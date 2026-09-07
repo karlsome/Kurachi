@@ -1769,7 +1769,8 @@ async function notifyPdfDisplayer(item, zuban) {
                     lotIndex: item.rollIndex || 1,
                     totalRolls: item.totalRolls || 1,
                     meters: item.meters || 0,
-                    action: 'scan'
+                    action: 'scan',
+                    language: localStorage.getItem('appLanguage') || 'ja'
                 }
             })
         });
@@ -1777,6 +1778,20 @@ async function notifyPdfDisplayer(item, zuban) {
         console.warn('⚠️ Error notifying pdfDisplayer:', err);
     }
 }
+
+document.addEventListener('languageChanged', (e) => {
+    const lang = e.detail?.lang || localStorage.getItem('appLanguage') || 'ja';
+    const machineId = state.machineName || 'PSA2';
+    fetch(`${serverURL}/api/broadcast-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            machineId: machineId,
+            action: 'language_change',
+            additionalData: { action: 'language_change', language: lang }
+        })
+    }).catch(err => console.warn('Could not broadcast language change:', err));
+});
 
 // -----------------------------------------------------
 // Info Tab: Load & Render Product and Ingredient Details

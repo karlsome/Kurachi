@@ -739,6 +739,452 @@
                 font-size: 1.5em;
             }
         }
+
+        /* ==========================================================
+           Production Plan UI Styles (First Factory & Other Factories)
+           ========================================================== */
+        .production-plan-section {
+            margin: 0;
+            padding: 0;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100%;
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(0, 0, 0, 0.12);
+        }
+
+        .plan-header-bar {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            color: #ffffff;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-shrink: 0;
+            border-bottom: 2px solid #334155;
+            flex-wrap: wrap;
+        }
+
+        .plan-title-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .plan-badge-factory {
+            background: #3b82f6;
+            color: #ffffff;
+            font-size: 0.8em;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: 6px;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+        }
+
+        .plan-badge-machine {
+            background: #10b981;
+            color: #ffffff;
+            font-size: 0.8em;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: 6px;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+        }
+
+        .plan-title {
+            font-size: 1.05em;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .plan-controls-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .plan-date-picker-wrap {
+            display: flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.12);
+            padding: 3px 6px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            gap: 4px;
+        }
+
+        .plan-btn-small {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.8em;
+            transition: all 0.2s ease;
+        }
+
+        .plan-btn-small:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .plan-btn-today {
+            background: #3b82f6;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.8em;
+            transition: all 0.2s ease;
+        }
+
+        .plan-btn-today:hover {
+            background: #2563eb;
+        }
+
+        .plan-date-input {
+            background: #ffffff;
+            color: #0f172a;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 3px 6px;
+            font-size: 0.85em;
+            font-weight: 600;
+            outline: none;
+        }
+
+        .plan-btn-toggle {
+            background: #6366f1;
+            color: #ffffff;
+            border: none;
+            border-radius: 6px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8em;
+            transition: all 0.2s ease;
+        }
+
+        .plan-btn-toggle:hover {
+            background: #4f46e5;
+        }
+
+        .plan-btn-refresh {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            padding: 5px 8px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.2s ease;
+        }
+
+        .plan-btn-refresh:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .plan-summary-bar {
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.85em;
+            font-weight: 600;
+            color: #334155;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .plan-stat-pills {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .stat-pill {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            padding: 2px 8px;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .plan-table-container {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: auto;
+            min-height: 0;
+            background: #ffffff;
+        }
+
+        .plan-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88em;
+            table-layout: auto;
+        }
+
+        .plan-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: #f1f5f9;
+            color: #334155;
+            font-weight: 700;
+            text-align: left;
+            padding: 9px 12px;
+            border-bottom: 2px solid #cbd5e1;
+            font-size: 0.82em;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }
+
+        .plan-table tbody tr {
+            border-bottom: 1px solid #e2e8f0;
+            transition: background 0.15s ease;
+        }
+
+        .plan-table tbody tr:hover {
+            background: #f8fafc;
+        }
+
+        .plan-table tbody td {
+            padding: 9px 12px;
+            color: #1e293b;
+            vertical-align: middle;
+        }
+
+        /* Active Job Row Highlighting */
+        .plan-table tbody tr.active-job-row {
+            background: #eff6ff !important;
+            border-left: 6px solid #2563eb !important;
+            box-shadow: inset 0 0 10px rgba(37, 99, 235, 0.15);
+        }
+
+        .plan-table tbody tr.active-job-row td {
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        /* Badges */
+        .badge-status-completed {
+            background: #dcfce7;
+            color: #15803d;
+            border: 1px solid #bbf7d0;
+            padding: 2px 7px;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 0.82em;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        }
+
+        .badge-status-inprogress {
+            background: #dbeafe;
+            color: #1d4ed8;
+            border: 1px solid #bfdbfe;
+            padding: 2px 7px;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 0.82em;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            animation: badgePulse 2s infinite;
+            white-space: nowrap;
+        }
+
+        .badge-status-pending {
+            background: #f1f5f9;
+            color: #64748b;
+            border: 1px solid #e2e8f0;
+            padding: 2px 7px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.82em;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        }
+
+        .badge-status-active {
+            background: #2563eb;
+            color: #ffffff;
+            padding: 3px 9px;
+            border-radius: 14px;
+            font-weight: 800;
+            font-size: 0.82em;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            box-shadow: 0 0 8px rgba(37, 99, 235, 0.5);
+            animation: badgeGlow 1.8s infinite alternate;
+            white-space: nowrap;
+        }
+
+        @keyframes badgePulse {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.85;
+                transform: scale(1.02);
+            }
+        }
+
+        @keyframes badgeGlow {
+            from {
+                box-shadow: 0 0 4px rgba(37, 99, 235, 0.4);
+            }
+
+            to {
+                box-shadow: 0 0 12px rgba(37, 99, 235, 0.85);
+            }
+        }
+
+        .badge-zuban {
+            background: #f3e8ff;
+            color: #7e22ce;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 5px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.95em;
+            display: inline-block;
+        }
+
+        .badge-seiban {
+            background: #e0f2fe;
+            color: #0369a1;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 5px;
+            font-size: 0.92em;
+            display: inline-block;
+        }
+
+        .badge-color {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: #e2e8f0;
+            font-size: 0.8em;
+            font-weight: 600;
+            color: #334155;
+        }
+
+        .badge-equipment {
+            background: #fef3c7;
+            color: #92400e;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 5px;
+            font-size: 0.82em;
+            display: inline-block;
+        }
+
+        .time-badge {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            font-weight: 700;
+            color: #334155;
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.92em;
+        }
+
+        .roll-chip {
+            display: inline-flex;
+            align-items: center;
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-size: 0.76em;
+            margin: 1px 2px;
+            color: #475569;
+        }
+
+        .plan-empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: #64748b;
+            text-align: center;
+        }
+
+        .plan-empty-icon {
+            font-size: 3.5em;
+            margin-bottom: 12px;
+            opacity: 0.8;
+        }
+
+        .plan-empty-title {
+            font-size: 1.2em;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 6px;
+        }
+
+        .plan-empty-sub {
+            font-size: 0.9em;
+            color: #64748b;
+            margin-bottom: 16px;
+        }
+
+        .plan-footer-bar {
+            background: #0f172a;
+            color: #94a3b8;
+            padding: 7px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 0.84em;
+            font-weight: 500;
+            flex-shrink: 0;
+            border-top: 1px solid #1e293b;
+            letter-spacing: 0.3px;
+        }
+
+        .footer-prompt-icon {
+            font-size: 1.1em;
+            color: #eab308;
+        }
     </style>
 </head>
 
@@ -774,6 +1220,30 @@
 
             <div class="pdf-section" id="pdfSection">
                 <div id="pdfGrid" style="text-align: center;">
+                </div>
+            </div>
+
+            <!-- Production Plan Section -->
+            <div class="production-plan-section" id="productionPlanSection" style="display: none;">
+                <!-- Stats summary bar -->
+                <div class="plan-summary-bar" id="planSummaryBar">
+                    <div class="plan-stat-pills" id="planStatPills">
+                        <span>計画データを読み込み中...</span>
+                    </div>
+                    <div id="planLastUpdated" style="font-size: 0.85em; color: #64748b;"></div>
+                </div>
+
+                <!-- Scrollable table container -->
+                <div class="plan-table-container" id="planTableContainer">
+                    <!-- Rendered dynamically -->
+                </div>
+
+                <!-- Bottom prompt / tips bar -->
+                <div class="plan-footer-bar" id="planFooterBar">
+                    <span class="footer-prompt-icon">⚡</span>
+                    <span class="footer-prompt-text" id="planFooterText">
+                        バーコードまたはQRコードをスキャンすると、作業指示書(PDF)が表示されます
+                    </span>
                 </div>
             </div>
 
@@ -841,6 +1311,7 @@
         }
 
         const MACHINE_ID = getMachineIdFromURL();
+
         const SERVER_URL = 'https://kurachi.onrender.com';
         //const SERVER_URL = 'http://localhost:3000';
         //const SERVER_URL = 'http://192.168.1.176:3000';
@@ -856,6 +1327,313 @@
         const productInfo = document.getElementById('productInfo');
         const pdfSection = document.getElementById('pdfSection');
         const manualSection = document.getElementById('manualSection');
+
+        // Production Plan Elements & State
+        const productionPlanSection = document.getElementById('productionPlanSection');
+        const planStatPills = document.getElementById('planStatPills');
+        const planLastUpdated = document.getElementById('planLastUpdated');
+        const planTableContainer = document.getElementById('planTableContainer');
+        const planFooterText = document.getElementById('planFooterText');
+
+        function getTodayDateString() {
+            const d = new Date();
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function inferFactoryFromMachine(machineId) {
+            if (!machineId) return '小瀬';
+            const m = machineId.toUpperCase();
+            if (m === 'PSA2' || m.startsWith('PSA')) return '第一工場';
+            if (m.startsWith('OZ')) return '小瀬';
+            if (m === 'NCC01' || m.startsWith('NCC')) return '倉知';
+            if (m.startsWith('AOL')) return 'SCNA';
+            return '小瀬';
+        }
+
+        let CURRENT_FACTORY = '';
+        let productionPlanDate = getTodayDateString();
+        let currentProductionData = null;
+        let isShowingAllEquipment = false;
+        let isPlanLoading = false;
+
+        function getInitialLanguage() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const fromUrl = urlParams.get('lang');
+            if (fromUrl && ['ja', 'en', 'pt'].includes(fromUrl.toLowerCase())) {
+                return fromUrl.toLowerCase();
+            }
+            return localStorage.getItem('appLanguage') || 'ja';
+        }
+
+        const PLAN_I18N = {
+            ja: {
+                machineLabel: 'Machine / マシン',
+                statusLabel: 'Status / ステータス',
+                factoryLabel: 'Factory / 工場',
+                dateLabel: 'Date / 日付',
+                modeLabel: 'Display Mode / 表示モード',
+                modeWaiting: '📋 生産計画 (待機中)',
+                connecting: '接続中...',
+                connected: '接続済み',
+                disconnected: '切断',
+                drawingLabel: '図番 / Drawing Number',
+                serialLabel: '背番号 / Serial Number',
+                partLabel: '品番 / Part Number',
+                scanTimeLabel: 'スキャン時間 / Scan Time',
+
+                // Badges
+                badgeActive: '🎯 現在作業中 (NOW ACTIVE)',
+                badgeCompleted: '✅ 完了',
+                badgeInProgress: '🔄 進行中',
+                badgeScheduled: '⏳ 予定',
+                badgePending: '⏳ 未着手',
+
+                // Pills & Units
+                targetEq: '対象設備:',
+                allEq: '全設備',
+                plannedItems: '予定品目:',
+                factoryTotal: '工場全体:',
+                totalBoxes: '総箱数:',
+                totalQty: '総数量:',
+                itemsUnit: '件',
+                boxesUnit: '箱',
+                pcsUnit: '個',
+                showAllEq: '全設備表示',
+                onlyThisEq: 'のみ表示',
+
+                totalLots: '総ロット:',
+                totalRolls: '総巻数:',
+                totalMeters: '総メーター:',
+                rollsUnit: '巻',
+                metersUnit: 'm',
+                completedCount: '完了:',
+                inProgressCount: '進行中:',
+                pendingCount: '未着手:',
+
+                // Headers
+                thStatus: '状態',
+                thStartTime: '予定開始',
+                thEquipment: '設備',
+                thSebanggo: '背番号',
+                thHinban: '品番',
+                thHinmei: '品名',
+                thQuantity: '計画数量',
+                thEstTime: '所要時間 (サイクル)',
+
+                thTime: '時間',
+                thZuban: '図番',
+                thHinmeiKizai: '品名・基材',
+                thColor: '色',
+                thRollsMeters: '巻数 / M数',
+                thWorker: '作業者',
+                thRollBreakdown: '巻内訳',
+
+                // Empty states
+                emptyOtherFactory: (id, date) => `本日 (${date}) の [${id}] の生産予定はありません`,
+                emptyOtherFactorySub: (count) => count > 0 ? `※ 工場全体では本日 ${count} 件の他設備計画があります。` : '本日はまだ生産計画が登録されていないか、休日です。',
+                btnShowAllPlans: (count) => `全設備の計画 (${count}件) を表示する`,
+                emptyFirstFactory: (id, date) => `本日 (${date}) の [${id}] の生産予定/実績はありません`,
+                emptyFirstFactorySub: 'タブレット日報からの登録をご確認ください。',
+
+                // Footer & Carousel
+                footerIdle: 'バーコードまたはQRコードをスキャンすると、作業指示書(PDF)が表示されます',
+                footerCarousel: (curr, total) => `📄 作業指示書(PDF)に戻るには「次へ」またはキーを押してください (ページ ${curr} / ${total})`,
+                planPageName: '📋 本日の生産計画 (Production Plan)',
+                planLoading: '生産計画を読み込み中...',
+                planLoadingSub: 'サーバーと通信しています'
+            },
+            en: {
+                machineLabel: 'Machine',
+                statusLabel: 'Status',
+                factoryLabel: 'Factory',
+                dateLabel: 'Date',
+                modeLabel: 'Display Mode',
+                modeWaiting: '📋 Production Plan (Idle)',
+                connecting: 'Connecting...',
+                connected: 'Connected',
+                disconnected: 'Disconnected',
+                drawingLabel: 'Drawing #',
+                serialLabel: 'Serial # (背番号)',
+                partLabel: 'Part Number (品番)',
+                scanTimeLabel: 'Scan Time',
+
+                // Badges
+                badgeActive: '🎯 NOW ACTIVE',
+                badgeCompleted: '✅ Completed',
+                badgeInProgress: '🔄 In Progress',
+                badgeScheduled: '⏳ Scheduled',
+                badgePending: '⏳ Pending',
+
+                // Pills & Units
+                targetEq: 'Target Machine:',
+                allEq: 'All Machines',
+                plannedItems: 'Planned Items:',
+                factoryTotal: 'Factory Total:',
+                totalBoxes: 'Total Boxes:',
+                totalQty: 'Total Qty:',
+                itemsUnit: 'items',
+                boxesUnit: 'boxes',
+                pcsUnit: 'pcs',
+                showAllEq: 'Show All',
+                onlyThisEq: 'Only',
+
+                totalLots: 'Total Lots:',
+                totalRolls: 'Total Rolls:',
+                totalMeters: 'Total Meters:',
+                rollsUnit: 'rolls',
+                metersUnit: 'm',
+                completedCount: 'Completed:',
+                inProgressCount: 'In Progress:',
+                pendingCount: 'Pending:',
+
+                // Headers
+                thStatus: 'Status',
+                thStartTime: 'Scheduled Start',
+                thEquipment: 'Equipment',
+                thSebanggo: 'Serial #',
+                thHinban: 'Part #',
+                thHinmei: 'Part Name',
+                thQuantity: 'Planned Qty',
+                thEstTime: 'Est. Time (Cycle)',
+
+                thTime: 'Time',
+                thZuban: 'Drawing #',
+                thHinmeiKizai: 'Part Name / Material',
+                thColor: 'Color',
+                thRollsMeters: 'Rolls / Meters',
+                thWorker: 'Operator',
+                thRollBreakdown: 'Roll Breakdown',
+
+                // Empty states
+                emptyOtherFactory: (id, date) => `No production plan scheduled for [${id}] today (${date})`,
+                emptyOtherFactorySub: (count) => count > 0 ? `※ There are ${count} items scheduled for other machines in the factory today.` : 'No production plans registered today or holiday.',
+                btnShowAllPlans: (count) => `Show all factory plans (${count} items)`,
+                emptyFirstFactory: (id, date) => `No production records or plan for [${id}] today (${date})`,
+                emptyFirstFactorySub: 'Please register production from the tablet daily report.',
+
+                // Footer & Carousel
+                footerIdle: 'Scan a barcode or QR code to display work instruction PDFs',
+                footerCarousel: (curr, total) => `📄 Press "Next" or any key to return to PDFs (Page ${curr} / ${total})`,
+                planPageName: '📋 Today\'s Production Plan',
+                planLoading: 'Loading Production Plan...',
+                planLoadingSub: 'Communicating with server...'
+            },
+            pt: {
+                machineLabel: 'Máquina',
+                statusLabel: 'Status',
+                factoryLabel: 'Fábrica',
+                dateLabel: 'Data',
+                modeLabel: 'Modo de Exibição',
+                modeWaiting: '📋 Plano de Produção (Ocioso)',
+                connecting: 'Conectando...',
+                connected: 'Conectado',
+                disconnected: 'Desconectado',
+                drawingLabel: 'Nº do Desenho',
+                serialLabel: 'Nº de Série (背番号)',
+                partLabel: 'Nº da Peça (品番)',
+                scanTimeLabel: 'Hora do Scan',
+
+                // Badges
+                badgeActive: '🎯 TRABALHANDO AGORA',
+                badgeCompleted: '✅ Concluído',
+                badgeInProgress: '🔄 Em Andamento',
+                badgeScheduled: '⏳ Agendado',
+                badgePending: '⏳ Pendente',
+
+                // Pills & Units
+                targetEq: 'Máquina Alvo:',
+                allEq: 'Todas as Máquinas',
+                plannedItems: 'Itens Planejados:',
+                factoryTotal: 'Total da Fábrica:',
+                totalBoxes: 'Total de Caixas:',
+                totalQty: 'Qtd Total:',
+                itemsUnit: 'itens',
+                boxesUnit: 'cx',
+                pcsUnit: 'un',
+                showAllEq: 'Mostrar Todas',
+                onlyThisEq: 'Apenas',
+
+                totalLots: 'Total de Lotes:',
+                totalRolls: 'Total de Rolos:',
+                totalMeters: 'Metros Totais:',
+                rollsUnit: 'rolos',
+                metersUnit: 'm',
+                completedCount: 'Concluído:',
+                inProgressCount: 'Em Andamento:',
+                pendingCount: 'Pendente:',
+
+                // Headers
+                thStatus: 'Status',
+                thStartTime: 'Início Previsto',
+                thEquipment: 'Equipamento',
+                thSebanggo: 'Nº de Série',
+                thHinban: 'Nº da Peça',
+                thHinmei: 'Nome da Peça',
+                thQuantity: 'Qtd Planejada',
+                thEstTime: 'Tempo Est. (Ciclo)',
+
+                thTime: 'Hora',
+                thZuban: 'Nº do Desenho',
+                thHinmeiKizai: 'Nome / Material',
+                thColor: 'Cor',
+                thRollsMeters: 'Rolos / Metros',
+                thWorker: 'Operador',
+                thRollBreakdown: 'Detalhes dos Rolos',
+
+                // Empty states
+                emptyOtherFactory: (id, date) => `Nenhum plano de produção para [${id}] hoje (${date})`,
+                emptyOtherFactorySub: (count) => count > 0 ? `※ Existem ${count} itens agendados para outras máquinas na fábrica hoje.` : 'Nenhum plano registrado para hoje ou feriado.',
+                btnShowAllPlans: (count) => `Mostrar todos os planos da fábrica (${count} itens)`,
+                emptyFirstFactory: (id, date) => `Nenhum registro de produção para [${id}] hoje (${date})`,
+                emptyFirstFactorySub: 'Por favor, registre a produção no relatório diário do tablet.',
+
+                // Footer & Carousel
+                footerIdle: 'Escaneie um código de barras ou QR code para exibir as instruções em PDF',
+                footerCarousel: (curr, total) => `📄 Pressione "Avançar" ou qualquer tecla para voltar aos PDFs (Página ${curr} / ${total})`,
+                planPageName: '📋 Plano de Produção de Hoje',
+                planLoading: 'Carregando Plano de Produção...',
+                planLoadingSub: 'Comunicando com o servidor...'
+            }
+        };
+
+        let currentLanguage = getInitialLanguage();
+
+        function t(key, ...args) {
+            const langObj = PLAN_I18N[currentLanguage] || PLAN_I18N.ja;
+            const val = langObj[key] !== undefined ? langObj[key] : (PLAN_I18N.ja[key] || key);
+            if (typeof val === 'function') {
+                return val(...args);
+            }
+            return val;
+        }
+
+        function setAppLanguage(newLang) {
+            if (!newLang || !PLAN_I18N[newLang]) return;
+            if (currentLanguage === newLang) return;
+            console.log(`🌐 Displayer language switched from "${currentLanguage}" to "${newLang}"`);
+            currentLanguage = newLang;
+            try {
+                localStorage.setItem('appLanguage', newLang);
+            } catch (_) { }
+
+            // Re-render UI elements
+            if (!window.currentSebanggo && !window.currentZuban) {
+                initializeWaitingCards();
+            } else {
+                renderActiveProductCards(false);
+            }
+            renderProductionPlanView();
+            if (Array.isArray(pdfPages)) {
+                const planPage = pdfPages.find(p => p.type === 'production_plan');
+                if (planPage) {
+                    planPage.name = t('planPageName');
+                }
+            }
+        }
+
         const manualMediaStage = document.getElementById('manualMediaStage');
         const manualProjectViewport = document.getElementById('manualProjectViewport');
         const manualProjectStage = document.getElementById('manualProjectStage');
@@ -1340,44 +2118,165 @@
             await manualSeekTo(steps[nextIndex].startTime, { autoplay: true });
         }
 
-        // Check if machine ID is valid
+        // Check if machine ID is valid and initialize application
         if (!MACHINE_ID) {
-            showError('❌ Machine parameter is missing!<br><br>Please use: <code>?machine=OZNC01</code>');
+            showError('❌ Machine parameter is missing!<br><br>Please use: <code>?machine=OZNC12</code>');
         } else {
+            initMachineApp();
+        }
+
+        async function initMachineApp() {
             document.title = `${MACHINE_ID} - Machine Display`;
 
-            // Initialize with 2 cards (machine name + connection status)
+            // Date is always current date
+            productionPlanDate = getTodayDateString();
+
+            // Initialize waiting cards
             initializeWaitingCards();
 
-            // Try to restore last scan from localStorage
+            // Show idle production plan immediately in loading state
+            showIdleProductionPlan();
+
+            // Query authoritative 工場 from Sasaki_Coating_MasterDB.setsubiDB based on machine name
+            try {
+                const factory = await lookupSetsubiFactory(MACHINE_ID);
+                CURRENT_FACTORY = factory || inferFactoryFromMachine(MACHINE_ID);
+                console.log(`🏭 Factory resolved for [${MACHINE_ID}] from setsubiDB: "${CURRENT_FACTORY}"`);
+            } catch (err) {
+                console.warn('⚠️ Could not resolve factory from setsubiDB, using fallback:', err);
+                CURRENT_FACTORY = inferFactoryFromMachine(MACHINE_ID);
+            }
+
+            updateFactoryCards();
+
+            // Load initial production plan data for the resolved factory and current date
+            await loadProductionPlanData();
+
+            // Try to restore last scan from localStorage (only if scanned today) as initial fast render
             const lastScan = loadScanFromStorage();
             if (lastScan) {
                 console.log('🔄 Restoring last scan from localStorage');
                 updateDisplay(lastScan);
+            } else {
+                // Keep showing idle production plan
+                showIdleProductionPlan();
             }
+
+            // Immediately reconcile with authoritative server state (failsafe against stale localStorage)
+            await syncWithAuthoritativeState();
 
             // Start SSE connection
             connectSSE();
+
+            // Auto-refresh production plan every 60 seconds (silent background refresh)
+            setInterval(() => {
+                productionPlanDate = getTodayDateString();
+                loadProductionPlanData({ silent: true });
+            }, 60000);
+
+            // Periodic failsafe sync with server state (every 1 minute)
+            // Guarantees grouped machines (e.g. OZNC04 <-> OZNC06) recover from any missed SSE broadcast
+            setInterval(() => {
+                syncWithAuthoritativeState();
+            }, 60000);
+
+            // Re-sync immediately on window focus or visibility change (e.g. monitor wake)
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    syncWithAuthoritativeState();
+                }
+            });
+            window.addEventListener('focus', () => {
+                syncWithAuthoritativeState();
+            });
         }
 
         function initializeWaitingCards() {
+            const todayStr = getTodayDateString();
             productInfo.innerHTML = `
                 <div class="info-card">
-                    <div class="info-label">Machine / マシン</div>
+                    <div class="info-label">${t('machineLabel')}</div>
                     <div class="info-value">${MACHINE_ID}</div>
                 </div>
                 <div class="info-card">
-                    <div class="info-label">Status / ステータス</div>
-                    <div class="info-value" id="statusValue"><span class="status-dot" id="statusDot"></span>接続中...</div>
+                    <div class="info-label">${t('statusLabel')}</div>
+                    <div class="info-value" id="statusValue"><span class="status-dot" id="statusDot"></span>${t('connecting')}</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">${t('factoryLabel')}</div>
+                    <div class="info-value" id="factoryValue">${CURRENT_FACTORY || '...'}</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">${t('dateLabel')}</div>
+                    <div class="info-value" id="headerDateValue">${todayStr}</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">${t('modeLabel')}</div>
+                    <div class="info-value" id="displayModeValue" style="color: #1d4ed8;">${t('modeWaiting')}</div>
                 </div>
             `;
+            productInfo.classList.add('expanded');
+        }
+
+        function renderActiveProductCards(isBurst = false) {
+            const formattedTime = window.lastScanTime ? new Date(window.lastScanTime).toLocaleString(
+                currentLanguage === 'ja' ? 'ja-JP' : (currentLanguage === 'pt' ? 'pt-BR' : 'en-US'), {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            }) : '-';
+
+            const burstClass = isBurst ? ' burst' : '';
+            if (isBurst) {
+                productInfo.classList.remove('expanded');
+            }
+
+            productInfo.innerHTML = `
+                <div class="info-card${burstClass}">
+                    <div class="info-label">${t('machineLabel')}</div>
+                    <div class="info-value">${MACHINE_ID || '-'}</div>
+                </div>
+                <div class="info-card${burstClass}">
+                    <div class="info-label">${t('statusLabel')}</div>
+                    <div class="info-value" id="statusValue"><span class="status-dot connected" id="statusDot"></span>${t('connected')}</div>
+                </div>
+                <div class="info-card${burstClass}">
+                    <div class="info-label">${window.currentZuban ? t('drawingLabel') : t('serialLabel')}</div>
+                    <div class="info-value">${window.currentZuban || window.currentSebanggo || '-'}</div>
+                </div>
+                <div class="info-card${burstClass}">
+                    <div class="info-label">${t('partLabel')}</div>
+                    <div class="info-value">${window.currentHinban || '-'}</div>
+                </div>
+                <div class="info-card${burstClass}">
+                    <div class="info-label">${t('scanTimeLabel')}</div>
+                    <div class="info-value">${formattedTime}</div>
+                </div>
+            `;
+
+            if (isBurst) {
+                setTimeout(() => {
+                    productInfo.classList.add('expanded');
+                    const statusDot = document.getElementById('statusDot');
+                    if (statusDot) {
+                        statusDot.classList.add('connected');
+                        statusDot.classList.remove('disconnected');
+                    }
+                }, 50);
+            } else {
+                productInfo.classList.add('expanded');
+            }
         }
 
         function updateStatusCard(status) {
             const statusDot = document.getElementById('statusDot');
             const statusValue = document.getElementById('statusValue');
+            const isConnected = status === '接続済み' || status === t('connected') || status === 'Connected' || status === 'Conectado';
             if (statusDot) {
-                if (status === '接続済み') {
+                if (isConnected) {
                     statusDot.classList.add('connected');
                     statusDot.classList.remove('disconnected');
                 } else {
@@ -1388,10 +2287,9 @@
             if (statusValue) {
                 const dotHTML = statusDot ? '<span class="status-dot" id="statusDot"></span>' : '';
                 statusValue.innerHTML = dotHTML + status;
-                // Reapply classes if we just recreated the dot
                 if (statusDot) {
                     const newDot = document.getElementById('statusDot');
-                    if (status === '接続済み') {
+                    if (isConnected) {
                         newDot.classList.add('connected');
                     } else {
                         newDot.classList.add('disconnected');
@@ -1402,10 +2300,429 @@
 
         // Show error message
         function showError(message) {
-            waitingMessage.style.display = 'none';
-            productSection.style.display = 'none';
-            errorMessage.style.display = 'block';
-            errorText.innerHTML = message;
+            if (waitingMessage) waitingMessage.style.display = 'none';
+            if (productSection) productSection.style.display = 'none';
+            if (errorMessage) errorMessage.style.display = 'block';
+            if (errorText) errorText.innerHTML = message;
+        }
+
+        // =========================================================================
+        // Production Plan Logic (First Factory & Other Factories)
+        // =========================================================================
+
+        async function lookupSetsubiFactory(machineId) {
+            if (!machineId) return null;
+            try {
+                const res = await fetch(`${SERVER_URL}/queries`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        dbName: 'Sasaki_Coating_MasterDB',
+                        collectionName: 'setsubiDB',
+                        query: { name: { $regex: `^${machineId}$`, $options: 'i' } }
+                    })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (Array.isArray(data) && data.length > 0 && data[0].工場) {
+                        console.log(`🏭 setsubiDB resolved factory for ${machineId}: "${data[0].工場}"`);
+                        return data[0].工場;
+                    }
+                }
+            } catch (err) {
+                console.warn('⚠️ setsubiDB lookup error:', err);
+            }
+            return null;
+        }
+
+        function updateFactoryCards() {
+            const factoryEl = document.getElementById('factoryValue');
+            if (factoryEl) factoryEl.textContent = CURRENT_FACTORY || '小瀬';
+        }
+
+        async function loadProductionPlanData(options = {}) {
+            if (!MACHINE_ID || isPlanLoading) return;
+            isPlanLoading = true;
+            if (!options.silent && planTableContainer && !currentProductionData) {
+                planTableContainer.innerHTML = `
+                    <div class="plan-empty-state">
+                        <div class="plan-empty-icon">⏳</div>
+                        <div class="plan-empty-title">${t('planLoading')}</div>
+                        <div class="plan-empty-sub">${t('planLoadingSub')}</div>
+                    </div>
+                `;
+            }
+
+            try {
+                // Date is always current date
+                const date = getTodayDateString();
+                productionPlanDate = date;
+                const factory = CURRENT_FACTORY || '小瀬';
+
+                if (factory === '第一工場') {
+                    // First Factory: submittedDB.firstFactoryProduction
+                    let records = null;
+                    try {
+                        const res = await fetch(`${SERVER_URL}/api/production/status?date=${encodeURIComponent(date)}&machine=${encodeURIComponent(MACHINE_ID)}`);
+                        if (res.ok) {
+                            const json = await res.json();
+                            records = json.records || [];
+                        }
+                    } catch (e) {
+                        console.warn('Primary firstFactoryProduction endpoint failed, trying fallback...', e);
+                    }
+
+                    if (!records) {
+                        const fallbackRes = await fetch(`${SERVER_URL}/queries`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                dbName: 'submittedDB',
+                                collectionName: 'firstFactoryProduction',
+                                query: { date: date, machine: MACHINE_ID }
+                            })
+                        });
+                        if (fallbackRes.ok) {
+                            records = await fallbackRes.json();
+                        }
+                    }
+
+                    currentProductionData = Array.isArray(records) ? records : [];
+                    console.log(`📋 Loaded ${currentProductionData.length} firstFactoryProduction records for ${date}`);
+
+                } else {
+                    // Other Factories (e.g. 小瀬): submittedDB.productionPlansDB
+                    let plans = null;
+                    try {
+                        const res = await fetch(`${SERVER_URL}/api/production-plans?factory=${encodeURIComponent(factory)}&date=${encodeURIComponent(date)}`);
+                        if (res.ok) {
+                            const json = await res.json();
+                            plans = json.data || [];
+                        }
+                    } catch (e) {
+                        console.warn('Primary productionPlansDB endpoint failed, trying fallback...', e);
+                    }
+
+                    if (!plans) {
+                        const fallbackRes = await fetch(`${SERVER_URL}/queries`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                dbName: 'submittedDB',
+                                collectionName: 'productionPlansDB',
+                                query: { factory: factory, date: date }
+                            })
+                        });
+                        if (fallbackRes.ok) {
+                            plans = await fallbackRes.json();
+                        }
+                    }
+
+                    if (Array.isArray(plans) && plans.length > 0) {
+                        currentProductionData = plans[0];
+                    } else {
+                        currentProductionData = { factory, date, products: [], breaks: [] };
+                    }
+                    console.log(`📋 Loaded production plan for ${factory} on ${date}:`, currentProductionData);
+                }
+
+                if (planLastUpdated) {
+                    planLastUpdated.textContent = `最終更新: ${new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+                }
+
+                renderProductionPlanView();
+
+            } catch (error) {
+                console.error('❌ Error loading production plan:', error);
+                if (planTableContainer && !currentProductionData) {
+                    planTableContainer.innerHTML = `
+                        <div class="plan-empty-state">
+                            <div class="plan-empty-icon">⚠️</div>
+                            <div class="plan-empty-title">生産計画の取得に失敗しました</div>
+                            <div class="plan-empty-sub">${escapeManualHtml(error.message)}</div>
+                            <button class="plan-btn-small" style="background: #3b82f6; margin-top: 10px; padding: 7px 18px;" onclick="loadProductionPlanData()">再試行</button>
+                        </div>
+                    `;
+                }
+            } finally {
+                isPlanLoading = false;
+            }
+        }
+
+        function renderProductionPlanView() {
+            if (!productionPlanSection || productionPlanSection.style.display === 'none') {
+                return;
+            }
+
+            updateFactoryCards();
+
+            const factory = CURRENT_FACTORY || '小瀬';
+            const date = productionPlanDate || getTodayDateString();
+
+            if (factory === '第一工場') {
+                renderFirstFactoryTable(currentProductionData || [], date);
+            } else {
+                renderOtherFactoryTable(currentProductionData || { products: [] }, date);
+            }
+
+            // Update footer text depending on whether scan is active
+            if (planFooterText) {
+                if (window.currentSebanggo || window.currentZuban) {
+                    planFooterText.innerHTML = t('footerCarousel', currentPDFIndex + 1, pdfPages.length);
+                } else {
+                    planFooterText.innerHTML = t('footerIdle');
+                }
+            }
+
+            // Auto-scroll to active row if present
+            setTimeout(() => {
+                const activeRow = planTableContainer?.querySelector('.active-job-row');
+                if (activeRow) {
+                    activeRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 100);
+        }
+
+        function renderFirstFactoryTable(records, date) {
+            const totalBatches = records.length;
+            let totalRolls = 0;
+            let totalMeters = 0;
+            let completedCount = 0;
+            let inProgressCount = 0;
+
+            records.forEach(r => {
+                totalRolls += Number(r.totalRolls) || 0;
+                totalMeters += Number(r.totalMeters) || 0;
+                if (r.status === 'completed') completedCount++;
+                else if (r.status === 'in_progress') inProgressCount++;
+            });
+
+            const pendingCount = Math.max(0, totalBatches - completedCount - inProgressCount);
+
+            if (planStatPills) {
+                planStatPills.innerHTML = `
+                    <span class="stat-pill">${t('totalLots')} <strong>${totalBatches}</strong></span>
+                    <span class="stat-pill">${t('totalRolls')} <strong>${totalRolls}</strong> ${t('rollsUnit')}</span>
+                    <span class="stat-pill">${t('totalMeters')} <strong>${totalMeters.toLocaleString()}</strong> ${t('metersUnit')}</span>
+                    <span class="stat-pill" style="color: #15803d; border-color: #bbf7d0;">${t('completedCount')} <strong>${completedCount}</strong></span>
+                    ${inProgressCount > 0 ? `<span class="stat-pill" style="color: #1d4ed8; border-color: #bfdbfe;">${t('inProgressCount')} <strong>${inProgressCount}</strong></span>` : ''}
+                    <span class="stat-pill" style="color: #64748b;">${t('pendingCount')} <strong>${pendingCount}</strong></span>
+                `;
+            }
+
+            if (records.length === 0) {
+                planTableContainer.innerHTML = `
+                    <div class="plan-empty-state">
+                        <div class="plan-empty-icon">📅</div>
+                        <div class="plan-empty-title">${t('emptyFirstFactory', escapeManualHtml(MACHINE_ID), date)}</div>
+                        <div class="plan-empty-sub">${t('emptyFirstFactorySub')}</div>
+                    </div>
+                `;
+                return;
+            }
+
+            let rowsHtml = '';
+            records.forEach((record, index) => {
+                const isCurrentScanned = Boolean(
+                    (window.currentZuban && String(record.zuban) === String(window.currentZuban)) ||
+                    (window.currentHinban && record.hinban && String(record.hinban).toUpperCase() === String(window.currentHinban).toUpperCase())
+                );
+
+                let statusBadge;
+                if (isCurrentScanned) {
+                    statusBadge = `<span class="badge-status-active">${t('badgeActive')}</span>`;
+                } else if (record.status === 'completed') {
+                    statusBadge = `<span class="badge-status-completed">${t('badgeCompleted')}</span>`;
+                } else if (record.status === 'in_progress') {
+                    statusBadge = `<span class="badge-status-inprogress">${t('badgeInProgress')}</span>`;
+                } else {
+                    statusBadge = `<span class="badge-status-pending">${t('badgePending')}</span>`;
+                }
+
+                const startTime = record.actualStartTime || (record.items?.[0]?.startTime || '--:--');
+                const endTime = record.actualEndTime || (record.items?.[record.items?.length - 1]?.endTime || '--:--');
+                const timeStr = `${startTime} ~ ${endTime}`;
+
+                let rollChipsHtml = '';
+                if (Array.isArray(record.items) && record.items.length > 0) {
+                    rollChipsHtml = record.items.map(item =>
+                        `<span class="roll-chip" title="${item.meters || 0}m (${item.startTime || ''}-${item.endTime || ''})">#${item.rollIndex || 1}: ${item.meters || 0}m</span>`
+                    ).join('');
+                }
+
+                rowsHtml += `
+                    <tr class="${isCurrentScanned ? 'active-job-row' : ''}">
+                        <td style="text-align: center; font-weight: 700; color: #64748b;">${index + 1}</td>
+                        <td>${statusBadge}</td>
+                        <td><span class="time-badge">${timeStr}</span></td>
+                        <td><span class="badge-zuban">${record.zuban || '-'}</span></td>
+                        <td><strong style="color: #0f172a;">${escapeManualHtml(record.hinban || '-')}</strong></td>
+                        <td>
+                            <div style="font-weight: 600;">${escapeManualHtml(record.hinmei || '-')}</div>
+                            <div style="font-size: 0.8em; color: #64748b;">${escapeManualHtml(record.kizai || '')}</div>
+                        </td>
+                        <td><span class="badge-color">${escapeManualHtml(record.color || '-')}</span></td>
+                        <td style="white-space: nowrap;">
+                            <strong>${record.totalRolls || 0}</strong> ${t('rollsUnit')} / <strong>${(record.totalMeters || 0).toLocaleString()}</strong> ${t('metersUnit')}
+                        </td>
+                        <td><span style="font-weight: 600; color: #334155;">${escapeManualHtml(record.worker || '-')}</span></td>
+                        <td><div style="display: flex; flex-wrap: wrap; max-width: 260px;">${rollChipsHtml}</div></td>
+                    </tr>
+                `;
+            });
+
+            planTableContainer.innerHTML = `
+                <table class="plan-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 40px; text-align: center;">#</th>
+                            <th style="width: 140px;">${t('thStatus')}</th>
+                            <th style="width: 120px;">${t('thTime')}</th>
+                            <th style="width: 90px;">${t('thZuban')}</th>
+                            <th style="width: 180px;">${t('thHinban')}</th>
+                            <th>${t('thHinmeiKizai')}</th>
+                            <th style="width: 80px;">${t('thColor')}</th>
+                            <th style="width: 130px;">${t('thRollsMeters')}</th>
+                            <th style="width: 90px;">${t('thWorker')}</th>
+                            <th style="width: 220px;">${t('thRollBreakdown')}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderOtherFactoryTable(plan, date) {
+            const allProducts = Array.isArray(plan.products) ? plan.products : [];
+            let displayList = allProducts;
+
+            if (!isShowingAllEquipment && MACHINE_ID) {
+                displayList = allProducts.filter(p => {
+                    if (!p.equipment) return false;
+                    const eqList = p.equipment.split(',').map(s => s.trim().toUpperCase());
+                    return eqList.includes(MACHINE_ID);
+                });
+            }
+
+            let totalQty = 0;
+            let totalBoxes = 0;
+            displayList.forEach(p => {
+                totalQty += Number(p.quantity) || 0;
+                totalBoxes += Number(p.boxes) || 0;
+            });
+
+            if (planStatPills) {
+                const targetText = isShowingAllEquipment ? t('allEq') : escapeManualHtml(MACHINE_ID);
+                const toggleText = isShowingAllEquipment ? `[${escapeManualHtml(MACHINE_ID)}] ${t('onlyThisEq')}` : t('showAllEq');
+                const diffNotice = !isShowingAllEquipment && allProducts.length !== displayList.length
+                    ? `(${t('factoryTotal')} ${allProducts.length}${t('itemsUnit')})`
+                    : '';
+
+                planStatPills.innerHTML = `
+                    <span class="stat-pill">${t('targetEq')} <strong style="color: #0369a1;">${targetText}</strong></span>
+                    <span class="stat-pill">${t('plannedItems')} <strong>${displayList.length}</strong> ${t('itemsUnit')} ${diffNotice}</span>
+                    <span class="stat-pill">${t('totalBoxes')} <strong>${totalBoxes.toLocaleString()}</strong> ${t('boxesUnit')}</span>
+                    <span class="stat-pill">${t('totalQty')} <strong>${totalQty.toLocaleString()}</strong> ${t('pcsUnit')}</span>
+                    ${allProducts.length > 0 ? `
+                        <button class="plan-btn-small" style="background: #6366f1; padding: 3px 10px; font-size: 0.8em; margin-left: 8px; cursor: pointer;" onclick="toggleEquipmentFilter()">${toggleText}</button>
+                    ` : ''}
+                `;
+            }
+
+            if (displayList.length === 0) {
+                planTableContainer.innerHTML = `
+                    <div class="plan-empty-state">
+                        <div class="plan-empty-icon">📅</div>
+                        <div class="plan-empty-title">${t('emptyOtherFactory', escapeManualHtml(MACHINE_ID), date)}</div>
+                        <div class="plan-empty-sub">${t('emptyOtherFactorySub', allProducts.length)}</div>
+                        ${allProducts.length > 0 ? `
+                            <button class="plan-btn-small" style="background: #6366f1; padding: 7px 16px; font-size: 0.9em; margin-top: 10px; cursor: pointer;" onclick="toggleEquipmentFilter(true)">${t('btnShowAllPlans', allProducts.length)}</button>
+                        ` : ''}
+                    </div>
+                `;
+                return;
+            }
+
+            let rowsHtml = '';
+            displayList.forEach((prod, index) => {
+                const isCurrentScanned = Boolean(
+                    (window.currentSebanggo && prod.背番号 && String(prod.背番号).toUpperCase() === String(window.currentSebanggo).toUpperCase()) ||
+                    (window.currentHinban && prod.品番 && String(prod.品番).toUpperCase() === String(window.currentHinban).toUpperCase())
+                );
+
+                let statusBadge;
+                if (isCurrentScanned) {
+                    statusBadge = `<span class="badge-status-active">${t('badgeActive')}</span>`;
+                } else {
+                    statusBadge = `<span class="badge-status-pending">${t('badgeScheduled')}</span>`;
+                }
+
+                const estTime = prod.estimatedTime?.formattedTime || (prod.estimatedTime?.totalMinutes ? `${prod.estimatedTime.totalMinutes} min` : '-');
+                const cycleSec = prod.estimatedTime?.cycleTimeSeconds || prod.estimatedTime?.secondsPerPiece || '-';
+
+                rowsHtml += `
+                    <tr class="${isCurrentScanned ? 'active-job-row' : ''}">
+                        <td style="text-align: center; font-weight: 700; color: #64748b;">${index + 1}</td>
+                        <td>${statusBadge}</td>
+                        <td><span class="time-badge">${escapeManualHtml(prod.startTime || '--:--')}</span></td>
+                        <td><span class="badge-equipment">${escapeManualHtml(prod.equipment || '-')}</span></td>
+                        <td><span class="badge-seiban">${escapeManualHtml(prod.背番号 || '-')}</span></td>
+                        <td><strong style="color: #0f172a;">${escapeManualHtml(prod.品番 || '-')}</strong></td>
+                        <td style="font-weight: 600;">${escapeManualHtml(prod.品名 || '-')}</td>
+                        <td style="white-space: nowrap;">
+                            <strong>${(Number(prod.boxes) || 0).toLocaleString()}</strong> ${t('boxesUnit')}
+                            <span style="color: #64748b; font-size: 0.85em;">(${(Number(prod.quantity) || 0).toLocaleString()} ${t('pcsUnit')})</span>
+                        </td>
+                        <td style="white-space: nowrap;">
+                            <span style="font-weight: 600;">${estTime}</span>
+                            <span style="color: #64748b; font-size: 0.8em;">(${cycleSec}s/pc)</span>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            planTableContainer.innerHTML = `
+                <table class="plan-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 40px; text-align: center;">#</th>
+                            <th style="width: 150px;">${t('thStatus')}</th>
+                            <th style="width: 90px;">${t('thStartTime')}</th>
+                            <th style="width: 110px;">${t('thEquipment')}</th>
+                            <th style="width: 80px;">${t('thSebanggo')}</th>
+                            <th style="width: 170px;">${t('thHinban')}</th>
+                            <th>${t('thHinmei')}</th>
+                            <th style="width: 140px;">${t('thQuantity')}</th>
+                            <th style="width: 140px;">${t('thEstTime')}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function toggleEquipmentFilter(forceShowAll) {
+            if (forceShowAll !== undefined) {
+                isShowingAllEquipment = forceShowAll;
+            } else {
+                isShowingAllEquipment = !isShowingAllEquipment;
+            }
+            renderProductionPlanView();
+        }
+
+        function showIdleProductionPlan() {
+            if (waitingMessage) waitingMessage.style.display = 'none';
+            if (productSection) productSection.style.display = 'flex';
+            if (pdfSection) pdfSection.style.display = 'none';
+            if (manualSection) manualSection.style.display = 'none';
+            if (productionPlanSection) {
+                productionPlanSection.style.display = 'flex';
+                renderProductionPlanView();
+            }
         }
 
         function resolveManualMediaUrl(url) {
@@ -2277,6 +3594,18 @@
                 const stored = localStorage.getItem(getStorageKey());
                 if (stored) {
                     const data = JSON.parse(stored);
+                    if (data && data.timestamp) {
+                        const scanDate = new Date(data.timestamp);
+                        const today = new Date();
+                        const isSameDay = scanDate.getFullYear() === today.getFullYear() &&
+                            scanDate.getMonth() === today.getMonth() &&
+                            scanDate.getDate() === today.getDate();
+                        if (!isSameDay) {
+                            console.log('📂 Stored scan is from a previous day, clearing:', data);
+                            clearScanFromStorage();
+                            return null;
+                        }
+                    }
                     console.log('📂 Loaded scan data from localStorage:', data);
                     return data;
                 }
@@ -2296,6 +3625,47 @@
             }
         }
 
+        // Failsafe Source of Truth: query server and MongoDB for active product
+        let isSyncingState = false;
+
+        async function syncWithAuthoritativeState() {
+            if (!MACHINE_ID || isSyncingState) return;
+            isSyncingState = true;
+            try {
+                const res = await fetch(`${SERVER_URL}/api/machine-current-scan/${encodeURIComponent(MACHINE_ID)}`);
+                if (res.ok) {
+                    const data = await res.json();
+
+                    if (data.isIdle || !data.currentScan) {
+                        // Server reports machine is currently reset or idle
+                        if (window.currentSebanggo || window.currentZuban) {
+                            console.log('🧹 Authoritative state reports machine is idle -> resetting to production plan');
+                            clearDisplay();
+                        }
+                    } else if (data.currentScan) {
+                        const s = data.currentScan;
+                        const currSeb = window.currentSebanggo || '';
+                        const currZub = window.currentZuban || '';
+                        const currHin = window.currentHinban || '';
+
+                        const hasDiff = (s.sebanggo && s.sebanggo !== currSeb) ||
+                            (s.zuban && s.zuban !== currZub) ||
+                            (s.hinban && s.hinban !== currHin) ||
+                            (!currSeb && !currZub);
+
+                        if (hasDiff) {
+                            console.log('🔄 Authoritative state discrepancy detected -> updating to correct product:', s);
+                            updateDisplay(s);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('⚠️ Could not sync with authoritative machine state:', err);
+            } finally {
+                isSyncingState = false;
+            }
+        }
+
         // Connect to SSE endpoint
         function connectSSE() {
             console.log(`🔌 Connecting to SSE for ${MACHINE_ID}...`);
@@ -2304,20 +3674,13 @@
 
             eventSource.onopen = function () {
                 console.log('✅ SSE Connection opened');
-                const statusDot = document.getElementById('statusDot');
-                if (statusDot) {
-                    statusDot.classList.add('connected');
-                    statusDot.classList.remove('disconnected');
-                }
+                updateStatusCard(t('connected'));
+                syncWithAuthoritativeState();
             };
 
             eventSource.onerror = function (error) {
                 console.error('❌ SSE Connection error:', error);
-                const statusDot = document.getElementById('statusDot');
-                if (statusDot) {
-                    statusDot.classList.remove('connected');
-                    statusDot.classList.add('disconnected');
-                }
+                updateStatusCard(t('disconnected'));
 
                 // Attempt to reconnect after 5 seconds
                 setTimeout(() => {
@@ -2343,8 +3706,20 @@
         function handleMessage(data) {
             console.log('📊 Processing message:', data);
 
+            // Synchronize language if received from backend or tablet broadcast
+            const incomingLang = data.language || (data.additionalData && data.additionalData.language);
+            if (incomingLang && ['ja', 'en', 'pt'].includes(String(incomingLang).toLowerCase())) {
+                setAppLanguage(String(incomingLang).toLowerCase());
+            }
+
             if (data.type === 'connected') {
                 console.log(`✅ Connected to ${data.machineId}`);
+                updateStatusCard(t('connected'));
+                return;
+            }
+
+            if (data.action === 'language_change' || data.type === 'language_change' || (data.additionalData && data.additionalData.action === 'language_change')) {
+                console.log(`🌐 Language change command processed: ${incomingLang}`);
                 return;
             }
 
@@ -2402,75 +3777,46 @@
             // Clear localStorage
             clearScanFromStorage();
 
-            // Hide PDF section
-            pdfSection.style.display = 'none';
-            manualSection.style.display = 'none';
+            window.currentSebanggo = null;
+            window.currentZuban = null;
+            window.currentHinban = null;
+            window.lastScanTime = null;
+            pdfPages = [];
+            currentPDFIndex = 0;
 
-            // Show waiting message
-            waitingMessage.style.display = 'block';
-
-            // Reset cards to 2-column state
-            productInfo.classList.remove('expanded');
+            // Reset cards to waiting state
             initializeWaitingCards();
+
+            // Show production plan in idle state!
+            showIdleProductionPlan();
         }
 
         // Update the display with scan data
         async function updateDisplay(data) {
-            window.currentSebanggo = data.sebanggo; // Added for data integrity check
+            window.currentSebanggo = data.sebanggo || null;
             window.currentZuban = data.zuban || null;
+            window.currentHinban = data.hinban || null;
+            window.lastScanTime = data.timestamp || Date.now();
             resetManualPlayer({ restorePdf: false });
+
+            // If incoming data specifies factory, update CURRENT_FACTORY
+            if (data.additionalData && (data.additionalData.factory || data.additionalData.工場)) {
+                const incomingFactory = data.additionalData.factory || data.additionalData.工場;
+                if (incomingFactory && incomingFactory !== CURRENT_FACTORY) {
+                    CURRENT_FACTORY = incomingFactory;
+                    updateFactoryCards();
+                }
+            }
 
             // Save to localStorage for persistence
             saveScanToStorage(data);
 
-            // Hide waiting message, show PDF section
-            waitingMessage.style.display = 'none';
-            productSection.style.display = 'block';
+            // Hide waiting message, show product section
+            if (waitingMessage) waitingMessage.style.display = 'none';
+            if (productSection) productSection.style.display = 'flex';
 
             // Create all 5 cards with burst animation
-            productInfo.classList.remove('expanded');
-            const formattedTime = new Date(data.timestamp).toLocaleString('ja-JP', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            });
-
-            productInfo.innerHTML = `
-                <div class="info-card burst">
-                    <div class="info-label">Machine / マシン</div>
-                    <div class="info-value">${MACHINE_ID}</div>
-                </div>
-                <div class="info-card burst">
-                    <div class="info-label">Status / ステータス</div>
-                    <div class="info-value" id="statusValue"><span class="status-dot" id="statusDot"></span>接続済み</div>
-                </div>
-                <div class="info-card burst">
-                    <div class="info-label">${data.zuban ? '図番 / Drawing Number' : '背番号 / Serial Number'}</div>
-                    <div class="info-value">${data.zuban || data.sebanggo || '-'}</div>
-                </div>
-                <div class="info-card burst">
-                    <div class="info-label">品番 / Part Number</div>
-                    <div class="info-value">${data.hinban || '-'}</div>
-                </div>
-                <div class="info-card burst">
-                    <div class="info-label">スキャン時間 / Scan Time</div>
-                    <div class="info-value">${formattedTime}</div>
-                </div>
-            `;
-
-            // Trigger expansion animation after burst
-            setTimeout(() => {
-                productInfo.classList.add('expanded');
-                // Make sure status dot has correct class after burst animation
-                const statusDot = document.getElementById('statusDot');
-                if (statusDot) {
-                    statusDot.classList.add('connected');
-                    statusDot.classList.remove('disconnected');
-                }
-            }, 50);
+            renderActiveProductCards(true);
 
             // Fetch and display PDFs
             await fetchAndDisplayPDFs(data.sebanggo, data.zuban);
@@ -2544,8 +3890,7 @@
                                 const cropCanvas = document.createElement('canvas');
                                 cropCanvas.width = cropW;
                                 cropCanvas.height = cropH;
-                                const cropCtx = cropCanvas.getContext('2d');
-                                cropCtx.drawImage(canvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
+                                cropCanvas.getContext('2d').drawImage(canvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
 
                                 const trimmedUrl = cropCanvas.toDataURL('image/jpeg', 0.95);
                                 trimmedImageCache.set(srcUrl, trimmedUrl);
@@ -2611,7 +3956,14 @@
                     });
                 }
 
-                console.log(`✅ Loaded ${pdfPages.length} PDF pages`, pdfPages);
+                // Add the Production Plan as the LAST page!
+                pdfPages.push({
+                    type: 'production_plan',
+                    imageURL: null,
+                    name: t('planPageName')
+                });
+
+                console.log(`✅ Loaded ${pdfPages.length} PDF/Plan pages`, pdfPages);
 
                 // Show first page
                 currentPDFIndex = 0;
@@ -2619,13 +3971,21 @@
 
             } catch (error) {
                 console.error('❌ Error fetching PDFs:', error);
-                pdfSection.style.display = 'none';
+                // Fallback: still provide the production plan page
+                pdfPages = [{
+                    type: 'production_plan',
+                    imageURL: null,
+                    name: t('planPageName')
+                }];
+                currentPDFIndex = 0;
+                await displayCurrentPDF();
             }
         }
 
         async function displayCurrentPDF() {
             if (pdfPages.length === 0) {
                 pdfSection.style.display = 'none';
+                if (productionPlanSection) productionPlanSection.style.display = 'none';
                 return;
             }
 
@@ -2633,9 +3993,26 @@
                 return;
             }
 
-            pdfSection.style.display = 'block';
             const currentPage = pdfPages[currentPDFIndex];
             const pdfGrid = document.getElementById('pdfGrid');
+
+            if (currentPage.type === 'production_plan') {
+                // Show Production Plan Section, hide PDF Grid Section
+                pdfSection.style.display = 'none';
+                if (productionPlanSection) {
+                    productionPlanSection.style.display = 'flex';
+                    renderProductionPlanView();
+                }
+                return;
+            }
+
+            // Normal PDF page
+            if (productionPlanSection) {
+                productionPlanSection.style.display = 'none';
+            }
+            pdfSection.style.display = 'block';
+
+            const pageTag = `(${currentPDFIndex + 1} / ${pdfPages.length})`;
 
             if (currentPage.imageURL) {
                 const displaySrc = currentPage.imageURL;
@@ -2650,8 +4027,9 @@
 
                 pdfGrid.innerHTML = `
                     <div style="position: relative; width: 100%; height: calc(100vh - 60px); display: flex; align-items: center; justify-content: center; overflow: hidden; background: #FFFFFF;">
-                        <div style="position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.8); color: white; font-size: 0.9em; font-weight: 600; padding: 8px 16px; border-radius: 6px; z-index: 10;">
-                            ${currentPage.name}
+                        <div style="position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.85); color: white; font-size: 0.9em; font-weight: 600; padding: 8px 16px; border-radius: 6px; z-index: 10; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+                            <span>${currentPage.name}</span>
+                            <span style="background: rgba(255,255,255,0.25); padding: 2px 8px; border-radius: 12px; font-size: 0.85em;">${pageTag}</span>
                         </div>
                         <img src="${displaySrc}" alt="${currentPage.name}" style="width: 100%; height: 100%; object-fit: ${objectFitStyle}; object-position: center; display: block;" />
                     </div>
@@ -2659,7 +4037,11 @@
             } else {
                 // Display placeholder
                 pdfGrid.innerHTML = `
-                    <div style="height: calc(100vh - 60px); display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                    <div style="height: calc(100vh - 60px); display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative;">
+                        <div style="position: absolute; top: 10px; left: 10px; background: rgba(0, 0, 0, 0.85); color: white; font-size: 0.9em; font-weight: 600; padding: 8px 16px; border-radius: 6px; z-index: 10; display: flex; align-items: center; gap: 8px;">
+                            <span>${currentPage.name}</span>
+                            <span style="background: rgba(255,255,255,0.25); padding: 2px 8px; border-radius: 12px; font-size: 0.85em;">${pageTag}</span>
+                        </div>
                         <div style="font-size: 1.2em; font-weight: 600; color: rgba(0, 0, 0, 0.8); margin-bottom: 20px;">
                             ${currentPage.name}
                         </div>
@@ -2736,6 +4118,13 @@
                     console.warn('Heartbeat check failed', e);
                 }
             }, 60000); // Check every minute
+
+            // Auto-refresh production plan every 60 seconds to sync manager edits live
+            setInterval(() => {
+                if (manualState.mode !== 'manual') {
+                    loadProductionPlanData({ silent: true });
+                }
+            }, 60000);
         });
 
         // Cleanup on page unload
