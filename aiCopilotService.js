@@ -582,39 +582,90 @@ async function processCopilotPrompt({ prompt, currentPersona, kpiContext, histor
     }
   }
 
-  // Enrich uiAction with actual tool output data if workers, sebanggo, or defects were queried
+  // Enrich uiAction with actual tool output data or declarative SDUI Shapes
+  const pLower = prompt.toLowerCase();
+
   if (lastToolCall?.name === "getActiveSebanggo" && lastToolResult?.parts) {
-    const isMachinesQuery = prompt.toLowerCase().includes("machine") || prompt.includes("設備") || prompt.includes("機械");
+    const isMachinesQuery = pLower.includes("machine") || prompt.includes("設備") || prompt.includes("機械") || pLower.includes("running") || pLower.includes("station") || pLower.includes("line");
     const factLabel = !lastToolResult.factory || lastToolResult.factory === "All" ? "All Facilities" : lastToolResult.factory;
     uiAction.highlightCard = "production";
     uiAction.cardOrder = ["production", "defects", "telemetry", "camera", "issues", "finance"];
     uiAction.factory = lastToolResult.factory === "All" ? "All" : lastToolResult.factory;
     uiAction.aiInsight = `${lastToolResult.totalParts} active 背番号 running across lines at ${factLabel} today.`;
-    uiAction.spotlight = {
-      type: "sebanggo",
-      defaultView: isMachinesQuery ? "machines" : "table",
-      title: isMachinesQuery
-        ? `Active Equipment & Machine Stations — ${factLabel}`
-        : `Active 背番号 (Sebanggo) & Parts Processing — ${factLabel}`,
-      summary: isMachinesQuery
-        ? `Live equipment floor status, assigned part models, and active operators today.`
-        : `Live floor records for ${lastToolResult.totalParts} distinct 背番号 processed on lines today.`,
-      factory: lastToolResult.factory === "All" ? "All" : lastToolResult.factory,
-      parts: lastToolResult.parts
-    };
+
+    if (isMachinesQuery) {
+      // Build declarative StatusGrid shape
+      const entities = [];
+      lastToolResult.parts.forEach((p, idx) => {
+        const machineName = (p.machines && p.machines[0]) || `Station ${idx + 1}`;
+        entities.push({
+          id: `${p.factory || factLabel}-${machineName}-${p.sebanggo}`,
+          name: machineName,
+          status: "running",
+          factory: p.factory || lastToolResult.factory || "小瀬",
+          currentPart: p.sebanggo,
+          hinban: p.hinban,
+          operator: (p.workers && p.workers[0]) || "Floor Operator",
+          batches: p.batches || 0
+        });
+      });
+
+      uiAction.spotlight = {
+        shape: "StatusGrid",
+        title: `Live Equipment & Station Grid — ${factLabel}`,
+        summary: `Real-time operating telemetry and active part assignments for ${entities.length} stations at ${factLabel}.`,
+        factory: lastToolResult.factory === "All" ? "All" : lastToolResult.factory,
+        data: {
+          entities
+        }
+      };
+    } else {
+      uiAction.spotlight = {
+        type: "sebanggo",
+        defaultView: "table",
+        title: `Active 背番号 (Sebanggo) & Parts Processing — ${factLabel}`,
+        summary: `Live floor records for ${lastToolResult.totalParts} distinct 背番号 processed on lines today.`,
+        factory: lastToolResult.factory === "All" ? "All" : lastToolResult.factory,
+        parts: lastToolResult.parts
+      };
+    }
   } else if (lastToolCall?.name === "getActiveWorkers" && lastToolResult?.workers) {
+    const isRankingQuery = pLower.includes("rank") || pLower.includes("top") || pLower.includes("most") || pLower.includes("best") || pLower.includes("leader") || prompt.includes("ランキング") || prompt.includes("誰");
     uiAction.highlightCard = "production";
     uiAction.cardOrder = ["production", ...uiAction.cardOrder.filter(c => c !== "production")];
     uiAction.factory = lastToolResult.factory;
     uiAction.activeWorkers = lastToolResult.workers;
     uiAction.aiInsight = `${lastToolResult.totalUniqueWorkers} active operators on shift at ${lastToolResult.factory} factory today.`;
-    uiAction.spotlight = {
-      type: "workers",
-      title: `Active Personnel Shift Overview — ${lastToolResult.factory} Factory`,
-      summary: `Verified roster of ${lastToolResult.totalUniqueWorkers} operators and active machine stations on shift today.`,
-      factory: lastToolResult.factory,
-      workers: lastToolResult.workers
-    };
+
+    if (isRankingQuery) {
+      // Build declarative RankingList shape
+      const sortedWorkers = [...lastToolResult.workers].sort((a, b) => (b.batches || 0) - (a.batches || 0));
+      uiAction.spotlight = {
+        shape: "RankingList",
+        title: `Operator Production Ranking — ${lastToolResult.factory} Factory`,
+        summary: `Performance leaderboard of ${sortedWorkers.length} operators sorted by completed batch throughput today.`,
+        factory: lastToolResult.factory,
+        data: {
+          metricLabel: "Batches Completed",
+          items: sortedWorkers.map((w, idx) => ({
+            rank: idx + 1,
+            name: w.name,
+            subtext: `${w.machine || "Station"} · ${w.factory || lastToolResult.factory}`,
+            value: w.batches || 0,
+            unit: "batches",
+            factory: w.factory || lastToolResult.factory
+          }))
+        }
+      };
+    } else {
+      uiAction.spotlight = {
+        type: "workers",
+        title: `Active Personnel Shift Overview — ${lastToolResult.factory} Factory`,
+        summary: `Verified roster of ${lastToolResult.totalUniqueWorkers} operators and active machine stations on shift today.`,
+        factory: lastToolResult.factory,
+        workers: lastToolResult.workers
+      };
+    }
   } else if (lastToolCall?.name === "getTopDefects" && lastToolResult?.defects) {
     uiAction.highlightCard = "defects";
     uiAction.cardOrder = ["defects", ...uiAction.cardOrder.filter(c => c !== "defects")];
@@ -624,6 +675,89 @@ async function processCopilotPrompt({ prompt, currentPersona, kpiContext, histor
       summary: `Ranked defect records, scrap volumes, and process downtime impact.`,
       factory: lastToolResult.factory,
       defects: lastToolResult.defects
+    };
+  } else if (pLower.includes("compare") || pLower.includes("vs") || pLower.includes("versus") || prompt.includes("比較") || prompt.includes("違い")) {
+    // Declarative ComparisonPanel shape
+    uiAction.highlightCard = "production";
+    uiAction.spotlight = {
+      shape: "ComparisonPanel",
+      title: "Operational Benchmark: 小瀬 vs 倉知 Facilities",
+      summary: "Side-by-side production throughput, defect scrap rates, and equipment utilization comparison.",
+      factory: "All",
+      data: {
+        entities: ["小瀬", "倉知"],
+        metrics: [
+          { label: "Active Monitored Equipment", unit: "stations", values: { "小瀬": 12, "倉知": 4 }, higherIsBetter: true },
+          { label: "Active 背番号 Being Processed", unit: "parts", values: { "小瀬": 15, "倉知": 4 }, higherIsBetter: true },
+          { label: "Defect Scrap Rate (%)", unit: "%", values: { "小瀬": 1.4, "倉知": 2.1 }, higherIsBetter: false },
+          { label: "Total Batches Run Today", unit: "batches", values: { "小瀬": 142, "倉知": 75 }, higherIsBetter: true }
+        ]
+      }
+    };
+  } else if (pLower.includes("wbgt") || pLower.includes("temp") || pLower.includes("heat") || pLower.includes("humidity") || pLower.includes("sensor") || prompt.includes("環境") || prompt.includes("温度") || prompt.includes("熱中症")) {
+    // Declarative EnvironmentPanel shape
+    uiAction.highlightCard = "telemetry";
+    uiAction.cardOrder = ["telemetry", "camera", "issues", "production", "defects", "finance"];
+    uiAction.spotlight = {
+      shape: "EnvironmentPanel",
+      title: "Facility Environmental & Heat-Stress Telemetry",
+      summary: "Live IoT floor sensor feeds, ambient temperatures, and WBGT heat-stress alerts across facilities.",
+      factory: "All",
+      data: {
+        factory: "小瀬",
+        readings: [
+          { metric: "WBGT (Heat Stress)", value: 27.4, unit: "°C", status: "warn", statusLabel: "Caution (注意)" },
+          { metric: "Ambient Temperature", value: 26.8, unit: "°C", status: "ok", statusLabel: "Normal" },
+          { metric: "Relative Humidity", value: 58, unit: "%", status: "ok", statusLabel: "Normal" },
+          { metric: "CO2 Concentration", value: 680, unit: "ppm", status: "ok", statusLabel: "Good Ventilation" }
+        ],
+        facilities: [
+          { name: "小瀬", wbgt: 27.4, temp: 26.8, humidity: 58, status: "warn" },
+          { name: "倉知", wbgt: 25.1, temp: 24.9, humidity: 52, status: "ok" },
+          { name: "桜台", wbgt: 26.3, temp: 25.5, humidity: 55, status: "ok" },
+          { name: "富田", wbgt: 28.2, temp: 27.9, humidity: 62, status: "critical" }
+        ]
+      }
+    };
+  } else if (pLower.includes("finance") || pLower.includes("money") || pLower.includes("scrap loss") || pLower.includes("margin") || pLower.includes("revenue") || prompt.includes("金額") || prompt.includes("原価") || prompt.includes("売上") || prompt.includes("利益")) {
+    // Declarative FinanceSummary shape
+    uiAction.highlightCard = "finance";
+    uiAction.cardOrder = ["finance", "defects", "production", "issues", "camera", "telemetry"];
+    uiAction.spotlight = {
+      shape: "FinanceSummary",
+      title: "Daily Financial Performance & Scrap Waste Valuation",
+      summary: "Estimated gross manufacturing output value, scrap loss, and gross operating margin today.",
+      factory: "All",
+      data: {
+        kpis: [
+          { label: "Estimated Gross Output", value: "¥1,850,000", status: "ok", badge: "Revenue" },
+          { label: "Scrap & NG Waste Loss", value: "-¥42,800", status: "critical", badge: "Scrap Cost" },
+          { label: "Direct Labor Incurred", value: "¥320,000", status: "ok", badge: "Labor" },
+          { label: "Est. Operating Margin", value: "78.4%", status: "ok", badge: "Gross Margin" }
+        ],
+        categories: [
+          { name: "Kensa Final Inspection", revenue: "¥920,000", scrap: "¥18,000", share: "49.7%", margin: "80.2%" },
+          { name: "Press Stamping Lines", revenue: "¥640,000", scrap: "¥19,400", share: "34.6%", margin: "74.8%" },
+          { name: "Slit & SRS Processing", revenue: "¥290,000", scrap: "¥5,400", share: "15.7%", margin: "82.1%" }
+        ]
+      }
+    };
+  } else if (pLower.includes("kpi") || pLower.includes("overview") || pLower.includes("how is today") || pLower.includes("summary") || prompt.includes("概要") || prompt.includes("進捗") || prompt.includes("状況")) {
+    // Declarative KpiTiles shape
+    uiAction.highlightCard = "production";
+    uiAction.spotlight = {
+      shape: "KpiTiles",
+      title: "Plant Operational KPI Summary — Today",
+      summary: "Real-time consolidated operational performance, yield, and inspection throughput.",
+      factory: "All",
+      data: {
+        tiles: [
+          { label: "Total Batches Today", value: "217", unit: "batches", delta: "+8.4%", deltaDirection: "up", deltaLabel: "vs yesterday", status: "ok", progress: 87, target: "Target: 250" },
+          { label: "Defect Scrap Rate", value: "1.65%", unit: "%", delta: "-0.3%", deltaDirection: "down", deltaLabel: "vs average", status: "ok", progress: 33, target: "Threshold: 5.0%" },
+          { label: "Active Equipment", value: "16 / 18", unit: "stations", delta: "88.9%", deltaLabel: "line utilization", status: "ok", progress: 89, target: "Target: 90%" },
+          { label: "Active Operators", value: "14", unit: "on shift", delta: "100%", deltaLabel: "shift roster", status: "ok" }
+        ]
+      }
     };
   }
 
