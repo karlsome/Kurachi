@@ -476,10 +476,78 @@ async function processCopilotPrompt({ prompt, currentPersona, kpiContext, histor
       }
     });
 
-    finalResponseText = response2.text;
+    let response2Text = "";
+    try {
+      if (typeof response2.text === "string") {
+        response2Text = response2.text;
+      }
+    } catch {
+      // response2.text getter may throw if only non-text parts exist
+    }
+
+    if (!response2Text && response2.candidates?.[0]?.content?.parts) {
+      const textParts = response2.candidates[0].content.parts
+        .filter(p => typeof p.text === "string" && p.text.trim())
+        .map(p => p.text);
+      if (textParts.length > 0) {
+        response2Text = textParts.join("\n").trim();
+      }
+    }
+
+    finalResponseText = response2Text;
+
+    // Handle case where response2 requested another tool
+    if (response2.functionCalls && response2.functionCalls.length > 0) {
+      const secondToolCall = response2.functionCalls[0];
+      console.log(`[aiCopilot] Gemini invoking 2nd tool: ${secondToolCall.name}`, secondToolCall.args);
+      try {
+        const secondToolResult = await executeToolCall(secondToolCall, client, prompt);
+        const response3 = await generateWithFallback({
+          contents: [
+            ...contents,
+            response1.candidates[0].content,
+            {
+              role: "user",
+              parts: [{
+                functionResponse: {
+                  name: toolCall.name,
+                  response: toolResult
+                }
+              }]
+            },
+            response2.candidates[0].content,
+            {
+              role: "user",
+              parts: [{
+                functionResponse: {
+                  name: secondToolCall.name,
+                  response: secondToolResult
+                }
+              }]
+            }
+          ],
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION
+          }
+        });
+
+        if (typeof response3?.text === "string" && response3.text.trim()) {
+          finalResponseText = response3.text;
+        }
+      } catch (err3) {
+        console.warn("[aiCopilot] 2nd tool turn completed with fallback summary:", err3.message);
+      }
+    }
   } else {
-    finalResponseText = response1.text;
+    try {
+      finalResponseText = response1.text || "";
+    } catch {
+      finalResponseText = "";
+    }
   }
+
+  // Ensure finalResponseText is always a string
+  finalResponseText = finalResponseText || "";
 
   // Parse UI Action JSON if returned by Gemini
   let uiAction = null;
@@ -560,12 +628,18 @@ async function processCopilotPrompt({ prompt, currentPersona, kpiContext, histor
   }
 
   // Clean up any raw tool output syntax that might have leaked into the model response
-  cleanReply = cleanReply.replace(/^response:default_api:[^\n]+\n?/g, "").trim();
+  cleanReply = (cleanReply || "").replace(/^response:default_api:[^\n]+\n?/g, "").trim();
 
   if (!cleanReply) {
-    if (lastToolCall?.name === "getActiveWorkers" && lastToolResult?.workers?.length > 0) {
+    if (lastToolCall?.name === "getActiveSebanggo" && lastToolResult?.parts?.length > 0) {
+      const fact = !lastToolResult.factory || lastToolResult.factory === "All" ? "All Facilities" : lastToolResult.factory;
+      const topP = lastToolResult.parts.slice(0, 5).map(p => `**${p.sebanggo}** (${p.machines?.join("/") || "station"})`).join(", ");
+      cleanReply = `Today at **${fact}**, there are **${lastToolResult.totalParts} active 背番号** being processed on lines: ${topP}. The equipment and parts spotlight has been placed at the top of your dashboard.`;
+    } else if (lastToolCall?.name === "getActiveWorkers" && lastToolResult?.workers?.length > 0) {
       const wNames = lastToolResult.workers.slice(0, 8).map(w => `**${w.name}** (${w.machine})`).join(", ");
       cleanReply = `Today at **${lastToolResult.factory}**, there are **${lastToolResult.totalUniqueWorkers} active operators** on shift: ${wNames}. The Factory Operations card has been prioritized and updated.`;
+    } else if (lastToolCall?.name === "getTopDefects" && lastToolResult?.defects?.length > 0) {
+      cleanReply = `Diagnostic records for **${lastToolResult.factory || "All Facilities"}** show non-conformance defects recorded today. The Quality & Defects card has been prioritized.`;
     } else {
       const focus = uiAction?.highlightCard || "requested";
       cleanReply = `I have analyzed your request and reorganized your dashboard layout to focus on **${focus}**. The relevant cards have been prioritized at the top for inspection.`;
