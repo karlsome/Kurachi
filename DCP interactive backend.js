@@ -16629,6 +16629,15 @@ if (manualSendModal) {
   // Machines this tablet currently has a cycle stop scheduled on.
   // One entry for a single pick, every grouped machine for the BOTH pick.
   let activeCycleStopMachines = [];
+
+  // The last cycle-stop intent this tablet sent to each mini-PC IP:
+  //   { at: <when the request went out>, scheduled: true (stop) | false (cancel) }
+  // A /state response whose request STARTED before that intent still describes the
+  // machine as it was beforehand. Acting on it flashes the overlay and the kiosk TV
+  // to the wrong state for a whole poll cycle, so those responses are corrected to
+  // what we asked for. Anything issued AFTER the intent is trusted as-is — the
+  // mini-PC stays the source of truth.
+  const cycleStopIntent = {};
   const CYCLE_STOP_ALL = '__BOTH__';
 
   // Normalise a 🛑 target (a machine name, the BOTH sentinel, an array, or null)
@@ -17064,8 +17073,34 @@ if (manualSendModal) {
     });
   });
 
+  // POST cancel_scheduled_cycle_stop to ONE mini-PC and read the reply it already
+  // sends ({"success": true, "scheduled": false}). Returns false only when the
+  // machine could not be reached or says the stop is still scheduled — those are the
+  // cases where the operator thinks the stop is off but the machine will still stop.
+  async function cancelCycleStopOnMachine(machineName, ip) {
+    const label = machineName || ip;
+    for (const port of [5000, 8766]) {
+      try {
+        const res = await fetch(`http://${ip}:${port}/cancel_scheduled_cycle_stop`, {
+          method: 'POST',
+          signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          // A legacy mini-PC may answer 200 with no usable body — treat that as done.
+          if (!data || data.scheduled !== true) {
+            console.log(`🛑 Cycle stop cancelled on ${label} (:${port}):`, data);
+            return true;
+          }
+        }
+      } catch (_) { }
+    }
+    console.warn(`⚠️ Cycle stop cancel NOT confirmed for ${label} — mini-PC offline or still scheduled.`);
+    return false;
+  }
+
   // Handle Cancel Button on Overlay (User changes mind on 🛑 for the machine(s) picked)
-  document.getElementById('btnCancelCycleStop')?.addEventListener('click', () => {
+  document.getElementById('btnCancelCycleStop')?.addEventListener('click', async () => {
     const targetMachines = activeCycleStopMachines.slice();
     closeCycleStopOverlay();
     if (typeof showToast === 'function') {
@@ -17074,18 +17109,45 @@ if (manualSendModal) {
 
     // Cancel only on the mini-PC(s) we actually scheduled. No machine picked keeps
     // the legacy single-IP fallback.
-    const targetIps = targetMachines.length > 0
-      ? targetMachines.map(m => getCNCMiniPCIP(m))
-      : [getCNCMiniPCIP(null)];
+    const pairs = targetMachines.length > 0
+      ? targetMachines.map(m => ({ machine: m, ip: getCNCMiniPCIP(m) }))
+      : [{ machine: null, ip: getCNCMiniPCIP(null) }];
 
-    Array.from(new Set(targetIps.filter(Boolean))).forEach(ip => {
-      const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
-      fetch(`http://${ip}:5000/cancel_scheduled_cycle_stop`, { method: 'POST', signal: sig1 })
-        .catch(() => {
-          const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
-          fetch(`http://${ip}:8766/cancel_scheduled_cycle_stop`, { method: 'POST', signal: sig2 }).catch(() => { });
-        });
+    const uniquePairs = [];
+    const seenIps = new Set();
+    pairs.forEach(pair => {
+      if (pair.ip && !seenIps.has(pair.ip)) {
+        seenIps.add(pair.ip);
+        uniquePairs.push(pair);
+      }
     });
+    if (uniquePairs.length === 0) return;
+
+    // Stamped before the requests go out, so any /state reply already in flight is
+    // recognised as pre-cancel and cannot flash the overlay back on.
+    const cancelSentAt = Date.now();
+    uniquePairs.forEach(pair => { cycleStopIntent[pair.ip] = { at: cancelSentAt, scheduled: false }; });
+
+    const results = await Promise.all(
+      uniquePairs.map(pair => cancelCycleStopOnMachine(pair.machine, pair.ip))
+    );
+
+    const unconfirmed = uniquePairs
+      .filter((pair, i) => !results[i])
+      .map(pair => pair.machine || pair.ip);
+
+    if (unconfirmed.length > 0) {
+      // Let the operator know the machine never acknowledged: it may still stop after
+      // its cycle. The /state poll re-opens the overlay once the mini-PC is reachable.
+      if (typeof showToast === 'function') {
+        showToast(`⚠️ ${unconfirmed.join(', ')} の停止取り消しを確認できませんでした / Cancel not confirmed`);
+      }
+      // Drop the guard for those machines so the poll is trusted again immediately —
+      // if the mini-PC still has the stop scheduled, the overlay must come back.
+      uniquePairs.forEach((pair, i) => {
+        if (!results[i]) delete cycleStopIntent[pair.ip];
+      });
+    }
   });
 
   // POST schedule_cycle_stop to ONE mini-PC. Returns true if that machine accepted it.
@@ -17130,22 +17192,29 @@ if (manualSendModal) {
 
     if (pairs.length === 0) return;
 
+    // Same guard as the cancel path, in the other direction: a /state reply already in
+    // flight still says "not scheduled" and would close the overlay we just opened.
+    const scheduleSentAt = Date.now();
+    pairs.forEach(pair => { cycleStopIntent[pair.ip] = { at: scheduleSentAt, scheduled: true }; });
+
     const results = await Promise.all(
       pairs.map(pair => scheduleCycleStopOnMachine(pair.machine, pair.ip))
     );
 
-    // Drop any machine that never accepted, so the kiosk TV stops showing it.
-    results.forEach((ok, i) => {
-      if (!ok && pairs[i].machine) {
-        const stillWaiting = activeCycleStopMachines.filter(m => m !== pairs[i].machine);
-        if (stillWaiting.length !== activeCycleStopMachines.length) {
-          if (typeof notifyStopCall === 'function') {
-            notifyStopCall('clear', 'stop', pairs[i].machine);
-          } else if (typeof window.notifyStopCall === 'function') {
-            window.notifyStopCall('clear', 'stop', pairs[i].machine);
-          }
-          activeCycleStopMachines = stillWaiting;
+    // A machine that never accepted has no stop scheduled: trust its polls again and
+    // stop showing it on the kiosk TV.
+    pairs.forEach((pair, i) => {
+      if (results[i]) return;
+      delete cycleStopIntent[pair.ip];
+      if (!pair.machine) return;
+      const stillWaiting = activeCycleStopMachines.filter(m => m !== pair.machine);
+      if (stillWaiting.length !== activeCycleStopMachines.length) {
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'stop', pair.machine);
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'stop', pair.machine);
         }
+        activeCycleStopMachines = stillWaiting;
       }
     });
 
@@ -17187,10 +17256,23 @@ if (manualSendModal) {
   // ==========================================================================
   const machineStates = {};
 
-  function syncGatekeeperState(state, ip) {
+  // requestStartedAt: when the /state request that produced this state was issued.
+  // Omitted for live SSE pushes, which are generated by the mini-PC on the spot.
+  function syncGatekeeperState(state, ip, requestStartedAt) {
     if (!state) return;
     lastHeartbeatTime = Date.now();
     const key = ip || state.machine_id || 'default';
+
+    // Correct a schedule flag from a response that was already in flight when we sent
+    // a stop or a cancel. The next poll, issued after ours, reports what the mini-PC
+    // actually has and the overlay follows that.
+    const intent = cycleStopIntent[key];
+    if (intent && requestStartedAt && requestStartedAt < intent.at
+      && !!state.scheduled_cycle_stop !== intent.scheduled) {
+      console.log(`⏱️ [CNC GATEKEEPER] Ignoring pre-request scheduled_cycle_stop from ${key}.`);
+      state = Object.assign({}, state, { scheduled_cycle_stop: intent.scheduled });
+    }
+
     machineStates[key] = state;
 
     reconcileGroupedGatekeeperStates();
@@ -17287,6 +17369,8 @@ if (manualSendModal) {
     const allIps = getAllCNCMiniPCIPs();
     if (allIps.length === 0) return;
     for (const ip of allIps) {
+      // Stamped BEFORE the request so a response that raced a cancel can be spotted.
+      const startedAt = Date.now();
       try {
         const sig = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
         const res = await fetch(`http://${ip}:5000/state`, { cache: 'no-store', signal: sig });
@@ -17298,7 +17382,7 @@ if (manualSendModal) {
               state.hold_reason = null;
             }
           }
-          syncGatekeeperState(state, ip);
+          syncGatekeeperState(state, ip, startedAt);
           continue;
         }
       } catch (_) {
@@ -17313,7 +17397,7 @@ if (manualSendModal) {
                 state.hold_reason = null;
               }
             }
-            syncGatekeeperState(state, ip);
+            syncGatekeeperState(state, ip, startedAt);
           }
         } catch (_) { }
       }
