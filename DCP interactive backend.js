@@ -17190,7 +17190,15 @@ if (manualSendModal) {
     isCycleStopPending = true;
     openCycleStopOverlay(targets);
 
-    if (pairs.length === 0) return;
+    // No mini-PC to talk to at all (no IP resolved). Nothing can be waiting, so do not
+    // leave the operator staring at a modal that will never close on its own.
+    if (pairs.length === 0) {
+      closeCycleStopOverlay();
+      if (typeof showToast === 'function') {
+        showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
+      }
+      return;
+    }
 
     // Same guard as the cancel path, in the other direction: a /state reply already in
     // flight still says "not scheduled" and would close the overlay we just opened.
