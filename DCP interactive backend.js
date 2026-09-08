@@ -16630,6 +16630,16 @@ if (manualSendModal) {
   // One entry for a single pick, every grouped machine for the BOTH pick.
   let activeCycleStopMachines = [];
 
+  // Mini-PC IPs that ACCEPTED a break stop, i.e. answered {"scheduled": true}. The
+  // break timer waits for every one of these to reach a BREAK hold. A legacy mini-PC
+  // has no such endpoint, never lands in this list, and is never waited on.
+  let breakWaitIps = [];
+  // What the break overlay title is currently naming (the machines still running).
+  let breakWaitTitleIps = [];
+  // True while the schedule requests are still going out, so nothing starts the break
+  // from a half-built wait list.
+  let breakScheduleInFlight = false;
+
   // The last cycle-stop intent this tablet sent to each mini-PC IP:
   //   { at: <when the request went out>, scheduled: true (stop) | false (cancel) }
   // A /state response whose request STARTED before that intent still describes the
@@ -16910,6 +16920,11 @@ if (manualSendModal) {
         startBtn.innerHTML = `<span>${_tr('cnc_break_btn_waiting', '⏳ サイクル完了後に休憩停止します...')}</span>`;
       }
     }
+
+    // The resets above drop the 【machine】 prefix both waiting overlays carry — put it
+    // back, otherwise switching language mid-wait hides which machine is still running.
+    if (activeCycleStopMachines.length > 0) setCycleStopOverlayTitle(activeCycleStopMachines);
+    if (breakWaitTitleIps.length > 0) setBreakWaitOverlayTitle(breakWaitTitleIps);
   }
 
   function broadcastLanguagePreferenceToMachine(lang) {
@@ -17038,6 +17053,18 @@ if (manualSendModal) {
     }
   }
 
+  // Name the machines the break is still waiting on, like the cycle stop overlay does.
+  function setBreakWaitOverlayTitle(ips) {
+    breakWaitTitleIps = (ips || []).slice();
+    const names = (ips || [])
+      .map(ip => getMachineNameFromIP(ip))
+      .filter(Boolean);
+    const breakTitle = breakWaitOverlay.querySelector('[data-i18n="cnc_break_wait_title"]');
+    if (!breakTitle) return;
+    const base = _tr('cnc_break_wait_title', '休憩待ち (サイクル完了後)');
+    breakTitle.textContent = names.length > 0 ? `【${names.join(' + ')}】 ` + base : base;
+  }
+
   function openBreakWaitOverlay() {
     updateCncOverlayTranslations();
     breakWaitOverlay.classList.add('open');
@@ -17052,7 +17079,41 @@ if (manualSendModal) {
   function closeBreakWaitOverlay() {
     breakWaitOverlay.classList.remove('open');
     isBreakScheduledPending = false;
+    breakWaitIps = [];
+    breakWaitTitleIps = [];
     resetBreakStartButtonUI();
+  }
+
+  // Start the break only once EVERY machine we are waiting on is holding for BREAK.
+  // Machines that never accepted the schedule (legacy mini-PCs, or offline ones) are
+  // not in breakWaitIps, so they are never waited on.
+  function tryStartBreakWhenAllStopped(withToast) {
+    if (!isBreakScheduledPending || breakScheduleInFlight) return false;
+    const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
+    if (isRecentlyFinished) return false;
+
+    const waitIps = breakWaitIps.length > 0 ? breakWaitIps : Object.keys(machineStates);
+    if (waitIps.length === 0) return false;
+
+    const stillRunning = waitIps.filter(k => {
+      const st = machineStates[k];
+      return !(st && st.holding && st.hold_reason === 'BREAK');
+    });
+    if (stillRunning.length > 0) {
+      // Keep the operator informed about which machine is still finishing its cycle.
+      setBreakWaitOverlayTitle(stillRunning);
+      return false;
+    }
+
+    closeBreakWaitOverlay();
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    if (!localStorage.getItem(pfx + 'activeBreakStart') && typeof startBreak === 'function') {
+      startBreak();
+      if (withToast && typeof showToast === 'function') {
+        showToast(_tr('toast_break_started_cnc_stopped', "☕ 休憩を開始しました (機械停止中)"));
+      }
+    }
+    return true;
   }
 
   // Handle Cancel Button on Break Wait Overlay (Cancels for all machines)
@@ -17324,7 +17385,12 @@ if (manualSendModal) {
     const breakScheduled = states.some(s => s && s.scheduled_break_stop);
     if (breakScheduled) {
       if (!isBreakScheduledPending) {
+        // Tablet reload / break started from another tablet: wait on exactly the
+        // machines that report a scheduled break stop.
+        breakWaitIps = Object.keys(machineStates)
+          .filter(k => machineStates[k] && machineStates[k].scheduled_break_stop);
         openBreakWaitOverlay();
+        setBreakWaitOverlayTitle(breakWaitIps);
       }
     } else if (isBreakScheduledPending && !breakScheduled) {
       const anyHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
@@ -17333,14 +17399,8 @@ if (manualSendModal) {
       }
     }
 
-    const breakHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
-    const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
-    if (breakHolding && isBreakScheduledPending && !isRecentlyFinished) {
-      closeBreakWaitOverlay();
-      if (!breakActive && typeof startBreak === 'function') {
-        startBreak();
-      }
-    }
+    // The break timer starts only when every awaited machine has actually stopped.
+    tryStartBreakWhenAllStopped(false);
 
     // 3. Preemptive cycle stop scheduled status for 🛑 Button
     const cycleStopScheduled = states.some(s => s && s.scheduled_cycle_stop);
@@ -17512,15 +17572,24 @@ if (manualSendModal) {
 
     // 4. Preemptive Break Stop Completed -> Start Break Screen!
     es.addEventListener('break_stop_completed', (e) => {
-      console.log("☕ [CNC GATEKEEPER] Break stop executed cleanly.");
-      closeBreakWaitOverlay();
-      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
-      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
-      const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
-      if (!breakActive && !isRecentlyFinished && typeof startBreak === 'function') {
-        startBreak();
-        if (typeof showToast === 'function') {
-          showToast(_tr('toast_break_started_cnc_stopped', "☕ 休憩を開始しました (機械停止中)"));
+      console.log(`☕ [CNC GATEKEEPER] Break stop executed cleanly (${ip}).`);
+      // Record THIS machine's hold, then let the shared check decide: the break starts
+      // only when every machine we are waiting on has stopped.
+      machineStates[ip] = Object.assign({}, machineStates[ip], {
+        holding: true,
+        hold_reason: 'BREAK',
+        scheduled_break_stop: false
+      });
+      if (!tryStartBreakWhenAllStopped(true)) {
+        const stillWaiting = (breakWaitIps.length > 0 ? breakWaitIps : [])
+          .filter(k => {
+            const st = machineStates[k];
+            return !(st && st.holding && st.hold_reason === 'BREAK');
+          })
+          .map(k => getMachineNameFromIP(k))
+          .filter(Boolean);
+        if (stillWaiting.length > 0 && typeof showToast === 'function') {
+          showToast(`☕ ${stillWaiting.join(', ')} のサイクル完了を待っています`);
         }
       }
     });
@@ -17662,9 +17731,14 @@ if (manualSendModal) {
       return;
     }
 
+    breakWaitIps = [];
+    breakWaitTitleIps = [];
+    breakScheduleInFlight = true;
     openBreakWaitOverlay();
 
-    let anyScheduled = false;
+    // Remember WHICH mini-PCs accepted. Only those are waited on; a legacy one that
+    // has no schedule_break_stop endpoint answers nothing and is simply not waited on.
+    const acceptedIps = [];
     await Promise.all(allIps.map(async (ip) => {
       let scheduled = false;
       try {
@@ -17676,7 +17750,6 @@ if (manualSendModal) {
           const data = await res.json();
           if (data && data.scheduled) {
             scheduled = true;
-            anyScheduled = true;
             console.log(`☕ Scheduled break stop response (${ip} :5000):`, data);
           }
         }
@@ -17692,19 +17765,32 @@ if (manualSendModal) {
             const data = await res.json();
             if (data && data.scheduled) {
               scheduled = true;
-              anyScheduled = true;
               console.log(`☕ Scheduled break stop response (${ip} :8766):`, data);
             }
           }
         } catch (_) { }
       }
+
+      if (scheduled) {
+        acceptedIps.push(ip);
+      } else {
+        console.warn(`☕ Legacy Mini-PC at ${ip} (no schedule_break_stop response within 2.5s) or offline — not waiting on it.`);
+      }
     }));
 
-    if (!anyScheduled) {
-      console.warn("Legacy Mini-PC (no schedule_break_stop response within 2.5s) or offline. Starting local break immediately.");
+    breakWaitIps = acceptedIps;
+    breakScheduleInFlight = false;
+
+    if (acceptedIps.length === 0) {
+      console.warn("No Mini-PC accepted schedule_break_stop (all legacy or offline). Starting local break immediately.");
       closeBreakWaitOverlay();
       if (typeof startBreak === 'function') startBreak();
+      return;
     }
+
+    setBreakWaitOverlayTitle(acceptedIps);
+    // A machine may already have been idle and stopped while we were asking.
+    tryStartBreakWhenAllStopped(false);
   }
   window.handleBreakStartButtonClick = handleBreakStartButtonClick;
 
