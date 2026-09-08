@@ -6992,7 +6992,10 @@
                     const cycleStopOverlay = document.getElementById('cncCycleStopOverlay');
                     const isCycleStopOpen = !!(cycleStopOverlay && cycleStopOverlay.classList.contains('open'));
                     if (isCycleStopOpen) {
-                        notifyStopCall('activate', 'stop');
+                        const targetM = cycleStopOverlay.dataset.targetMachine;
+                        const isBoth = (!targetM || targetM === 'BOTH' || targetM === '__ALL__' || targetM === 'ALL');
+                        const specificTarget = isBoth ? null : targetM;
+                        notifyStopCall('activate', 'stop', specificTarget);
                     } else {
                         // Tablet reload protection: ensure no ghost STOP lingers on cloud TV
                         notifyStopCall('clear', 'stop');
