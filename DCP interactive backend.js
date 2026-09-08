@@ -16986,37 +16986,46 @@ if (manualSendModal) {
     }
   }
 
-  // One machine of a BOTH stop finished. Clear just that machine on the kiosk TV and
-  // keep waiting for the rest; close everything once nothing is left.
-  function handleCycleStopCompleted(finishedMachine) {
-    // A machine we never scheduled finished its own stop — leave our overlay alone.
-    if (finishedMachine && activeCycleStopMachines.length > 0
-      && !activeCycleStopMachines.includes(finishedMachine)) {
+  // A machine dropped out of the cycle stop — it either completed cleanly or its
+  // schedule was cancelled on the mini-PC. Clear just that machine on the kiosk TV
+  // and keep waiting for the rest; close everything once nothing is left.
+  //
+  // droppedMachine may be null when the mini-PC IP could not be resolved to a name —
+  // that keeps the legacy "any completion closes the overlay" behaviour.
+  function releaseCycleStopMachine(droppedMachine, allDoneToast, partialToast) {
+    // Nothing on screen means we are not tracking a stop (e.g. this is the echo of
+    // our own cancel button, which already closed the overlay). Ignore it.
+    if (!overlay.classList.contains('open')) return;
+
+    // A machine we never scheduled dropped out — leave our overlay alone.
+    if (droppedMachine && activeCycleStopMachines.length > 0
+      && !activeCycleStopMachines.includes(droppedMachine)) {
       return;
     }
 
-    const remaining = finishedMachine
-      ? activeCycleStopMachines.filter(m => m !== finishedMachine)
+    const remaining = droppedMachine
+      ? activeCycleStopMachines.filter(m => m !== droppedMachine)
       : [];
 
-    if (!finishedMachine || remaining.length === 0) {
+    if (!droppedMachine || remaining.length === 0) {
       closeCycleStopOverlay();
-      if (typeof showToast === 'function') {
-        showToast(_tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"));
+      if (typeof showToast === 'function' && allDoneToast) {
+        showToast(allDoneToast);
       }
       return;
     }
 
+    // Still waiting on a sibling: clear only this machine on the factory TV.
     if (typeof notifyStopCall === 'function') {
-      notifyStopCall('clear', 'stop', finishedMachine);
+      notifyStopCall('clear', 'stop', droppedMachine);
     } else if (typeof window.notifyStopCall === 'function') {
-      window.notifyStopCall('clear', 'stop', finishedMachine);
+      window.notifyStopCall('clear', 'stop', droppedMachine);
     }
     activeCycleStopMachines = remaining;
     overlay.dataset.targetMachine = remaining.join(',');
     setCycleStopOverlayTitle(remaining);
-    if (typeof showToast === 'function') {
-      showToast(`✅ ${finishedMachine} サイクル完了停止しました`);
+    if (typeof showToast === 'function' && partialToast) {
+      showToast(partialToast);
     }
   }
 
@@ -17253,7 +17262,7 @@ if (manualSendModal) {
         const scheduledMachines = [];
         Object.entries(machineStates).forEach(([key, s]) => {
           if (s && s.scheduled_cycle_stop) {
-            const m = getMachineNameFromIP(key) || s.machine_id || null;
+            const m = getMachineNameFromIP(key);
             if (m && !scheduledMachines.includes(m)) scheduledMachines.push(m);
           }
         });
@@ -17437,7 +17446,28 @@ if (manualSendModal) {
       }
       // Only the machine that fired this event is done — a BOTH stop keeps
       // waiting (and keeps blinking on the kiosk TV) for its sibling.
-      handleCycleStopCompleted(getMachineNameFromIP(ip));
+      const finishedMachine = getMachineNameFromIP(ip);
+      releaseCycleStopMachine(
+        finishedMachine,
+        _tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"),
+        finishedMachine ? `✅ ${finishedMachine} サイクル完了停止しました` : null
+      );
+    });
+
+    // 5b. Cycle stop cancelled on the mini-PC (another tablet, or its own UI).
+    // Without this the overlay would keep waiting on a machine that is no longer
+    // scheduled, because a sibling still holding a stop keeps the reconciler quiet.
+    es.addEventListener('cycle_stop_cancelled', (e) => {
+      console.log(`🛑 [CNC GATEKEEPER] Cycle stop cancelled on the mini-PC (${ip}).`);
+      if (machineStates[ip]) {
+        machineStates[ip].scheduled_cycle_stop = false;
+      }
+      const cancelledMachine = getMachineNameFromIP(ip);
+      releaseCycleStopMachine(
+        cancelledMachine,
+        _tr('toast_cycle_stop_cancelled', "停止リクエストを取り消しました"),
+        cancelledMachine ? `↩️ ${cancelledMachine} の停止リクエストを取り消しました` : null
+      );
     });
 
     // 6. Gatekeeper Unlocked
