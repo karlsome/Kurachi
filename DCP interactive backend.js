@@ -16744,6 +16744,9 @@ if (manualSendModal) {
   // these may be pruned when they stop reporting it, so a mini-PC that has not yet
   // processed our request is never mistaken for one that has finished.
   let cycleStopSeenScheduled = [];
+  // When the "all machines stopped" confirmation was last shown, so the poll prune and
+  // the SSE event reporting the same last machine do not toast twice.
+  let lastCycleStopDoneToastAt = 0;
   let breakWaitSeenScheduled = [];
   // True while our own schedule_cycle_stop requests are still going out. A poll can
   // legitimately report "not scheduled" in that window because the mini-PC has not
@@ -17167,7 +17170,12 @@ if (manualSendModal) {
       if (onlyWhenOverlayOpen) return;
       // Something else closed the overlay first (e.g. the /state poll). There is
       // nothing to update, but the operator still gets confirmation.
-      if (typeof showToast === 'function' && allDoneToast) showToast(allDoneToast);
+      // The poll prune and the SSE event can both report the last machine. Confirm once.
+      if (typeof showToast === 'function' && allDoneToast
+        && (Date.now() - lastCycleStopDoneToastAt) > 4000) {
+        lastCycleStopDoneToastAt = Date.now();
+        showToast(allDoneToast);
+      }
       return;
     }
 
@@ -17184,6 +17192,7 @@ if (manualSendModal) {
     if (!droppedMachine || remaining.length === 0) {
       closeCycleStopOverlay();
       if (typeof showToast === 'function' && allDoneToast) {
+        lastCycleStopDoneToastAt = Date.now();
         showToast(allDoneToast);
       }
       return;
@@ -17299,6 +17308,10 @@ if (manualSendModal) {
 
     const allIps = getAllCNCMiniPCIPs();
     allIps.forEach(ip => {
+      // Clear the mirror handleBreakStartButtonClick seeded, or the next reconcile
+      // re-adopts the wait we just cancelled and re-opens the overlay.
+      delete breakIntentAt[ip];
+      if (machineStates[ip]) machineStates[ip].scheduled_break_stop = false;
       const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
       fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST', signal: sig1 })
         .catch(() => {
@@ -18010,20 +18023,25 @@ if (manualSendModal) {
     // 6. Gatekeeper Unlocked
     es.addEventListener('unlocked', (e) => {
       console.log(`🔓 [CNC GATEKEEPER] Unlocked (${ip}):`, e.data);
-      Object.keys(machineStates).forEach(k => {
-        if (machineStates[k]) {
-          machineStates[k].holding = false;
-          machineStates[k].hold_reason = null;
-          machineStates[k].scheduled_break_stop = false;
-          machineStates[k].scheduled_cycle_stop = false;
-        }
+      // /unlock runs on ONE mini-PC, so only that machine's state changes. Wiping the
+      // group would drop a sibling's still-armed stop from the wait list and clear it
+      // on the kiosk TV.
+      machineStates[ip] = Object.assign({}, machineStates[ip], {
+        holding: false,
+        hold_reason: null,
+        scheduled_break_stop: false,
+        scheduled_cycle_stop: false
       });
-      isBreakScheduledPending = false;
-      closeBreakWaitOverlay();
+      delete cycleStopIntent[ip];
+      delete breakIntentAt[ip];
+      releaseBreakWaitMachine(ip);
+      releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
       reconcileGroupedGatekeeperStates();
 
       const anyStillHolding = Object.values(machineStates).some(s => s && s.holding);
-      if (!anyStillHolding) {
+      const anyStillArmed = Object.values(machineStates)
+        .some(st => st && (st.scheduled_cycle_stop || st.scheduled_break_stop));
+      if (!anyStillHolding && !anyStillArmed) {
         closeCycleStopOverlay();
         closeBreakWaitOverlay();
         if (typeof closeCncCancelOverlay === 'function') {
