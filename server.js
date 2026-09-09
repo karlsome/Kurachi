@@ -12436,7 +12436,7 @@ app.post('/api/production-goals/lookup', async (req, res) => {
 // ==================== UPDATE PRODUCTION PLAN ====================
 app.post('/api/production-plans/update', async (req, res) => {
     try {
-        const { planId, factory, date, products, breaks, updatedBy } = req.body;
+        const { planId, factory, date, products, breaks, updatedBy, startTime } = req.body;
         
         if (!planId) {
             return res.status(400).json({ 
@@ -12457,6 +12457,7 @@ app.post('/api/production-plans/update', async (req, res) => {
         if (products) updateData.products = products;
         if (breaks) updateData.breaks = breaks;
         if (updatedBy) updateData.updatedBy = updatedBy;
+        if (startTime !== undefined) updateData.startTime = startTime;
         
         const result = await collection.updateOne(
             { _id: new ObjectId(planId) },
@@ -12514,7 +12515,7 @@ app.get('/api/production-plans', async (req, res) => {
 // ==================== CREATE PRODUCTION PLAN ====================
 app.post('/api/production-plans', async (req, res) => {
     try {
-        const { factory, date, products, breaks, createdBy } = req.body;
+        const { factory, date, products, breaks, createdBy, startTime } = req.body;
         
         if (!factory || !date) {
             return res.status(400).json({ 
@@ -12535,6 +12536,7 @@ app.post('/api/production-plans', async (req, res) => {
             createdAt: new Date(),
             updatedAt: new Date()
         };
+        if (startTime) plan.startTime = startTime;
         
         const result = await collection.insertOne(plan);
         
