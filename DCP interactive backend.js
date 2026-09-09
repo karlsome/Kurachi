@@ -17512,14 +17512,25 @@ if (manualSendModal) {
     if (!isCycleStopPending) {
       console.log('🛑 [CNC GATEKEEPER] Cycle stop was cancelled while scheduling — undoing.');
       const undoAt = Date.now();
-      pairs.forEach((pair, i) => {
-        if (!results[i]) return;
+      const toUndo = pairs.filter((pair, i) => results[i]);
+      toUndo.forEach(pair => {
         // Stamp a fresh cancel intent rather than dropping the old one: a /state reply
         // racing this re-cancel would otherwise be trusted and flash the overlay back.
         cycleStopIntent[pair.ip] = { at: undoAt, scheduled: false };
         if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
-        cancelCycleStopOnMachine(pair.machine, pair.ip);
       });
+      cycleStopCancelInFlight = true;
+      Promise.all(toUndo.map(pair => cancelCycleStopOnMachine(pair.machine, pair.ip)))
+        .then(undoResults => {
+          cycleStopCancelInFlight = false;
+          const unconfirmed = toUndo
+            .filter((pair, i) => !undoResults[i])
+            .map(pair => pair.machine || pair.ip);
+          if (unconfirmed.length > 0) {
+            // Same warning the ordinary cancel gives: this machine may still stop.
+            showToast(`⚠️ ${unconfirmed.join(', ')} の停止取り消しを確認できませんでした / Cancel not confirmed`);
+          }
+        });
       return;
     }
 
@@ -17838,9 +17849,13 @@ if (manualSendModal) {
         // with the SSE stream down this is the only place the operator gets told.
         const wasWaiting = activeCycleStopMachines.length > 0;
         closeCycleStopOverlay();
+        // Neutral wording on purpose: gatekeeper_state looks identical whether the stop
+        // completed or was cancelled elsewhere, so claiming 完了停止 here would report a
+        // machine as stopped while it is still cutting. The SSE handler, which knows
+        // which event fired, gives the precise message when the stream is up.
         if (wasWaiting && (Date.now() - lastCycleStopDoneToastAt) > 4000) {
           lastCycleStopDoneToastAt = Date.now();
-          showToast(_tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"));
+          showToast('サイクル停止の待機を終了しました / Cycle stop wait ended');
         }
       } else {
         // Tablet Reload Protection: Clear any ghost STOP on cloud TV if no machine is in cycle stop
