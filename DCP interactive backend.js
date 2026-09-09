@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.35:3000";
+//const serverURL = "http://192.168.1.176:3000";
 window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
@@ -8189,6 +8189,10 @@ function updateSheetStatus(selectedValue, machineName) {
 
 const SEND_TO_MACHINE_COOLDOWN_MS = 17000;
 let sendToMachineCooldownEndTime = 0;
+// Per-machine cooldown for the grouped "<machine> に送信" buttons, so sending to one
+// machine no longer locks its siblings. The shared clock above still gates the
+// send-to-all buttons (main / Step 3 / single-machine completed).
+const machineSendCooldownEndTime = {};
 let sendToMachineCooldownTimer = null;
 let sendToMachineProgressHideTimer = null;
 let sendToMachineProgressMessage = 'Send to machine in progress';
@@ -8201,11 +8205,56 @@ function isSendToMachineCooldownActive() {
   return getSendToMachineCooldownSeconds() > 0;
 }
 
+function getMachineSendCooldownSeconds(machine) {
+  if (!machine) return 0;
+  const end = machineSendCooldownEndTime[machine] || 0;
+  return Math.max(0, Math.ceil((end - Date.now()) / 1000));
+}
+
+function beginMachineSendCooldown(machine) {
+  if (!machine) return;
+  machineSendCooldownEndTime[machine] = Date.now() + SEND_TO_MACHINE_COOLDOWN_MS;
+  updateSendToMachineCooldownUI();
+
+  if (!sendToMachineCooldownTimer) {
+    sendToMachineCooldownTimer = setInterval(() => {
+      updateSendToMachineCooldownUI();
+      if (!isAnySendCooldownActive()) {
+        clearInterval(sendToMachineCooldownTimer);
+        sendToMachineCooldownTimer = null;
+      }
+    }, 250);
+  }
+}
+window.beginMachineSendCooldown = beginMachineSendCooldown;
+window.getMachineSendCooldownSeconds = getMachineSendCooldownSeconds;
+
+// The countdown ticker must keep running while EITHER clock is active, otherwise a
+// per-machine button could be left greyed out after the shared clock expires.
+function isAnySendCooldownActive() {
+  if (isSendToMachineCooldownActive()) return true;
+  return Object.keys(machineSendCooldownEndTime)
+    .some(m => getMachineSendCooldownSeconds(m) > 0);
+}
+
+// Record a button's resting markup, so a cooldown that is already running restores
+// THIS instead of whatever transient label was showing when it snapshotted.
+function setSendButtonRestingMarkup(button, html) {
+  if (!button) return;
+  if (button.dataset.sendToMachineOriginalHtml !== undefined) {
+    button.dataset.sendToMachineOriginalHtml = html;
+  } else {
+    button.innerHTML = html;
+  }
+}
+
 function setButtonCooldownState(button, disabled, secondsRemaining) {
   if (!button) return;
 
-  if (!button.dataset.sendToMachineOriginalText) {
-    button.dataset.sendToMachineOriginalText = button.textContent.trim() || 'Send to Machine';
+  // Save the full markup, not just the text: these buttons carry an inline SVG icon
+  // that a textContent round-trip would delete.
+  if (button.dataset.sendToMachineOriginalHtml === undefined) {
+    button.dataset.sendToMachineOriginalHtml = button.innerHTML;
   }
 
   if (disabled) {
@@ -8215,19 +8264,21 @@ function setButtonCooldownState(button, disabled, secondsRemaining) {
     button.style.opacity = '0.6';
     button.style.cursor = 'not-allowed';
     button.style.filter = 'grayscale(20%)';
-    button.textContent = `送信中... ${secondsRemaining}s`;
+    const _cLang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
+    const _cdText = _cLang === 'en' ? 'Sending...' : _cLang === 'pt' ? 'Enviando...' : '送信中...';
+    button.textContent = `${_cdText} ${secondsRemaining}s`;
     return;
   }
 
   button.disabled = false;
   button.removeAttribute('aria-disabled');
   button.removeAttribute('title');
-  button.style.opacity = '';
+  button.style.opacity = '1';
   button.style.cursor = '';
   button.style.filter = '';
-  if (button.dataset.sendToMachineOriginalText) {
-    button.textContent = button.dataset.sendToMachineOriginalText;
-    delete button.dataset.sendToMachineOriginalText;
+  if (button.dataset.sendToMachineOriginalHtml !== undefined) {
+    button.innerHTML = button.dataset.sendToMachineOriginalHtml;
+    delete button.dataset.sendToMachineOriginalHtml;
   }
 }
 
@@ -8286,9 +8337,13 @@ function updateSendToMachineCooldownUI() {
     setButtonCooldownState(step3Button, isActive, secondsRemaining);
   }
 
-  // Also lock/unlock grouped machine buttons in the completed send panel
+  // Grouped machine buttons in the completed send panel lock INDIVIDUALLY: pressing
+  // 「OZNC23 に送信」 must leave 「OZNC26 に送信」 usable.
   const groupedBtns = document.querySelectorAll('#completedSendPanel .machine-send-all');
-  groupedBtns.forEach(btn => setButtonCooldownState(btn, isActive, secondsRemaining));
+  groupedBtns.forEach(btn => {
+    const machineSeconds = getMachineSendCooldownSeconds(btn.dataset.machine);
+    setButtonCooldownState(btn, machineSeconds > 0, machineSeconds);
+  });
 
   if (isActive) {
     showSendToMachineProgress(secondsRemaining);
@@ -8306,7 +8361,7 @@ function beginSendToMachineCooldown(message = 'Send to machine in progress') {
   updateSendToMachineCooldownUI();
   sendToMachineCooldownTimer = setInterval(() => {
     updateSendToMachineCooldownUI();
-    if (!isSendToMachineCooldownActive()) {
+    if (!isAnySendCooldownActive()) {
       clearInterval(sendToMachineCooldownTimer);
       sendToMachineCooldownTimer = null;
     }
@@ -8416,14 +8471,17 @@ async function sendtoNC(selectedValue) {
   const currentSebanggo = document.getElementById('sub-dropdown').value;
 
   //window.alert(machineName + currentSebanggo);
+  // Callers need to tell "sent" from "skipped" apart: this function is also invoked
+  // programmatically (the production lot scan), where a silent early return used to be
+  // reported to the operator as a successful send.
   if (!currentSebanggo) {
     window.alert(_t('alert_select_product_first'));
-    return;
+    return { sent: false, reason: 'no-product' };
   }
 
   if (isSendToMachineCooldownActive()) {
     updateSendToMachineCooldownUI();
-    return;
+    return { sent: false, reason: 'cooldown', secondsRemaining: getSendToMachineCooldownSeconds() };
   }
 
   sendtoNCButtonisPressed = true;
@@ -8466,10 +8524,17 @@ async function sendtoNC(selectedValue) {
     }
 
     // Send only to the machine(s) assigned in this lot-change cycle (each grouped
-    // machine has its own lot timeline). Falls back to the single chosen machine.
+    // machine has its own lot timeline). Falls back to the single chosen machine, and
+    // then to the assignment frozen by captureLotSendMachines() — the live globals are
+    // reset on the way to Step 3, so without that freeze the filter below would be
+    // skipped and the send would fan out to every machine in the group.
     const _chosen = (window.__lotCycleMachinesDone && window.__lotCycleMachinesDone.length)
       ? window.__lotCycleMachinesDone
-      : (window.__lotScanMachine ? [window.__lotScanMachine] : null);
+      : (window.__lotScanMachine
+        ? [window.__lotScanMachine]
+        : ((window.__lotSendMachines && window.__lotSendMachines.length)
+          ? window.__lotSendMachines
+          : null));
     if (_chosen) {
       const filtered = {};
       _chosen.forEach(m => { if (machineIPMap[m]) filtered[m] = machineIPMap[m]; });
@@ -8484,6 +8549,12 @@ async function sendtoNC(selectedValue) {
     // Store machine group globally for individual send modal
     window.currentMachineGroup = Object.entries(machineIPMap).map(([name, ip]) => ({ name, ip }));
     console.log("💾 Stored currentMachineGroup:", window.currentMachineGroup);
+
+    // These machines are being sent to right now, so their individual buttons in the
+    // completed panel must lock too — otherwise Step 3 (or this production auto-send)
+    // could be followed straight away by a per-machine press pushing the same program.
+    Object.keys(machineIPMap).forEach(m => beginMachineSendCooldown(m));
+    updateSendToMachineCooldownUI();
 
     updateSendToMachineProgressMessage(`Sending to ${Object.keys(machineIPMap).length} machines`);
 
@@ -8539,9 +8610,13 @@ async function sendtoNC(selectedValue) {
       console.error('Error sending to multiple machines:', error);
     }
 
+    return { sent: true, machines: Object.keys(machineIPMap) };
+
   } else {
     // Single machine - original logic
     const singleMachineName = document.getElementById('process').value || 'UNKNOWN';
+    // No per-machine cooldown here: a single-machine page has no per-machine buttons,
+    // so it would only keep the countdown ticker running for 17s with nothing to show.
     const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce&mode=mass&machine=${singleMachineName}`;
 
     try {
@@ -8555,10 +8630,10 @@ async function sendtoNC(selectedValue) {
       hideSendToMachineProgress();
       sendToMachineCooldownEndTime = 0;
       updateSendToMachineCooldownUI();
-      if (typeof showToast === 'function') {
-        showToast('✅ 送信完了 / Send to machine completed');
+      if (typeof window.showAppToast === 'function') {
+        window.showAppToast('✅ 送信完了 / Send to machine completed');
       }
-      return true;
+      return { sent: true, machines: [singleMachineName] };
     } catch (error) {
       console.warn('Notice from send to mini PC, trying fallback:', error);
       try {
@@ -8571,10 +8646,10 @@ async function sendtoNC(selectedValue) {
       hideSendToMachineProgress();
       sendToMachineCooldownEndTime = 0;
       updateSendToMachineCooldownUI();
-      if (typeof showToast === 'function') {
-        showToast('✅ 送信完了 / Send to machine completed');
+      if (typeof window.showAppToast === 'function') {
+        window.showAppToast('✅ 送信完了 / Send to machine completed');
       }
-      return true;
+      return { sent: true, machines: [singleMachineName] };
     }
   }
 }
@@ -8971,6 +9046,9 @@ function showPopup() {
       const key = `${uniquePrefix}sendtoNCButtonisPressed`;
       localStorage.setItem(key, 'true'); // Save the value with the unique key
 
+      // This prompt is a general reminder, not a lot-cycle send: drop any frozen
+      // per-machine target so it is not silently narrowed to one machine.
+      window.__lotSendMachines = [];
       sendtoNC(); // Call the sendtoNC function
       console.log("sendtoNC function called");
       document.body.removeChild(popup);
@@ -11455,6 +11533,7 @@ function resetAllSteps() {
   window.__lotScanMachine = null;
   window.__pendingPrevLot = null;
   window.__lotCycleMachinesDone = [];
+  window.__lotSendMachines = [];
 
   // Clear product details cache
   currentProductDetails = {
@@ -11632,6 +11711,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function (ev
         window.__lotScanMachine = null;
         window.__pendingPrevLot = null;
         window.__lotCycleMachinesDone = [];
+        window.__lotSendMachines = [];
         console.log('✅ New session started:', newSessionID);
       } else {
         console.warn('⚠️ Failed to generate sessionID');
@@ -12370,7 +12450,13 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 
     // Default behavior for non-OZMANAS machines
     if (isSendToMachineCooldownActive()) {
+      // Nothing is sent here. The button greys out with a countdown, but say so
+      // plainly too — this is the only feedback that the press did nothing.
       updateSendToMachineCooldownUI();
+      const _secs = getSendToMachineCooldownSeconds();
+      const _warn = `⚠️ 未送信です。あと${_secs}秒お待ちください / NOT sent — wait ${_secs}s`;
+      if (typeof window.showAppToast === 'function') window.showAppToast(_warn, 4000);
+      else if (typeof window.showToast === 'function') window.showToast(_warn, 4000);
       return;
     }
 
@@ -12389,15 +12475,25 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       actionButton.style.opacity = '0.75';
     }
 
-    // Send to NC (Mini-PC) in background
+    // Fire-and-forget: the per-machine requests are no-cors GETs with no timeout, so
+    // awaiting them would hang this handler on an unreachable mini-PC and leave the
+    // button disabled and the tabs locked. The only outcome worth branching on is the
+    // cooldown skip, and that is already handled above, before anything is sent.
     sendtoNC(currentSebanggo);
 
-    // Keep Step 3 button visible and show Resend button
+    // Keep Step 3 button visible and show Resend button. sendtoNC starts the cooldown
+    // synchronously, which snapshots the button while the 送信中 spinner is showing —
+    // so hand the Resend markup to that snapshot, or the cooldown would restore the
+    // spinner label permanently when it expires.
     if (actionButton) {
-      actionButton.disabled = false;
-      actionButton.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg><span>マシンに再送信 / Resend to Machine</span>';
-      actionButton.style.opacity = '1';
+      setSendButtonRestingMarkup(actionButton, '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg><span>マシンに再送信 / Resend to Machine</span>');
       actionButton.style.background = 'linear-gradient(135deg, #2E6FF2, #1b4bb8)';
+      // Leave disabled/opacity to the cooldown while it owns the button: re-enabling
+      // here made it briefly clickable again while it read 送信中.
+      if (!isSendToMachineCooldownActive()) {
+        actionButton.disabled = false;
+        actionButton.style.opacity = '1';
+      }
     }
 
     // Mark workflow as complete and unlock navigation tabs
@@ -12406,7 +12502,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'true');
     } catch (_) { }
     markScanWorkflowComplete();
-    saveCurrentStep(3);
+    saveCurrentStep(0);
     if (typeof assertMachineState === 'function') assertMachineState();
     if (typeof updateTabLock === 'function') updateTabLock();
     if (typeof window.updateTabLock === 'function') window.updateTabLock();
@@ -12414,9 +12510,10 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     const skipBtn = document.getElementById('btnSkipStep3Send');
     if (skipBtn) skipBtn.style.display = 'none';
 
-    // Keep step3Modal visible
+    // Close Step 3 modal so Scan Completed card (with individual machine buttons) is shown immediately
     const s3Modal = document.getElementById('step3Modal');
-    if (s3Modal) s3Modal.style.display = 'block';
+    if (s3Modal) s3Modal.style.display = 'none';
+    if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
 
     // Lot cycle done: clear chosen machine
     window.__lotScanMachine = null;
@@ -12454,19 +12551,15 @@ if (btnSkipStep3Send) {
             localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'true');
           } catch (_) { }
           markScanWorkflowComplete();
-          saveCurrentStep(3);
+          saveCurrentStep(0);
           if (typeof assertMachineState === 'function') assertMachineState();
           if (typeof updateTabLock === 'function') updateTabLock();
           if (typeof window.updateTabLock === 'function') window.updateTabLock();
 
-          // Update action button UI
-          const actionButton = document.getElementById('startStep3Send');
-          if (actionButton) {
-            actionButton.disabled = false;
-            actionButton.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M5 12h14M12 5l7 7-7 7"/></svg><span>⏭️ スキップ済み (${leaderName} 承認) / Skipped (Resend Available)</span>`;
-            actionButton.style.opacity = '1';
-            actionButton.style.background = 'linear-gradient(135deg, #10b981, #059669)';
-          }
+          // Close Step 3 modal so Scan Completed card is shown
+          const s3Modal = document.getElementById('step3Modal');
+          if (s3Modal) s3Modal.style.display = 'none';
+          if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
 
           // Hide skip button
           btnSkipStep3Send.style.display = 'none';
@@ -13225,7 +13318,9 @@ if (manualSendModal) {
           if (e.target === ov) {
             closeLP();
             if (opts.onCancel) opts.onCancel();
-            window.__materialScanMode = null;
+            // Only the flow that OWNS the material scan may end it. Other callers
+            // (e.g. editing a machine's ショット数) must not cancel it as a side effect.
+            if (opts.clearsMaterialScanMode) window.__materialScanMode = null;
           }
         });
       }
@@ -13239,7 +13334,7 @@ if (manualSendModal) {
         e.stopPropagation();
         closeLP();
         if (opts.onCancel) opts.onCancel();
-        window.__materialScanMode = null;
+        if (opts.clearsMaterialScanMode) window.__materialScanMode = null;
       };
       card.appendChild(closeBtn);
     }
@@ -13523,14 +13618,39 @@ if (manualSendModal) {
       {
         done: done,
         allowDone: done.length > 0,
+        // Abandoning the machine choice abandons the material scan itself.
+        clearsMaterialScanMode: true,
         // "Done → Send": stop adding machines and go to Step 3 (send).
-        onDone: function () { if (typeof showStep3Modal === 'function') showStep3Modal(); }
+        onDone: function () {
+          window.captureLotSendMachines();
+          if (typeof showStep3Modal === 'function') showStep3Modal();
+        }
       });
   };
 
   // After a machine's lot+photo+shots: if grouped machines remain unhandled this
   // cycle, re-open the chooser (handled machines greyed) so the operator does the
   // other machine; otherwise continue to Step 3 (send).
+  // Freeze which machines this lot cycle assigned, so Step 3 still knows where to
+  // send after __lotScanMachine / __lotCycleMachinesDone are reset on the way there.
+  window.captureLotSendMachines = function () {
+    const done = (window.__lotCycleMachinesDone || []).slice();
+    const live = done.length
+      ? done
+      : (window.__lotScanMachine ? [window.__lotScanMachine] : []);
+    // Capture only when there IS something live to capture. proceedAfterMachineDone
+    // freezes and then clears both globals, so a second call (the production Step 3
+    // override makes one) would otherwise overwrite the freeze with an empty list and
+    // send the lot to every machine in the group.
+    if (live.length) {
+      window.__lotSendMachines = live;
+    } else if (!Array.isArray(window.__lotSendMachines)) {
+      window.__lotSendMachines = [];
+    }
+    console.log('🎯 [captureLotSendMachines] Sending this cycle to:', window.__lotSendMachines);
+    return window.__lotSendMachines;
+  };
+
   window.proceedAfterMachineDone = function () {
     console.log('🟣 [proceedAfterMachineDone] called');
     const grouped = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1);
@@ -13553,6 +13673,7 @@ if (manualSendModal) {
       }
     }
     console.log('🟣 [proceedAfterMachineDone] All machines done (or not grouped) → showStep3Modal');
+    window.captureLotSendMachines();
     window.__lotScanMachine = null;
     window.__lotCycleMachinesDone = [];
     if (typeof showStep3Modal === 'function') showStep3Modal();
@@ -16626,7 +16747,63 @@ if (manualSendModal) {
   let isCycleStopPending = false;
   let lastHeartbeatTime = Date.now();
 
-  let activeCycleStopMachine = null;
+  // Machines this tablet currently has a cycle stop scheduled on.
+  // One entry for a single pick, every grouped machine for the BOTH pick.
+  let activeCycleStopMachines = [];
+  // True when a wait was ADOPTED from the mini-PCs (tablet reload, or a stop another
+  // tablet scheduled) rather than started here. Only an adopted wait absorbs machines
+  // the poller reveals later; a wait the operator started must stay on exactly the
+  // machine they picked, or Cancel would kill a sibling's independent stop.
+  let cycleStopAdopted = false;
+  let breakWaitAdopted = false;
+  // Machines observed actually holding a scheduled cycle stop during this wait. Only
+  // these may be pruned when they stop reporting it, so a mini-PC that has not yet
+  // processed our request is never mistaken for one that has finished.
+  let cycleStopSeenScheduled = [];
+  // When the "all machines stopped" confirmation was last shown, so the poll prune and
+  // the SSE event reporting the same last machine do not toast twice.
+  let lastCycleStopDoneToastAt = 0;
+  let breakWaitSeenScheduled = [];
+  // True while our own schedule_cycle_stop requests are still going out. A poll can
+  // legitimately report "not scheduled" in that window because the mini-PC has not
+  // been told yet, and acting on it would close the overlay just opened.
+  let cycleStopScheduleInFlight = false;
+  // Likewise for cancels: a poll issued AFTER the cancel went out but before the
+  // mini-PC applied it still reports the stop as scheduled, and adopting that would
+  // pop the overlay back open and re-blink the kiosk TV.
+  let cycleStopCancelInFlight = false;
+  let breakCancelInFlight = false;
+
+  // Mini-PC IPs that ACCEPTED a break stop, i.e. answered {"scheduled": true}. The
+  // break timer waits for every one of these to reach a BREAK hold. A legacy mini-PC
+  // has no such endpoint, never lands in this list, and is never waited on.
+  let breakWaitIps = [];
+  // What the break overlay title is currently naming (the machines still running).
+  let breakWaitTitleIps = [];
+  // True while the schedule requests are still going out, so nothing starts the break
+  // from a half-built wait list.
+  let breakScheduleInFlight = false;
+
+  // The last cycle-stop intent this tablet sent to each mini-PC IP:
+  //   { at: <when the request went out>, scheduled: true (stop) | false (cancel) }
+  // A /state response whose request STARTED before that intent still describes the
+  // machine as it was beforehand. Acting on it flashes the overlay and the kiosk TV
+  // to the wrong state for a whole poll cycle, so those responses are corrected to
+  // what we asked for. Anything issued AFTER the intent is trusted as-is — the
+  // mini-PC stays the source of truth.
+  const cycleStopIntent = {};
+  // Same idea for the break stop: when it was requested on each mini-PC IP.
+  const breakIntentAt = {};
+  const CYCLE_STOP_ALL = '__BOTH__';
+
+  // Normalise a 🛑 target (a machine name, the BOTH sentinel, an array, or null)
+  // into a plain list of machine names. An empty list means "no specific machine",
+  // which keeps the legacy single-machine fallback behaviour.
+  function resolveCycleStopTargets(target) {
+    if (target === CYCLE_STOP_ALL) return getGroupedMachineList().filter(Boolean);
+    if (Array.isArray(target)) return target.filter(Boolean);
+    return target ? [target] : [];
+  }
 
   function getGroupedMachineList() {
     if (typeof groupedMachines !== 'undefined' && Array.isArray(groupedMachines) && groupedMachines.length > 0) {
@@ -16655,6 +16832,13 @@ if (manualSendModal) {
         const idx = ms.indexOf(specificMachine);
         if (idx >= 0 && ips[idx]) return ips[idx];
       }
+      // Refuse to guess only where guessing could hit the WRONG machine. On a single
+      // machine page there is nothing to confuse it with, so the fallback below still
+      // applies — a stray space in #process must not disable the cycle stop.
+      if (getGroupedMachineList().length > 1) {
+        console.warn(`🛑 No mini-PC IP resolved for ${specificMachine} — not guessing.`);
+        return null;
+      }
     }
     if (typeof groupedMachineIPs !== 'undefined' && typeof primaryMachineName !== 'undefined' && groupedMachineIPs[primaryMachineName]) {
       return groupedMachineIPs[primaryMachineName];
@@ -16663,6 +16847,24 @@ if (manualSendModal) {
     if (ipInput && ipInput.value) {
       const first = ipInput.value.split(',')[0].replace(/"/g, '').trim();
       if (first) return first;
+    }
+    return null;
+  }
+
+  // Resolve a mini-PC IP back to its machine name (display only, no network).
+  function getMachineNameFromIP(ip) {
+    if (!ip) return null;
+    if (typeof groupedMachineIPs !== 'undefined') {
+      const match = Object.entries(groupedMachineIPs).find(([_, mIp]) => mIp === ip);
+      if (match) return match[0];
+    }
+    const mEl = document.getElementById('process');
+    const ipInput = document.getElementById('ipInfo');
+    if (mEl && ipInput && ipInput.value) {
+      const ms = mEl.value.split(',').map(m => m.trim());
+      const ips = ipInput.value.split(',').map(i => i.replace(/"/g, '').trim());
+      const idx = ips.indexOf(ip);
+      if (idx >= 0 && ms[idx]) return ms[idx];
     }
     return null;
   }
@@ -16789,6 +16991,20 @@ if (manualSendModal) {
   `;
   document.head.appendChild(style);
 
+  // The page's toast helper is exported only as window.showAppToast; a bare
+  // `showToast` is not a global, so every `typeof showToast === 'function'` check in
+  // this module was silently failing and its messages never reached the operator.
+  // Shadow it locally with one that resolves whichever the page actually provides.
+  function showToast(msg, ms) {
+    const appToast = window.showAppToast;
+    if (typeof appToast === 'function') return appToast(msg, ms);
+    // Compare identity before delegating: if this declaration ever ends up on window
+    // (Annex B block hoisting), calling it here would recurse into itself.
+    const pageToast = window.showToast;
+    if (typeof pageToast === 'function' && pageToast !== showToast) return pageToast(msg, ms);
+    console.log('[toast]', msg);
+  }
+
   // Helper for i18n translation lookup
   function _tr(key, fallback) {
     if (typeof _t === 'function') {
@@ -16871,6 +17087,11 @@ if (manualSendModal) {
         startBtn.innerHTML = `<span>${_tr('cnc_break_btn_waiting', '⏳ サイクル完了後に休憩停止します...')}</span>`;
       }
     }
+
+    // The resets above drop the 【machine】 prefix both waiting overlays carry — put it
+    // back, otherwise switching language mid-wait hides which machine is still running.
+    if (activeCycleStopMachines.length > 0) setCycleStopOverlayTitle(activeCycleStopMachines);
+    if (breakWaitTitleIps.length > 0) setBreakWaitOverlayTitle(breakWaitTitleIps);
   }
 
   function broadcastLanguagePreferenceToMachine(lang) {
@@ -16902,38 +17123,130 @@ if (manualSendModal) {
     broadcastLanguagePreferenceToMachine(lang);
   });
 
-  function openCycleStopOverlay(targetMachine) {
-    activeCycleStopMachine = targetMachine || null;
-    updateCncOverlayTranslations();
-    if (targetMachine) {
-      const cycleTitle = overlay.querySelector('[data-i18n="cnc_cycle_stop_title"]');
-      if (cycleTitle) {
-        cycleTitle.textContent = `【${targetMachine}】 ` + _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
-      }
+  // Retitle the overlay with the machine(s) still waiting to stop.
+  function setCycleStopOverlayTitle(machineList) {
+    if (!machineList || machineList.length === 0) return;
+    const cycleTitle = overlay.querySelector('[data-i18n="cnc_cycle_stop_title"]');
+    if (cycleTitle) {
+      cycleTitle.textContent = `【${machineList.join(' + ')}】 ` + _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
     }
+  }
+
+  function openCycleStopOverlay(targetMachine) {
+    const targets = resolveCycleStopTargets(targetMachine);
+    activeCycleStopMachines = targets;
+    // Remember the machine(s) on the DOM so the tablet heartbeat (DCP interactive.html)
+    // can re-assert the STOP for the SAME machine(s) only, never the whole group.
+    if (targets.length > 0) {
+      overlay.dataset.targetMachine = targets.join(',');
+    } else {
+      delete overlay.dataset.targetMachine;
+    }
+    updateCncOverlayTranslations();
+    setCycleStopOverlayTitle(targets);
     const wasOpen = overlay.classList.contains('open');
     overlay.classList.add('open');
     if (!wasOpen) {
+      // Display only: tell the factory TV exactly which machine(s) are stopping.
+      // The server splits this comma list, so a single pick blinks a single machine.
+      // Passing null keeps the old behaviour (whole grouped ?machine= list).
+      const notifyTarget = targets.join(',') || null;
       if (typeof notifyStopCall === 'function') {
-        notifyStopCall('activate', 'stop');
+        notifyStopCall('activate', 'stop', notifyTarget);
       } else if (typeof window.notifyStopCall === 'function') {
-        window.notifyStopCall('activate', 'stop');
+        window.notifyStopCall('activate', 'stop', notifyTarget);
       }
     }
   }
 
-  function closeCycleStopOverlay() {
+  // skipNotify: the caller has already cleared each machine individually, so the
+  // group-wide clear below would wipe a sibling's own, unrelated stop call.
+  function closeCycleStopOverlay(skipNotify) {
     const wasOpen = overlay.classList.contains('open');
+    const clearedMachines = activeCycleStopMachines.slice();
     overlay.classList.remove('open');
     isCycleStopPending = false;
-    activeCycleStopMachine = null;
-    if (wasOpen) {
+    activeCycleStopMachines = [];
+    cycleStopAdopted = false;
+    cycleStopSeenScheduled = [];
+    delete overlay.dataset.targetMachine;
+    if (wasOpen && !skipNotify) {
+      // Clear the same machine(s) we activated, so a sibling machine's own call stays up.
+      const notifyTarget = clearedMachines.join(',') || null;
       if (typeof notifyStopCall === 'function') {
-        notifyStopCall('clear', 'stop');
+        notifyStopCall('clear', 'stop', notifyTarget);
       } else if (typeof window.notifyStopCall === 'function') {
-        window.notifyStopCall('clear', 'stop');
+        window.notifyStopCall('clear', 'stop', notifyTarget);
       }
     }
+  }
+
+  // A machine dropped out of the cycle stop — it either completed cleanly or its
+  // schedule was cancelled on the mini-PC. Clear just that machine on the kiosk TV
+  // and keep waiting for the rest; close everything once nothing is left.
+  //
+  // droppedMachine may be null when the mini-PC IP could not be resolved to a name —
+  // that keeps the legacy "any completion closes the overlay" behaviour.
+  // onlyWhenOverlayOpen: set for CANCEL events, which our own cancel button echoes
+  // back after it has already closed the overlay — acting on that echo would raise a
+  // duplicate toast. Completions are never self-inflicted, so they still confirm.
+  function releaseCycleStopMachine(droppedMachine, allDoneToast, partialToast, onlyWhenOverlayOpen) {
+    if (!overlay.classList.contains('open')) {
+      if (onlyWhenOverlayOpen) return;
+      // Something else closed the overlay first (e.g. the /state poll). There is
+      // nothing to update, but the operator still gets confirmation.
+      // The poll prune and the SSE event can both report the last machine. Confirm once.
+      if (typeof showToast === 'function' && allDoneToast
+        && (Date.now() - lastCycleStopDoneToastAt) > 4000) {
+        lastCycleStopDoneToastAt = Date.now();
+        showToast(allDoneToast);
+      }
+      return;
+    }
+
+    // A machine we never scheduled dropped out — leave our overlay alone.
+    if (droppedMachine && activeCycleStopMachines.length > 0
+      && !activeCycleStopMachines.includes(droppedMachine)) {
+      return;
+    }
+
+    const remaining = droppedMachine
+      ? activeCycleStopMachines.filter(m => m !== droppedMachine)
+      : [];
+
+    if (!droppedMachine || remaining.length === 0) {
+      closeCycleStopOverlay();
+      if (typeof showToast === 'function' && allDoneToast) {
+        lastCycleStopDoneToastAt = Date.now();
+        showToast(allDoneToast);
+      }
+      return;
+    }
+
+    // Still waiting on a sibling: clear only this machine on the factory TV.
+    if (typeof notifyStopCall === 'function') {
+      notifyStopCall('clear', 'stop', droppedMachine);
+    } else if (typeof window.notifyStopCall === 'function') {
+      window.notifyStopCall('clear', 'stop', droppedMachine);
+    }
+    activeCycleStopMachines = remaining;
+    overlay.dataset.targetMachine = remaining.join(',');
+    setCycleStopOverlayTitle(remaining);
+    if (typeof showToast === 'function' && partialToast) {
+      showToast(partialToast);
+    }
+  }
+
+  // Name the machines the break is still waiting on, like the cycle stop overlay does.
+  function setBreakWaitOverlayTitle(ips) {
+    breakWaitTitleIps = (ips || []).slice();
+    const names = (ips || [])
+      .map(ip => getMachineNameFromIP(ip))
+      .filter(Boolean);
+    const breakTitle = breakWaitOverlay.querySelector('[data-i18n="cnc_break_wait_title"]');
+    if (!breakTitle) return;
+    const base = _tr('cnc_break_wait_title', '休憩待ち (サイクル完了後)');
+    breakTitle.textContent = names.length > 0 ? `【${names.join(' + ')}】 ` + base : base;
   }
 
   function openBreakWaitOverlay() {
@@ -16950,7 +17263,65 @@ if (manualSendModal) {
   function closeBreakWaitOverlay() {
     breakWaitOverlay.classList.remove('open');
     isBreakScheduledPending = false;
+    breakWaitIps = [];
+    breakWaitTitleIps = [];
+    breakWaitSeenScheduled = [];
+    breakWaitAdopted = false;
     resetBreakStartButtonUI();
+  }
+
+  // One machine dropped out of the break wait: its schedule was cancelled on the
+  // mini-PC. Stop waiting on that machine but keep waiting for its siblings —
+  // closing the whole wait here would clear isBreakScheduledPending, and the
+  // sibling's later break_stop_completed would then be ignored, leaving it stopped
+  // for a break the tablet never started.
+  function releaseBreakWaitMachine(ip) {
+    if (!isBreakScheduledPending) return;
+    // The wait list is still being built while our requests are in flight; an empty
+    // list there means "not known yet", not "single machine".
+    if (breakScheduleInFlight) return;
+    // No wait list (single machine / legacy fallback): behave as before.
+    if (breakWaitIps.length === 0) { closeBreakWaitOverlay(); return; }
+    if (breakWaitIps.indexOf(ip) < 0) return; // a machine we were not waiting on
+
+    breakWaitIps = breakWaitIps.filter(k => k !== ip);
+    if (breakWaitIps.length === 0) { closeBreakWaitOverlay(); return; }
+
+    setBreakWaitOverlayTitle(breakWaitIps);
+    // The remaining machines may already be holding.
+    tryStartBreakWhenAllStopped(true);
+  }
+
+  // Start the break only once EVERY machine we are waiting on is holding for BREAK.
+  // Machines that never accepted the schedule (legacy mini-PCs, or offline ones) are
+  // not in breakWaitIps, so they are never waited on.
+  function tryStartBreakWhenAllStopped(withToast) {
+    if (!isBreakScheduledPending || breakScheduleInFlight) return false;
+    const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
+    if (isRecentlyFinished) return false;
+
+    const waitIps = breakWaitIps.length > 0 ? breakWaitIps : Object.keys(machineStates);
+    if (waitIps.length === 0) return false;
+
+    const stillRunning = waitIps.filter(k => {
+      const st = machineStates[k];
+      return !(st && st.holding && st.hold_reason === 'BREAK');
+    });
+    if (stillRunning.length > 0) {
+      // Keep the operator informed about which machine is still finishing its cycle.
+      setBreakWaitOverlayTitle(stillRunning);
+      return false;
+    }
+
+    closeBreakWaitOverlay();
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    if (!localStorage.getItem(pfx + 'activeBreakStart') && typeof startBreak === 'function') {
+      startBreak();
+      if (withToast && typeof showToast === 'function') {
+        showToast(_tr('toast_break_started_cnc_stopped', "☕ 休憩を開始しました (機械停止中)"));
+      }
+    }
+    return true;
   }
 
   // Handle Cancel Button on Break Wait Overlay (Cancels for all machines)
@@ -16962,98 +17333,332 @@ if (manualSendModal) {
 
     const allIps = getAllCNCMiniPCIPs();
     allIps.forEach(ip => {
-      const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
-      fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST', signal: sig1 })
-        .catch(() => {
-          const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
-          fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST', signal: sig2 }).catch(() => { });
-        });
+      // Clear the mirror handleBreakStartButtonClick seeded, or the next reconcile
+      // re-adopts the wait we just cancelled and re-opens the overlay.
+      delete breakIntentAt[ip];
+      if (machineStates[ip]) machineStates[ip].scheduled_break_stop = false;
+    });
+
+    // Read the reply the mini-PC already sends, so a cancel that never landed is
+    // reported rather than leaving the machine quietly scheduled to stop.
+    breakCancelInFlight = true;
+    Promise.all(allIps.map(async ip => {
+      for (const port of [5000, 8766]) {
+        try {
+          const res = await fetch(`http://${ip}:${port}/cancel_scheduled_break`, {
+            method: 'POST',
+            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined
+          });
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            if (!data || data.scheduled !== true) return true;
+          }
+        } catch (_) { }
+      }
+      console.warn(`☕ Break cancel NOT confirmed for ${getMachineNameFromIP(ip) || ip}.`);
+      return false;
+    })).then(results => {
+      breakCancelInFlight = false;
+      const unconfirmed = allIps
+        .filter((ip, i) => !results[i])
+        .map(ip => getMachineNameFromIP(ip) || ip);
+      if (unconfirmed.length > 0) {
+        showToast(`⚠️ ${unconfirmed.join(', ')} の休憩取り消しを確認できませんでした / Cancel not confirmed`);
+      }
     });
   });
 
-  // Handle Cancel Button on Overlay (User changes mind on 🛑 for the specific machine)
-  document.getElementById('btnCancelCycleStop')?.addEventListener('click', () => {
-    const targetMachine = activeCycleStopMachine;
+  // POST cancel_scheduled_cycle_stop to ONE mini-PC and read the reply it already
+  // sends ({"success": true, "scheduled": false}). Returns false only when the
+  // machine could not be reached or says the stop is still scheduled — those are the
+  // cases where the operator thinks the stop is off but the machine will still stop.
+  async function cancelCycleStopOnMachine(machineName, ip) {
+    const label = machineName || ip;
+    for (const port of [5000, 8766]) {
+      try {
+        const res = await fetch(`http://${ip}:${port}/cancel_scheduled_cycle_stop`, {
+          method: 'POST',
+          signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          // A legacy mini-PC may answer 200 with no usable body — treat that as done.
+          if (!data || data.scheduled !== true) {
+            console.log(`🛑 Cycle stop cancelled on ${label} (:${port}):`, data);
+            return true;
+          }
+        }
+      } catch (_) { }
+    }
+    console.warn(`⚠️ Cycle stop cancel NOT confirmed for ${label} — mini-PC offline or still scheduled.`);
+    return false;
+  }
+
+  // Handle Cancel Button on Overlay (User changes mind on 🛑 for the machine(s) picked)
+  document.getElementById('btnCancelCycleStop')?.addEventListener('click', async () => {
+    const targetMachines = activeCycleStopMachines.slice();
     closeCycleStopOverlay();
     if (typeof showToast === 'function') {
       showToast(_tr('toast_cycle_stop_cancelled', "停止リクエストを取り消しました"));
     }
 
-    const ip = getCNCMiniPCIP(targetMachine);
-    if (ip) {
-      const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
-      fetch(`http://${ip}:5000/cancel_scheduled_cycle_stop`, { method: 'POST', signal: sig1 })
-        .catch(() => {
-          const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
-          fetch(`http://${ip}:8766/cancel_scheduled_cycle_stop`, { method: 'POST', signal: sig2 }).catch(() => { });
-        });
+    // Cancel only on the mini-PC(s) we actually scheduled. No machine picked keeps
+    // the legacy single-IP fallback.
+    const pairs = targetMachines.length > 0
+      ? targetMachines.map(m => ({ machine: m, ip: getCNCMiniPCIP(m) }))
+      : [{ machine: null, ip: getCNCMiniPCIP(null) }];
+
+    const uniquePairs = [];
+    const seenIps = new Set();
+    pairs.forEach(pair => {
+      if (pair.ip && !seenIps.has(pair.ip)) {
+        seenIps.add(pair.ip);
+        uniquePairs.push(pair);
+      }
+    });
+    if (uniquePairs.length === 0) return;
+
+    // Stamped before the requests go out, so any /state reply already in flight is
+    // recognised as pre-cancel and cannot flash the overlay back on.
+    const cancelSentAt = Date.now();
+    uniquePairs.forEach(pair => {
+      cycleStopIntent[pair.ip] = { at: cancelSentAt, scheduled: false };
+      // Clear the mirror too: until the next poll lands, a sibling's sync would still
+      // see this machine as scheduled and re-adopt the stop we just cancelled.
+      if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
+    });
+
+    cycleStopCancelInFlight = true;
+    const results = await Promise.all(
+      uniquePairs.map(pair => cancelCycleStopOnMachine(pair.machine, pair.ip))
+    );
+    cycleStopCancelInFlight = false;
+
+    const unconfirmed = uniquePairs
+      .filter((pair, i) => !results[i])
+      .map(pair => pair.machine || pair.ip);
+
+    if (unconfirmed.length > 0) {
+      // Let the operator know the machine never acknowledged: it may still stop after
+      // its cycle. The /state poll re-opens the overlay once the mini-PC is reachable.
+      if (typeof showToast === 'function') {
+        showToast(`⚠️ ${unconfirmed.join(', ')} の停止取り消しを確認できませんでした / Cancel not confirmed`);
+      }
+      // Drop the guard for those machines so the poll is trusted again immediately —
+      // if the mini-PC still has the stop scheduled, the overlay must come back.
+      uniquePairs.forEach((pair, i) => {
+        if (!results[i]) delete cycleStopIntent[pair.ip];
+      });
     }
   });
 
-  async function proceedWithCycleStop(targetMachine) {
-    activeCycleStopMachine = targetMachine || null;
-    const ip = getCNCMiniPCIP(targetMachine);
-    isCycleStopPending = true;
-    openCycleStopOverlay(targetMachine);
-
-    if (ip) {
-      let scheduled = false;
+  // POST schedule_cycle_stop to ONE mini-PC. Returns true if that machine accepted it.
+  async function scheduleCycleStopOnMachine(machineName, ip) {
+    const label = machineName || ip;
+    for (const port of [5000, 8766]) {
       try {
-        const res = await fetch(`http://${ip}:5000/schedule_cycle_stop`, {
+        const res = await fetch(`http://${ip}:${port}/schedule_cycle_stop`, {
           method: 'POST',
           signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
         });
         if (res.ok) {
           const data = await res.json();
           if (data && data.scheduled) {
-            scheduled = true;
-            console.log(`🛑 Scheduled cycle stop response for ${targetMachine || ip} (:5000):`, data);
+            console.log(`🛑 Scheduled cycle stop response for ${label} (:${port}):`, data);
+            return true;
           }
         }
       } catch (_) { }
-
-      if (!scheduled) {
-        try {
-          const res = await fetch(`http://${ip}:8766/schedule_cycle_stop`, {
-            method: 'POST',
-            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data && data.scheduled) {
-              scheduled = true;
-              console.log(`🛑 Scheduled cycle stop response for ${targetMachine || ip} (:8766):`, data);
-            }
-          }
-        } catch (_) { }
-      }
-
-      if (!scheduled) {
-        console.warn(`Legacy Mini-PC for ${targetMachine || ip} (no schedule_cycle_stop response within 2.5s) or offline.`);
-        closeCycleStopOverlay();
-        if (typeof showToast === 'function') {
-          showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
-        }
-      }
     }
+    console.warn(`Legacy Mini-PC for ${label} (no schedule_cycle_stop response within 2.5s) or offline.`);
+    return false;
+  }
+
+  // targetMachine: a machine name, CYCLE_STOP_ALL (both/all grouped machines),
+  // or null/undefined for the legacy single-machine fallback.
+  async function proceedWithCycleStop(targetMachine) {
+    const targets = resolveCycleStopTargets(targetMachine);
+
+    // Each picked machine gets its OWN mini-PC request — nothing is broadcast.
+    const pairs = targets.length > 0
+      ? targets.map(m => ({ machine: m, ip: getCNCMiniPCIP(m) })).filter(pair => pair.ip)
+      : [{ machine: null, ip: getCNCMiniPCIP(null) }].filter(pair => pair.ip);
+
+    const distinctIps = new Set(pairs.map(pair => pair.ip));
+    if (pairs.length > 1 && distinctIps.size !== pairs.length) {
+      console.warn('🛑 Cycle stop: machines resolved to the same mini-PC IP — check the machine/ipInfo pairing.', pairs);
+    }
+
+    isCycleStopPending = true;
+    cycleStopAdopted = false;
+    cycleStopSeenScheduled = [];
+    cycleStopScheduleInFlight = true;
+    // Wait on the machines we can actually reach: one whose IP does not resolve is
+    // never sent a schedule_cycle_stop, so it must not sit on the overlay or the TV.
+    openCycleStopOverlay(pairs.length > 0 ? pairs.map(pair => pair.machine).filter(Boolean) : targets);
+
+    // No mini-PC to talk to at all (no IP resolved). Nothing can be waiting, so do not
+    // leave the operator staring at a modal that will never close on its own.
+    if (pairs.length === 0) {
+      cycleStopScheduleInFlight = false;
+      closeCycleStopOverlay();
+      if (typeof showToast === 'function') {
+        showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
+      }
+      return;
+    }
+
+    // Same guard as the cancel path, in the other direction: a /state reply already in
+    // flight still says "not scheduled" and would close the overlay we just opened.
+    const scheduleSentAt = Date.now();
+    pairs.forEach(pair => { cycleStopIntent[pair.ip] = { at: scheduleSentAt, scheduled: true }; });
+
+    const results = await Promise.all(
+      pairs.map(pair => scheduleCycleStopOnMachine(pair.machine, pair.ip))
+    );
+    cycleStopScheduleInFlight = false;
+
+    // The operator may have cancelled while these requests were in flight. Their
+    // cancel POST was answered before our schedule landed, so the machine would stop
+    // at cycle end anyway — re-cancel on everything that ended up accepting.
+    if (!isCycleStopPending) {
+      console.log('🛑 [CNC GATEKEEPER] Cycle stop was cancelled while scheduling — undoing.');
+      const undoAt = Date.now();
+      const toUndo = pairs.filter((pair, i) => results[i]);
+      toUndo.forEach(pair => {
+        // Stamp a fresh cancel intent rather than dropping the old one: a /state reply
+        // racing this re-cancel would otherwise be trusted and flash the overlay back.
+        cycleStopIntent[pair.ip] = { at: undoAt, scheduled: false };
+        if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
+      });
+      cycleStopCancelInFlight = true;
+      Promise.all(toUndo.map(pair => cancelCycleStopOnMachine(pair.machine, pair.ip)))
+        .then(undoResults => {
+          cycleStopCancelInFlight = false;
+          const unconfirmed = toUndo
+            .filter((pair, i) => !undoResults[i])
+            .map(pair => pair.machine || pair.ip);
+          if (unconfirmed.length > 0) {
+            // Same warning the ordinary cancel gives: this machine may still stop.
+            showToast(`⚠️ ${unconfirmed.join(', ')} の停止取り消しを確認できませんでした / Cancel not confirmed`);
+          }
+        });
+      return;
+    }
+
+    // A machine that never accepted has no stop scheduled: trust its polls again and
+    // stop showing it on the kiosk TV.
+    let clearedIndividually = false;
+    pairs.forEach((pair, i) => {
+      if (results[i]) {
+        // Seed the flag the mini-PC now holds. Without it a /state response already in
+        // flight for a SIBLING can reconcile against a machineStates entry that has
+        // not caught up, and close the overlay just opened.
+        machineStates[pair.ip] = Object.assign({}, machineStates[pair.ip], { scheduled_cycle_stop: true });
+        return;
+      }
+      delete cycleStopIntent[pair.ip];
+      // 2: the intent guard may have written a scheduled flag we now know is wrong;
+      // leaving it would make the next reconcile re-adopt a stop that never happened.
+      if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
+      if (!pair.machine) return;
+      const stillWaiting = activeCycleStopMachines.filter(m => m !== pair.machine);
+      if (stillWaiting.length !== activeCycleStopMachines.length) {
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'stop', pair.machine);
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'stop', pair.machine);
+        }
+        activeCycleStopMachines = stillWaiting;
+        clearedIndividually = true;
+      }
+    });
+
+    // Machines we could not reach at all (no IP) never made it into pairs.
+    const unreachable = targets.filter(m => !pairs.some(pair => pair.machine === m));
+    const refused = pairs.filter((pair, i) => !results[i] && pair.machine).map(pair => pair.machine);
+    const notStopping = unreachable.concat(refused);
+
+    if (!results.some(Boolean)) {
+      // Every machine was already cleared by name above; a group-wide clear here would
+      // also wipe a sibling's unrelated stop call from the factory TV.
+      closeCycleStopOverlay(clearedIndividually);
+      showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
+    } else if (notStopping.length > 0) {
+      // Partial failure: some machines are stopping, these are NOT. Saying nothing
+      // would leave the operator believing every machine they picked will stop.
+      showToast(`⚠️ ${notStopping.join(', ')} は停止しません / will NOT stop`);
+      if (activeCycleStopMachines.length > 0) {
+        overlay.dataset.targetMachine = activeCycleStopMachines.join(',');
+        setCycleStopOverlayTitle(activeCycleStopMachines);
+      }
+    } else if (activeCycleStopMachines.length > 0) {
+      overlay.dataset.targetMachine = activeCycleStopMachines.join(',');
+      setCycleStopOverlayTitle(activeCycleStopMachines);
+    }
+  }
+
+  // Machine picker for 🛑, on its OWN modal node.
+  //
+  // It deliberately does not reuse window.chooseMachine: that shares the single
+  // #lpModal element with the lot-scan chooser and the ショット数 prompt and removes
+  // whatever is there on entry, so opening this picker mid lot-scan would delete that
+  // modal and strand its callback. Its cancel path also clears __materialScanMode,
+  // which belongs to the lot flow, not to a cycle stop.
+  function chooseCycleStopMachine(machines, onPick) {
+    const existing = document.getElementById('cncCycleStopPickerModal');
+    if (existing) existing.remove();
+
+    const ov = document.createElement('div');
+    ov.id = 'cncCycleStopPickerModal';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:100200;background:rgba(10,15,26,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:16px;max-width:360px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:inherit;position:relative;';
+
+    const btnStyle = 'width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:pointer;';
+    const allLabel = machines.length > 2 ? '全部 / ALL' : '両方 / BOTH';
+
+    card.innerHTML =
+      '<div style="font-size:1.05rem;font-weight:800;color:#101828;margin-bottom:4px;">' +
+      _tr('cnc_cycle_stop_pick_title', '機械を選択 / Select machine') + '</div>' +
+      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin-bottom:14px;">' +
+      _tr('cnc_cycle_stop_pick_sub', '停止する機械を選択 / Machine to stop') + '</div>' +
+      machines.map(m => '<button data-m="' + m + '" style="' + btnStyle + '">' + m + '</button>').join('') +
+      '<button data-m="' + CYCLE_STOP_ALL + '" style="' + btnStyle + '">' + allLabel + '</button>';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '✕';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.4rem;font-weight:bold;color:#667085;cursor:pointer;padding:0;line-height:1;z-index:10;';
+    closeBtn.onclick = (e) => { e.stopPropagation(); ov.remove(); };
+    card.appendChild(closeBtn);
+
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+
+    card.querySelectorAll('[data-m]').forEach(b => {
+      b.onclick = () => {
+        const m = b.getAttribute('data-m');
+        ov.remove();
+        if (onPick) onPick(m);
+      };
+    });
+
+    ov.appendChild(card);
+    document.body.appendChild(ov);
   }
 
   // Handle Floating 🛑 Button Click -> Choose machine if grouped, otherwise direct
   stopBtn.addEventListener('click', async () => {
     const machines = getGroupedMachineList();
-    if (machines && machines.length > 1 && typeof window.chooseMachine === 'function') {
-      window.chooseMachine(machines, (pickedMachine) => {
+    if (machines && machines.length > 1) {
+      chooseCycleStopMachine(machines, (pickedMachine) => {
         proceedWithCycleStop(pickedMachine);
-      }, {
-        title: '機械を選択 / Select machine',
-        subtitle: '停止する機械を選択 / Machine to stop',
-        allowCancel: true,
-        onCancel: () => {
-          // cancelled by operator
-        }
       });
     } else {
-      const singleM = (machines && machines[0]) || (document.getElementById('process')?.value) || null;
+      const singleM = (machines && machines[0])
+        || (document.getElementById('process')?.value || '').trim()
+        || null;
       proceedWithCycleStop(singleM);
     }
   });
@@ -17063,10 +17668,30 @@ if (manualSendModal) {
   // ==========================================================================
   const machineStates = {};
 
-  function syncGatekeeperState(state, ip) {
+  // requestStartedAt: when the /state request that produced this state was issued.
+  // Omitted for live SSE pushes, which are generated by the mini-PC on the spot.
+  function syncGatekeeperState(state, ip, requestStartedAt) {
     if (!state) return;
     lastHeartbeatTime = Date.now();
     const key = ip || state.machine_id || 'default';
+
+    // Correct a schedule flag from a response that was already in flight when we sent
+    // a stop or a cancel. The next poll, issued after ours, reports what the mini-PC
+    // actually has and the overlay follows that.
+    const intent = cycleStopIntent[key];
+    if (intent && requestStartedAt && requestStartedAt < intent.at
+      && !!state.scheduled_cycle_stop !== intent.scheduled) {
+      console.log(`⏱️ [CNC GATEKEEPER] Ignoring pre-request scheduled_cycle_stop from ${key}.`);
+      state = Object.assign({}, state, { scheduled_cycle_stop: intent.scheduled });
+    }
+
+    const breakAt = breakIntentAt[key];
+    if (breakAt && requestStartedAt && requestStartedAt < breakAt && !state.scheduled_break_stop
+      && !(state.holding && state.hold_reason === 'BREAK')) {
+      console.log(`⏱️ [CNC GATEKEEPER] Ignoring pre-request scheduled_break_stop from ${key}.`);
+      state = Object.assign({}, state, { scheduled_break_stop: true });
+    }
+
     machineStates[key] = state;
 
     reconcileGroupedGatekeeperStates();
@@ -17109,35 +17734,141 @@ if (manualSendModal) {
     // 2. Preemptive break scheduled status for Breaktime Button
     const breakScheduled = states.some(s => s && s.scheduled_break_stop);
     if (breakScheduled) {
-      if (!isBreakScheduledPending) {
+      const scheduledBreakIps = Object.keys(machineStates)
+        .filter(k => machineStates[k] && machineStates[k].scheduled_break_stop);
+      if (!isBreakScheduledPending && !breakCancelInFlight && !breakScheduleInFlight) {
+        // Tablet reload / break started from another tablet: wait on exactly the
+        // machines that report a scheduled break stop.
+        breakWaitIps = scheduledBreakIps;
+        breakWaitAdopted = true;
         openBreakWaitOverlay();
+        setBreakWaitOverlayTitle(breakWaitIps);
+      } else if (breakWaitAdopted && !breakScheduleInFlight) {
+        // pollGatekeeperState reconciles after EACH machine, so the list built above
+        // can be missing a sibling the poll had not reached yet. Absorb it, or the
+        // break would start while that machine is still cutting.
+        const newlySeen = scheduledBreakIps.filter(k => breakWaitIps.indexOf(k) < 0);
+        if (newlySeen.length > 0) {
+          breakWaitIps = breakWaitIps.concat(newlySeen);
+          setBreakWaitOverlayTitle(breakWaitIps);
+        }
       }
-    } else if (isBreakScheduledPending && !breakScheduled) {
+    } else if (isBreakScheduledPending && !breakScheduled && !breakScheduleInFlight) {
+      // Never while our own schedule requests are still going out: the machines have
+      // not been told yet, so "nothing scheduled" is not yet the truth.
       const anyHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
       if (!anyHolding) {
         closeBreakWaitOverlay();
       }
     }
 
-    const breakHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
-    const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
-    if (breakHolding && isBreakScheduledPending && !isRecentlyFinished) {
-      closeBreakWaitOverlay();
-      if (!breakActive && typeof startBreak === 'function') {
-        startBreak();
+    // Remember which awaited machines really hold a scheduled break stop.
+    breakWaitIps.forEach(k => {
+      if (machineStates[k] && machineStates[k].scheduled_break_stop
+        && breakWaitSeenScheduled.indexOf(k) < 0) {
+        breakWaitSeenScheduled.push(k);
       }
+    });
+
+    // Drop a machine whose break stop was cancelled: it is neither scheduled any more
+    // nor holding for BREAK, so waiting on it would block the break forever. Only ones
+    // we have seen scheduled qualify, so a mini-PC that has not received our request
+    // yet is never mistaken for a cancelled one. The SSE handler normally does this;
+    // polling is the fallback when the event stream is down.
+    if (isBreakScheduledPending && !breakScheduleInFlight && breakWaitIps.length > 0) {
+      breakWaitIps.filter(k => {
+        if (breakWaitSeenScheduled.indexOf(k) < 0) return false;
+        const st = machineStates[k];
+        if (!st) return false;
+        if (st.scheduled_break_stop) return false;
+        if (st.holding && st.hold_reason === 'BREAK') return false; // already satisfied
+        return true;
+      }).forEach(k => {
+        console.warn(`☕ [CNC GATEKEEPER] ${getMachineNameFromIP(k) || k} is no longer scheduled for a break stop — stopping waiting on it.`);
+        releaseBreakWaitMachine(k);
+      });
     }
+
+    // The break timer starts only when every awaited machine has actually stopped.
+    tryStartBreakWhenAllStopped(false);
 
     // 3. Preemptive cycle stop scheduled status for 🛑 Button
     const cycleStopScheduled = states.some(s => s && s.scheduled_cycle_stop);
     if (cycleStopScheduled) {
-      if (!isCycleStopPending) {
+      // Display only: name the machine(s) actually waiting to stop, so the factory TV
+      // blinks exactly those (tablet reload / stop started from another tablet).
+      const scheduledMachines = [];
+      Object.entries(machineStates).forEach(([key, s]) => {
+        if (s && s.scheduled_cycle_stop) {
+          const m = getMachineNameFromIP(key);
+          if (m && !scheduledMachines.includes(m)) scheduledMachines.push(m);
+        }
+      });
+
+      // Remember which of our machines really are holding a scheduled stop, so the
+      // prune below can tell "finished" from "has not received our request yet".
+      scheduledMachines.forEach(m => {
+        if (activeCycleStopMachines.includes(m) && !cycleStopSeenScheduled.includes(m)) {
+          cycleStopSeenScheduled.push(m);
+        }
+      });
+
+      if (!isCycleStopPending && !cycleStopCancelInFlight && !cycleStopScheduleInFlight) {
         isCycleStopPending = true;
-        openCycleStopOverlay();
+        cycleStopAdopted = true;
+        cycleStopSeenScheduled = scheduledMachines.slice();
+        openCycleStopOverlay(scheduledMachines);
+      } else if (cycleStopAdopted) {
+        // The poll reconciles after EACH machine, so a sibling can show up a moment
+        // later. Without this the overlay would close on the first machine's
+        // completion while the second is still waiting to stop. Only an adopted wait
+        // does this — absorbing into an operator's own pick would let Cancel cancel a
+        // stop this tablet never asked for.
+        const newlySeen = scheduledMachines.filter(m => !activeCycleStopMachines.includes(m));
+        if (newlySeen.length > 0) {
+          activeCycleStopMachines = activeCycleStopMachines.concat(newlySeen);
+          cycleStopSeenScheduled = cycleStopSeenScheduled.concat(newlySeen);
+          overlay.dataset.targetMachine = activeCycleStopMachines.join(',');
+          setCycleStopOverlayTitle(activeCycleStopMachines);
+          if (typeof notifyStopCall === 'function') {
+            notifyStopCall('activate', 'stop', newlySeen.join(','));
+          } else if (typeof window.notifyStopCall === 'function') {
+            window.notifyStopCall('activate', 'stop', newlySeen.join(','));
+          }
+        }
       }
-    } else {
+
+      // Prune machines that HAVE been seen scheduled and now report otherwise: they
+      // finished. The SSE handlers normally do this, but polling is the fallback when
+      // the event stream is down, and without it the kiosk TV keeps blinking a machine
+      // that already stopped.
       if (isCycleStopPending) {
+        cycleStopSeenScheduled
+          .filter(m => activeCycleStopMachines.includes(m) && !scheduledMachines.includes(m))
+          .forEach(m => releaseCycleStopMachine(
+            m,
+            _tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"),
+            `✅ ${m} サイクル完了停止しました`,
+            true
+          ));
+      }
+    } else if (!cycleStopScheduleInFlight) {
+      // Never while our own requests are still going out: the machines have not been
+      // told yet, so "nothing scheduled" is not yet the truth.
+      if (isCycleStopPending) {
+        // Nothing is scheduled anywhere any more, so this is the last machine finishing.
+        // The per-machine prune above only runs while something is still scheduled, so
+        // with the SSE stream down this is the only place the operator gets told.
+        const wasWaiting = activeCycleStopMachines.length > 0;
         closeCycleStopOverlay();
+        // Neutral wording on purpose: gatekeeper_state looks identical whether the stop
+        // completed or was cancelled elsewhere, so claiming 完了停止 here would report a
+        // machine as stopped while it is still cutting. The SSE handler, which knows
+        // which event fired, gives the precise message when the stream is up.
+        if (wasWaiting && (Date.now() - lastCycleStopDoneToastAt) > 4000) {
+          lastCycleStopDoneToastAt = Date.now();
+          showToast('サイクル停止の待機を終了しました / Cycle stop wait ended');
+        }
       } else {
         // Tablet Reload Protection: Clear any ghost STOP on cloud TV if no machine is in cycle stop
         if (typeof notifyStopCall === 'function') {
@@ -17154,6 +17885,8 @@ if (manualSendModal) {
     const allIps = getAllCNCMiniPCIPs();
     if (allIps.length === 0) return;
     for (const ip of allIps) {
+      // Stamped BEFORE the request so a response that raced a cancel can be spotted.
+      const startedAt = Date.now();
       try {
         const sig = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
         const res = await fetch(`http://${ip}:5000/state`, { cache: 'no-store', signal: sig });
@@ -17165,7 +17898,7 @@ if (manualSendModal) {
               state.hold_reason = null;
             }
           }
-          syncGatekeeperState(state, ip);
+          syncGatekeeperState(state, ip, startedAt);
           continue;
         }
       } catch (_) {
@@ -17180,7 +17913,7 @@ if (manualSendModal) {
                 state.hold_reason = null;
               }
             }
-            syncGatekeeperState(state, ip);
+            syncGatekeeperState(state, ip, startedAt);
           }
         } catch (_) { }
       }
@@ -17232,8 +17965,11 @@ if (manualSendModal) {
     es.addEventListener('start_aborted', (e) => {
       try {
         const data = JSON.parse(e.data || '{}');
-        console.log("⚠️ [CNC GATEKEEPER] Start aborted within grace window:", data);
-        closeCycleStopOverlay();
+        console.log(`⚠️ [CNC GATEKEEPER] Start aborted within grace window (${ip}):`, data);
+        // The mini-PC clears scheduled_cycle_stop for THIS machine only, so release
+        // just this one — a sibling's stop is still scheduled and must keep waiting.
+        if (machineStates[ip]) machineStates[ip].scheduled_cycle_stop = false;
+        releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
         if (typeof closeCncCancelOverlay === 'function') closeCncCancelOverlay();
         if (typeof showToast === 'function') {
           showToast("⚠️ 開始直後の取消 (セットやり直し可) / Start cancelled before cut - Ready to restart");
@@ -17247,8 +17983,9 @@ if (manualSendModal) {
     es.addEventListener('cancel_detected', (e) => {
       try {
         const data = JSON.parse(e.data || '{}');
-        console.log("🚨 [CNC GATEKEEPER] Cancel detected:", data);
-        closeCycleStopOverlay();
+        console.log(`🚨 [CNC GATEKEEPER] Cancel detected (${ip}):`, data);
+        if (machineStates[ip]) machineStates[ip].scheduled_cycle_stop = false;
+        releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
         const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
         if (!breakActive && typeof openCncCancelOverlay === 'function') {
           openCncCancelOverlay();
@@ -17287,12 +18024,37 @@ if (manualSendModal) {
 
     // 4. Preemptive Break Stop Completed -> Start Break Screen!
     es.addEventListener('break_stop_completed', (e) => {
-      console.log("☕ [CNC GATEKEEPER] Break stop executed cleanly.");
-      closeBreakWaitOverlay();
+      console.log(`☕ [CNC GATEKEEPER] Break stop executed cleanly (${ip}).`);
+      // Record THIS machine's hold, then let the shared check decide: the break starts
+      // only when every machine we are waiting on has stopped.
+      machineStates[ip] = Object.assign({}, machineStates[ip], {
+        holding: true,
+        hold_reason: 'BREAK',
+        scheduled_break_stop: false
+      });
+      if (tryStartBreakWhenAllStopped(true)) return;
+
+      if (isBreakScheduledPending) {
+        const stillWaiting = (breakWaitIps.length > 0 ? breakWaitIps : [])
+          .filter(k => {
+            const st = machineStates[k];
+            return !(st && st.holding && st.hold_reason === 'BREAK');
+          })
+          .map(k => getMachineNameFromIP(k))
+          .filter(Boolean);
+        if (stillWaiting.length > 0 && typeof showToast === 'function') {
+          showToast(`☕ ${stillWaiting.join(', ')} のサイクル完了を待っています`);
+        }
+        return;
+      }
+
+      // We are not waiting on anything, yet this machine has stopped FOR a break —
+      // the wait was closed by a cancel, an unlock or a reload. Never leave it locked
+      // with no break running; this is what the handler did before the wait existed.
       const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
-      const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
       const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
-      if (!breakActive && !isRecentlyFinished && typeof startBreak === 'function') {
+      if (!localStorage.getItem(pfx + 'activeBreakStart') && !isRecentlyFinished && typeof startBreak === 'function') {
+        console.warn('☕ [CNC GATEKEEPER] Machine holding for BREAK with no break running — starting it.');
         startBreak();
         if (typeof showToast === 'function') {
           showToast(_tr('toast_break_started_cnc_stopped', "☕ 休憩を開始しました (機械停止中)"));
@@ -17301,51 +18063,72 @@ if (manualSendModal) {
     });
 
     es.addEventListener('break_stop_cancelled', (e) => {
-      console.log("☕ [CNC GATEKEEPER] Break scheduled stop cancelled.");
-      closeBreakWaitOverlay();
+      console.log(`☕ [CNC GATEKEEPER] Break scheduled stop cancelled (${ip}).`);
+      if (machineStates[ip]) {
+        machineStates[ip].scheduled_break_stop = false;
+      }
+      releaseBreakWaitMachine(ip);
     });
 
     // 5. Preemptive Cycle Stop Completed -> Close Modal!
     es.addEventListener('cycle_stop_completed', (e) => {
-      console.log("🛑 [CNC GATEKEEPER] Cycle stop executed cleanly.");
-      closeCycleStopOverlay();
-      if (typeof showToast === 'function') {
-        showToast(_tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"));
+      console.log(`🛑 [CNC GATEKEEPER] Cycle stop executed cleanly (${ip}).`);
+      if (machineStates[ip]) {
+        machineStates[ip].scheduled_cycle_stop = false;
       }
+      // Only the machine that fired this event is done — a BOTH stop keeps
+      // waiting (and keeps blinking on the kiosk TV) for its sibling.
+      const finishedMachine = getMachineNameFromIP(ip);
+      releaseCycleStopMachine(
+        finishedMachine,
+        _tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"),
+        finishedMachine ? `✅ ${finishedMachine} サイクル完了停止しました` : null
+      );
+    });
+
+    // 5b. Cycle stop cancelled on the mini-PC (another tablet, or its own UI).
+    // Without this the overlay would keep waiting on a machine that is no longer
+    // scheduled, because a sibling still holding a stop keeps the reconciler quiet.
+    es.addEventListener('cycle_stop_cancelled', (e) => {
+      console.log(`🛑 [CNC GATEKEEPER] Cycle stop cancelled on the mini-PC (${ip}).`);
+      if (machineStates[ip]) {
+        machineStates[ip].scheduled_cycle_stop = false;
+      }
+      const cancelledMachine = getMachineNameFromIP(ip);
+      releaseCycleStopMachine(
+        cancelledMachine,
+        _tr('toast_cycle_stop_cancelled', "停止リクエストを取り消しました"),
+        cancelledMachine ? `↩️ ${cancelledMachine} の停止リクエストを取り消しました` : null,
+        true
+      );
     });
 
     // 6. Gatekeeper Unlocked
     es.addEventListener('unlocked', (e) => {
       console.log(`🔓 [CNC GATEKEEPER] Unlocked (${ip}):`, e.data);
-      Object.keys(machineStates).forEach(k => {
-        if (machineStates[k]) {
-          machineStates[k].holding = false;
-          machineStates[k].hold_reason = null;
-          machineStates[k].scheduled_break_stop = false;
-          machineStates[k].scheduled_cycle_stop = false;
-        }
+      // /unlock runs on ONE mini-PC, so only that machine's state changes. Wiping the
+      // group would drop a sibling's still-armed stop from the wait list and clear it
+      // on the kiosk TV.
+      machineStates[ip] = Object.assign({}, machineStates[ip], {
+        holding: false,
+        hold_reason: null,
+        scheduled_break_stop: false,
+        scheduled_cycle_stop: false
       });
-      isBreakScheduledPending = false;
-      closeBreakWaitOverlay();
+      delete cycleStopIntent[ip];
+      delete breakIntentAt[ip];
+      releaseBreakWaitMachine(ip);
+      releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
       reconcileGroupedGatekeeperStates();
 
       const anyStillHolding = Object.values(machineStates).some(s => s && s.holding);
-      if (!anyStillHolding) {
+      const anyStillArmed = Object.values(machineStates)
+        .some(st => st && (st.scheduled_cycle_stop || st.scheduled_break_stop));
+      if (!anyStillHolding && !anyStillArmed) {
         closeCycleStopOverlay();
         closeBreakWaitOverlay();
         if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
-        }
-        if (typeof notifyStopCall === 'function') {
-          notifyStopCall('clear', 'leader');
-        } else if (typeof window.notifyStopCall === 'function') {
-          window.notifyStopCall('clear', 'leader');
-        }
-        const raw = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeStopCallStart');
-        if (raw && typeof finalizeStopCall === 'function') {
-          finalizeStopCall();
-        } else if (typeof closeStopCallOverlay === 'function') {
-          closeStopCallOverlay();
         }
       }
     });
@@ -17414,9 +18197,16 @@ if (manualSendModal) {
       return;
     }
 
+    breakWaitIps = [];
+    breakWaitTitleIps = [];
+    breakWaitSeenScheduled = [];
+    breakWaitAdopted = false;
+    breakScheduleInFlight = true;
     openBreakWaitOverlay();
 
-    let anyScheduled = false;
+    // Remember WHICH mini-PCs accepted. Only those are waited on; a legacy one that
+    // has no schedule_break_stop endpoint answers nothing and is simply not waited on.
+    const acceptedIps = [];
     await Promise.all(allIps.map(async (ip) => {
       let scheduled = false;
       try {
@@ -17428,7 +18218,6 @@ if (manualSendModal) {
           const data = await res.json();
           if (data && data.scheduled) {
             scheduled = true;
-            anyScheduled = true;
             console.log(`☕ Scheduled break stop response (${ip} :5000):`, data);
           }
         }
@@ -17444,19 +18233,57 @@ if (manualSendModal) {
             const data = await res.json();
             if (data && data.scheduled) {
               scheduled = true;
-              anyScheduled = true;
               console.log(`☕ Scheduled break stop response (${ip} :8766):`, data);
             }
           }
         } catch (_) { }
       }
+
+      if (scheduled) {
+        acceptedIps.push(ip);
+        breakIntentAt[ip] = Date.now();
+        machineStates[ip] = Object.assign({}, machineStates[ip], { scheduled_break_stop: true });
+      } else {
+        delete breakIntentAt[ip];
+        console.warn(`☕ Legacy Mini-PC at ${ip} (no schedule_break_stop response within 2.5s) or offline — not waiting on it.`);
+      }
     }));
 
-    if (!anyScheduled) {
-      console.warn("Legacy Mini-PC (no schedule_break_stop response within 2.5s) or offline. Starting local break immediately.");
+    breakScheduleInFlight = false;
+
+    // The operator may have pressed 休憩を取り消す while these requests were in flight.
+    // closeBreakWaitOverlay cleared the pending flag, so honour that instead of
+    // starting a break they cancelled.
+    if (!isBreakScheduledPending) {
+      console.log('☕ [CNC GATEKEEPER] Break request was cancelled while scheduling — undoing.');
+      breakWaitIps = [];
+      // Their cancel was answered before our schedule landed, so those machines would
+      // stop for a break nobody wants. Cancel again on the ones that accepted.
+      acceptedIps.forEach(ip => {
+        delete breakIntentAt[ip];
+        if (machineStates[ip]) machineStates[ip].scheduled_break_stop = false;
+        const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+        fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST', signal: sig1 })
+          .catch(() => {
+            const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+            fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST', signal: sig2 }).catch(() => { });
+          });
+      });
+      return;
+    }
+
+    breakWaitIps = acceptedIps;
+
+    if (acceptedIps.length === 0) {
+      console.warn("No Mini-PC accepted schedule_break_stop (all legacy or offline). Starting local break immediately.");
       closeBreakWaitOverlay();
       if (typeof startBreak === 'function') startBreak();
+      return;
     }
+
+    setBreakWaitOverlayTitle(acceptedIps);
+    // A machine may already have been idle and stopped while we were asking.
+    tryStartBreakWhenAllStopped(false);
   }
   window.handleBreakStartButtonClick = handleBreakStartButtonClick;
 
