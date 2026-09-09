@@ -7259,16 +7259,16 @@
                 window.showStep3Modal = function () {
                     if (window.__materialScanMode === 'production') {
                         const seb = document.getElementById('scannedKanban')?.value || document.getElementById('sub-dropdown')?.value;
+                        // Always tear the flow down the same way, whatever the outcome:
+                        // leaving __materialScanMode on 'production' would make the NEXT
+                        // Step 3 auto-send instead of showing the modal.
+                        const closeFlow = function () {
+                            const m = document.getElementById('step2Modal');
+                            if (m) m.style.display = 'none';
+                            if (typeof window.closeAllStepModals === 'function') window.closeAllStepModals();
+                            if (typeof window.renderImageGallery === 'function') window.renderImageGallery();
+                        };
                         if (seb && typeof window.sendtoNC === 'function') {
-                            // Always tear the flow down the same way, whatever the outcome:
-                            // leaving __materialScanMode on 'production' would make the NEXT
-                            // Step 3 auto-send instead of showing the modal.
-                            const closeFlow = function () {
-                                const m = document.getElementById('step2Modal');
-                                if (m) m.style.display = 'none';
-                                if (typeof window.closeAllStepModals === 'function') window.closeAllStepModals();
-                                if (typeof window.renderImageGallery === 'function') window.renderImageGallery();
-                            };
                             // This send is programmatic — there is no button the cooldown can
                             // grey out — so sendtoNC's "skipped" result must be surfaced instead
                             // of being reported to the operator as a completed send.
@@ -7282,12 +7282,12 @@
                                 ? (window.captureLotSendMachines() || []).slice()
                                 : (window.__lotSendMachines || []).slice();
                             const attemptSend = function (mayWaitForCooldown) {
-                                if (typeof showToast === 'function') showToast(_t('toast_sending_machine'), 2000);
+                                if (typeof showToast === 'function') showToast(_t('toast_sending_machine'));
                                 return window.sendtoNC(seb).then(function (result) {
                                     if (result && result.sent === false) {
                                         if (result.reason === 'cooldown' && mayWaitForCooldown) {
                                             const secs = Math.max(1, result.secondsRemaining || 1);
-                                            if (typeof showToast === 'function') showToast('⏳ 前回の送信の完了を待っています / Waiting for the previous send (' + secs + 's)', secs * 1000);
+                                            if (typeof showToast === 'function') showToast('⏳ 前回の送信の完了を待っています / Waiting for the previous send (' + secs + 's)');
                                             setTimeout(function () {
                                                 // The operator may have closed the flow while we waited;
                                                 // closeAllStepModals clears this flag. Sending then would
@@ -7303,18 +7303,21 @@
                                         }
                                         // Never claim success: the machine did not get the program.
                                         closeFlow();
-                                        if (typeof showToast === 'function') showToast('⚠️ 未送信です。スキャンタブから再送信してください / NOT sent — resend from the Scan tab', 6000);
+                                        if (typeof showToast === 'function') showToast('⚠️ 未送信です。スキャンタブから再送信してください / NOT sent — resend from the Scan tab');
                                         return;
                                     }
-                                    if (typeof showToast === 'function') showToast(_t('toast_send_complete'), 3000);
+                                    if (typeof showToast === 'function') showToast(_t('toast_send_complete'));
                                     closeFlow();
                                 }).catch(err => {
                                     closeFlow();
-                                    if (typeof showToast === 'function') showToast(_t('toast_send_failed'), 4000);
+                                    if (typeof showToast === 'function') showToast(_t('toast_send_failed'));
                                 });
                             };
                             attemptSend(true);
                         } else {
+                            // Nothing to send: end the production scan instead of leaving it
+                            // armed, or the next Step 3 would be intercepted and auto-send.
+                            closeFlow();
                             if (typeof showToast === 'function') showToast(_t('toast_error_no_product'));
                         }
                         return;

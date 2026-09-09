@@ -8258,7 +8258,7 @@ function setButtonCooldownState(button, disabled, secondsRemaining) {
   button.disabled = false;
   button.removeAttribute('aria-disabled');
   button.removeAttribute('title');
-  button.style.opacity = '';
+  button.style.opacity = '1';
   button.style.cursor = '';
   button.style.filter = '';
   if (button.dataset.sendToMachineOriginalHtml !== undefined) {
@@ -12471,10 +12471,14 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     // so hand the Resend markup to that snapshot, or the cooldown would restore the
     // spinner label permanently when it expires.
     if (actionButton) {
-      actionButton.disabled = false;
       setSendButtonRestingMarkup(actionButton, '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg><span>マシンに再送信 / Resend to Machine</span>');
-      actionButton.style.opacity = '1';
       actionButton.style.background = 'linear-gradient(135deg, #2E6FF2, #1b4bb8)';
+      // Leave disabled/opacity to the cooldown while it owns the button: re-enabling
+      // here made it briefly clickable again while it read 送信中.
+      if (!isSendToMachineCooldownActive()) {
+        actionButton.disabled = false;
+        actionButton.style.opacity = '1';
+      }
     }
 
     // Mark workflow as complete and unlock navigation tabs
@@ -17785,7 +17789,15 @@ if (manualSendModal) {
       // Never while our own requests are still going out: the machines have not been
       // told yet, so "nothing scheduled" is not yet the truth.
       if (isCycleStopPending) {
+        // Nothing is scheduled anywhere any more, so this is the last machine finishing.
+        // The per-machine prune above only runs while something is still scheduled, so
+        // with the SSE stream down this is the only place the operator gets told.
+        const wasWaiting = activeCycleStopMachines.length > 0;
         closeCycleStopOverlay();
+        if (wasWaiting && (Date.now() - lastCycleStopDoneToastAt) > 4000) {
+          lastCycleStopDoneToastAt = Date.now();
+          showToast(_tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"));
+        }
       } else {
         // Tablet Reload Protection: Clear any ghost STOP on cloud TV if no machine is in cycle stop
         if (typeof notifyStopCall === 'function') {
