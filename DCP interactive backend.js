@@ -8189,6 +8189,10 @@ function updateSheetStatus(selectedValue, machineName) {
 
 const SEND_TO_MACHINE_COOLDOWN_MS = 17000;
 let sendToMachineCooldownEndTime = 0;
+// Per-machine cooldown for the grouped "<machine> に送信" buttons, so sending to one
+// machine no longer locks its siblings. The shared clock above still gates the
+// send-to-all buttons (main / Step 3 / single-machine completed).
+const machineSendCooldownEndTime = {};
 let sendToMachineCooldownTimer = null;
 let sendToMachineProgressHideTimer = null;
 let sendToMachineProgressMessage = 'Send to machine in progress';
@@ -8201,11 +8205,32 @@ function isSendToMachineCooldownActive() {
   return getSendToMachineCooldownSeconds() > 0;
 }
 
+function getMachineSendCooldownSeconds(machine) {
+  if (!machine) return 0;
+  const end = machineSendCooldownEndTime[machine] || 0;
+  return Math.max(0, Math.ceil((end - Date.now()) / 1000));
+}
+
+function beginMachineSendCooldown(machine) {
+  if (!machine) return;
+  machineSendCooldownEndTime[machine] = Date.now() + SEND_TO_MACHINE_COOLDOWN_MS;
+}
+
+// The countdown ticker must keep running while EITHER clock is active, otherwise a
+// per-machine button could be left greyed out after the shared clock expires.
+function isAnySendCooldownActive() {
+  if (isSendToMachineCooldownActive()) return true;
+  return Object.keys(machineSendCooldownEndTime)
+    .some(m => getMachineSendCooldownSeconds(m) > 0);
+}
+
 function setButtonCooldownState(button, disabled, secondsRemaining) {
   if (!button) return;
 
-  if (!button.dataset.sendToMachineOriginalText) {
-    button.dataset.sendToMachineOriginalText = button.textContent.trim() || 'Send to Machine';
+  // Save the full markup, not just the text: these buttons carry an inline SVG icon
+  // that a textContent round-trip would delete.
+  if (button.dataset.sendToMachineOriginalHtml === undefined) {
+    button.dataset.sendToMachineOriginalHtml = button.innerHTML;
   }
 
   if (disabled) {
@@ -8225,9 +8250,9 @@ function setButtonCooldownState(button, disabled, secondsRemaining) {
   button.style.opacity = '';
   button.style.cursor = '';
   button.style.filter = '';
-  if (button.dataset.sendToMachineOriginalText) {
-    button.textContent = button.dataset.sendToMachineOriginalText;
-    delete button.dataset.sendToMachineOriginalText;
+  if (button.dataset.sendToMachineOriginalHtml !== undefined) {
+    button.innerHTML = button.dataset.sendToMachineOriginalHtml;
+    delete button.dataset.sendToMachineOriginalHtml;
   }
 }
 
@@ -8286,9 +8311,13 @@ function updateSendToMachineCooldownUI() {
     setButtonCooldownState(step3Button, isActive, secondsRemaining);
   }
 
-  // Also lock/unlock grouped machine buttons in the completed send panel
+  // Grouped machine buttons in the completed send panel lock INDIVIDUALLY: pressing
+  // 「OZNC23 に送信」 must leave 「OZNC26 に送信」 usable.
   const groupedBtns = document.querySelectorAll('#completedSendPanel .machine-send-all');
-  groupedBtns.forEach(btn => setButtonCooldownState(btn, isActive, secondsRemaining));
+  groupedBtns.forEach(btn => {
+    const machineSeconds = getMachineSendCooldownSeconds(btn.dataset.machine);
+    setButtonCooldownState(btn, machineSeconds > 0, machineSeconds);
+  });
 
   if (isActive) {
     showSendToMachineProgress(secondsRemaining);
@@ -8306,7 +8335,7 @@ function beginSendToMachineCooldown(message = 'Send to machine in progress') {
   updateSendToMachineCooldownUI();
   sendToMachineCooldownTimer = setInterval(() => {
     updateSendToMachineCooldownUI();
-    if (!isSendToMachineCooldownActive()) {
+    if (!isAnySendCooldownActive()) {
       clearInterval(sendToMachineCooldownTimer);
       sendToMachineCooldownTimer = null;
     }

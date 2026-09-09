@@ -7671,6 +7671,8 @@
                         const btn = document.createElement('button');
                         btn.type = 'button';
                         btn.className = 'machine-send-all';
+                        // Names this button's machine so the cooldown can lock it alone.
+                        btn.dataset.machine = name;
                         const _lang = getCurrentLanguage();
                         const _sendLabel = _lang === 'ja' ? name + ' に送信' : _lang === 'pt' ? 'Enviar para ' + name : 'Send to ' + name;
                         btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' + _sendLabel;
@@ -7687,7 +7689,10 @@
                             // Send to this machine
                             await fireSendToMachine(ip, seb, name);
 
-                            // 17 second cooldown lock on ALL send buttons
+                            // 17 second cooldown: this machine's button only. The shared
+                            // clock still gates the send-to-all buttons (main / Step 3),
+                            // so the same program cannot be pushed twice in that window.
+                            if (typeof beginMachineSendCooldown === 'function') beginMachineSendCooldown(name);
                             if (typeof beginSendToMachineCooldown === 'function') beginSendToMachineCooldown(name + ' に送信中');
 
                             const _sentLang = getCurrentLanguage();
