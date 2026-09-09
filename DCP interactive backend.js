@@ -8445,14 +8445,17 @@ async function sendtoNC(selectedValue) {
   const currentSebanggo = document.getElementById('sub-dropdown').value;
 
   //window.alert(machineName + currentSebanggo);
+  // Callers need to tell "sent" from "skipped" apart: this function is also invoked
+  // programmatically (the production lot scan), where a silent early return used to be
+  // reported to the operator as a successful send.
   if (!currentSebanggo) {
     window.alert(_t('alert_select_product_first'));
-    return;
+    return { sent: false, reason: 'no-product' };
   }
 
   if (isSendToMachineCooldownActive()) {
     updateSendToMachineCooldownUI();
-    return;
+    return { sent: false, reason: 'cooldown', secondsRemaining: getSendToMachineCooldownSeconds() };
   }
 
   sendtoNCButtonisPressed = true;
@@ -8575,6 +8578,8 @@ async function sendtoNC(selectedValue) {
       console.error('Error sending to multiple machines:', error);
     }
 
+    return { sent: true, machines: Object.keys(machineIPMap) };
+
   } else {
     // Single machine - original logic
     const singleMachineName = document.getElementById('process').value || 'UNKNOWN';
@@ -8594,7 +8599,7 @@ async function sendtoNC(selectedValue) {
       if (typeof showToast === 'function') {
         showToast('✅ 送信完了 / Send to machine completed');
       }
-      return true;
+      return { sent: true, machines: [singleMachineName] };
     } catch (error) {
       console.warn('Notice from send to mini PC, trying fallback:', error);
       try {
@@ -8610,7 +8615,7 @@ async function sendtoNC(selectedValue) {
       if (typeof showToast === 'function') {
         showToast('✅ 送信完了 / Send to machine completed');
       }
-      return true;
+      return { sent: true, machines: [singleMachineName] };
     }
   }
 }
@@ -13263,7 +13268,9 @@ if (manualSendModal) {
           if (e.target === ov) {
             closeLP();
             if (opts.onCancel) opts.onCancel();
-            window.__materialScanMode = null;
+            // Only the flow that OWNS the material scan may end it. Other callers
+            // (e.g. editing a machine's ショット数) must not cancel it as a side effect.
+            if (opts.clearsMaterialScanMode) window.__materialScanMode = null;
           }
         });
       }
@@ -13277,7 +13284,7 @@ if (manualSendModal) {
         e.stopPropagation();
         closeLP();
         if (opts.onCancel) opts.onCancel();
-        window.__materialScanMode = null;
+        if (opts.clearsMaterialScanMode) window.__materialScanMode = null;
       };
       card.appendChild(closeBtn);
     }
@@ -13561,6 +13568,8 @@ if (manualSendModal) {
       {
         done: done,
         allowDone: done.length > 0,
+        // Abandoning the machine choice abandons the material scan itself.
+        clearsMaterialScanMode: true,
         // "Done → Send": stop adding machines and go to Step 3 (send).
         onDone: function () {
           window.captureLotSendMachines();
@@ -17351,21 +17360,62 @@ if (manualSendModal) {
     }
   }
 
+  // Machine picker for 🛑, on its OWN modal node.
+  //
+  // It deliberately does not reuse window.chooseMachine: that shares the single
+  // #lpModal element with the lot-scan chooser and the ショット数 prompt and removes
+  // whatever is there on entry, so opening this picker mid lot-scan would delete that
+  // modal and strand its callback. Its cancel path also clears __materialScanMode,
+  // which belongs to the lot flow, not to a cycle stop.
+  function chooseCycleStopMachine(machines, onPick) {
+    const existing = document.getElementById('cncCycleStopPickerModal');
+    if (existing) existing.remove();
+
+    const ov = document.createElement('div');
+    ov.id = 'cncCycleStopPickerModal';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:100200;background:rgba(10,15,26,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:16px;max-width:360px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:inherit;position:relative;';
+
+    const btnStyle = 'width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:pointer;';
+    const allLabel = machines.length > 2 ? '全部 / ALL' : '両方 / BOTH';
+
+    card.innerHTML =
+      '<div style="font-size:1.05rem;font-weight:800;color:#101828;margin-bottom:4px;">' +
+      _tr('cnc_cycle_stop_pick_title', '機械を選択 / Select machine') + '</div>' +
+      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin-bottom:14px;">' +
+      _tr('cnc_cycle_stop_pick_sub', '停止する機械を選択 / Machine to stop') + '</div>' +
+      machines.map(m => '<button data-m="' + m + '" style="' + btnStyle + '">' + m + '</button>').join('') +
+      '<button data-m="' + CYCLE_STOP_ALL + '" style="' + btnStyle + '">' + allLabel + '</button>';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '✕';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.4rem;font-weight:bold;color:#667085;cursor:pointer;padding:0;line-height:1;z-index:10;';
+    closeBtn.onclick = (e) => { e.stopPropagation(); ov.remove(); };
+    card.appendChild(closeBtn);
+
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+
+    card.querySelectorAll('[data-m]').forEach(b => {
+      b.onclick = () => {
+        const m = b.getAttribute('data-m');
+        ov.remove();
+        if (onPick) onPick(m);
+      };
+    });
+
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+  }
+
   // Handle Floating 🛑 Button Click -> Choose machine if grouped, otherwise direct
   stopBtn.addEventListener('click', async () => {
     const machines = getGroupedMachineList();
-    if (machines && machines.length > 1 && typeof window.chooseMachine === 'function') {
-      const allLabel = machines.length > 2 ? '全部 / ALL' : '両方 / BOTH';
-      window.chooseMachine(machines.concat([CYCLE_STOP_ALL]), (pickedMachine) => {
+    if (machines && machines.length > 1) {
+      chooseCycleStopMachine(machines, (pickedMachine) => {
         proceedWithCycleStop(pickedMachine);
-      }, {
-        title: '機械を選択 / Select machine',
-        subtitle: '停止する機械を選択 / Machine to stop',
-        formatLabel: (m) => (m === CYCLE_STOP_ALL ? allLabel : m),
-        allowCancel: true,
-        onCancel: () => {
-          // cancelled by operator
-        }
       });
     } else {
       const singleM = (machines && machines[0]) || (document.getElementById('process')?.value) || null;
