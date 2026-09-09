@@ -8589,7 +8589,8 @@ async function sendtoNC(selectedValue) {
   } else {
     // Single machine - original logic
     const singleMachineName = document.getElementById('process').value || 'UNKNOWN';
-    beginMachineSendCooldown(singleMachineName);
+    // No per-machine cooldown here: a single-machine page has no per-machine buttons,
+    // so it would only keep the countdown ticker running for 17s with nothing to show.
     const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce&mode=mass&machine=${singleMachineName}`;
 
     try {
@@ -12420,7 +12421,13 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 
     // Default behavior for non-OZMANAS machines
     if (isSendToMachineCooldownActive()) {
+      // Nothing is sent here. The button greys out with a countdown, but say so
+      // plainly too — this is the only feedback that the press did nothing.
       updateSendToMachineCooldownUI();
+      const _secs = getSendToMachineCooldownSeconds();
+      const _warn = `⚠️ 未送信です。あと${_secs}秒お待ちください / NOT sent — wait ${_secs}s`;
+      if (typeof window.showAppToast === 'function') window.showAppToast(_warn, 4000);
+      else if (typeof window.showToast === 'function') window.showToast(_warn, 4000);
       return;
     }
 
@@ -12439,29 +12446,11 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       actionButton.style.opacity = '0.75';
     }
 
-    // The send itself stays fire-and-forget: the per-machine fetches are no-cors GETs
-    // with no timeout, so awaiting them would hang this handler on an unreachable
-    // mini-PC and leave the button disabled and the tabs locked. Only the SKIP needs
-    // to be known, and the cooldown decides that synchronously, before any request.
-    const sendResult = isSendToMachineCooldownActive()
-      ? { sent: false, reason: 'cooldown', secondsRemaining: getSendToMachineCooldownSeconds() }
-      : null;
-    if (!sendResult) sendtoNC(currentSebanggo);
-    if (sendResult && sendResult.sent === false) {
-      if (actionButton) {
-        actionButton.disabled = false;
-        actionButton.innerHTML = '<span>マシンに送信 / Send to machine</span>';
-        actionButton.style.opacity = '1';
-      }
-      const _wait = (sendResult.reason === 'cooldown' && sendResult.secondsRemaining)
-        ? `あと${sendResult.secondsRemaining}秒 / ${sendResult.secondsRemaining}s`
-        : '';
-      const _warn = `⚠️ 未送信です。もう一度押してください ${_wait} / NOT sent — press again`;
-      if (typeof window.showAppToast === 'function') window.showAppToast(_warn, 5000);
-      else if (typeof window.showToast === 'function') window.showToast(_warn, 5000);
-      else window.alert(_warn);
-      return;
-    }
+    // Fire-and-forget: the per-machine requests are no-cors GETs with no timeout, so
+    // awaiting them would hang this handler on an unreachable mini-PC and leave the
+    // button disabled and the tabs locked. The only outcome worth branching on is the
+    // cooldown skip, and that is already handled above, before anything is sent.
+    sendtoNC(currentSebanggo);
 
     // Keep Step 3 button visible and show Resend button
     if (actionButton) {
@@ -17438,6 +17427,20 @@ if (manualSendModal) {
       pairs.map(pair => scheduleCycleStopOnMachine(pair.machine, pair.ip))
     );
     cycleStopScheduleInFlight = false;
+
+    // The operator may have cancelled while these requests were in flight. Their
+    // cancel POST was answered before our schedule landed, so the machine would stop
+    // at cycle end anyway — re-cancel on everything that ended up accepting.
+    if (!isCycleStopPending) {
+      console.log('🛑 [CNC GATEKEEPER] Cycle stop was cancelled while scheduling — undoing.');
+      pairs.forEach((pair, i) => {
+        if (!results[i]) return;
+        delete cycleStopIntent[pair.ip];
+        if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
+        cancelCycleStopOnMachine(pair.machine, pair.ip);
+      });
+      return;
+    }
 
     // A machine that never accepted has no stop scheduled: trust its polls again and
     // stop showing it on the kiosk TV.
