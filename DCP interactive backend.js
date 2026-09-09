@@ -39,9 +39,9 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.35:3000";
+const serverURL = "http://192.168.1.176:3000";
 window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
@@ -8214,7 +8214,20 @@ function getMachineSendCooldownSeconds(machine) {
 function beginMachineSendCooldown(machine) {
   if (!machine) return;
   machineSendCooldownEndTime[machine] = Date.now() + SEND_TO_MACHINE_COOLDOWN_MS;
+  updateSendToMachineCooldownUI();
+
+  if (!sendToMachineCooldownTimer) {
+    sendToMachineCooldownTimer = setInterval(() => {
+      updateSendToMachineCooldownUI();
+      if (!isAnySendCooldownActive()) {
+        clearInterval(sendToMachineCooldownTimer);
+        sendToMachineCooldownTimer = null;
+      }
+    }, 250);
+  }
 }
+window.beginMachineSendCooldown = beginMachineSendCooldown;
+window.getMachineSendCooldownSeconds = getMachineSendCooldownSeconds;
 
 // The countdown ticker must keep running while EITHER clock is active, otherwise a
 // per-machine button could be left greyed out after the shared clock expires.
@@ -8251,7 +8264,9 @@ function setButtonCooldownState(button, disabled, secondsRemaining) {
     button.style.opacity = '0.6';
     button.style.cursor = 'not-allowed';
     button.style.filter = 'grayscale(20%)';
-    button.textContent = `送信中... ${secondsRemaining}s`;
+    const _cLang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
+    const _cdText = _cLang === 'en' ? 'Sending...' : _cLang === 'pt' ? 'Enviando...' : '送信中...';
+    button.textContent = `${_cdText} ${secondsRemaining}s`;
     return;
   }
 
@@ -12487,7 +12502,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'true');
     } catch (_) { }
     markScanWorkflowComplete();
-    saveCurrentStep(3);
+    saveCurrentStep(0);
     if (typeof assertMachineState === 'function') assertMachineState();
     if (typeof updateTabLock === 'function') updateTabLock();
     if (typeof window.updateTabLock === 'function') window.updateTabLock();
@@ -12495,9 +12510,10 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     const skipBtn = document.getElementById('btnSkipStep3Send');
     if (skipBtn) skipBtn.style.display = 'none';
 
-    // Keep step3Modal visible
+    // Close Step 3 modal so Scan Completed card (with individual machine buttons) is shown immediately
     const s3Modal = document.getElementById('step3Modal');
-    if (s3Modal) s3Modal.style.display = 'block';
+    if (s3Modal) s3Modal.style.display = 'none';
+    if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
 
     // Lot cycle done: clear chosen machine
     window.__lotScanMachine = null;
@@ -12535,19 +12551,15 @@ if (btnSkipStep3Send) {
             localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'true');
           } catch (_) { }
           markScanWorkflowComplete();
-          saveCurrentStep(3);
+          saveCurrentStep(0);
           if (typeof assertMachineState === 'function') assertMachineState();
           if (typeof updateTabLock === 'function') updateTabLock();
           if (typeof window.updateTabLock === 'function') window.updateTabLock();
 
-          // Update action button UI
-          const actionButton = document.getElementById('startStep3Send');
-          if (actionButton) {
-            actionButton.disabled = false;
-            actionButton.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M5 12h14M12 5l7 7-7 7"/></svg><span>⏭️ スキップ済み (${leaderName} 承認) / Skipped (Resend Available)</span>`;
-            actionButton.style.opacity = '1';
-            actionButton.style.background = 'linear-gradient(135deg, #10b981, #059669)';
-          }
+          // Close Step 3 modal so Scan Completed card is shown
+          const s3Modal = document.getElementById('step3Modal');
+          if (s3Modal) s3Modal.style.display = 'none';
+          if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
 
           // Hide skip button
           btnSkipStep3Send.style.display = 'none';

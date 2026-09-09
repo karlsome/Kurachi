@@ -4148,6 +4148,9 @@
                         if (imgSrc) { thumb.src = imgSrc; thumb.style.display = ''; }
                         else { thumb.style.display = 'none'; }
                     }
+                    if (typeof window.buildCompletedSendPanel === 'function') {
+                        window.buildCompletedSendPanel();
+                    }
                 } else {
                     completedCard.style.display = 'none';
                 }
@@ -7686,16 +7689,15 @@
                     async function fireSendToMachine(ip, seb, machineName) {
                         const url = 'http://' + ip + ':5000/request?filename=' + seb + '.pce' + (machineName ? '&mode=mass&machine=' + machineName : '');
                         try {
-                            const res = await fetch(url);
-                            const data = await res.json().catch(() => ({}));
-                            console.log('fireSendToMachine response:', data);
+                            console.log('📤 Sending to ' + machineName + ' (' + ip + '): ' + url);
+                            await fetch(url, { method: 'GET', mode: 'no-cors' });
+                            console.log('✅ Sent command to ' + machineName);
                         } catch (err) {
                             console.warn('fireSendToMachine fetch notice:', err);
-                        } finally {
-                            if (typeof closeSendingToMachineIndicator === 'function') closeSendingToMachineIndicator();
-                            if (typeof hideSendToMachineProgress === 'function') hideSendToMachineProgress();
-                            if (typeof sendToMachineCooldownEndTime !== 'undefined') sendToMachineCooldownEndTime = 0;
-                            if (typeof updateSendToMachineCooldownUI === 'function') updateSendToMachineCooldownUI();
+                            try {
+                                const newTab = window.open(url, '_blank', 'width=100,height=100,left=-1000,top=-1000');
+                                if (newTab) setTimeout(() => { try { newTab.close(); } catch (_) {} }, 4000);
+                            } catch (_) {}
                         }
                         return true;
                     }
@@ -7734,6 +7736,9 @@
                         btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' + _sendLabel;
 
                         btn.addEventListener('click', async () => {
+                            if (typeof getMachineSendCooldownSeconds === 'function' && getMachineSendCooldownSeconds(name) > 0) {
+                                return;
+                            }
                             const seb = document.getElementById('sub-dropdown')?.value;
                             if (!seb) { if (window.showAppToast) window.showAppToast(_t('toast_no_product')); return; }
                             const ips = (typeof groupedMachineIPs !== 'undefined') ? groupedMachineIPs : {};
@@ -7742,18 +7747,17 @@
                             const _ipMsg = _ipLang === 'en' ? name + "'s IP is unknown" : _ipLang === 'pt' ? 'IP de ' + name + ' é desconhecido' : name + ' の IP が不明です';
                             if (!ip) { if (window.showAppToast) window.showAppToast(_ipMsg); return; }
 
-                            // Send to this machine
-                            await fireSendToMachine(ip, seb, name);
-
-                            // 17 second cooldown: this machine's button only. The shared
-                            // clock still gates the send-to-all buttons (main / Step 3),
-                            // so the same program cannot be pushed twice in that window.
-                            if (typeof beginMachineSendCooldown === 'function') beginMachineSendCooldown(name);
-                            if (typeof beginSendToMachineCooldown === 'function') beginSendToMachineCooldown(name + ' に送信中');
+                            // 17 second cooldown: this machine's button only!
+                            if (typeof beginMachineSendCooldown === 'function') {
+                                beginMachineSendCooldown(name);
+                            }
 
                             const _sentLang = getCurrentLanguage();
                             const _sentMsg = _sentLang === 'en' ? 'Sent to ' + name : _sentLang === 'pt' ? 'Enviado para ' + name : name + ' に送信しました';
                             if (window.showAppToast) window.showAppToast(_sentMsg);
+
+                            // Send to this machine in background
+                            fireSendToMachine(ip, seb, name);
                         });
 
                         wrap.appendChild(btn);
@@ -7761,7 +7765,14 @@
 
                     panel.appendChild(wrap);
                 }
+                window.buildCompletedSendPanel = buildCompletedSendPanel;
                 buildCompletedSendPanel();
+
+                document.addEventListener('languageChanged', () => {
+                    if (typeof window.buildCompletedSendPanel === 'function') {
+                        window.buildCompletedSendPanel();
+                    }
+                });
 
                 // Tap to preview: completed-card thumbnail and the info-sidebar product image
                 const prodThumb = document.getElementById('activeProductThumb');
