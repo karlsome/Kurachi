@@ -8224,6 +8224,17 @@ function isAnySendCooldownActive() {
     .some(m => getMachineSendCooldownSeconds(m) > 0);
 }
 
+// Record a button's resting markup, so a cooldown that is already running restores
+// THIS instead of whatever transient label was showing when it snapshotted.
+function setSendButtonRestingMarkup(button, html) {
+  if (!button) return;
+  if (button.dataset.sendToMachineOriginalHtml !== undefined) {
+    button.dataset.sendToMachineOriginalHtml = html;
+  } else {
+    button.innerHTML = html;
+  }
+}
+
 function setButtonCooldownState(button, disabled, secondsRemaining) {
   if (!button) return;
 
@@ -12455,10 +12466,13 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
     // cooldown skip, and that is already handled above, before anything is sent.
     sendtoNC(currentSebanggo);
 
-    // Keep Step 3 button visible and show Resend button
+    // Keep Step 3 button visible and show Resend button. sendtoNC starts the cooldown
+    // synchronously, which snapshots the button while the 送信中 spinner is showing —
+    // so hand the Resend markup to that snapshot, or the cooldown would restore the
+    // spinner label permanently when it expires.
     if (actionButton) {
       actionButton.disabled = false;
-      actionButton.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg><span>マシンに再送信 / Resend to Machine</span>';
+      setSendButtonRestingMarkup(actionButton, '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg><span>マシンに再送信 / Resend to Machine</span>');
       actionButton.style.opacity = '1';
       actionButton.style.background = 'linear-gradient(135deg, #2E6FF2, #1b4bb8)';
     }
@@ -17117,7 +17131,9 @@ if (manualSendModal) {
     }
   }
 
-  function closeCycleStopOverlay() {
+  // skipNotify: the caller has already cleared each machine individually, so the
+  // group-wide clear below would wipe a sibling's own, unrelated stop call.
+  function closeCycleStopOverlay(skipNotify) {
     const wasOpen = overlay.classList.contains('open');
     const clearedMachines = activeCycleStopMachines.slice();
     overlay.classList.remove('open');
@@ -17126,7 +17142,7 @@ if (manualSendModal) {
     cycleStopAdopted = false;
     cycleStopSeenScheduled = [];
     delete overlay.dataset.targetMachine;
-    if (wasOpen) {
+    if (wasOpen && !skipNotify) {
       // Clear the same machine(s) we activated, so a sibling machine's own call stays up.
       const notifyTarget = clearedMachines.join(',') || null;
       if (typeof notifyStopCall === 'function') {
@@ -17345,7 +17361,12 @@ if (manualSendModal) {
     // Stamped before the requests go out, so any /state reply already in flight is
     // recognised as pre-cancel and cannot flash the overlay back on.
     const cancelSentAt = Date.now();
-    uniquePairs.forEach(pair => { cycleStopIntent[pair.ip] = { at: cancelSentAt, scheduled: false }; });
+    uniquePairs.forEach(pair => {
+      cycleStopIntent[pair.ip] = { at: cancelSentAt, scheduled: false };
+      // Clear the mirror too: until the next poll lands, a sibling's sync would still
+      // see this machine as scheduled and re-adopt the stop we just cancelled.
+      if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
+    });
 
     const results = await Promise.all(
       uniquePairs.map(pair => cancelCycleStopOnMachine(pair.machine, pair.ip))
@@ -17440,9 +17461,12 @@ if (manualSendModal) {
     // at cycle end anyway — re-cancel on everything that ended up accepting.
     if (!isCycleStopPending) {
       console.log('🛑 [CNC GATEKEEPER] Cycle stop was cancelled while scheduling — undoing.');
+      const undoAt = Date.now();
       pairs.forEach((pair, i) => {
         if (!results[i]) return;
-        delete cycleStopIntent[pair.ip];
+        // Stamp a fresh cancel intent rather than dropping the old one: a /state reply
+        // racing this re-cancel would otherwise be trusted and flash the overlay back.
+        cycleStopIntent[pair.ip] = { at: undoAt, scheduled: false };
         if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
         cancelCycleStopOnMachine(pair.machine, pair.ip);
       });
@@ -17451,6 +17475,7 @@ if (manualSendModal) {
 
     // A machine that never accepted has no stop scheduled: trust its polls again and
     // stop showing it on the kiosk TV.
+    let clearedIndividually = false;
     pairs.forEach((pair, i) => {
       if (results[i]) {
         // Seed the flag the mini-PC now holds. Without it a /state response already in
@@ -17472,11 +17497,14 @@ if (manualSendModal) {
           window.notifyStopCall('clear', 'stop', pair.machine);
         }
         activeCycleStopMachines = stillWaiting;
+        clearedIndividually = true;
       }
     });
 
     if (!results.some(Boolean)) {
-      closeCycleStopOverlay();
+      // Every machine was already cleared by name above; a group-wide clear here would
+      // also wipe a sibling's unrelated stop call from the factory TV.
+      closeCycleStopOverlay(clearedIndividually);
       if (typeof showToast === 'function') {
         showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
       }
