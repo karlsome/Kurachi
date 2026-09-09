@@ -7282,12 +7282,12 @@
                                 ? (window.captureLotSendMachines() || []).slice()
                                 : (window.__lotSendMachines || []).slice();
                             const attemptSend = function (mayWaitForCooldown) {
-                                if (window.showToast) window.showToast(_t('toast_sending_machine'), 2000);
+                                if (typeof showToast === 'function') showToast(_t('toast_sending_machine'), 2000);
                                 return window.sendtoNC(seb).then(function (result) {
                                     if (result && result.sent === false) {
                                         if (result.reason === 'cooldown' && mayWaitForCooldown) {
                                             const secs = Math.max(1, result.secondsRemaining || 1);
-                                            if (window.showToast) window.showToast('⏳ 前回の送信の完了を待っています / Waiting for the previous send (' + secs + 's)', secs * 1000);
+                                            if (typeof showToast === 'function') showToast('⏳ 前回の送信の完了を待っています / Waiting for the previous send (' + secs + 's)', secs * 1000);
                                             setTimeout(function () {
                                                 // The operator may have closed the flow while we waited;
                                                 // closeAllStepModals clears this flag. Sending then would
@@ -7303,19 +7303,19 @@
                                         }
                                         // Never claim success: the machine did not get the program.
                                         closeFlow();
-                                        if (window.showToast) window.showToast('⚠️ 未送信です。スキャンタブから再送信してください / NOT sent — resend from the Scan tab', 6000);
+                                        if (typeof showToast === 'function') showToast('⚠️ 未送信です。スキャンタブから再送信してください / NOT sent — resend from the Scan tab', 6000);
                                         return;
                                     }
-                                    if (window.showToast) window.showToast(_t('toast_send_complete'), 3000);
+                                    if (typeof showToast === 'function') showToast(_t('toast_send_complete'), 3000);
                                     closeFlow();
                                 }).catch(err => {
                                     closeFlow();
-                                    if (window.showToast) window.showToast(_t('toast_send_failed'), 4000);
+                                    if (typeof showToast === 'function') showToast(_t('toast_send_failed'), 4000);
                                 });
                             };
                             attemptSend(true);
                         } else {
-                            if (window.showToast) window.showToast(_t('toast_error_no_product'));
+                            if (typeof showToast === 'function') showToast(_t('toast_error_no_product'));
                         }
                         return;
                     }

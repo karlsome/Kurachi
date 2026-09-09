@@ -12439,10 +12439,14 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       actionButton.style.opacity = '0.75';
     }
 
-    // Send to NC (Mini-PC). The result matters: sendtoNC skips the send while the
-    // cooldown is active, and marking the workflow complete after a skipped send would
-    // unlock the tabs for a program the machine never received.
-    const sendResult = await sendtoNC(currentSebanggo);
+    // The send itself stays fire-and-forget: the per-machine fetches are no-cors GETs
+    // with no timeout, so awaiting them would hang this handler on an unreachable
+    // mini-PC and leave the button disabled and the tabs locked. Only the SKIP needs
+    // to be known, and the cooldown decides that synchronously, before any request.
+    const sendResult = isSendToMachineCooldownActive()
+      ? { sent: false, reason: 'cooldown', secondsRemaining: getSendToMachineCooldownSeconds() }
+      : null;
+    if (!sendResult) sendtoNC(currentSebanggo);
     if (sendResult && sendResult.sent === false) {
       if (actionButton) {
         actionButton.disabled = false;
