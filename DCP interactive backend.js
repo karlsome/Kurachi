@@ -8524,6 +8524,12 @@ async function sendtoNC(selectedValue) {
     window.currentMachineGroup = Object.entries(machineIPMap).map(([name, ip]) => ({ name, ip }));
     console.log("💾 Stored currentMachineGroup:", window.currentMachineGroup);
 
+    // These machines are being sent to right now, so their individual buttons in the
+    // completed panel must lock too — otherwise Step 3 (or this production auto-send)
+    // could be followed straight away by a per-machine press pushing the same program.
+    Object.keys(machineIPMap).forEach(m => beginMachineSendCooldown(m));
+    updateSendToMachineCooldownUI();
+
     updateSendToMachineProgressMessage(`Sending to ${Object.keys(machineIPMap).length} machines`);
 
     // Send command to each machine
@@ -8583,6 +8589,7 @@ async function sendtoNC(selectedValue) {
   } else {
     // Single machine - original logic
     const singleMachineName = document.getElementById('process').value || 'UNKNOWN';
+    beginMachineSendCooldown(singleMachineName);
     const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce&mode=mass&machine=${singleMachineName}`;
 
     try {
@@ -17078,10 +17085,17 @@ if (manualSendModal) {
   //
   // droppedMachine may be null when the mini-PC IP could not be resolved to a name —
   // that keeps the legacy "any completion closes the overlay" behaviour.
-  function releaseCycleStopMachine(droppedMachine, allDoneToast, partialToast) {
-    // Nothing on screen means we are not tracking a stop (e.g. this is the echo of
-    // our own cancel button, which already closed the overlay). Ignore it.
-    if (!overlay.classList.contains('open')) return;
+  // onlyWhenOverlayOpen: set for CANCEL events, which our own cancel button echoes
+  // back after it has already closed the overlay — acting on that echo would raise a
+  // duplicate toast. Completions are never self-inflicted, so they still confirm.
+  function releaseCycleStopMachine(droppedMachine, allDoneToast, partialToast, onlyWhenOverlayOpen) {
+    if (!overlay.classList.contains('open')) {
+      if (onlyWhenOverlayOpen) return;
+      // Something else closed the overlay first (e.g. the /state poll). There is
+      // nothing to update, but the operator still gets confirmation.
+      if (typeof showToast === 'function' && allDoneToast) showToast(allDoneToast);
+      return;
+    }
 
     // A machine we never scheduled dropped out — leave our overlay alone.
     if (droppedMachine && activeCycleStopMachines.length > 0
@@ -17144,6 +17158,25 @@ if (manualSendModal) {
     breakWaitIps = [];
     breakWaitTitleIps = [];
     resetBreakStartButtonUI();
+  }
+
+  // One machine dropped out of the break wait: its schedule was cancelled on the
+  // mini-PC. Stop waiting on that machine but keep waiting for its siblings —
+  // closing the whole wait here would clear isBreakScheduledPending, and the
+  // sibling's later break_stop_completed would then be ignored, leaving it stopped
+  // for a break the tablet never started.
+  function releaseBreakWaitMachine(ip) {
+    if (!isBreakScheduledPending) return;
+    // No wait list (single machine / legacy fallback): behave as before.
+    if (breakWaitIps.length === 0) { closeBreakWaitOverlay(); return; }
+    if (breakWaitIps.indexOf(ip) < 0) return; // a machine we were not waiting on
+
+    breakWaitIps = breakWaitIps.filter(k => k !== ip);
+    if (breakWaitIps.length === 0) { closeBreakWaitOverlay(); return; }
+
+    setBreakWaitOverlayTitle(breakWaitIps);
+    // The remaining machines may already be holding.
+    tryStartBreakWhenAllStopped(true);
   }
 
   // Start the break only once EVERY machine we are waiting on is holding for BREAK.
@@ -17698,8 +17731,11 @@ if (manualSendModal) {
     });
 
     es.addEventListener('break_stop_cancelled', (e) => {
-      console.log("☕ [CNC GATEKEEPER] Break scheduled stop cancelled.");
-      closeBreakWaitOverlay();
+      console.log(`☕ [CNC GATEKEEPER] Break scheduled stop cancelled (${ip}).`);
+      if (machineStates[ip]) {
+        machineStates[ip].scheduled_break_stop = false;
+      }
+      releaseBreakWaitMachine(ip);
     });
 
     // 5. Preemptive Cycle Stop Completed -> Close Modal!
@@ -17730,7 +17766,8 @@ if (manualSendModal) {
       releaseCycleStopMachine(
         cancelledMachine,
         _tr('toast_cycle_stop_cancelled', "停止リクエストを取り消しました"),
-        cancelledMachine ? `↩️ ${cancelledMachine} の停止リクエストを取り消しました` : null
+        cancelledMachine ? `↩️ ${cancelledMachine} の停止リクエストを取り消しました` : null,
+        true
       );
     });
 

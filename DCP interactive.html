@@ -7284,6 +7284,13 @@
                                             const secs = Math.max(1, result.secondsRemaining || 1);
                                             if (window.showToast) window.showToast('⏳ 前回の送信の完了を待っています / Waiting for the previous send (' + secs + 's)', secs * 1000);
                                             setTimeout(function () {
+                                                // The operator may have closed the flow while we waited;
+                                                // closeAllStepModals clears this flag. Sending then would
+                                                // push a program after the scan was abandoned.
+                                                if (window.__materialScanMode !== 'production') {
+                                                    console.log('⏹️ Production send retry skipped: the scan was closed while waiting for the cooldown.');
+                                                    return;
+                                                }
                                                 if (lotTargets.length) window.__lotSendMachines = lotTargets;
                                                 attemptSend(false);
                                             }, secs * 1000 + 400);
