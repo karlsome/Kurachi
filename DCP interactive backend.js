@@ -12439,8 +12439,24 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       actionButton.style.opacity = '0.75';
     }
 
-    // Send to NC (Mini-PC) in background
-    sendtoNC(currentSebanggo);
+    // Send to NC (Mini-PC). The result matters: sendtoNC skips the send while the
+    // cooldown is active, and marking the workflow complete after a skipped send would
+    // unlock the tabs for a program the machine never received.
+    const sendResult = await sendtoNC(currentSebanggo);
+    if (sendResult && sendResult.sent === false) {
+      if (actionButton) {
+        actionButton.disabled = false;
+        actionButton.innerHTML = '<span>マシンに送信 / Send to machine</span>';
+        actionButton.style.opacity = '1';
+      }
+      if (typeof showToast === 'function') {
+        const wait = (sendResult.reason === 'cooldown' && sendResult.secondsRemaining)
+          ? `あと${sendResult.secondsRemaining}秒 / ${sendResult.secondsRemaining}s`
+          : '';
+        showToast(`⚠️ 未送信です。もう一度押してください ${wait} / NOT sent — press again`, 5000);
+      }
+      return;
+    }
 
     // Keep Step 3 button visible and show Resend button
     if (actionButton) {
@@ -16717,6 +16733,11 @@ if (manualSendModal) {
   // these may be pruned when they stop reporting it, so a mini-PC that has not yet
   // processed our request is never mistaken for one that has finished.
   let cycleStopSeenScheduled = [];
+  let breakWaitSeenScheduled = [];
+  // True while our own schedule_cycle_stop requests are still going out. A poll can
+  // legitimately report "not scheduled" in that window because the mini-PC has not
+  // been told yet, and acting on it would close the overlay just opened.
+  let cycleStopScheduleInFlight = false;
 
   // Mini-PC IPs that ACCEPTED a break stop, i.e. answered {"scheduled": true}. The
   // break timer waits for every one of these to reach a BREAK hold. A legacy mini-PC
@@ -17178,6 +17199,8 @@ if (manualSendModal) {
     isBreakScheduledPending = false;
     breakWaitIps = [];
     breakWaitTitleIps = [];
+    breakWaitSeenScheduled = [];
+    breakWaitAdopted = false;
     resetBreakStartButtonUI();
   }
 
@@ -17188,6 +17211,9 @@ if (manualSendModal) {
   // for a break the tablet never started.
   function releaseBreakWaitMachine(ip) {
     if (!isBreakScheduledPending) return;
+    // The wait list is still being built while our requests are in flight; an empty
+    // list there means "not known yet", not "single machine".
+    if (breakScheduleInFlight) return;
     // No wait list (single machine / legacy fallback): behave as before.
     if (breakWaitIps.length === 0) { closeBreakWaitOverlay(); return; }
     if (breakWaitIps.indexOf(ip) < 0) return; // a machine we were not waiting on
@@ -17367,6 +17393,7 @@ if (manualSendModal) {
     isCycleStopPending = true;
     cycleStopAdopted = false;
     cycleStopSeenScheduled = [];
+    cycleStopScheduleInFlight = true;
     // Wait on the machines we can actually reach: one whose IP does not resolve is
     // never sent a schedule_cycle_stop, so it must not sit on the overlay or the TV.
     openCycleStopOverlay(pairs.length > 0 ? pairs.map(pair => pair.machine).filter(Boolean) : targets);
@@ -17374,6 +17401,7 @@ if (manualSendModal) {
     // No mini-PC to talk to at all (no IP resolved). Nothing can be waiting, so do not
     // leave the operator staring at a modal that will never close on its own.
     if (pairs.length === 0) {
+      cycleStopScheduleInFlight = false;
       closeCycleStopOverlay();
       if (typeof showToast === 'function') {
         showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
@@ -17389,12 +17417,16 @@ if (manualSendModal) {
     const results = await Promise.all(
       pairs.map(pair => scheduleCycleStopOnMachine(pair.machine, pair.ip))
     );
+    cycleStopScheduleInFlight = false;
 
     // A machine that never accepted has no stop scheduled: trust its polls again and
     // stop showing it on the kiosk TV.
     pairs.forEach((pair, i) => {
       if (results[i]) return;
       delete cycleStopIntent[pair.ip];
+      // 2: the intent guard may have written a scheduled flag we now know is wrong;
+      // leaving it would make the next reconcile re-adopt a stop that never happened.
+      if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
       if (!pair.machine) return;
       const stillWaiting = activeCycleStopMachines.filter(m => m !== pair.machine);
       if (stillWaiting.length !== activeCycleStopMachines.length) {
@@ -17573,6 +17605,33 @@ if (manualSendModal) {
       }
     }
 
+    // Remember which awaited machines really hold a scheduled break stop.
+    breakWaitIps.forEach(k => {
+      if (machineStates[k] && machineStates[k].scheduled_break_stop
+        && breakWaitSeenScheduled.indexOf(k) < 0) {
+        breakWaitSeenScheduled.push(k);
+      }
+    });
+
+    // Drop a machine whose break stop was cancelled: it is neither scheduled any more
+    // nor holding for BREAK, so waiting on it would block the break forever. Only ones
+    // we have seen scheduled qualify, so a mini-PC that has not received our request
+    // yet is never mistaken for a cancelled one. The SSE handler normally does this;
+    // polling is the fallback when the event stream is down.
+    if (isBreakScheduledPending && !breakScheduleInFlight && breakWaitIps.length > 0) {
+      breakWaitIps.filter(k => {
+        if (breakWaitSeenScheduled.indexOf(k) < 0) return false;
+        const st = machineStates[k];
+        if (!st) return false;
+        if (st.scheduled_break_stop) return false;
+        if (st.holding && st.hold_reason === 'BREAK') return false; // already satisfied
+        return true;
+      }).forEach(k => {
+        console.warn(`☕ [CNC GATEKEEPER] ${getMachineNameFromIP(k) || k} is no longer scheduled for a break stop — stopping waiting on it.`);
+        releaseBreakWaitMachine(k);
+      });
+    }
+
     // The break timer starts only when every awaited machine has actually stopped.
     tryStartBreakWhenAllStopped(false);
 
@@ -17636,7 +17695,9 @@ if (manualSendModal) {
             true
           ));
       }
-    } else {
+    } else if (!cycleStopScheduleInFlight) {
+      // Never while our own requests are still going out: the machines have not been
+      // told yet, so "nothing scheduled" is not yet the truth.
       if (isCycleStopPending) {
         closeCycleStopOverlay();
       } else {
@@ -17735,8 +17796,11 @@ if (manualSendModal) {
     es.addEventListener('start_aborted', (e) => {
       try {
         const data = JSON.parse(e.data || '{}');
-        console.log("⚠️ [CNC GATEKEEPER] Start aborted within grace window:", data);
-        closeCycleStopOverlay();
+        console.log(`⚠️ [CNC GATEKEEPER] Start aborted within grace window (${ip}):`, data);
+        // The mini-PC clears scheduled_cycle_stop for THIS machine only, so release
+        // just this one — a sibling's stop is still scheduled and must keep waiting.
+        if (machineStates[ip]) machineStates[ip].scheduled_cycle_stop = false;
+        releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
         if (typeof closeCncCancelOverlay === 'function') closeCncCancelOverlay();
         if (typeof showToast === 'function') {
           showToast("⚠️ 開始直後の取消 (セットやり直し可) / Start cancelled before cut - Ready to restart");
@@ -17750,8 +17814,8 @@ if (manualSendModal) {
     es.addEventListener('cancel_detected', (e) => {
       try {
         const data = JSON.parse(e.data || '{}');
-        console.log("🚨 [CNC GATEKEEPER] Cancel detected:", data);
-        closeCycleStopOverlay();
+        console.log(`🚨 [CNC GATEKEEPER] Cancel detected (${ip}):`, data);
+        releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
         const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
         if (!breakActive && typeof openCncCancelOverlay === 'function') {
           openCncCancelOverlay();
@@ -17971,6 +18035,7 @@ if (manualSendModal) {
 
     breakWaitIps = [];
     breakWaitTitleIps = [];
+    breakWaitSeenScheduled = [];
     breakWaitAdopted = false;
     breakScheduleInFlight = true;
     openBreakWaitOverlay();
