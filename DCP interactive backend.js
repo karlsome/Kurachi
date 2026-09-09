@@ -16756,6 +16756,11 @@ if (manualSendModal) {
   // legitimately report "not scheduled" in that window because the mini-PC has not
   // been told yet, and acting on it would close the overlay just opened.
   let cycleStopScheduleInFlight = false;
+  // Likewise for cancels: a poll issued AFTER the cancel went out but before the
+  // mini-PC applied it still reports the stop as scheduled, and adopting that would
+  // pop the overlay back open and re-blink the kiosk TV.
+  let cycleStopCancelInFlight = false;
+  let breakCancelInFlight = false;
 
   // Mini-PC IPs that ACCEPTED a break stop, i.e. answered {"scheduled": true}. The
   // break timer waits for every one of these to reach a BREAK hold. A legacy mini-PC
@@ -16979,8 +16984,12 @@ if (manualSendModal) {
   // this module was silently failing and its messages never reached the operator.
   // Shadow it locally with one that resolves whichever the page actually provides.
   function showToast(msg, ms) {
-    if (typeof window.showAppToast === 'function') return window.showAppToast(msg, ms);
-    if (typeof window.showToast === 'function') return window.showToast(msg, ms);
+    const appToast = window.showAppToast;
+    if (typeof appToast === 'function') return appToast(msg, ms);
+    // Compare identity before delegating: if this declaration ever ends up on window
+    // (Annex B block hoisting), calling it here would recurse into itself.
+    const pageToast = window.showToast;
+    if (typeof pageToast === 'function' && pageToast !== showToast) return pageToast(msg, ms);
     console.log('[toast]', msg);
   }
 
@@ -17316,12 +17325,34 @@ if (manualSendModal) {
       // re-adopts the wait we just cancelled and re-opens the overlay.
       delete breakIntentAt[ip];
       if (machineStates[ip]) machineStates[ip].scheduled_break_stop = false;
-      const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
-      fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST', signal: sig1 })
-        .catch(() => {
-          const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
-          fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST', signal: sig2 }).catch(() => { });
-        });
+    });
+
+    // Read the reply the mini-PC already sends, so a cancel that never landed is
+    // reported rather than leaving the machine quietly scheduled to stop.
+    breakCancelInFlight = true;
+    Promise.all(allIps.map(async ip => {
+      for (const port of [5000, 8766]) {
+        try {
+          const res = await fetch(`http://${ip}:${port}/cancel_scheduled_break`, {
+            method: 'POST',
+            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined
+          });
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            if (!data || data.scheduled !== true) return true;
+          }
+        } catch (_) { }
+      }
+      console.warn(`☕ Break cancel NOT confirmed for ${getMachineNameFromIP(ip) || ip}.`);
+      return false;
+    })).then(results => {
+      breakCancelInFlight = false;
+      const unconfirmed = allIps
+        .filter((ip, i) => !results[i])
+        .map(ip => getMachineNameFromIP(ip) || ip);
+      if (unconfirmed.length > 0) {
+        showToast(`⚠️ ${unconfirmed.join(', ')} の休憩取り消しを確認できませんでした / Cancel not confirmed`);
+      }
     });
   });
 
@@ -17385,9 +17416,11 @@ if (manualSendModal) {
       if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
     });
 
+    cycleStopCancelInFlight = true;
     const results = await Promise.all(
       uniquePairs.map(pair => cancelCycleStopOnMachine(pair.machine, pair.ip))
     );
+    cycleStopCancelInFlight = false;
 
     const unconfirmed = uniquePairs
       .filter((pair, i) => !results[i])
@@ -17518,12 +17551,23 @@ if (manualSendModal) {
       }
     });
 
+    // Machines we could not reach at all (no IP) never made it into pairs.
+    const unreachable = targets.filter(m => !pairs.some(pair => pair.machine === m));
+    const refused = pairs.filter((pair, i) => !results[i] && pair.machine).map(pair => pair.machine);
+    const notStopping = unreachable.concat(refused);
+
     if (!results.some(Boolean)) {
       // Every machine was already cleared by name above; a group-wide clear here would
       // also wipe a sibling's unrelated stop call from the factory TV.
       closeCycleStopOverlay(clearedIndividually);
-      if (typeof showToast === 'function') {
-        showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
+      showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
+    } else if (notStopping.length > 0) {
+      // Partial failure: some machines are stopping, these are NOT. Saying nothing
+      // would leave the operator believing every machine they picked will stop.
+      showToast(`⚠️ ${notStopping.join(', ')} は停止しません / will NOT stop`);
+      if (activeCycleStopMachines.length > 0) {
+        overlay.dataset.targetMachine = activeCycleStopMachines.join(',');
+        setCycleStopOverlayTitle(activeCycleStopMachines);
       }
     } else if (activeCycleStopMachines.length > 0) {
       overlay.dataset.targetMachine = activeCycleStopMachines.join(',');
@@ -17669,7 +17713,7 @@ if (manualSendModal) {
     if (breakScheduled) {
       const scheduledBreakIps = Object.keys(machineStates)
         .filter(k => machineStates[k] && machineStates[k].scheduled_break_stop);
-      if (!isBreakScheduledPending) {
+      if (!isBreakScheduledPending && !breakCancelInFlight && !breakScheduleInFlight) {
         // Tablet reload / break started from another tablet: wait on exactly the
         // machines that report a scheduled break stop.
         breakWaitIps = scheduledBreakIps;
@@ -17746,7 +17790,7 @@ if (manualSendModal) {
         }
       });
 
-      if (!isCycleStopPending) {
+      if (!isCycleStopPending && !cycleStopCancelInFlight && !cycleStopScheduleInFlight) {
         isCycleStopPending = true;
         cycleStopAdopted = true;
         cycleStopSeenScheduled = scheduledMachines.slice();

@@ -7281,6 +7281,7 @@
                             const lotTargets = (typeof window.captureLotSendMachines === 'function')
                                 ? (window.captureLotSendMachines() || []).slice()
                                 : (window.__lotSendMachines || []).slice();
+                            const lotEpoch = window.__lotScanEpoch;
                             const attemptSend = function (mayWaitForCooldown) {
                                 if (typeof showToast === 'function') showToast(_t('toast_sending_machine'));
                                 return window.sendtoNC(seb).then(function (result) {
@@ -7296,6 +7297,14 @@
                                                     console.log('⏹️ Production send retry skipped: the scan was closed while waiting for the cooldown.');
                                                     return;
                                                 }
+                                                if (window.__lotScanEpoch !== lotEpoch) {
+                                                    console.log('⏹️ Production send retry skipped: a newer material scan started while waiting.');
+                                                    return;
+                                                }
+                                                // Re-assert the frozen target over ALL three globals sendtoNC
+                                                // consults, so a newer pick cannot redirect this send.
+                                                window.__lotCycleMachinesDone = [];
+                                                window.__lotScanMachine = null;
                                                 if (lotTargets.length) window.__lotSendMachines = lotTargets;
                                                 attemptSend(false);
                                             }, secs * 1000 + 400);
@@ -7794,6 +7803,10 @@
                         return;
                     }
                     window.__materialScanMode = 'production';
+                    // Bumped per scan. A send queued behind the cooldown captures this
+                    // and bails if a newer scan started, so it cannot be redirected to
+                    // whatever machine that newer scan picked.
+                    window.__lotScanEpoch = (window.__lotScanEpoch || 0) + 1;
                     // Clear the current cycle so we can pick any machine
                     if (window.__lotCycleMachinesDone) {
                         window.__lotCycleMachinesDone = [];
