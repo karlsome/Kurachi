@@ -13592,9 +13592,18 @@ if (manualSendModal) {
   // send after __lotScanMachine / __lotCycleMachinesDone are reset on the way there.
   window.captureLotSendMachines = function () {
     const done = (window.__lotCycleMachinesDone || []).slice();
-    window.__lotSendMachines = done.length
+    const live = done.length
       ? done
       : (window.__lotScanMachine ? [window.__lotScanMachine] : []);
+    // Capture only when there IS something live to capture. proceedAfterMachineDone
+    // freezes and then clears both globals, so a second call (the production Step 3
+    // override makes one) would otherwise overwrite the freeze with an empty list and
+    // send the lot to every machine in the group.
+    if (live.length) {
+      window.__lotSendMachines = live;
+    } else if (!Array.isArray(window.__lotSendMachines)) {
+      window.__lotSendMachines = [];
+    }
     console.log('🎯 [captureLotSendMachines] Sending this cycle to:', window.__lotSendMachines);
     return window.__lotSendMachines;
   };
@@ -18008,8 +18017,18 @@ if (manualSendModal) {
       }
     }));
 
-    breakWaitIps = acceptedIps;
     breakScheduleInFlight = false;
+
+    // The operator may have pressed 休憩を取り消す while these requests were in flight.
+    // closeBreakWaitOverlay cleared the pending flag, so honour that instead of
+    // starting a break they cancelled.
+    if (!isBreakScheduledPending) {
+      console.log('☕ [CNC GATEKEEPER] Break request was cancelled while scheduling — not starting.');
+      breakWaitIps = [];
+      return;
+    }
+
+    breakWaitIps = acceptedIps;
 
     if (acceptedIps.length === 0) {
       console.warn("No Mini-PC accepted schedule_break_stop (all legacy or offline). Starting local break immediately.");
