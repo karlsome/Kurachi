@@ -6284,6 +6284,7 @@
             let stopCallInterval = null;
             let stopCallCancelTimer = null;
             let stopCallScanner = null;
+            let stopCallPulseInterval = null;
 
             function getStopCallData() {
                 try {
@@ -6308,6 +6309,10 @@
             window.clearStopCallData = function () {
                 localStorage.removeItem(breakPrefix + 'stopCallData');
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
+                localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
+                if (typeof stopCallStopPulse === 'function') {
+                    stopCallStopPulse();
+                }
             };
 
             // ---- Tracks the machine chosen in the per-call picker ----
@@ -6382,6 +6387,10 @@
             function closeStopCallOverlay() {
                 clearInterval(stopCallInterval);
                 clearTimeout(stopCallCancelTimer);
+                if (stopCallPulseInterval) {
+                    clearInterval(stopCallPulseInterval);
+                    stopCallPulseInterval = null;
+                }
                 stopStopCallScanner();
                 const ov = document.getElementById('stopCallOverlay');
                 if (ov) ov.classList.remove('open');
@@ -6405,21 +6414,36 @@
                 ips.forEach(async ip => {
                     const url = `http://${ip}:5000/request?callStop=${callStopValue}`;
                     try {
-                        await fetch(url, { method: 'GET', mode: 'no-cors' });
-                        console.log(`callStop=${callStopValue} sent to ${ip}`);
+                        const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+                        const timeoutId = ctrl ? setTimeout(() => ctrl.abort(), 950) : null;
+                        await fetch(url, { method: 'GET', mode: 'no-cors', signal: ctrl ? ctrl.signal : undefined });
+                        if (timeoutId) clearTimeout(timeoutId);
                     } catch (e) {
-                        console.error(`Error sending callStop=${callStopValue} to ${ip}:`, e);
-                        console.log('Fetch failed, trying fallback method...');
-                        try {
-                            const newTab = window.open(url, '_blank');
-                            setTimeout(() => {
-                                if (newTab) newTab.close();
-                            }, 3000);
-                        } catch (fallbackErr) {
-                            console.error('Fallback also failed:', fallbackErr);
-                        }
+                        // Silent catch on network timeout/abort during recurring pulse
                     }
                 });
+            }
+
+            function startCallStopPulse(specificIP = null) {
+                if (stopCallPulseInterval) {
+                    clearInterval(stopCallPulseInterval);
+                    stopCallPulseInterval = null;
+                }
+                // Send immediately on start
+                sendCNCCallStop(1, specificIP);
+                // Pulse callStop=1 once per second to keep machine paused without locking
+                stopCallPulseInterval = setInterval(() => {
+                    sendCNCCallStop(1, specificIP);
+                }, 1000);
+            }
+
+            function stopCallStopPulse(specificIP = null) {
+                if (stopCallPulseInterval) {
+                    clearInterval(stopCallPulseInterval);
+                    stopCallPulseInterval = null;
+                }
+                // Send callStop=0 to release pause cleanly
+                sendCNCCallStop(0, specificIP);
             }
 
             function startStopCall(pickedMachine) {
@@ -6427,14 +6451,19 @@
                 stopCallPickedMachine = pickedMachine || null;
                 const startEpoch = Date.now();
                 localStorage.setItem(breakPrefix + 'activeStopCallStart', String(startEpoch));
+                if (pickedMachine) {
+                    localStorage.setItem(breakPrefix + 'activeStopCallMachine', pickedMachine);
+                } else {
+                    localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
+                }
                 openStopCallOverlay(startEpoch);
                 notifyStopCall('activate', 'leader', pickedMachine || null);
                 if (typeof logTabletAction === 'function') {
                     logTabletAction('Stop call activated (Leader called)', 'in-progress', { machine: pickedMachine || 'primary' });
                 }
-                // Stop only the picked machine (or all if not grouped)
+                // Pause only the picked machine (or all if not grouped) by pulsing callStop=1 every 1 second
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
-                sendCNCCallStop(1, pickedIP);
+                startCallStopPulse(pickedIP);
             }
             function cancelStopCall() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
@@ -6443,13 +6472,14 @@
                 const pickedMachine = stopCallPickedMachine;
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
+                localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
+                stopCallStopPulse(pickedIP);
                 closeStopCallOverlay();
                 notifyStopCall('clear', 'leader', pickedMachine || null);
                 if (typeof logTabletAction === 'function') {
                     logTabletAction('Stop call canceled within grace period', 'Reset', { machine: pickedMachine || 'primary' });
                 }
                 showToast(_t('toast_call_canceled'));
-                sendCNCCallStop(0, pickedIP);
                 stopCallPickedMachine = null;
             }
             function beginStopCallUnlock() {
@@ -6545,7 +6575,7 @@
                 
                 const pickedMachine = stopCallPickedMachine;
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
-                sendCNCCallStop(0, pickedIP);
+                stopCallStopPulse(pickedIP);
                 
                 const data = getStopCallData();
                 data.records.push(pendingStopCallRecord);
@@ -6560,18 +6590,20 @@
                 pendingStopCallRecord = null;
                 stopCallPickedMachine = null;
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
+                localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
                 closeStopCallOverlay();
                 notifyStopCall('clear', 'leader', pickedMachine || null);
-                if (typeof window.unlockCNCGatekeeper === 'function') {
-                    window.unlockCNCGatekeeper();
-                }
                 showToast(_t('toast_leader_recorded'));
             }
             function resumeStopCallIfActive() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
                 if (raw) {
+                    const savedMachine = localStorage.getItem(breakPrefix + 'activeStopCallMachine') || null;
+                    stopCallPickedMachine = savedMachine;
+                    const pickedIP = savedMachine ? (groupedMachineIPs[savedMachine] || null) : null;
                     openStopCallOverlay(parseInt(raw, 10));
-                    notifyStopCall('activate', 'leader'); // re-assert to the TV after a reload/server restart
+                    notifyStopCall('activate', 'leader', savedMachine || null); // re-assert to the TV after a reload/server restart
+                    startCallStopPulse(pickedIP);
                 }
                 const matTarget = localStorage.getItem(breakPrefix + 'activeCall_material');
                 const menuWrap = document.getElementById('callMenuWrapper');

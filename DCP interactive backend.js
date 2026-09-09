@@ -18130,17 +18130,6 @@ if (manualSendModal) {
         if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
         }
-        if (typeof notifyStopCall === 'function') {
-          notifyStopCall('clear', 'leader');
-        } else if (typeof window.notifyStopCall === 'function') {
-          window.notifyStopCall('clear', 'leader');
-        }
-        const raw = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeStopCallStart');
-        if (raw && typeof finalizeStopCall === 'function') {
-          finalizeStopCall();
-        } else if (typeof closeStopCallOverlay === 'function') {
-          closeStopCallOverlay();
-        }
       }
     });
 
