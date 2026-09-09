@@ -16667,23 +16667,6 @@ if (manualSendModal) {
     return null;
   }
 
-  function getMachineNameFromIP(ip) {
-    if (!ip) return null;
-    if (typeof groupedMachineIPs !== 'undefined') {
-      const match = Object.entries(groupedMachineIPs).find(([_, mIp]) => mIp === ip);
-      if (match) return match[0];
-    }
-    const mEl = document.getElementById('process');
-    const ipInput = document.getElementById('ipInfo');
-    if (mEl && ipInput && ipInput.value) {
-      const ms = mEl.value.split(',').map(m => m.trim());
-      const ips = ipInput.value.split(',').map(i => i.replace(/"/g, '').trim());
-      const idx = ips.indexOf(ip);
-      if (idx >= 0 && ms[idx]) return ms[idx];
-    }
-    return null;
-  }
-
   function getAllCNCMiniPCIPs() {
     const ips = new Set();
     if (typeof groupedMachineIPs !== 'undefined' && Object.keys(groupedMachineIPs).length > 0) {
@@ -16921,45 +16904,34 @@ if (manualSendModal) {
 
   function openCycleStopOverlay(targetMachine) {
     activeCycleStopMachine = targetMachine || null;
-    overlay.dataset.targetMachine = targetMachine || '';
     updateCncOverlayTranslations();
     if (targetMachine) {
       const cycleTitle = overlay.querySelector('[data-i18n="cnc_cycle_stop_title"]');
       if (cycleTitle) {
-        const isBoth = (targetMachine === 'BOTH' || targetMachine === '__ALL__' || targetMachine === 'ALL');
-        const displayLabel = isBoth
-          ? (getGroupedMachineList().join(' + ') || 'BOTH')
-          : targetMachine;
-        cycleTitle.textContent = `【${displayLabel}】 ` + _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
+        cycleTitle.textContent = `【${targetMachine}】 ` + _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
       }
     }
     const wasOpen = overlay.classList.contains('open');
     overlay.classList.add('open');
     if (!wasOpen) {
-      const isBoth = (!targetMachine || targetMachine === 'BOTH' || targetMachine === '__ALL__' || targetMachine === 'ALL');
-      const specificTarget = isBoth ? null : targetMachine;
       if (typeof notifyStopCall === 'function') {
-        notifyStopCall('activate', 'stop', specificTarget);
+        notifyStopCall('activate', 'stop');
       } else if (typeof window.notifyStopCall === 'function') {
-        window.notifyStopCall('activate', 'stop', specificTarget);
+        window.notifyStopCall('activate', 'stop');
       }
     }
   }
 
-  function closeCycleStopOverlay(targetMachine) {
+  function closeCycleStopOverlay() {
     const wasOpen = overlay.classList.contains('open');
     overlay.classList.remove('open');
     isCycleStopPending = false;
-    const targetToClear = (targetMachine !== undefined) ? targetMachine : activeCycleStopMachine;
-    delete overlay.dataset.targetMachine;
     activeCycleStopMachine = null;
     if (wasOpen) {
-      const isBoth = (!targetToClear || targetToClear === 'BOTH' || targetToClear === '__ALL__' || targetToClear === 'ALL');
-      const specificTarget = isBoth ? null : targetToClear;
       if (typeof notifyStopCall === 'function') {
-        notifyStopCall('clear', 'stop', specificTarget);
+        notifyStopCall('clear', 'stop');
       } else if (typeof window.notifyStopCall === 'function') {
-        window.notifyStopCall('clear', 'stop', specificTarget);
+        window.notifyStopCall('clear', 'stop');
       }
     }
   }
@@ -16999,41 +16971,50 @@ if (manualSendModal) {
     });
   });
 
-  // Handle Cancel Button on Overlay (User changes mind on 🛑 for the specific machine or both)
+  // Handle Cancel Button on Overlay (User changes mind on 🛑 for the specific machine)
   document.getElementById('btnCancelCycleStop')?.addEventListener('click', () => {
     const targetMachine = activeCycleStopMachine;
-    closeCycleStopOverlay(targetMachine);
+    closeCycleStopOverlay();
     if (typeof showToast === 'function') {
       showToast(_tr('toast_cycle_stop_cancelled', "停止リクエストを取り消しました"));
     }
 
-    const isBoth = (!targetMachine || targetMachine === 'BOTH' || targetMachine === '__ALL__' || targetMachine === 'ALL');
-    const targetIps = isBoth ? getAllCNCMiniPCIPs() : [getCNCMiniPCIP(targetMachine)].filter(Boolean);
-
-    targetIps.forEach(ip => {
+    const ip = getCNCMiniPCIP(targetMachine);
+    if (ip) {
       const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
       fetch(`http://${ip}:5000/cancel_scheduled_cycle_stop`, { method: 'POST', signal: sig1 })
         .catch(() => {
           const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
           fetch(`http://${ip}:8766/cancel_scheduled_cycle_stop`, { method: 'POST', signal: sig2 }).catch(() => { });
         });
-    });
+    }
   });
 
   async function proceedWithCycleStop(targetMachine) {
     activeCycleStopMachine = targetMachine || null;
-    const isBoth = (!targetMachine || targetMachine === 'BOTH' || targetMachine === '__ALL__' || targetMachine === 'ALL');
-    const targetIps = isBoth ? getAllCNCMiniPCIPs() : [getCNCMiniPCIP(targetMachine)].filter(Boolean);
-
+    const ip = getCNCMiniPCIP(targetMachine);
     isCycleStopPending = true;
     openCycleStopOverlay(targetMachine);
 
-    if (targetIps.length > 0) {
-      let anyScheduled = false;
-      await Promise.all(targetIps.map(async (ip) => {
-        let scheduled = false;
+    if (ip) {
+      let scheduled = false;
+      try {
+        const res = await fetch(`http://${ip}:5000/schedule_cycle_stop`, {
+          method: 'POST',
+          signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.scheduled) {
+            scheduled = true;
+            console.log(`🛑 Scheduled cycle stop response for ${targetMachine || ip} (:5000):`, data);
+          }
+        }
+      } catch (_) { }
+
+      if (!scheduled) {
         try {
-          const res = await fetch(`http://${ip}:5000/schedule_cycle_stop`, {
+          const res = await fetch(`http://${ip}:8766/schedule_cycle_stop`, {
             method: 'POST',
             signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
           });
@@ -17041,36 +17022,15 @@ if (manualSendModal) {
             const data = await res.json();
             if (data && data.scheduled) {
               scheduled = true;
-              anyScheduled = true;
-              console.log(`🛑 Scheduled cycle stop response for ${ip} (:5000):`, data);
+              console.log(`🛑 Scheduled cycle stop response for ${targetMachine || ip} (:8766):`, data);
             }
           }
         } catch (_) { }
+      }
 
-        if (!scheduled) {
-          try {
-            const res = await fetch(`http://${ip}:8766/schedule_cycle_stop`, {
-              method: 'POST',
-              signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
-            });
-            if (res.ok) {
-              const data = await res.json();
-              if (data && data.scheduled) {
-                scheduled = true;
-                anyScheduled = true;
-                console.log(`🛑 Scheduled cycle stop response for ${ip} (:8766):`, data);
-              }
-            }
-          } catch (_) { }
-        }
-
-        if (!scheduled) {
-          console.warn(`Legacy Mini-PC for ${ip} (no schedule_cycle_stop response within 2.5s) or offline.`);
-        }
-      }));
-
-      if (!anyScheduled) {
-        closeCycleStopOverlay(targetMachine);
+      if (!scheduled) {
+        console.warn(`Legacy Mini-PC for ${targetMachine || ip} (no schedule_cycle_stop response within 2.5s) or offline.`);
+        closeCycleStopOverlay();
         if (typeof showToast === 'function') {
           showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
         }
@@ -17078,72 +17038,19 @@ if (manualSendModal) {
     }
   }
 
-  // Dedicated Machine Picker Modal for Cycle Stop (🛑)
-  function chooseCycleStopMachine(machines, onPick, onCancel) {
-    const existing = document.getElementById('cncCycleStopPickerModal');
-    if (existing) existing.remove();
-
-    const ov = document.createElement('div');
-    ov.id = 'cncCycleStopPickerModal';
-    ov.style.cssText = 'position:fixed;inset:0;z-index:100100;background:rgba(10,15,26,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
-
-    const card = document.createElement('div');
-    card.style.cssText = 'background:#fff;border-radius:16px;max-width:360px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:inherit;position:relative;';
-
-    const btnStyle = 'width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:pointer;';
-
-    const machineBtns = (machines || []).map(m => {
-      return '<button data-m="' + m + '" style="' + btnStyle + '">' + m + '</button>';
-    }).join('');
-
-    const bothBtn = '<button data-m="BOTH" style="' + btnStyle + '">BOTH</button>';
-
-    const closeBtn = document.createElement('button');
-    closeBtn.innerHTML = '✕';
-    closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.4rem;font-weight:bold;color:#667085;cursor:pointer;padding:0;line-height:1;z-index:10;';
-    closeBtn.setAttribute('aria-label', 'Close');
-
-    function closeModal() {
-      ov.remove();
-    }
-
-    closeBtn.onclick = (e) => {
-      e.stopPropagation();
-      closeModal();
-      if (onCancel) onCancel();
-    };
-
-    ov.addEventListener('click', (e) => {
-      if (e.target === ov) {
-        closeModal();
-        if (onCancel) onCancel();
-      }
-    });
-
-    card.innerHTML =
-      '<div style="font-size:1.05rem;font-weight:800;color:#101828;margin-bottom:4px;">機械を選択 / Select machine</div>' +
-      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin-bottom:14px;">停止する機械を選択 / Machine to stop</div>' +
-      machineBtns + bothBtn;
-
-    card.appendChild(closeBtn);
-    ov.appendChild(card);
-    document.body.appendChild(ov);
-
-    card.querySelectorAll('[data-m]').forEach(b => {
-      b.onclick = () => {
-        const m = b.getAttribute('data-m');
-        closeModal();
-        if (onPick) onPick(m);
-      };
-    });
-  }
-
   // Handle Floating 🛑 Button Click -> Choose machine if grouped, otherwise direct
   stopBtn.addEventListener('click', async () => {
     const machines = getGroupedMachineList();
-    if (machines && machines.length > 1) {
-      chooseCycleStopMachine(machines, (pickedMachine) => {
+    if (machines && machines.length > 1 && typeof window.chooseMachine === 'function') {
+      window.chooseMachine(machines, (pickedMachine) => {
         proceedWithCycleStop(pickedMachine);
+      }, {
+        title: '機械を選択 / Select machine',
+        subtitle: '停止する機械を選択 / Machine to stop',
+        allowCancel: true,
+        onCancel: () => {
+          // cancelled by operator
+        }
       });
     } else {
       const singleM = (machines && machines[0]) || (document.getElementById('process')?.value) || null;
@@ -17224,28 +17131,9 @@ if (manualSendModal) {
     // 3. Preemptive cycle stop scheduled status for 🛑 Button
     const cycleStopScheduled = states.some(s => s && s.scheduled_cycle_stop);
     if (cycleStopScheduled) {
-      const scheduledMachines = [];
-      Object.entries(machineStates).forEach(([key, s]) => {
-        if (s && s.scheduled_cycle_stop) {
-          const m = s.machine_id || getMachineNameFromIP(key) || key;
-          if (m && !scheduledMachines.includes(m)) scheduledMachines.push(m);
-        }
-      });
-      const target = scheduledMachines.length === 1
-        ? scheduledMachines[0]
-        : (scheduledMachines.length > 1 ? 'BOTH' : null);
-
       if (!isCycleStopPending) {
         isCycleStopPending = true;
-        openCycleStopOverlay(target);
-      } else if ((activeCycleStopMachine === 'BOTH' || activeCycleStopMachine === '__ALL__') && scheduledMachines.length === 1) {
-        // One machine finished, only one left!
-        activeCycleStopMachine = scheduledMachines[0];
-        overlay.dataset.targetMachine = scheduledMachines[0];
-        const cycleTitle = overlay.querySelector('[data-i18n="cnc_cycle_stop_title"]');
-        if (cycleTitle) {
-          cycleTitle.textContent = `【${scheduledMachines[0]}】 ` + _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
-        }
+        openCycleStopOverlay();
       }
     } else {
       if (isCycleStopPending) {
@@ -17417,53 +17305,13 @@ if (manualSendModal) {
       closeBreakWaitOverlay();
     });
 
-    // 5. Preemptive Cycle Stop Completed
+    // 5. Preemptive Cycle Stop Completed -> Close Modal!
     es.addEventListener('cycle_stop_completed', (e) => {
-      console.log(`🛑 [CNC GATEKEEPER] Cycle stop executed cleanly on ${ip}`);
-      if (machineStates[ip]) {
-        machineStates[ip].scheduled_cycle_stop = false;
+      console.log("🛑 [CNC GATEKEEPER] Cycle stop executed cleanly.");
+      closeCycleStopOverlay();
+      if (typeof showToast === 'function') {
+        showToast(_tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"));
       }
-      const finishedMachine = getMachineNameFromIP(ip) || activeCycleStopMachine;
-      if (finishedMachine && finishedMachine !== 'BOTH' && finishedMachine !== '__ALL__') {
-        if (typeof notifyStopCall === 'function') {
-          notifyStopCall('clear', 'stop', finishedMachine);
-        } else if (typeof window.notifyStopCall === 'function') {
-          window.notifyStopCall('clear', 'stop', finishedMachine);
-        }
-      }
-
-      const anyStillScheduled = Object.values(machineStates).some(s => s && s.scheduled_cycle_stop);
-      if (!anyStillScheduled) {
-        closeCycleStopOverlay(finishedMachine);
-        if (typeof showToast === 'function') {
-          showToast(_tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"));
-        }
-      } else {
-        const remainingMachines = Object.entries(machineStates)
-          .filter(([_, s]) => s && s.scheduled_cycle_stop)
-          .map(([k, s]) => s.machine_id || getMachineNameFromIP(k) || k)
-          .filter(Boolean);
-        if (remainingMachines.length > 0) {
-          activeCycleStopMachine = remainingMachines.length === 1 ? remainingMachines[0] : 'BOTH';
-          overlay.dataset.targetMachine = activeCycleStopMachine;
-          const cycleTitle = overlay.querySelector('[data-i18n="cnc_cycle_stop_title"]');
-          if (cycleTitle) {
-            const displayLabel = remainingMachines.length === 1 ? remainingMachines[0] : remainingMachines.join(' + ');
-            cycleTitle.textContent = `【${displayLabel}】 ` + _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
-          }
-        }
-        if (typeof showToast === 'function') {
-          showToast(`✅ ${finishedMachine || ''} サイクル完了停止しました`);
-        }
-      }
-    });
-
-    es.addEventListener('cycle_stop_cancelled', (e) => {
-      console.log(`🛑 [CNC GATEKEEPER] Cycle stop cancelled on ${ip}`);
-      if (machineStates[ip]) {
-        machineStates[ip].scheduled_cycle_stop = false;
-      }
-      reconcileGroupedGatekeeperStates();
     });
 
     // 6. Gatekeeper Unlocked
