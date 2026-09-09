@@ -8466,10 +8466,17 @@ async function sendtoNC(selectedValue) {
     }
 
     // Send only to the machine(s) assigned in this lot-change cycle (each grouped
-    // machine has its own lot timeline). Falls back to the single chosen machine.
+    // machine has its own lot timeline). Falls back to the single chosen machine, and
+    // then to the assignment frozen by captureLotSendMachines() — the live globals are
+    // reset on the way to Step 3, so without that freeze the filter below would be
+    // skipped and the send would fan out to every machine in the group.
     const _chosen = (window.__lotCycleMachinesDone && window.__lotCycleMachinesDone.length)
       ? window.__lotCycleMachinesDone
-      : (window.__lotScanMachine ? [window.__lotScanMachine] : null);
+      : (window.__lotScanMachine
+        ? [window.__lotScanMachine]
+        : ((window.__lotSendMachines && window.__lotSendMachines.length)
+          ? window.__lotSendMachines
+          : null));
     if (_chosen) {
       const filtered = {};
       _chosen.forEach(m => { if (machineIPMap[m]) filtered[m] = machineIPMap[m]; });
@@ -11455,6 +11462,7 @@ function resetAllSteps() {
   window.__lotScanMachine = null;
   window.__pendingPrevLot = null;
   window.__lotCycleMachinesDone = [];
+  window.__lotSendMachines = [];
 
   // Clear product details cache
   currentProductDetails = {
@@ -11632,6 +11640,7 @@ document.getElementById('startStep1Scan').addEventListener('click', function (ev
         window.__lotScanMachine = null;
         window.__pendingPrevLot = null;
         window.__lotCycleMachinesDone = [];
+        window.__lotSendMachines = [];
         console.log('✅ New session started:', newSessionID);
       } else {
         console.warn('⚠️ Failed to generate sessionID');
@@ -13524,13 +13533,27 @@ if (manualSendModal) {
         done: done,
         allowDone: done.length > 0,
         // "Done → Send": stop adding machines and go to Step 3 (send).
-        onDone: function () { if (typeof showStep3Modal === 'function') showStep3Modal(); }
+        onDone: function () {
+          window.captureLotSendMachines();
+          if (typeof showStep3Modal === 'function') showStep3Modal();
+        }
       });
   };
 
   // After a machine's lot+photo+shots: if grouped machines remain unhandled this
   // cycle, re-open the chooser (handled machines greyed) so the operator does the
   // other machine; otherwise continue to Step 3 (send).
+  // Freeze which machines this lot cycle assigned, so Step 3 still knows where to
+  // send after __lotScanMachine / __lotCycleMachinesDone are reset on the way there.
+  window.captureLotSendMachines = function () {
+    const done = (window.__lotCycleMachinesDone || []).slice();
+    window.__lotSendMachines = done.length
+      ? done
+      : (window.__lotScanMachine ? [window.__lotScanMachine] : []);
+    console.log('🎯 [captureLotSendMachines] Sending this cycle to:', window.__lotSendMachines);
+    return window.__lotSendMachines;
+  };
+
   window.proceedAfterMachineDone = function () {
     console.log('🟣 [proceedAfterMachineDone] called');
     const grouped = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1);
@@ -13553,6 +13576,7 @@ if (manualSendModal) {
       }
     }
     console.log('🟣 [proceedAfterMachineDone] All machines done (or not grouped) → showStep3Modal');
+    window.captureLotSendMachines();
     window.__lotScanMachine = null;
     window.__lotCycleMachinesDone = [];
     if (typeof showStep3Modal === 'function') showStep3Modal();

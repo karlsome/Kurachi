@@ -7324,6 +7324,7 @@
                     window.__materialScanMode = null;
                     window.__lotScanMachine = null;
                     window.__lotCycleMachinesDone = [];
+                    window.__lotSendMachines = [];
                     const el = document.getElementById('step2Modal');
                     if (el) {
                         el.classList.remove('as-overlay');
@@ -7346,6 +7347,7 @@
                     window.__materialScanMode = null;
                     window.__lotScanMachine = null;
                     window.__lotCycleMachinesDone = [];
+                    window.__lotSendMachines = [];
                     return origStep1.apply(this, arguments);
                 };
             }
@@ -7744,6 +7746,9 @@
                     if (window.__lotCycleMachinesDone) {
                         window.__lotCycleMachinesDone = [];
                     }
+                    // Drop the previous cycle's frozen send target so this scan cannot
+                    // inherit it — this scan decides its own machine.
+                    window.__lotSendMachines = [];
                     
                     if (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1) {
                         window.chooseScanMachine(() => {
