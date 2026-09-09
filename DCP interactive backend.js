@@ -17344,7 +17344,9 @@ if (manualSendModal) {
     }
 
     isCycleStopPending = true;
-    openCycleStopOverlay(targets);
+    // Wait on the machines we can actually reach: one whose IP does not resolve is
+    // never sent a schedule_cycle_stop, so it must not sit on the overlay or the TV.
+    openCycleStopOverlay(pairs.length > 0 ? pairs.map(pair => pair.machine).filter(Boolean) : targets);
 
     // No mini-PC to talk to at all (no IP resolved). Nothing can be waiting, so do not
     // leave the operator staring at a modal that will never close on its own.
@@ -17520,15 +17522,27 @@ if (manualSendModal) {
     // 2. Preemptive break scheduled status for Breaktime Button
     const breakScheduled = states.some(s => s && s.scheduled_break_stop);
     if (breakScheduled) {
+      const scheduledBreakIps = Object.keys(machineStates)
+        .filter(k => machineStates[k] && machineStates[k].scheduled_break_stop);
       if (!isBreakScheduledPending) {
         // Tablet reload / break started from another tablet: wait on exactly the
         // machines that report a scheduled break stop.
-        breakWaitIps = Object.keys(machineStates)
-          .filter(k => machineStates[k] && machineStates[k].scheduled_break_stop);
+        breakWaitIps = scheduledBreakIps;
         openBreakWaitOverlay();
         setBreakWaitOverlayTitle(breakWaitIps);
+      } else if (!breakScheduleInFlight) {
+        // pollGatekeeperState reconciles after EACH machine, so the list built above
+        // can be missing a sibling the poll had not reached yet. Absorb it, or the
+        // break would start while that machine is still cutting.
+        const newlySeen = scheduledBreakIps.filter(k => breakWaitIps.indexOf(k) < 0);
+        if (newlySeen.length > 0) {
+          breakWaitIps = breakWaitIps.concat(newlySeen);
+          setBreakWaitOverlayTitle(breakWaitIps);
+        }
       }
-    } else if (isBreakScheduledPending && !breakScheduled) {
+    } else if (isBreakScheduledPending && !breakScheduled && !breakScheduleInFlight) {
+      // Never while our own schedule requests are still going out: the machines have
+      // not been told yet, so "nothing scheduled" is not yet the truth.
       const anyHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
       if (!anyHolding) {
         closeBreakWaitOverlay();
@@ -17541,18 +17555,34 @@ if (manualSendModal) {
     // 3. Preemptive cycle stop scheduled status for 🛑 Button
     const cycleStopScheduled = states.some(s => s && s.scheduled_cycle_stop);
     if (cycleStopScheduled) {
+      // Display only: name the machine(s) actually waiting to stop, so the factory TV
+      // blinks exactly those (tablet reload / stop started from another tablet).
+      const scheduledMachines = [];
+      Object.entries(machineStates).forEach(([key, s]) => {
+        if (s && s.scheduled_cycle_stop) {
+          const m = getMachineNameFromIP(key);
+          if (m && !scheduledMachines.includes(m)) scheduledMachines.push(m);
+        }
+      });
+
       if (!isCycleStopPending) {
         isCycleStopPending = true;
-        // Display only: name the machine(s) actually waiting to stop, so the factory TV
-        // blinks exactly those (tablet reload / stop started from another tablet).
-        const scheduledMachines = [];
-        Object.entries(machineStates).forEach(([key, s]) => {
-          if (s && s.scheduled_cycle_stop) {
-            const m = getMachineNameFromIP(key);
-            if (m && !scheduledMachines.includes(m)) scheduledMachines.push(m);
-          }
-        });
         openCycleStopOverlay(scheduledMachines);
+      } else {
+        // The poll reconciles after EACH machine, so a sibling can show up a moment
+        // later. Without this the overlay would close on the first machine's
+        // completion while the second is still waiting to stop.
+        const newlySeen = scheduledMachines.filter(m => !activeCycleStopMachines.includes(m));
+        if (newlySeen.length > 0) {
+          activeCycleStopMachines = activeCycleStopMachines.concat(newlySeen);
+          overlay.dataset.targetMachine = activeCycleStopMachines.join(',');
+          setCycleStopOverlayTitle(activeCycleStopMachines);
+          if (typeof notifyStopCall === 'function') {
+            notifyStopCall('activate', 'stop', newlySeen.join(','));
+          } else if (typeof window.notifyStopCall === 'function') {
+            window.notifyStopCall('activate', 'stop', newlySeen.join(','));
+          }
+        }
       }
     } else {
       if (isCycleStopPending) {
@@ -17716,7 +17746,9 @@ if (manualSendModal) {
         hold_reason: 'BREAK',
         scheduled_break_stop: false
       });
-      if (!tryStartBreakWhenAllStopped(true)) {
+      if (tryStartBreakWhenAllStopped(true)) return;
+
+      if (isBreakScheduledPending) {
         const stillWaiting = (breakWaitIps.length > 0 ? breakWaitIps : [])
           .filter(k => {
             const st = machineStates[k];
@@ -17726,6 +17758,20 @@ if (manualSendModal) {
           .filter(Boolean);
         if (stillWaiting.length > 0 && typeof showToast === 'function') {
           showToast(`☕ ${stillWaiting.join(', ')} のサイクル完了を待っています`);
+        }
+        return;
+      }
+
+      // We are not waiting on anything, yet this machine has stopped FOR a break —
+      // the wait was closed by a cancel, an unlock or a reload. Never leave it locked
+      // with no break running; this is what the handler did before the wait existed.
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
+      if (!localStorage.getItem(pfx + 'activeBreakStart') && !isRecentlyFinished && typeof startBreak === 'function') {
+        console.warn('☕ [CNC GATEKEEPER] Machine holding for BREAK with no break running — starting it.');
+        startBreak();
+        if (typeof showToast === 'function') {
+          showToast(_tr('toast_break_started_cnc_stopped', "☕ 休憩を開始しました (機械停止中)"));
         }
       }
     });
