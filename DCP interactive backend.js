@@ -16698,6 +16698,16 @@ if (manualSendModal) {
   // Machines this tablet currently has a cycle stop scheduled on.
   // One entry for a single pick, every grouped machine for the BOTH pick.
   let activeCycleStopMachines = [];
+  // True when a wait was ADOPTED from the mini-PCs (tablet reload, or a stop another
+  // tablet scheduled) rather than started here. Only an adopted wait absorbs machines
+  // the poller reveals later; a wait the operator started must stay on exactly the
+  // machine they picked, or Cancel would kill a sibling's independent stop.
+  let cycleStopAdopted = false;
+  let breakWaitAdopted = false;
+  // Machines observed actually holding a scheduled cycle stop during this wait. Only
+  // these may be pruned when they stop reporting it, so a mini-PC that has not yet
+  // processed our request is never mistaken for one that has finished.
+  let cycleStopSeenScheduled = [];
 
   // Mini-PC IPs that ACCEPTED a break stop, i.e. answered {"scheduled": true}. The
   // break timer waits for every one of these to reach a BREAK hold. A legacy mini-PC
@@ -17067,6 +17077,8 @@ if (manualSendModal) {
     overlay.classList.remove('open');
     isCycleStopPending = false;
     activeCycleStopMachines = [];
+    cycleStopAdopted = false;
+    cycleStopSeenScheduled = [];
     delete overlay.dataset.targetMachine;
     if (wasOpen) {
       // Clear the same machine(s) we activated, so a sibling machine's own call stays up.
@@ -17344,6 +17356,8 @@ if (manualSendModal) {
     }
 
     isCycleStopPending = true;
+    cycleStopAdopted = false;
+    cycleStopSeenScheduled = [];
     // Wait on the machines we can actually reach: one whose IP does not resolve is
     // never sent a schedule_cycle_stop, so it must not sit on the overlay or the TV.
     openCycleStopOverlay(pairs.length > 0 ? pairs.map(pair => pair.machine).filter(Boolean) : targets);
@@ -17528,9 +17542,10 @@ if (manualSendModal) {
         // Tablet reload / break started from another tablet: wait on exactly the
         // machines that report a scheduled break stop.
         breakWaitIps = scheduledBreakIps;
+        breakWaitAdopted = true;
         openBreakWaitOverlay();
         setBreakWaitOverlayTitle(breakWaitIps);
-      } else if (!breakScheduleInFlight) {
+      } else if (breakWaitAdopted && !breakScheduleInFlight) {
         // pollGatekeeperState reconciles after EACH machine, so the list built above
         // can be missing a sibling the poll had not reached yet. Absorb it, or the
         // break would start while that machine is still cutting.
@@ -17565,16 +17580,29 @@ if (manualSendModal) {
         }
       });
 
+      // Remember which of our machines really are holding a scheduled stop, so the
+      // prune below can tell "finished" from "has not received our request yet".
+      scheduledMachines.forEach(m => {
+        if (activeCycleStopMachines.includes(m) && !cycleStopSeenScheduled.includes(m)) {
+          cycleStopSeenScheduled.push(m);
+        }
+      });
+
       if (!isCycleStopPending) {
         isCycleStopPending = true;
+        cycleStopAdopted = true;
+        cycleStopSeenScheduled = scheduledMachines.slice();
         openCycleStopOverlay(scheduledMachines);
-      } else {
+      } else if (cycleStopAdopted) {
         // The poll reconciles after EACH machine, so a sibling can show up a moment
         // later. Without this the overlay would close on the first machine's
-        // completion while the second is still waiting to stop.
+        // completion while the second is still waiting to stop. Only an adopted wait
+        // does this — absorbing into an operator's own pick would let Cancel cancel a
+        // stop this tablet never asked for.
         const newlySeen = scheduledMachines.filter(m => !activeCycleStopMachines.includes(m));
         if (newlySeen.length > 0) {
           activeCycleStopMachines = activeCycleStopMachines.concat(newlySeen);
+          cycleStopSeenScheduled = cycleStopSeenScheduled.concat(newlySeen);
           overlay.dataset.targetMachine = activeCycleStopMachines.join(',');
           setCycleStopOverlayTitle(activeCycleStopMachines);
           if (typeof notifyStopCall === 'function') {
@@ -17583,6 +17611,21 @@ if (manualSendModal) {
             window.notifyStopCall('activate', 'stop', newlySeen.join(','));
           }
         }
+      }
+
+      // Prune machines that HAVE been seen scheduled and now report otherwise: they
+      // finished. The SSE handlers normally do this, but polling is the fallback when
+      // the event stream is down, and without it the kiosk TV keeps blinking a machine
+      // that already stopped.
+      if (isCycleStopPending) {
+        cycleStopSeenScheduled
+          .filter(m => activeCycleStopMachines.includes(m) && !scheduledMachines.includes(m))
+          .forEach(m => releaseCycleStopMachine(
+            m,
+            _tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"),
+            `✅ ${m} サイクル完了停止しました`,
+            true
+          ));
       }
     } else {
       if (isCycleStopPending) {
@@ -17919,6 +17962,7 @@ if (manualSendModal) {
 
     breakWaitIps = [];
     breakWaitTitleIps = [];
+    breakWaitAdopted = false;
     breakScheduleInFlight = true;
     openBreakWaitOverlay();
 

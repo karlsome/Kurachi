@@ -7275,7 +7275,12 @@
                             // The machines this lot cycle assigned. If the cooldown makes us
                             // wait, anything that resets the step modals meanwhile would clear
                             // them, and the retry would fan out to the whole group again.
-                            const lotTargets = (window.__lotSendMachines || []).slice();
+                            // Freeze through captureLotSendMachines so the manual-lot and
+                            // already-added-lot routes — which reach Step 3 without going
+                            // through proceedAfterMachineDone — are covered too.
+                            const lotTargets = (typeof window.captureLotSendMachines === 'function')
+                                ? (window.captureLotSendMachines() || []).slice()
+                                : (window.__lotSendMachines || []).slice();
                             const attemptSend = function (mayWaitForCooldown) {
                                 if (window.showToast) window.showToast(_t('toast_sending_machine'), 2000);
                                 return window.sendtoNC(seb).then(function (result) {
