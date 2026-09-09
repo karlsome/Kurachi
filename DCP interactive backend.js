@@ -8604,8 +8604,8 @@ async function sendtoNC(selectedValue) {
       hideSendToMachineProgress();
       sendToMachineCooldownEndTime = 0;
       updateSendToMachineCooldownUI();
-      if (typeof showToast === 'function') {
-        showToast('✅ 送信完了 / Send to machine completed');
+      if (typeof window.showAppToast === 'function') {
+        window.showAppToast('✅ 送信完了 / Send to machine completed');
       }
       return { sent: true, machines: [singleMachineName] };
     } catch (error) {
@@ -8620,8 +8620,8 @@ async function sendtoNC(selectedValue) {
       hideSendToMachineProgress();
       sendToMachineCooldownEndTime = 0;
       updateSendToMachineCooldownUI();
-      if (typeof showToast === 'function') {
-        showToast('✅ 送信完了 / Send to machine completed');
+      if (typeof window.showAppToast === 'function') {
+        window.showAppToast('✅ 送信完了 / Send to machine completed');
       }
       return { sent: true, machines: [singleMachineName] };
     }
@@ -9020,6 +9020,9 @@ function showPopup() {
       const key = `${uniquePrefix}sendtoNCButtonisPressed`;
       localStorage.setItem(key, 'true'); // Save the value with the unique key
 
+      // This prompt is a general reminder, not a lot-cycle send: drop any frozen
+      // per-machine target so it is not silently narrowed to one machine.
+      window.__lotSendMachines = [];
       sendtoNC(); // Call the sendtoNC function
       console.log("sendtoNC function called");
       document.body.removeChild(popup);
@@ -16751,6 +16754,8 @@ if (manualSendModal) {
   // what we asked for. Anything issued AFTER the intent is trusted as-is — the
   // mini-PC stays the source of truth.
   const cycleStopIntent = {};
+  // Same idea for the break stop: when it was requested on each mini-PC IP.
+  const breakIntentAt = {};
   const CYCLE_STOP_ALL = '__BOTH__';
 
   // Normalise a 🛑 target (a machine name, the BOTH sentinel, an array, or null)
@@ -16789,11 +16794,13 @@ if (manualSendModal) {
         const idx = ms.indexOf(specificMachine);
         if (idx >= 0 && ips[idx]) return ips[idx];
       }
-      // A NAMED machine that cannot be resolved must not fall through to the primary
-      // IP below: that would stop a different machine than the operator picked, while
-      // the overlay and the factory TV named theirs.
-      console.warn(`🛑 No mini-PC IP resolved for ${specificMachine} — not guessing.`);
-      return null;
+      // Refuse to guess only where guessing could hit the WRONG machine. On a single
+      // machine page there is nothing to confuse it with, so the fallback below still
+      // applies — a stray space in #process must not disable the cycle stop.
+      if (getGroupedMachineList().length > 1) {
+        console.warn(`🛑 No mini-PC IP resolved for ${specificMachine} — not guessing.`);
+        return null;
+      }
     }
     if (typeof groupedMachineIPs !== 'undefined' && typeof primaryMachineName !== 'undefined' && groupedMachineIPs[primaryMachineName]) {
       return groupedMachineIPs[primaryMachineName];
@@ -17445,7 +17452,13 @@ if (manualSendModal) {
     // A machine that never accepted has no stop scheduled: trust its polls again and
     // stop showing it on the kiosk TV.
     pairs.forEach((pair, i) => {
-      if (results[i]) return;
+      if (results[i]) {
+        // Seed the flag the mini-PC now holds. Without it a /state response already in
+        // flight for a SIBLING can reconcile against a machineStates entry that has
+        // not caught up, and close the overlay just opened.
+        machineStates[pair.ip] = Object.assign({}, machineStates[pair.ip], { scheduled_cycle_stop: true });
+        return;
+      }
       delete cycleStopIntent[pair.ip];
       // 2: the intent guard may have written a scheduled flag we now know is wrong;
       // leaving it would make the next reconcile re-adopt a stop that never happened.
@@ -17531,7 +17544,9 @@ if (manualSendModal) {
         proceedWithCycleStop(pickedMachine);
       });
     } else {
-      const singleM = (machines && machines[0]) || (document.getElementById('process')?.value) || null;
+      const singleM = (machines && machines[0])
+        || (document.getElementById('process')?.value || '').trim()
+        || null;
       proceedWithCycleStop(singleM);
     }
   });
@@ -17556,6 +17571,13 @@ if (manualSendModal) {
       && !!state.scheduled_cycle_stop !== intent.scheduled) {
       console.log(`⏱️ [CNC GATEKEEPER] Ignoring pre-request scheduled_cycle_stop from ${key}.`);
       state = Object.assign({}, state, { scheduled_cycle_stop: intent.scheduled });
+    }
+
+    const breakAt = breakIntentAt[key];
+    if (breakAt && requestStartedAt && requestStartedAt < breakAt && !state.scheduled_break_stop
+      && !(state.holding && state.hold_reason === 'BREAK')) {
+      console.log(`⏱️ [CNC GATEKEEPER] Ignoring pre-request scheduled_break_stop from ${key}.`);
+      state = Object.assign({}, state, { scheduled_break_stop: true });
     }
 
     machineStates[key] = state;
@@ -18101,7 +18123,10 @@ if (manualSendModal) {
 
       if (scheduled) {
         acceptedIps.push(ip);
+        breakIntentAt[ip] = Date.now();
+        machineStates[ip] = Object.assign({}, machineStates[ip], { scheduled_break_stop: true });
       } else {
+        delete breakIntentAt[ip];
         console.warn(`☕ Legacy Mini-PC at ${ip} (no schedule_break_stop response within 2.5s) or offline — not waiting on it.`);
       }
     }));
@@ -18112,8 +18137,20 @@ if (manualSendModal) {
     // closeBreakWaitOverlay cleared the pending flag, so honour that instead of
     // starting a break they cancelled.
     if (!isBreakScheduledPending) {
-      console.log('☕ [CNC GATEKEEPER] Break request was cancelled while scheduling — not starting.');
+      console.log('☕ [CNC GATEKEEPER] Break request was cancelled while scheduling — undoing.');
       breakWaitIps = [];
+      // Their cancel was answered before our schedule landed, so those machines would
+      // stop for a break nobody wants. Cancel again on the ones that accepted.
+      acceptedIps.forEach(ip => {
+        delete breakIntentAt[ip];
+        if (machineStates[ip]) machineStates[ip].scheduled_break_stop = false;
+        const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+        fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST', signal: sig1 })
+          .catch(() => {
+            const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+            fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST', signal: sig2 }).catch(() => { });
+          });
+      });
       return;
     }
 
