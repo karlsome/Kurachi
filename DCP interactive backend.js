@@ -12449,12 +12449,13 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
         actionButton.innerHTML = '<span>マシンに送信 / Send to machine</span>';
         actionButton.style.opacity = '1';
       }
-      if (typeof showToast === 'function') {
-        const wait = (sendResult.reason === 'cooldown' && sendResult.secondsRemaining)
-          ? `あと${sendResult.secondsRemaining}秒 / ${sendResult.secondsRemaining}s`
-          : '';
-        showToast(`⚠️ 未送信です。もう一度押してください ${wait} / NOT sent — press again`, 5000);
-      }
+      const _wait = (sendResult.reason === 'cooldown' && sendResult.secondsRemaining)
+        ? `あと${sendResult.secondsRemaining}秒 / ${sendResult.secondsRemaining}s`
+        : '';
+      const _warn = `⚠️ 未送信です。もう一度押してください ${_wait} / NOT sent — press again`;
+      if (typeof window.showAppToast === 'function') window.showAppToast(_warn, 5000);
+      else if (typeof window.showToast === 'function') window.showToast(_warn, 5000);
+      else window.alert(_warn);
       return;
     }
 
@@ -16795,6 +16796,11 @@ if (manualSendModal) {
         const idx = ms.indexOf(specificMachine);
         if (idx >= 0 && ips[idx]) return ips[idx];
       }
+      // A NAMED machine that cannot be resolved must not fall through to the primary
+      // IP below: that would stop a different machine than the operator picked, while
+      // the overlay and the factory TV named theirs.
+      console.warn(`🛑 No mini-PC IP resolved for ${specificMachine} — not guessing.`);
+      return null;
     }
     if (typeof groupedMachineIPs !== 'undefined' && typeof primaryMachineName !== 'undefined' && groupedMachineIPs[primaryMachineName]) {
       return groupedMachineIPs[primaryMachineName];
@@ -16946,6 +16952,16 @@ if (manualSendModal) {
     }
   `;
   document.head.appendChild(style);
+
+  // The page's toast helper is exported only as window.showAppToast; a bare
+  // `showToast` is not a global, so every `typeof showToast === 'function'` check in
+  // this module was silently failing and its messages never reached the operator.
+  // Shadow it locally with one that resolves whichever the page actually provides.
+  function showToast(msg, ms) {
+    if (typeof window.showAppToast === 'function') return window.showAppToast(msg, ms);
+    if (typeof window.showToast === 'function') return window.showToast(msg, ms);
+    console.log('[toast]', msg);
+  }
 
   // Helper for i18n translation lookup
   function _tr(key, fallback) {
@@ -17815,6 +17831,7 @@ if (manualSendModal) {
       try {
         const data = JSON.parse(e.data || '{}');
         console.log(`🚨 [CNC GATEKEEPER] Cancel detected (${ip}):`, data);
+        if (machineStates[ip]) machineStates[ip].scheduled_cycle_stop = false;
         releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
         const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
         if (!breakActive && typeof openCncCancelOverlay === 'function') {
