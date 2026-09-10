@@ -20542,7 +20542,11 @@ app.post("/api/noda-requests", async (req, res) => {
             });
           }
 
-          // Handle inventory transactions when changing from completed to pending/in-progress
+          const userName = req.body.userName || 'Freya Admin';
+          let inventoryReversed = false;
+          let inventoryCompleted = false;
+
+          // Handle inventory transactions when changing from completed to pending/in-progress/paused
           if (currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'paused' || newStatus === 'in-progress')) {
             console.log(`🔄 Reversing inventory transaction for line item ${data.lineNumber}: ${currentStatus} → ${newStatus}`);
             
@@ -20551,19 +20555,7 @@ app.post("/api/noda-requests", async (req, res) => {
               { $match: { 背番号: currentLineItem.背番号 } },
               {
                 $addFields: {
-                  timeStampDate: {
-                    $cond: {
-                      if: { $type: "$timeStamp" },
-                      then: {
-                        $cond: {
-                          if: { $eq: [{ $type: "$timeStamp" }, "string"] },
-                          then: { $dateFromString: { dateString: "$timeStamp" } },
-                          else: "$timeStamp"
-                        }
-                      },
-                      else: new Date()
-                    }
-                  }
+                  timeStampDate: buildInventoryTimeStampDateExpression()
                 }
               },
               { $sort: { timeStampDate: -1 } },
@@ -20572,27 +20564,22 @@ app.post("/api/noda-requests", async (req, res) => {
 
             if (inventoryResults.length > 0) {
               const currentInventory = inventoryResults[0];
-              const quantity = currentLineItem.quantity;
+              const quantity = Number(currentLineItem.quantity) || 0;
 
-              // Calculate reversed inventory quantities
-              // When reversing a picking operation (completed → pending/in-progress), we need to:
-              // 1. Restore the physical quantity (items go back to stock)
-              // 2. Restore the reserved quantity (items become reserved again for this request)
-              // 3. Keep available quantity unchanged (items are reserved, not available for others)
-              
-              // From the original flow:
-              // - When reserved: physical unchanged, reserved increased, available decreased
-              // - When picked: physical decreased, reserved decreased, available unchanged
-              // - When reversing pick: physical increased, reserved increased, available unchanged
-              
-              const newPhysicalQuantity = (currentInventory.physicalQuantity || 0) + quantity;
-              const newReservedQuantity = (currentInventory.reservedQuantity || 0) + quantity;
-              const newAvailableQuantity = currentInventory.availableQuantity || 0; // Available stays the same
+              const currentPhysical = Number(currentInventory.physicalQuantity || currentInventory.runningQuantity || 0);
+              const currentReserved = Number(currentInventory.reservedQuantity || 0);
+              const currentAvailable = Number(currentInventory.availableQuantity || currentInventory.runningQuantity || 0);
+
+              const newPhysicalQuantity = currentPhysical + quantity;
+              const newReservedQuantity = currentReserved + quantity;
+              const newAvailableQuantity = currentAvailable; // Available stays the same
 
               // Create reverse inventory transaction
+              const reverseTraceId = `freyaAdmin-reverse-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
               const reverseTransaction = {
                 背番号: currentLineItem.背番号,
                 品番: currentLineItem.品番,
+                工場: currentInventory.工場 || currentLineItem.工場 || bulkRequest.factory || '1',
                 timeStamp: new Date(),
                 Date: new Date().toISOString().split('T')[0],
                 
@@ -20603,20 +20590,96 @@ app.post("/api/noda-requests", async (req, res) => {
                 
                 // Legacy field for compatibility
                 runningQuantity: newAvailableQuantity,
-                lastQuantity: currentInventory.physicalQuantity || 0,
+                lastQuantity: currentPhysical,
                 
                 action: `Admin Status Reversal (+${quantity} physical, +${quantity} reserved)`,
                 source: `Freya Admin - Status Change (${currentStatus} → ${newStatus})`,
                 requestId: requestId,
                 bulkRequestNumber: bulkRequest.requestNumber,
                 lineNumber: data.lineNumber,
-                note: `Reversed picking transaction for request ${bulkRequest.requestNumber} line ${data.lineNumber}. Status changed from ${currentStatus} to ${newStatus}. Physical: ${currentInventory.physicalQuantity || 0} → ${newPhysicalQuantity}, Reserved: ${currentInventory.reservedQuantity || 0} → ${newReservedQuantity}`
+                note: `Reversed picking transaction for request ${bulkRequest.requestNumber} line ${data.lineNumber}. Status changed from ${currentStatus} to ${newStatus}. Physical: ${currentPhysical} → ${newPhysicalQuantity}, Reserved: ${currentReserved} → ${newReservedQuantity}`,
+                
+                _insertSource: `nodaServer-createInventoryTransaction-${reverseTraceId}`,
+                _insertedAt: new Date().toISOString(),
+                _insertedBy: 'nodaServer.js:createInventoryTransaction'
               };
 
               await inventoryCollection.insertOne(reverseTransaction);
+              inventoryReversed = true;
               console.log(`✅ Inventory transaction reversed for ${currentLineItem.背番号}: +${quantity} units`);
             } else {
               console.warn(`⚠️ No inventory record found for ${currentLineItem.背番号}`);
+            }
+          }
+
+          // Handle inventory transactions when changing from pending/paused to completed
+          if (currentStatus !== 'completed' && newStatus === 'completed') {
+            console.log(`📦 [DEBUG] Recording picking completion inventory transaction for line item ${data.lineNumber}: ${currentStatus} → ${newStatus}, 背番号: '${currentLineItem.背番号}'`);
+            
+            // Get current inventory state
+            const inventoryResults = await inventoryCollection.aggregate([
+              { $match: { 背番号: currentLineItem.背番号 } },
+              {
+                $addFields: {
+                  timeStampDate: buildInventoryTimeStampDateExpression()
+                }
+              },
+              { $sort: { timeStampDate: -1 } },
+              { $limit: 1 }
+            ]).toArray();
+
+            console.log(`📦 [DEBUG] inventoryResults found: ${inventoryResults.length}`);
+
+            if (inventoryResults.length > 0) {
+              const currentInventory = inventoryResults[0];
+              const quantity = Number(currentLineItem.quantity) || 0;
+
+              const currentPhysical = Number(currentInventory.physicalQuantity || currentInventory.runningQuantity || 0);
+              const currentReserved = Number(currentInventory.reservedQuantity || 0);
+              const currentAvailable = Number(currentInventory.availableQuantity || currentInventory.runningQuantity || 0);
+
+              const newPhysicalQuantity = Math.max(0, currentPhysical - quantity);
+              const newReservedQuantity = Math.max(0, currentReserved - quantity);
+              const newAvailableQuantity = newPhysicalQuantity - newReservedQuantity;
+
+              console.log(`📦 [DEBUG] Quantities - Current: phys=${currentPhysical}, res=${currentReserved} | New: phys=${newPhysicalQuantity}, res=${newReservedQuantity}`);
+
+              // Create picking completion inventory transaction
+              const completionTraceId = `freyaAdmin-picking-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+              const completionTransaction = {
+                背番号: currentLineItem.背番号,
+                品番: currentLineItem.品番,
+                工場: currentInventory.工場 || currentLineItem.工場 || bulkRequest.factory || '1',
+                timeStamp: new Date(),
+                Date: new Date().toISOString().split('T')[0],
+                
+                // Two-stage inventory fields
+                physicalQuantity: newPhysicalQuantity,
+                reservedQuantity: newReservedQuantity,
+                availableQuantity: newAvailableQuantity,
+                
+                // Legacy field for compatibility
+                runningQuantity: newPhysicalQuantity,
+                lastQuantity: currentPhysical,
+                
+                action: `Picking Completed (-${quantity})`,
+                source: `Freya Admin - Status Change (${currentStatus} → ${newStatus})`,
+                requestId: requestId,
+                bulkRequestNumber: bulkRequest.requestNumber,
+                lineNumber: data.lineNumber,
+                note: `Admin completed picking transaction for request ${bulkRequest.requestNumber} line ${data.lineNumber} by ${userName || 'admin'}. Status changed from ${currentStatus} to ${newStatus}. Physical: ${currentPhysical} → ${newPhysicalQuantity}, Reserved: ${currentReserved} → ${newReservedQuantity}`,
+                
+                _insertSource: `nodaServer-createInventoryTransaction-${completionTraceId}`,
+                _insertedAt: new Date().toISOString(),
+                _insertedBy: 'nodaServer.js:createInventoryTransaction',
+                _providedAction: `Picking Completed (-${quantity})`
+              };
+
+              const insertRes = await inventoryCollection.insertOne(completionTransaction);
+              inventoryCompleted = true;
+              console.log(`✅ [DEBUG] Inventory picking transaction inserted! ID: ${insertRes.insertedId}, acknowledged: ${insertRes.acknowledged}`);
+            } else {
+              console.warn(`⚠️ [DEBUG] No inventory record found for ${currentLineItem.背番号}`);
             }
           }
 
@@ -20626,6 +20689,12 @@ app.post("/api/noda-requests", async (req, res) => {
             "lineItems.$.updatedAt": new Date(),
             updatedAt: new Date()
           };
+
+          // Set completion fields if moving to completed status
+          if (currentStatus !== 'completed' && newStatus === 'completed') {
+            updateFields["lineItems.$.completedAt"] = new Date();
+            updateFields["lineItems.$.completedBy"] = userName;
+          }
 
           // Clear completion fields if moving away from completed status
           if (currentStatus === 'completed' && newStatus !== 'completed') {
@@ -20719,12 +20788,186 @@ app.post("/api/noda-requests", async (req, res) => {
             previousStatus: currentStatus,
             newStatus: data.status,
             bulkStatus: newBulkStatus,
-            inventoryReversed: currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'paused' || newStatus === 'in-progress')
+            inventoryReversed: inventoryReversed,
+            inventoryCompleted: inventoryCompleted
           });
 
         } catch (error) {
           console.error("Error in updateLineItemStatus:", error);
           res.status(500).json({ error: "Failed to update line item status", details: error.message });
+        }
+        break;
+
+      case 'batchUpdateLineItemStatus':
+        try {
+          if (!requestId || !data || !data.status) {
+            return res.status(400).json({ error: "Request ID and target status are required" });
+          }
+
+          const targetStatus = data.status;
+          const bulkRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
+          if (!bulkRequest) {
+            return res.status(404).json({ error: "Bulk request not found" });
+          }
+
+          if (bulkRequest.requestType !== 'bulk') {
+            return res.status(400).json({ error: "This operation is only for bulk requests" });
+          }
+
+          const userName = req.body.userName || 'Freya Admin';
+          const lineItems = bulkRequest.lineItems || [];
+
+          // Determine which line items to update
+          let targetLineNumbers = [];
+          if (data.lineNumbers === 'all' || !Array.isArray(data.lineNumbers)) {
+            targetLineNumbers = lineItems
+              .filter(item => item.status !== targetStatus && item.status !== 'in-progress')
+              .map(item => item.lineNumber);
+          } else {
+            targetLineNumbers = data.lineNumbers.map(Number);
+          }
+
+          // Filter line items that are eligible to update
+          const eligibleItems = lineItems.filter(item => {
+            if (!targetLineNumbers.includes(item.lineNumber)) return false;
+            if (item.status === targetStatus) return false;
+            if (item.status === 'in-progress' && targetStatus === 'completed') return false;
+            return true;
+          });
+
+          if (eligibleItems.length === 0) {
+            return res.json({
+              success: true,
+              message: "No eligible line items to update",
+              updatedCount: 0,
+              updatedLineNumbers: []
+            });
+          }
+
+          const updatedLineNumbers = [];
+          const now = new Date();
+
+          for (const item of eligibleItems) {
+            const currentStatus = item.status;
+            const quantity = Number(item.quantity) || 0;
+
+            // Handle completing from non-completed
+            if (currentStatus !== 'completed' && targetStatus === 'completed') {
+              // Get current inventory state
+              const inventoryResults = await inventoryCollection.aggregate([
+                { $match: { 背番号: item.背番号 } },
+                {
+                  $addFields: {
+                    timeStampDate: buildInventoryTimeStampDateExpression()
+                  }
+                },
+                { $sort: { timeStampDate: -1 } },
+                { $limit: 1 }
+              ]).toArray();
+
+              if (inventoryResults.length > 0) {
+                const currentInventory = inventoryResults[0];
+                const currentPhysical = Number(currentInventory.physicalQuantity || currentInventory.runningQuantity || 0);
+                const currentReserved = Number(currentInventory.reservedQuantity || 0);
+                const currentAvailable = Number(currentInventory.availableQuantity || currentInventory.runningQuantity || 0);
+
+                const newPhysicalQuantity = Math.max(0, currentPhysical - quantity);
+                const newReservedQuantity = Math.max(0, currentReserved - quantity);
+                const newAvailableQuantity = newPhysicalQuantity - newReservedQuantity;
+
+                const completionTraceId = `freyaAdmin-batch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+                const completionTransaction = {
+                  背番号: item.背番号,
+                  品番: item.品番,
+                  工場: currentInventory.工場 || item.工場 || bulkRequest.factory || '1',
+                  timeStamp: new Date(),
+                  Date: new Date().toISOString().split('T')[0],
+                  
+                  // Two-stage inventory fields
+                  physicalQuantity: newPhysicalQuantity,
+                  reservedQuantity: newReservedQuantity,
+                  availableQuantity: newAvailableQuantity,
+                  
+                  // Legacy field for compatibility
+                  runningQuantity: newPhysicalQuantity,
+                  lastQuantity: currentPhysical,
+                  
+                  action: `Picking Completed (-${quantity})`,
+                  source: `Freya Admin - Batch Status Change (${currentStatus} → ${targetStatus})`,
+                  requestId: requestId,
+                  bulkRequestNumber: bulkRequest.requestNumber,
+                  lineNumber: item.lineNumber,
+                  note: `Admin batch completed picking transaction for request ${bulkRequest.requestNumber} line ${item.lineNumber} by ${userName}. Status changed from ${currentStatus} to ${targetStatus}. Physical: ${currentPhysical} → ${newPhysicalQuantity}, Reserved: ${currentReserved} → ${newReservedQuantity}`,
+                  
+                  _insertSource: `nodaServer-createInventoryTransaction-${completionTraceId}`,
+                  _insertedAt: new Date().toISOString(),
+                  _insertedBy: 'nodaServer.js:createInventoryTransaction',
+                  _providedAction: `Picking Completed (-${quantity})`
+                };
+
+                await inventoryCollection.insertOne(completionTransaction);
+              }
+            }
+
+            // Update item in lineItems array
+            item.status = targetStatus;
+            item.updatedAt = now;
+            if (targetStatus === 'completed') {
+              item.completedAt = now;
+              item.completedBy = userName;
+            } else if (currentStatus === 'completed') {
+              item.completedAt = null;
+              item.completedBy = null;
+            }
+            updatedLineNumbers.push(item.lineNumber);
+          }
+
+          // Check bulk request status
+          const allCompleted = lineItems.every(item => item.status === 'completed');
+          const anyInProgress = lineItems.some(item => item.status === 'in-progress');
+          const anyPaused = lineItems.some(item => item.status === 'paused');
+          const anyCompleted = lineItems.some(item => item.status === 'completed');
+
+          let newBulkStatus = bulkRequest.status;
+          let bulkUpdateFields = { 
+            lineItems: lineItems,
+            updatedAt: now 
+          };
+
+          if (allCompleted) {
+            newBulkStatus = 'completed';
+            bulkUpdateFields.status = 'completed';
+            bulkUpdateFields.completedAt = now;
+          } else if (anyInProgress) {
+            newBulkStatus = 'in-progress';
+            bulkUpdateFields.status = 'in-progress';
+          } else if (anyPaused) {
+            newBulkStatus = 'paused';
+            bulkUpdateFields.status = 'paused';
+          } else if (anyCompleted) {
+            newBulkStatus = 'in-progress';
+            bulkUpdateFields.status = 'in-progress';
+          } else {
+            newBulkStatus = 'pending';
+            bulkUpdateFields.status = 'pending';
+          }
+
+          await requestsCollection.updateOne(
+            withActiveRequestFilter({ _id: new ObjectId(requestId) }),
+            { $set: bulkUpdateFields }
+          );
+
+          res.json({
+            success: true,
+            message: `Successfully updated ${updatedLineNumbers.length} line items to ${targetStatus}`,
+            updatedCount: updatedLineNumbers.length,
+            updatedLineNumbers: updatedLineNumbers,
+            bulkStatus: newBulkStatus
+          });
+
+        } catch (error) {
+          console.error("Error in batchUpdateLineItemStatus:", error);
+          res.status(500).json({ error: "Failed to batch update line item statuses", details: error.message });
         }
         break;
 
