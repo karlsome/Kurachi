@@ -4776,14 +4776,14 @@ function showLotPhotoPopup(lotNumber, anchorEl) {
   const pop = document.createElement('div');
   pop.id = 'lotPhotoPopup';
   pop.style.cssText = `
-    position: fixed; z-index: 100050; width: 210px;
+    position: fixed; z-index: 100050; width: 220px;
     background: #fff; border: 1px solid var(--border); border-radius: 12px;
     box-shadow: 0 12px 32px rgba(16,24,40,0.18); padding: 10px;
     display: flex; flex-direction: column; gap: 8px;`;
   pop.innerHTML = `
-    <div style="font-size:0.74rem;font-weight:800;color:var(--text-main);display:flex;justify-content:space-between;align-items:center;">
-      <span>📷 ${lotNumber}</span>
-      <span id="lotPopupClose" style="cursor:pointer;color:var(--text-muted);font-size:1rem;">✕</span>
+    <div style="font-size:0.74rem;font-weight:800;color:var(--text-main);display:flex;justify-content:space-between;align-items:center;gap:6px;">
+      <span style="min-width:0;word-break:break-word;">📷 ${typeof formatLotTagLabel === 'function' ? formatLotTagLabel(lotNumber) : lotNumber}</span>
+      <span id="lotPopupClose" style="cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;flex-shrink:0;padding:2px;">✕</span>
     </div>
     <img id="lotPopupThumb" src="${photo ? photo.blobUrl : ''}" alt="lot photo"
          style="width:100%;height:160px;object-fit:contain;border-radius:8px;background:var(--bg-inset);cursor:zoom-in;">
@@ -4822,6 +4822,41 @@ function showLotPhotoPopup(lotNumber, anchorEl) {
     window.addEventListener('resize', positionLotPopup);
   }, 0);
 }
+
+// Format label for lot tag (e.g. "2323-1 (6shots)" or "2323-1 (in-progress)")
+function formatLotTagLabel(lotNumber) {
+  if (!lotNumber) return '';
+  let records = [];
+  if (typeof window.getAllLotRecords === 'function') {
+    records = window.getAllLotRecords().filter(r => r && r.lotNumber === lotNumber);
+  }
+
+  const lang = (typeof getCurrentLanguage === 'function' ? getCurrentLanguage() : null)
+    || localStorage.getItem('appLanguage')
+    || 'ja';
+
+  const isClosed = records.length > 0 && records.every(r => !r.open && r.shots != null && r.shots !== '');
+
+  if (isClosed) {
+    const totalShots = records.reduce((sum, r) => sum + (parseInt(r.shots, 10) || 0), 0);
+    let unit = (typeof _t === 'function' ? _t('lot_shots_unit') : null) || 'ショット';
+    if (lang === 'en') {
+      unit = (totalShots === 1) ? 'shot' : 'shots';
+    }
+    const space = (lang === 'pt') ? ' ' : '';
+    return `${lotNumber} (${totalShots}${space}${unit})`;
+  } else {
+    let inProg = (typeof _t === 'function' ? _t('lot_in_progress') : null) || '進行中';
+    return `${lotNumber} (${inProg})`;
+  }
+}
+
+// Re-render lot tags when the language changes
+document.addEventListener('languageChanged', () => {
+  if (typeof renderMaterialLotTags === 'function') {
+    renderMaterialLotTags();
+  }
+});
 
 // Render lot tags
 function renderMaterialLotTags() {
@@ -4863,7 +4898,7 @@ function renderMaterialLotTags() {
       tag.appendChild(icon);
 
       const lotText = document.createElement('span');
-      lotText.textContent = lot.lotNumber;
+      lotText.textContent = formatLotTagLabel(lot.lotNumber);
       tag.appendChild(lotText);
 
       // Delete button — also deletes the lot's linked photo
@@ -13100,6 +13135,9 @@ if (manualSendModal) {
       } else {
         window.__processQuantityAutoCalculated = false;
       }
+    }
+    if (typeof renderMaterialLotTags === 'function') {
+      renderMaterialLotTags();
     }
   }
 
