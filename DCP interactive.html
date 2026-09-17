@@ -6402,51 +6402,77 @@
             }
 
             // specificIP: if provided, only sends to that IP (for per-machine leader call).
-            function sendCNCCallStop(callStopValue, specificIP = null) {
+            async function sendCNCCallStop(callStopValue, specificIP = null) {
                 let ips;
                 if (specificIP) {
                     ips = [specificIP];
                 } else {
                     const ipStr = document.getElementById('ipInfo')?.value;
-                    if (!ipStr) return;
+                    if (!ipStr) return false;
                     ips = ipStr.split(',').map(ip => ip.trim()).filter(ip => ip);
                 }
-                ips.forEach(async ip => {
-                    const url = `http://${ip}:5000/request?callStop=${callStopValue}`;
+                if (ips.length === 0) return false;
+
+                const factory = document.getElementById('selected工場')?.value || '';
+                const machine = stopCallPickedMachine || new URLSearchParams(location.search).get('machine') || '';
+
+                const results = await Promise.all(ips.map(async ip => {
+                    const queryParams = new URLSearchParams({
+                        callStop: String(callStopValue)
+                    });
+                    if (factory) queryParams.set('factory', factory);
+                    if (machine) queryParams.set('machine', machine);
+
+                    const url = `http://${ip}:5000/request?${queryParams.toString()}`;
                     try {
                         const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-                        const timeoutId = ctrl ? setTimeout(() => ctrl.abort(), 950) : null;
-                        await fetch(url, { method: 'GET', mode: 'no-cors', signal: ctrl ? ctrl.signal : undefined });
+                        const timeoutId = ctrl ? setTimeout(() => ctrl.abort(), 3500) : null;
+                        const res = await fetch(url, { method: 'GET', signal: ctrl ? ctrl.signal : undefined });
                         if (timeoutId) clearTimeout(timeoutId);
+                        if (!res.ok) {
+                            console.warn(`[sendCNCCallStop] Mini-PC (${ip}) returned status ${res.status}`);
+                            return false;
+                        }
+                        const data = await res.json().catch(() => null);
+                        if (callStopValue === 1 || callStopValue === '1') {
+                            return !!(data && data.ok && data.cloud_notified !== false);
+                        }
+                        return !!(data && data.ok);
                     } catch (e) {
-                        // Silent catch on network timeout/abort during recurring pulse
+                        console.warn(`[sendCNCCallStop] Error communicating with Mini-PC (${ip}):`, e);
+                        return false;
                     }
-                });
+                }));
+
+                return results.every(r => r === true);
             }
 
+            async function triggerCallStopActivation(specificIP = null, pickedMachine = null) {
+                const success = await sendCNCCallStop(1, specificIP);
+                if (success) {
+                    console.log("✅ [Stop Call] Mini-PC confirmed TV alert sent successfully. Tablet skipping cloud notify.");
+                } else {
+                    console.warn("⚠️ [Stop Call] Mini-PC unreachable or cloud alert failed. Triggering tablet failsafe...");
+                    notifyStopCall('activate', 'leader', pickedMachine || null);
+                }
+                return success;
+            }
+
+            // Kept for backward compatibility (sends callStop=1 once, no recurring pulse)
             function startCallStopPulse(specificIP = null) {
+                triggerCallStopActivation(specificIP, stopCallPickedMachine);
+            }
+
+            async function stopCallStopPulse(specificIP = null) {
                 if (stopCallPulseInterval) {
                     clearInterval(stopCallPulseInterval);
                     stopCallPulseInterval = null;
                 }
-                // Send immediately on start
-                sendCNCCallStop(1, specificIP);
-                // Pulse callStop=1 once per second to keep machine paused without locking
-                stopCallPulseInterval = setInterval(() => {
-                    sendCNCCallStop(1, specificIP);
-                }, 1000);
+                // Send callStop=0 once to release pause cleanly
+                return await sendCNCCallStop(0, specificIP);
             }
 
-            function stopCallStopPulse(specificIP = null) {
-                if (stopCallPulseInterval) {
-                    clearInterval(stopCallPulseInterval);
-                    stopCallPulseInterval = null;
-                }
-                // Send callStop=0 to release pause cleanly
-                sendCNCCallStop(0, specificIP);
-            }
-
-            function startStopCall(pickedMachine) {
+            async function startStopCall(pickedMachine) {
                 if (localStorage.getItem(breakPrefix + 'activeStopCallStart')) return; // already calling
                 stopCallPickedMachine = pickedMachine || null;
                 const startEpoch = Date.now();
@@ -6457,15 +6483,14 @@
                     localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
                 }
                 openStopCallOverlay(startEpoch);
-                notifyStopCall('activate', 'leader', pickedMachine || null);
                 if (typeof logTabletAction === 'function') {
                     logTabletAction('Stop call activated (Leader called)', 'in-progress', { machine: pickedMachine || 'primary' });
                 }
-                // Pause only the picked machine (or all if not grouped) by pulsing callStop=1 every 1 second
+                // Send callStop=1 ONCE to Mini-PC (with tablet failsafe if Mini-PC fails)
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
-                startCallStopPulse(pickedIP);
+                await triggerCallStopActivation(pickedIP, pickedMachine);
             }
-            function cancelStopCall() {
+            async function cancelStopCall() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
                 // Only allowed within the 15s window; ignore otherwise.
                 if (raw && (Date.now() - parseInt(raw, 10)) > STOP_CANCEL_WINDOW_MS) return;
@@ -6473,9 +6498,11 @@
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
-                stopCallStopPulse(pickedIP);
                 closeStopCallOverlay();
+
+                await stopCallStopPulse(pickedIP);
                 notifyStopCall('clear', 'leader', pickedMachine || null);
+
                 if (typeof logTabletAction === 'function') {
                     logTabletAction('Stop call canceled within grace period', 'Reset', { machine: pickedMachine || 'primary' });
                 }
@@ -6570,12 +6597,12 @@
                 }, 400);
             }
 
-            function finalizeStopCall() {
+            async function finalizeStopCall() {
                 if (!pendingStopCallRecord) return;
                 
                 const pickedMachine = stopCallPickedMachine;
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
-                stopCallStopPulse(pickedIP);
+                await stopCallStopPulse(pickedIP);
                 
                 const data = getStopCallData();
                 data.records.push(pendingStopCallRecord);
@@ -6602,8 +6629,7 @@
                     stopCallPickedMachine = savedMachine;
                     const pickedIP = savedMachine ? (groupedMachineIPs[savedMachine] || null) : null;
                     openStopCallOverlay(parseInt(raw, 10));
-                    notifyStopCall('activate', 'leader', savedMachine || null); // re-assert to the TV after a reload/server restart
-                    startCallStopPulse(pickedIP);
+                    triggerCallStopActivation(pickedIP, savedMachine);
                 }
                 const matTarget = localStorage.getItem(breakPrefix + 'activeCall_material');
                 const menuWrap = document.getElementById('callMenuWrapper');
