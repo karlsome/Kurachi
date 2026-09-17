@@ -7384,9 +7384,17 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
   // Validate that no lot is missing shot count
   let hasMissingShots = false;
+  if (typeof window.reconcileMaterialLots === 'function') {
+    window.reconcileMaterialLots();
+  }
   if (typeof window.getAllLotRecords === 'function') {
     const records = window.getAllLotRecords();
-    hasMissingShots = records.some(r => r.open || r.shots == null || r.shots === '');
+    const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots))
+      ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
+      : [];
+    const recordsMissingShots = records.some(r => r.open || r.shots == null || r.shots === '');
+    const lotsMissingFromRecords = mLots.some(l => !records.some(r => r.lotNumber === l));
+    hasMissingShots = recordsMissingShots || lotsMissingFromRecords;
   }
 
   const shotInput = document.getElementById('shot');
@@ -11707,6 +11715,9 @@ document.getElementById('startStep1Scan').addEventListener('click', function (ev
         // Fresh production entry: clear any per-lot tracking left over from a
         // previous (possibly abandoned) session so no phantom "previous lot"
         // shots prompt appears on the first scan.
+        materialLots = [];
+        saveMaterialLots();
+        renderMaterialLotTags();
         if (typeof window.lotProductionReset === 'function') window.lotProductionReset();
         window.__lotScanMachine = null;
         window.__pendingPrevLot = null;
@@ -12024,8 +12035,18 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
           await step2Scanner.stop();
           step2Scanner = null;
 
-          if (_isGrouped && !_machineDone) {
-            console.log("Lot already listed; recording it for another machine:", _scanMachine);
+          // Check if this specific machine already has this lot on its timeline
+          const cleanMachine = (_scanMachine && _scanMachine.includes(','))
+            ? (window.__lotScanMachine || _scanMachine.split(',')[0].trim())
+            : _scanMachine;
+          let machineHasLot = false;
+          if (typeof window.getAllLotRecords === 'function') {
+            const allRecs = window.getAllLotRecords();
+            machineHasLot = allRecs.some(r => (r.machine === cleanMachine || r.machine === _scanMachine) && r.lotNumber === lotNumber);
+          }
+
+          if (!machineHasLot || (_isGrouped && !_machineDone)) {
+            console.log("Lot already listed in materialLots, but recording on machine timeline:", _scanMachine);
             _recordAndAdvance();
             return;
           }
@@ -13138,6 +13159,35 @@ if (manualSendModal) {
     return prevOpen;
   }
 
+  function reconcileMaterialLots() {
+    refreshLots();
+    const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0)
+      ? groupedMachines
+      : [(document.getElementById('process') ? document.getElementById('process').value : '') || (document.getElementById('machine-selector') ? document.getElementById('machine-selector').value : '') || 'UNKNOWN'];
+
+    // Only auto-reconcile onto the machine timeline if there is a single machine
+    if (machines.length === 1 && machines[0] && machines[0] !== 'UNKNOWN') {
+      const m = machines[0];
+      const list = lotsByMachine[m] || (lotsByMachine[m] = []);
+      const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots))
+        ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
+        : [];
+
+      let added = false;
+      mLots.forEach(lotNum => {
+        if (!list.some(r => r.lotNumber === lotNum)) {
+          recordLotScan(lotNum, m, 'auto');
+          added = true;
+        }
+      });
+      if (added) {
+        save();
+        updateShotTotalField();
+      }
+    }
+  }
+  window.reconcileMaterialLots = reconcileMaterialLots;
+
   window.isMachineLotScanned = function (machineName) {
     const m = String(machineName || '').trim().toUpperCase();
     if (!m) return false;
@@ -13347,6 +13397,7 @@ if (manualSendModal) {
   // Collect ショット数 for each still-open lot or lot with missing shots.
   function promptFinalLots() {
     if (document.getElementById('lpModal')) return; // Already showing prompt
+    if (typeof reconcileMaterialLots === 'function') reconcileMaterialLots();
     refreshLots();
     let open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
 
@@ -13514,6 +13565,7 @@ if (manualSendModal) {
   };
 
   function renderShotEditModal() {
+    if (typeof reconcileMaterialLots === 'function') reconcileMaterialLots();
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;inset:0;z-index:100200;background:rgba(10,15,26,.8);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(5px);';
 
