@@ -36614,6 +36614,768 @@ app.post('/api/production/print-log', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// First Factory (第一工場) Label Photo Upload & Queue Management API
+// ---------------------------------------------------------------------------
+
+// 1. Firebase Storage label photo upload
+app.post('/api/firstkojo/upload-label-photo', async (req, res) => {
+  try {
+    const { base64, date, machine, worker, lotNo, hinban } = req.body;
+
+    if (!base64) {
+      return res.status(400).json({ error: 'Missing base64 image data' });
+    }
+
+    const bucket = admin.storage().bucket();
+    const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(cleanBase64, 'base64');
+    const downloadToken = 'masterDBToken69';
+
+    const targetMachine = machine || 'PSA2';
+    const targetDate = date || new Date().toISOString().slice(0, 10);
+    const targetWorker = worker || 'worker';
+    const targetLotNo = lotNo || 'nolot';
+    const timestamp = Date.now();
+
+    const filePath = `firstKojo/${targetMachine}/${targetDate}_${targetWorker}_${targetLotNo}_${timestamp}_materialLabel.jpg`;
+    const file = bucket.file(filePath);
+
+    await uploadToFirebaseWithRetry(file, buffer, {
+      metadata: {
+        contentType: 'image/jpeg',
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken
+        }
+      },
+      validation: false
+    });
+
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+    console.log(`📸 Uploaded first factory label photo: ${publicUrl}`);
+    res.json({ success: true, url: publicUrl });
+  } catch (error) {
+    console.error('❌ Error uploading first factory label photo:', error);
+    res.status(500).json({ error: 'Failed to upload label photo', details: error.message });
+  }
+});
+
+// 2. First Factory Queue API (MongoDB: submittedDB.firstFactoryQueue)
+
+// GET active queue list
+app.get('/api/production/queue', async (req, res) => {
+  try {
+    const { date, machine, status } = req.query;
+    const query = {};
+    if (date) query.date = date;
+    if (machine) query.machine = machine;
+    if (status) query.status = status;
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+
+    const queue = await queueCollection
+      .find(query)
+      .sort({ queuePosition: 1, createdAt: 1 })
+      .toArray();
+
+    res.json({ success: true, queue });
+  } catch (error) {
+    console.error('❌ Error in GET /api/production/queue:', error);
+    res.status(500).json({ error: 'Failed to fetch production queue' });
+  }
+});
+
+// Enqueue new lot / item
+app.post('/api/production/queue/enqueue', async (req, res) => {
+  try {
+    const {
+      date,
+      machine,
+      worker,
+      groupId,
+      hinban,
+      hinmei,
+      kizai,
+      color,
+      zuban,
+      okyakuHinban,
+      labelHinban,
+      shippingDest,
+      totalRolls,
+      totalMeters,
+      rollMeters,
+      rollIndex,
+      lotNo,
+      rawMaterialQR,
+      rawMaterialLength,
+      manufacturerUid,
+      photoUrl,
+      status
+    } = req.body;
+
+    if (!date) {
+      return res.status(400).json({ error: 'date is required' });
+    }
+
+    const targetDate = date;
+    const targetMachine = machine || 'PSA2';
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+
+    // Find highest queuePosition for (date, machine)
+    const lastItem = await queueCollection
+      .find({ date: targetDate, machine: targetMachine })
+      .sort({ queuePosition: -1 })
+      .limit(1)
+      .toArray();
+    const maxPos = (lastItem.length > 0 && typeof lastItem[0].queuePosition === 'number')
+      ? lastItem[0].queuePosition
+      : 0;
+    const queuePosition = maxPos + 1;
+
+    // Check if there is an active item in queue
+    const activeItem = await queueCollection.findOne({
+      date: targetDate,
+      machine: targetMachine,
+      status: 'active'
+    });
+    const finalStatus = status || (activeItem ? 'queued' : 'active');
+
+    const newItem = {
+      date: targetDate,
+      machine: targetMachine,
+      worker: worker || '',
+      groupId: groupId || '',
+      hinban: hinban || '',
+      hinmei: hinmei || '',
+      kizai: kizai || '',
+      color: color || '',
+      zuban: zuban || '',
+      okyakuHinban: okyakuHinban || '',
+      labelHinban: labelHinban || '',
+      shippingDest: shippingDest || '',
+      totalRolls: Number(totalRolls) || 1,
+      totalMeters: Number(totalMeters) || 0,
+      rollMeters: Number(rollMeters) || 0,
+      rollIndex: Number(rollIndex) || 1,
+      currentRollIndex: Number(rollIndex) || 1,
+      lotNo: lotNo || '',
+      rawMaterialQR: rawMaterialQR || '',
+      rawMaterialLength: rawMaterialLength || '',
+      manufacturerUid: manufacturerUid || '',
+      photoUrl: photoUrl || '',
+      queuePosition,
+      status: finalStatus,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    if (finalStatus === 'active') {
+      newItem.startedAt = new Date();
+    }
+
+    const insertResult = await queueCollection.insertOne(newItem);
+    newItem._id = insertResult.insertedId;
+
+    // Sync to firstFactoryProduction with status 'in-progress' if it's the first active item
+    if (finalStatus === 'active' && newItem.groupId) {
+      const productionCollection = db.collection('firstFactoryProduction');
+      await productionCollection.updateOne(
+        { date: targetDate, groupId: newItem.groupId },
+        {
+          $set: {
+            date: targetDate,
+            groupId: newItem.groupId,
+            machine: newItem.machine,
+            worker: newItem.worker,
+            hinban: newItem.hinban,
+            hinmei: newItem.hinmei,
+            kizai: newItem.kizai,
+            color: newItem.color,
+            zuban: newItem.zuban,
+            totalRolls: newItem.totalRolls,
+            totalMeters: newItem.totalMeters,
+            status: 'in-progress',
+            actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+            startEpoch: Date.now(),
+            updatedAt: new Date()
+          },
+          $setOnInsert: {
+            createdAt: new Date()
+          }
+        },
+        { upsert: true }
+      );
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine
+    });
+
+    console.log(`📋 Enqueued item [${newItem.hinban || newItem.groupId}] -> pos: ${queuePosition}, status: ${finalStatus}`);
+    res.json({ success: true, item: newItem });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/enqueue:', error);
+    res.status(500).json({ error: 'Failed to enqueue item' });
+  }
+});
+
+// Advance roll / lot
+app.post('/api/production/queue/advance', async (req, res) => {
+  try {
+    const { date, machine, queueId, groupId, rollIndex, totalRolls } = req.body;
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+
+    let item = null;
+    if (queueId) {
+      if (ObjectId.isValid(queueId)) {
+        item = await queueCollection.findOne({ _id: new ObjectId(queueId) });
+      }
+      if (!item) {
+        item = await queueCollection.findOne({ _id: queueId });
+      }
+      if (!item) {
+        item = await queueCollection.findOne({ queueId });
+      }
+    }
+    if (!item && groupId) {
+      const groupQuery = { groupId };
+      if (date) groupQuery.date = date;
+      if (machine) groupQuery.machine = machine;
+      item = await queueCollection.findOne(groupQuery);
+    }
+    if (!item && date && machine) {
+      item = await queueCollection.findOne({ date, machine, status: 'active' });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+    const targetGroupId = item.groupId || groupId;
+    const targetTotalRolls = Number(totalRolls) || Number(item.totalRolls) || 1;
+
+    const rollThatCompleted = rollIndex !== undefined ? Number(rollIndex) : (item.currentRollIndex || item.rollIndex || 1);
+    const nextRollIndex = rollThatCompleted + 1;
+
+    let newStatus = item.status;
+    let completedAt = null;
+
+    if (nextRollIndex > targetTotalRolls) {
+      newStatus = 'completed';
+      completedAt = new Date();
+    }
+
+    const updateFields = {
+      currentRollIndex: nextRollIndex,
+      rollIndex: nextRollIndex,
+      status: newStatus,
+      updatedAt: new Date()
+    };
+    if (completedAt) {
+      updateFields.completedAt = completedAt;
+    }
+
+    await queueCollection.updateOne({ _id: item._id }, { $set: updateFields });
+
+    if (newStatus === 'completed') {
+      const productionCollection = db.collection('firstFactoryProduction');
+      if (targetGroupId) {
+        await productionCollection.updateOne(
+          { date: targetDate, groupId: targetGroupId },
+          {
+            $set: {
+              status: 'completed',
+              actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+              endEpoch: Date.now(),
+              updatedAt: new Date()
+            }
+          }
+        );
+      }
+
+      // Activate next queued item
+      const nextItem = await queueCollection.findOne(
+        { date: targetDate, machine: targetMachine, status: 'queued' },
+        { sort: { queuePosition: 1, createdAt: 1 } }
+      );
+
+      if (nextItem) {
+        await queueCollection.updateOne(
+          { _id: nextItem._id },
+          {
+            $set: {
+              status: 'active',
+              startedAt: new Date(),
+              updatedAt: new Date()
+            }
+          }
+        );
+
+        if (nextItem.groupId) {
+          await productionCollection.updateOne(
+            { date: targetDate, groupId: nextItem.groupId },
+            {
+              $set: {
+                date: targetDate,
+                groupId: nextItem.groupId,
+                machine: nextItem.machine,
+                worker: nextItem.worker,
+                hinban: nextItem.hinban,
+                hinmei: nextItem.hinmei,
+                kizai: nextItem.kizai,
+                color: nextItem.color,
+                zuban: nextItem.zuban,
+                totalRolls: nextItem.totalRolls,
+                totalMeters: nextItem.totalMeters,
+                status: 'in-progress',
+                actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+                startEpoch: Date.now(),
+                updatedAt: new Date()
+              },
+              $setOnInsert: { createdAt: new Date() }
+            },
+            { upsert: true }
+          );
+        }
+      }
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine
+    });
+
+    broadcastProductionEvent({
+      type: 'queue_roll_printed',
+      date: targetDate,
+      machine: targetMachine,
+      groupId: targetGroupId,
+      rollIndex: rollThatCompleted,
+      totalRolls: targetTotalRolls
+    });
+
+    console.log(`⏩ Advanced queue [${item.hinban || targetGroupId}]: roll ${rollThatCompleted}/${targetTotalRolls} -> status: ${newStatus}`);
+    res.json({
+      success: true,
+      status: newStatus,
+      currentRollIndex: nextRollIndex
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/advance:', error);
+    res.status(500).json({ error: 'Failed to advance queue' });
+  }
+});
+
+// Skip / scrap lot or item
+app.post('/api/production/queue/skip', async (req, res) => {
+  try {
+    const { date, machine, queueId, groupId, rollIndex, reason, scrapEntireLot } = req.body;
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+
+    let item = null;
+    if (queueId) {
+      if (ObjectId.isValid(queueId)) {
+        item = await queueCollection.findOne({ _id: new ObjectId(queueId) });
+      }
+      if (!item) {
+        item = await queueCollection.findOne({ _id: queueId });
+      }
+      if (!item) {
+        item = await queueCollection.findOne({ queueId });
+      }
+    }
+    if (!item && groupId) {
+      item = await queueCollection.findOne({ groupId });
+    }
+    if (!item && date && machine) {
+      item = await queueCollection.findOne({ date, machine, status: 'active' });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+    const targetTotalRolls = Number(item.totalRolls) || 1;
+    const currentRoll = rollIndex !== undefined ? Number(rollIndex) : (item.currentRollIndex || 1);
+    const scrapReason = reason || '破棄 / スキップ';
+
+    // Check if scrapping just 1 roll or entire lot
+    const isEntireLot = scrapEntireLot === true || (currentRoll >= targetTotalRolls);
+
+    if (isEntireLot) {
+      await queueCollection.updateOne(
+        { _id: item._id },
+        {
+          $set: {
+            status: 'scrapped',
+            reason: scrapReason,
+            scrappedAt: new Date(),
+            updatedAt: new Date()
+          }
+        }
+      );
+
+      // Activate next item if available
+      const nextItem = await queueCollection.findOne(
+        { date: targetDate, machine: targetMachine, status: 'queued' },
+        { sort: { queuePosition: 1, createdAt: 1 } }
+      );
+
+      if (nextItem) {
+        await queueCollection.updateOne(
+          { _id: nextItem._id },
+          {
+            $set: {
+              status: 'active',
+              startedAt: new Date(),
+              updatedAt: new Date()
+            }
+          }
+        );
+
+        if (nextItem.groupId) {
+          const productionCollection = db.collection('firstFactoryProduction');
+          await productionCollection.updateOne(
+            { date: targetDate, groupId: nextItem.groupId },
+            {
+              $set: {
+                date: targetDate,
+                groupId: nextItem.groupId,
+                machine: nextItem.machine,
+                worker: nextItem.worker,
+                hinban: nextItem.hinban,
+                hinmei: nextItem.hinmei,
+                kizai: nextItem.kizai,
+                color: nextItem.color,
+                zuban: nextItem.zuban,
+                totalRolls: nextItem.totalRolls,
+                totalMeters: nextItem.totalMeters,
+                status: 'in-progress',
+                actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+                startEpoch: Date.now(),
+                updatedAt: new Date()
+              },
+              $setOnInsert: { createdAt: new Date() }
+            },
+            { upsert: true }
+          );
+        }
+      }
+    } else {
+      // 1 roll scrap: advance to next roll index and log scrap
+      const nextRollIndex = currentRoll + 1;
+      const scrappedList = Array.isArray(item.scrappedList) ? item.scrappedList : [];
+      scrappedList.push({
+        rollIndex: currentRoll,
+        reason: scrapReason,
+        scrappedAt: new Date()
+      });
+
+      await queueCollection.updateOne(
+        { _id: item._id },
+        {
+          $set: {
+            currentRollIndex: nextRollIndex,
+            rollIndex: nextRollIndex,
+            scrappedRolls: (Number(item.scrappedRolls) || 0) + 1,
+            scrappedList,
+            updatedAt: new Date()
+          }
+        }
+      );
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine
+    });
+
+    broadcastProductionEvent({
+      type: 'queue_scrapped',
+      date: targetDate,
+      machine: targetMachine,
+      queueId: item._id.toString(),
+      rollIndex: currentRoll,
+      reason: scrapReason,
+      isEntireLot
+    });
+
+    console.log(`⚠️ Scrapped queue item [${item.hinban || item._id}] roll #${currentRoll} (entireLot: ${isEntireLot}), reason: ${scrapReason}`);
+    res.json({ success: true, isEntireLot });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/skip:', error);
+    res.status(500).json({ error: 'Failed to skip queue item' });
+  }
+});
+
+// Finish lot early with shortage recorded
+app.post('/api/production/queue/finish-early', async (req, res) => {
+  try {
+    const { date, machine, queueId, actualRollsProduced } = req.body;
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+
+    let item = null;
+    if (queueId) {
+      if (ObjectId.isValid(queueId)) {
+        item = await queueCollection.findOne({ _id: new ObjectId(queueId) });
+      }
+      if (!item) {
+        item = await queueCollection.findOne({ _id: queueId });
+      }
+      if (!item) {
+        item = await queueCollection.findOne({ queueId });
+      }
+    }
+    if (!item && date && machine) {
+      item = await queueCollection.findOne({ date, machine, status: 'active' });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+    const rollsProduced = Number(actualRollsProduced) || 0;
+
+    await queueCollection.updateOne(
+      { _id: item._id },
+      {
+        $set: {
+          status: 'completed',
+          actualRollsProduced: rollsProduced,
+          finishedEarly: true,
+          completedAt: new Date(),
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    if (item.groupId) {
+      const productionCollection = db.collection('firstFactoryProduction');
+      await productionCollection.updateOne(
+        { date: targetDate, groupId: item.groupId },
+        {
+          $set: {
+            status: 'completed',
+            actualRollsProduced: rollsProduced,
+            finishedEarly: true,
+            actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+            endEpoch: Date.now(),
+            updatedAt: new Date()
+          }
+        }
+      );
+    }
+
+    const nextItem = await queueCollection.findOne(
+      { date: targetDate, machine: targetMachine, status: 'queued' },
+      { sort: { queuePosition: 1, createdAt: 1 } }
+    );
+
+    if (nextItem) {
+      await queueCollection.updateOne(
+        { _id: nextItem._id },
+        {
+          $set: {
+            status: 'active',
+            startedAt: new Date(),
+            updatedAt: new Date()
+          }
+        }
+      );
+
+      if (nextItem.groupId) {
+        const productionCollection = db.collection('firstFactoryProduction');
+        await productionCollection.updateOne(
+          { date: targetDate, groupId: nextItem.groupId },
+          {
+            $set: {
+              date: targetDate,
+              groupId: nextItem.groupId,
+              machine: nextItem.machine,
+              worker: nextItem.worker,
+              hinban: nextItem.hinban,
+              hinmei: nextItem.hinmei,
+              kizai: nextItem.kizai,
+              color: nextItem.color,
+              zuban: nextItem.zuban,
+              totalRolls: nextItem.totalRolls,
+              totalMeters: nextItem.totalMeters,
+              status: 'in-progress',
+              actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+              startEpoch: Date.now(),
+              updatedAt: new Date()
+            },
+            $setOnInsert: { createdAt: new Date() }
+          },
+          { upsert: true }
+        );
+      }
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine
+    });
+
+    console.log(`⏹️ Lot finished early [${item.hinban || item._id}]: ${rollsProduced} rolls produced`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/finish-early:', error);
+    res.status(500).json({ error: 'Failed to finish queue item early' });
+  }
+});
+
+// Reorder queue positions
+app.post('/api/production/queue/reorder', async (req, res) => {
+  try {
+    const { date, machine, orderedQueueIds } = req.body;
+
+    if (!Array.isArray(orderedQueueIds)) {
+      return res.status(400).json({ error: 'orderedQueueIds must be an array' });
+    }
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+
+    for (let i = 0; i < orderedQueueIds.length; i++) {
+      const qId = orderedQueueIds[i];
+      const query = ObjectId.isValid(qId)
+        ? { $or: [{ _id: new ObjectId(qId) }, { _id: qId }, { queueId: qId }] }
+        : { $or: [{ _id: qId }, { queueId: qId }] };
+
+      await queueCollection.updateOne(query, {
+        $set: {
+          queuePosition: i + 1,
+          updatedAt: new Date()
+        }
+      });
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date,
+      machine
+    });
+
+    console.log(`🔢 Reordered queue for ${date} [${machine}]: ${orderedQueueIds.length} items`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/reorder:', error);
+    res.status(500).json({ error: 'Failed to reorder queue' });
+  }
+});
+
+// Select a specific item to become the active wrapping item
+app.post('/api/production/queue/select', async (req, res) => {
+  try {
+    const { date, machine, queueId } = req.body;
+    if (!queueId) {
+      return res.status(400).json({ error: 'queueId is required' });
+    }
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+
+    let item = null;
+    if (ObjectId.isValid(queueId)) {
+      item = await queueCollection.findOne({ _id: new ObjectId(queueId) });
+    }
+    if (!item) {
+      item = await queueCollection.findOne({ _id: queueId });
+    }
+    if (!item) {
+      item = await queueCollection.findOne({ queueId });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+
+    // Set any currently active item in this date/machine to 'queued'
+    await queueCollection.updateMany(
+      { date: targetDate, machine: targetMachine, status: 'active', _id: { $ne: item._id } },
+      { $set: { status: 'queued', updatedAt: new Date() } }
+    );
+
+    // Set selected item to 'active'
+    await queueCollection.updateOne(
+      { _id: item._id },
+      {
+        $set: {
+          status: 'active',
+          startedAt: item.startedAt || new Date(),
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    // Sync to firstFactoryProduction
+    if (item.groupId) {
+      const productionCollection = db.collection('firstFactoryProduction');
+      await productionCollection.updateOne(
+        { date: targetDate, groupId: item.groupId },
+        {
+          $set: {
+            date: targetDate,
+            groupId: item.groupId,
+            machine: item.machine,
+            worker: item.worker,
+            hinban: item.hinban,
+            hinmei: item.hinmei,
+            kizai: item.kizai,
+            color: item.color,
+            zuban: item.zuban,
+            totalRolls: item.totalRolls,
+            totalMeters: item.totalMeters,
+            status: 'in-progress',
+            actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+            startEpoch: Date.now(),
+            updatedAt: new Date()
+          },
+          $setOnInsert: { createdAt: new Date() }
+        },
+        { upsert: true }
+      );
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine
+    });
+
+    console.log(`🎯 Active wrapping item switched to: [${item.hinban || item._id}] (${targetDate} / ${targetMachine})`);
+    res.json({ success: true, item });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/select:', error);
+    res.status(500).json({ error: 'Failed to select queue item' });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // First Factory Production Scheduling & Excel Sync Routes
 // ---------------------------------------------------------------------------
 

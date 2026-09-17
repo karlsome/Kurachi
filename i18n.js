@@ -383,6 +383,8 @@ const translations = {
         'toast_break_started_cnc_stopped': '☕ 休憩を開始しました (機械停止中)',
         'toast_cycle_stop_not_supported': '⚠️ マシンがサイクル停止機能に対応していません',
         'toast_on_break_press_finish': '☕ 休憩中です。タブレットで「休憩を終了」を押してください',
+        'lot_in_progress': '進行中',
+        'lot_shots_unit': 'ショット',
     },
 
     en: {
@@ -766,6 +768,8 @@ const translations = {
         'toast_break_started_cnc_stopped': '☕ Break started (machine stopped)',
         'toast_cycle_stop_not_supported': '⚠️ Machine does not support cycle stop',
         'toast_on_break_press_finish': '☕ On break. Tap "End Break" on tablet to resume',
+        'lot_in_progress': 'in-progress',
+        'lot_shots_unit': 'shots',
     },
 
     pt: {
@@ -1149,6 +1153,8 @@ const translations = {
         'toast_break_started_cnc_stopped': '☕ Intervalo iniciado (máquina parada)',
         'toast_cycle_stop_not_supported': '⚠️ A máquina não suporta a parada de ciclo',
         'toast_on_break_press_finish': '☕ Em intervalo. Toque em "Finalizar Intervalo" no tablet para retomar',
+        'lot_in_progress': 'em andamento',
+        'lot_shots_unit': 'disparos',
     }
 };
 

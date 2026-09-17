@@ -1,0 +1,1497 @@
+/**
+ * firstKojoNippo2.js
+ * Logic for First Factory Wrapping & Label Printing (第一工場 包装・ラベル発行) Tablet 2 UI
+ */
+
+// Determine backend server URL
+const serverURL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
+    ? window.location.origin
+    : "https://kurachi.onrender.com";
+
+// -----------------------------------------------------
+// Date & Time Helpers
+// -----------------------------------------------------
+function getTodayDateString() {
+    const now = new Date();
+    try {
+        const parts = new Intl.DateTimeFormat('ja-JP', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            timeZone: 'Asia/Tokyo'
+        }).formatToParts(now);
+        const y = parts.find(p => p.type === 'year')?.value;
+        const m = parts.find(p => p.type === 'month')?.value;
+        const d = parts.find(p => p.type === 'day')?.value;
+        if (y && m && d) return `${y}-${m}-${d}`;
+    } catch {
+        // fallback
+    }
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function shiftDateString(dateStr, offsetDays) {
+    if (!dateStr || !dateStr.includes('-')) return getTodayDateString();
+    const parts = dateStr.split('-');
+    const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    dt.setDate(dt.getDate() + offsetDays);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+// -----------------------------------------------------
+// Application State
+// -----------------------------------------------------
+const state = {
+    selectedDate: sessionStorage.getItem('firstkojo2_date') || getTodayDateString(),
+    machineName: null,
+    filterName: null,
+    workerName: localStorage.getItem('firstkojo_nippo_worker_name') || '包装担当',
+    soundEnabled: localStorage.getItem('firstkojo2_sound_enabled') !== 'false',
+
+    // Queue Data
+    queue: [],
+    activeItem: null,
+    waitingItems: [],
+    completedItems: [],
+    isLoadingQueue: false,
+
+    // Last Printed Roll for reprint
+    lastPrinted: (() => {
+        try {
+            return JSON.parse(localStorage.getItem('firstkojo2_last_printed') || 'null');
+        } catch {
+            return null;
+        }
+    })(),
+
+    // UI state
+    isPrinting: false,
+    selectedScrapReason: 'キズ・汚れ',
+
+    // SSE connection state
+    eventSource: null,
+    sseConnected: false,
+    reconnectTimeoutId: null,
+    reconnectAttempts: 0,
+    pollingIntervalId: null,
+};
+
+// -----------------------------------------------------
+// URL Parameter Parsing
+// -----------------------------------------------------
+function parseUrlParams() {
+    let searchStr = window.location.search;
+    while (searchStr.startsWith('?')) {
+        searchStr = searchStr.substring(1);
+    }
+    const params = new URLSearchParams(searchStr);
+
+    if (params.has('machine') || params.has('?machine')) {
+        state.machineName = params.get('machine') || params.get('?machine');
+    }
+    if (params.has('filter') || params.has('?filter')) {
+        state.filterName = params.get('filter') || params.get('?filter');
+    }
+    if (params.has('date') || params.has('?date')) {
+        const d = params.get('date') || params.get('?date');
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+            state.selectedDate = d;
+        }
+    }
+    if (params.has('worker') || params.has('?worker')) {
+        state.workerName = params.get('worker') || params.get('?worker');
+    }
+
+    // Update UI elements
+    const machineTag = document.getElementById('machineTag');
+    if (machineTag) {
+        if (state.machineName) {
+            machineTag.textContent = `設備: ${state.machineName}${state.filterName ? ` (${state.filterName})` : ''}`;
+            machineTag.style.color = '';
+            machineTag.style.borderColor = '';
+        } else {
+            machineTag.textContent = `設備: 未指定 (No Machine in URL)`;
+            machineTag.style.color = '#E5484D';
+            machineTag.style.borderColor = '#FCA5A5';
+        }
+    }
+
+    const datePicker = document.getElementById('datePickerInput');
+    if (datePicker) {
+        datePicker.value = state.selectedDate;
+    }
+}
+
+// -----------------------------------------------------
+// Sound Synthesizer (Web Audio API)
+// -----------------------------------------------------
+let audioCtx = null;
+
+function playChime(type) {
+    if (!state.soundEnabled) return;
+    try {
+        if (!audioCtx) {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (AudioContextClass) audioCtx = new AudioContextClass();
+        }
+        if (!audioCtx) return;
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        if (type === 'success') {
+            // Ascending major chord (E5 -> A5)
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(659.25, now); // E5
+            osc.frequency.exponentialRampToValueAtTime(880, now + 0.12); // A5
+            gain.gain.setValueAtTime(0.25, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+            osc.start(now);
+            osc.stop(now + 0.4);
+        } else if (type === 'warning') {
+            // Minor drop (F#4 -> C4)
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(369.99, now);
+            osc.frequency.setValueAtTime(261.63, now + 0.14);
+            gain.gain.setValueAtTime(0.22, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+            osc.start(now);
+            osc.stop(now + 0.36);
+        } else {
+            // Soft click beep
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(523.25, now);
+            gain.gain.setValueAtTime(0.15, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+            osc.start(now);
+            osc.stop(now + 0.09);
+        }
+    } catch (e) {
+        console.warn('Audio play error:', e);
+    }
+}
+
+// -----------------------------------------------------
+// Toast Notification
+// -----------------------------------------------------
+function showToast(message, type = 'info', durationMs = 3200) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast-msg ${type}`;
+
+    let icon = 'ℹ️';
+    if (type === 'success') icon = '✅';
+    if (type === 'error') icon = '❌';
+    if (type === 'warning') icon = '⚠️';
+
+    toast.innerHTML = `<span style="font-size: 1.25rem;">${icon}</span><span style="flex:1;">${message}</span>`;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(12px)';
+        setTimeout(() => toast.remove(), 320);
+    }, durationMs);
+}
+
+// -----------------------------------------------------
+// Special Kinuura Hinban Pattern Matching
+// -----------------------------------------------------
+const SPECIAL_KINUURA_PATTERNS = [
+    "CNU/BLZ02B*GD/***W48",
+    "CNU/85ULBB*GD/***W48",
+    "CNU/B0474B*GD/***W*6"
+];
+
+function isSpecialKinuuraHinban(hinban) {
+    if (!hinban) return false;
+    return SPECIAL_KINUURA_PATTERNS.some(pattern => {
+        let escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+        escaped = escaped.replace(/\*/g, '.');
+        return new RegExp(`^${escaped}$`).test(hinban);
+    });
+}
+
+// -----------------------------------------------------
+// Brother Label Printing Helpers (iOS / Android / Desktop)
+// -----------------------------------------------------
+function buildBrotherPrintFields(item, rollIndex, totalRolls) {
+    let yymmdd = '';
+    if (state.selectedDate && state.selectedDate.includes('-')) {
+        const parts = state.selectedDate.split('-');
+        yymmdd = `${parts[0].slice(-2)}${parts[1].padStart(2, '0')}${parts[2].padStart(2, '0')}`;
+    } else {
+        const now = new Date();
+        const yy = String(now.getFullYear()).slice(-2);
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        yymmdd = `${yy}${mm}${dd}`;
+    }
+
+    const currentRoll = Number(rollIndex) || 1;
+    const lotNo = `${yymmdd}-${currentRoll}`;
+    const hinban = item.hinban || '';
+    const okyakuHinban = item.okyakuHinban || '';
+    const color = item.color || '';
+    const hinmei = item.hinmei || '';
+    const shippingDest = item.shippingDest || '';
+    const meters = item.rollMeters || item.metersPerRoll || item.meters || 100;
+
+    const isSpecial = isSpecialKinuuraHinban(hinban);
+
+    let filename = 'firstkojo4.lbx';
+    let textHinban = hinban;
+    let textSebangou = '';
+    let barcode = '';
+
+    if (isSpecial) {
+        // Special Kinuura Label Mapping
+        filename = 'kinuuraLabel.lbx';
+        textHinban = okyakuHinban || hinban;
+        textSebangou = hinmei || '';
+        barcode = okyakuHinban || hinban;
+    } else {
+        // Standard Printing Mapping
+        const rawLabel = item.labelHinban || '';
+        const labelHinban = (rawLabel && String(rawLabel).trim() !== '' && rawLabel !== 'null' && rawLabel !== 'undefined') ? String(rawLabel).trim() : '';
+
+        if (labelHinban === 'NC2') {
+            filename = 'NC21.lbx';
+        }
+        textHinban = hinban;
+        textSebangou = labelHinban;
+        barcode = `${labelHinban || hinban},${lotNo},${meters}`;
+    }
+
+    return {
+        filename: filename,
+        size: 'RollW62',
+        copies: 1,
+        text_品番: textHinban,
+        text_背番号: textSebangou,
+        text_収容数: String(currentRoll),
+        text_color: color,
+        text_品名: hinmei,
+        text_location: shippingDest ? `${shippingDest}へ` : '',
+        text_DateT: lotNo,
+        barcode_barcode: barcode
+    };
+}
+
+async function executeBrotherPrint(fields) {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const params = `filename=${encodeURIComponent(fields.filename)}&size=${encodeURIComponent(fields.size)}&copies=${fields.copies}` +
+        `&text_品番=${encodeURIComponent(fields.text_品番 || '')}` +
+        `&text_背番号=${encodeURIComponent(fields.text_背番号 || '')}` +
+        `&text_収容数=${encodeURIComponent(fields.text_収容数 || '')}` +
+        `&text_color=${encodeURIComponent(fields.text_color || '')}` +
+        `&text_品名=${encodeURIComponent(fields.text_品名 || '')}` +
+        `&text_location=${encodeURIComponent(fields.text_location || '')}` +
+        `&text_DateT=${encodeURIComponent(fields.text_DateT || '')}` +
+        `&barcode_barcode=${encodeURIComponent(fields.barcode_barcode || '')}`;
+
+    if (isIOS) {
+        const url = `brotherwebprint://print?${params}`;
+        console.log('🖨️ [iOS] Brother Print URL:', url, fields);
+        window.location.href = url;
+        // Allow time for Brother Web Print URL scheme
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        return { success: true, mode: 'ios' };
+    } else {
+        const url = `http://localhost:8088/print?${params}`;
+        console.log('🖨️ [Android/Desktop] Brother Print URL:', url, fields);
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            const textResponse = await response.text();
+
+            if (textResponse && textResponse.includes('<result>SUCCESS</result>')) {
+                return { success: true, response: textResponse, mode: 'network' };
+            } else {
+                const errorMsg = textResponse.includes('PrinterStatusErrorCoverOpen')
+                    ? 'プリンターのカバーが開いています (Cover Open)'
+                    : (textResponse.includes('<error>') ? textResponse : 'プリンターエラー (Printer Error)');
+                return { success: false, error: errorMsg, response: textResponse };
+            }
+        } catch (err) {
+            console.warn('Print request network error:', err);
+            // In dev environment or if localhost:8088 isn't running, show notice but allow flow
+            const isConnectionRefused = err.name === 'AbortError' || (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')));
+            return {
+                success: false,
+                isConnectionRefused,
+                error: isConnectionRefused
+                    ? 'プリンター未接続 (localhost:8088 未起動)'
+                    : err.message
+            };
+        }
+    }
+}
+
+// -----------------------------------------------------
+// Modal Controls
+// -----------------------------------------------------
+function showPrintProgressModal(title, detailText) {
+    const modal = document.getElementById('printProgressModal');
+    const titleEl = document.getElementById('printModalTitle');
+    const detailEl = document.getElementById('printModalDetail');
+    const iconEl = document.getElementById('printModalIcon');
+    const subEl = document.getElementById('printModalSub');
+
+    if (titleEl) titleEl.textContent = title || 'ラベル印刷中...';
+    if (detailEl) detailEl.textContent = detailText || '';
+    if (iconEl) iconEl.textContent = '🖨️';
+    if (subEl) subEl.innerHTML = 'プリンターにラベル印刷データを送信しています。<br>しばらくお待ちください。';
+
+    if (modal) modal.classList.add('open');
+}
+
+function updatePrintProgressSuccess(title, detailText) {
+    const titleEl = document.getElementById('printModalTitle');
+    const detailEl = document.getElementById('printModalDetail');
+    const iconEl = document.getElementById('printModalIcon');
+    const subEl = document.getElementById('printModalSub');
+
+    if (titleEl) titleEl.textContent = title || '印刷完了！';
+    if (detailEl) detailEl.textContent = detailText || '';
+    if (iconEl) iconEl.textContent = '✅';
+    if (subEl) subEl.innerHTML = '正常にラベルが発行されました。';
+
+    setTimeout(() => {
+        closePrintProgressModal();
+    }, 1800);
+}
+
+function updatePrintProgressError(errorMessage) {
+    const titleEl = document.getElementById('printModalTitle');
+    const iconEl = document.getElementById('printModalIcon');
+    const subEl = document.getElementById('printModalSub');
+
+    if (titleEl) titleEl.textContent = '印刷エラー';
+    if (iconEl) iconEl.textContent = '⚠️';
+    if (subEl) subEl.innerHTML = `<span style="color:var(--red);font-weight:800;">${errorMessage}</span><br><br>プリンターの電源・用紙・接続を確認してください。`;
+}
+
+function closePrintProgressModal() {
+    const modal = document.getElementById('printProgressModal');
+    if (modal) modal.classList.remove('open');
+}
+
+// Photo Lightbox Modal
+function openPhotoModal(photoUrl, captionText) {
+    if (!photoUrl) return;
+    const modal = document.getElementById('photoModal');
+    const img = document.getElementById('fullWarehousePhoto');
+    const caption = document.getElementById('photoModalCaption');
+
+    if (img) img.src = photoUrl;
+    if (caption) caption.textContent = captionText || '現品票写真 (Warehouse Label Photo)';
+    if (modal) modal.classList.add('open');
+}
+
+function closePhotoModal() {
+    const modal = document.getElementById('photoModal');
+    if (modal) modal.classList.remove('open');
+}
+
+// Scrap Modal
+function openScrapModal() {
+    if (!state.activeItem) {
+        showToast('包装中のアイテムがありません', 'warning');
+        return;
+    }
+    const modal = document.getElementById('scrapModal');
+    const subtitle = document.getElementById('scrapModalSubtitle');
+    const chkEntire = document.getElementById('chkScrapEntireLot');
+
+    const curRoll = state.activeItem.currentRollIndex || state.activeItem.rollIndex || 1;
+    const totalRolls = state.activeItem.totalRolls || 1;
+
+    if (subtitle) {
+        subtitle.textContent = `【${state.activeItem.hinban}】の Roll #${curRoll} / ${totalRolls} を不良として破棄し、次へ進めますか？`;
+    }
+    if (chkEntire) chkEntire.checked = false;
+
+    state.selectedScrapReason = 'キズ・汚れ';
+    updateScrapReasonButtons();
+
+    if (modal) modal.classList.add('open');
+}
+
+function closeScrapModal() {
+    const modal = document.getElementById('scrapModal');
+    if (modal) modal.classList.remove('open');
+}
+
+function selectScrapReason(reason) {
+    state.selectedScrapReason = reason;
+    updateScrapReasonButtons();
+}
+
+function updateScrapReasonButtons() {
+    const btns = document.querySelectorAll('#scrapReasonGrid .reason-btn');
+    btns.forEach(btn => {
+        if (btn.textContent.trim() === state.selectedScrapReason) {
+            btn.classList.add('selected');
+        } else {
+            btn.classList.remove('selected');
+        }
+    });
+}
+
+// Finish Early Modal
+function openFinishEarlyModal() {
+    if (!state.activeItem) {
+        showToast('包装中のアイテムがありません', 'warning');
+        return;
+    }
+    const modal = document.getElementById('finishEarlyModal');
+    const plannedDisplay = document.getElementById('plannedRollsDisplay');
+    const inputActual = document.getElementById('inputActualRolls');
+
+    const total = state.activeItem.totalRolls || 1;
+    const currentRoll = state.activeItem.currentRollIndex || state.activeItem.rollIndex || 1;
+
+    if (plannedDisplay) plannedDisplay.textContent = `${total} 巻 (Planned)`;
+    if (inputActual) {
+        inputActual.value = Math.max(0, currentRoll - 1);
+        inputActual.max = total;
+    }
+
+    if (modal) modal.classList.add('open');
+}
+
+function closeFinishEarlyModal() {
+    const modal = document.getElementById('finishEarlyModal');
+    if (modal) modal.classList.remove('open');
+}
+
+// -----------------------------------------------------
+// Fetch Production Queue from API
+// -----------------------------------------------------
+async function fetchProductionQueue(showLoading = false) {
+    if (!state.machineName) {
+        console.warn('⚠️ No machine specified in URL params (?machine=...). Waiting for URL parameter.');
+        state.queue = [];
+        state.activeItem = null;
+        state.waitingItems = [];
+        state.completedItems = [];
+        renderApp();
+        return;
+    }
+    if (state.isLoadingQueue && !showLoading) return;
+    state.isLoadingQueue = true;
+
+    try {
+        const url = `${serverURL}/api/production/queue?date=${encodeURIComponent(state.selectedDate)}&machine=${encodeURIComponent(state.machineName)}`;
+        console.log(`📥 Fetching production queue: ${url}`);
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Queue fetch failed: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const rawQueue = Array.isArray(data.queue) ? data.queue : [];
+
+        // Partition into Active, Queued (Waiting), and Completed
+        const active = rawQueue.find(item => item.status === 'active');
+        const queued = rawQueue.filter(item => item.status === 'queued' || (item.status !== 'active' && item.status !== 'completed' && item.status !== 'scrapped'));
+        const completed = rawQueue.filter(item => item.status === 'completed' || item.status === 'scrapped');
+
+        state.queue = rawQueue;
+        state.activeItem = active || null;
+        state.waitingItems = queued;
+        state.completedItems = completed;
+
+        // If no item is explicitly active, but there are queued items, default the first one as active target
+        if (!state.activeItem && queued.length > 0) {
+            state.activeItem = queued[0];
+            state.waitingItems = queued.slice(1);
+        }
+
+        renderApp();
+    } catch (err) {
+        console.warn('Could not fetch queue from server:', err);
+        // If server is unavailable, fallback to localStorage cache
+        fallbackToLocalQueue();
+    } finally {
+        state.isLoadingQueue = false;
+    }
+}
+
+function fallbackToLocalQueue() {
+    const cacheKey = `firstkojo2_queue_${state.selectedDate}_${state.machineName}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+        try {
+            const list = JSON.parse(cached);
+            state.queue = list;
+            state.activeItem = list.find(i => i.status === 'active') || list[0] || null;
+            state.waitingItems = list.filter(i => i !== state.activeItem && i.status !== 'completed');
+            renderApp();
+            return;
+        } catch {
+            // ignore
+        }
+    }
+    renderApp();
+}
+
+function saveLocalQueue() {
+    const cacheKey = `firstkojo2_queue_${state.selectedDate}_${state.machineName}`;
+    localStorage.setItem(cacheKey, JSON.stringify(state.queue));
+}
+
+// -----------------------------------------------------
+// Render App UI
+// -----------------------------------------------------
+function renderApp() {
+    renderHeroCard();
+    renderQueueSection();
+    updateLastPrintedInfo();
+}
+
+function renderHeroCard() {
+    const wrapper = document.getElementById('heroCardWrapper');
+    if (!wrapper) return;
+
+    const item = state.activeItem;
+
+    if (!item) {
+        if (!state.machineName) {
+            wrapper.innerHTML = `
+                <div class="empty-queue-card" style="border-color: #FCA5A5; background: #FFFBFB;">
+                    <div class="empty-icon" style="background: #FEE2E2; color: #DC2626;">⚠️</div>
+                    <h2 class="empty-title" style="color: #DC2626;">設備（machine）パラメータが指定されていません</h2>
+                    <p class="empty-subtitle">
+                        URLに設備パラメータが付与されていません。<br>
+                        例: <code>?machine=PSA2&filter=第一工場</code> のように設備名を指定して開いてください。
+                    </p>
+                </div>
+            `;
+            return;
+        }
+
+        // Empty State Placeholder
+        wrapper.innerHTML = `
+            <div class="empty-queue-card">
+                <div class="empty-icon">📦</div>
+                <h2 class="empty-title">待機中: 投入工程からの登録を待っています</h2>
+                <p class="empty-subtitle">
+                    Waiting for feeder station to register materials.<br>
+                    投入工程（Tablet 1）で原反QRまたは現品票写真が登録されると、自動的にここに表示されます。
+                </p>
+                <div class="empty-actions">
+                    <button type="button" class="btn-edge" onclick="fetchProductionQueue(true)">
+                        🔄 キューを再確認 (Refresh)
+                    </button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
+    const totalRolls = Number(item.totalRolls) || 1;
+    const hinban = item.hinban || '品番未設定';
+    const color = item.color || '標準';
+    const hinmei = item.hinmei || '-';
+    const okyakuHinban = item.okyakuHinban || '-';
+    const metersPerRoll = item.rollMeters || item.metersPerRoll || item.meters || 100;
+    const totalMeters = item.totalMeters || (metersPerRoll * totalRolls);
+    const shippingDest = item.shippingDest || '';
+    const rawQr = item.rawMaterialQR || item.rawQr || '-';
+    const rawLen = item.rawMaterialLength || item.materialLength || `${totalMeters}m`;
+    const mfgUid = item.manufacturerUid || item.lotNo || '-';
+    const photoUrl = item.photoUrl || '';
+
+    // Determine lbx label format name for operator visibility
+    const isSpecial = isSpecialKinuuraHinban(hinban);
+    let labelFormat = 'firstkojo4.lbx';
+    if (isSpecial) labelFormat = 'kinuuraLabel.lbx (衣浦特殊)';
+    else if (item.labelHinban === 'NC2') labelFormat = 'NC21.lbx (NC2専用)';
+
+    // Step dots
+    let stepDotsHtml = '';
+    for (let r = 1; r <= totalRolls; r++) {
+        let dotClass = 'roll-step-dot';
+        let dotText = `Roll ${r}`;
+
+        if (r < curRoll) {
+            dotClass += ' completed';
+            dotText = `✓ Roll ${r}`;
+        } else if (r === curRoll) {
+            dotClass += ' current';
+            dotText = `▶ Roll ${r}`;
+        }
+        stepDotsHtml += `<div class="${dotClass}">${dotText}</div>`;
+    }
+
+    wrapper.innerHTML = `
+        <div class="hero-wrapping-card has-active">
+            <!-- Header of Hero -->
+            <div class="hero-card-header">
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <div class="hero-status-pill">
+                        <span>▶</span>
+                        <span>現在包装中 (Currently Wrapping)</span>
+                    </div>
+                    <div class="roll-counter-badge">
+                        <span>Roll</span>
+                        <strong style="font-size: 1.35rem;">${curRoll}</strong>
+                        <span style="font-size: 0.95rem; opacity: 0.8;">/ ${totalRolls} 巻き</span>
+                    </div>
+                </div>
+                <div class="hero-lot-tag" title="ロット番号 (Auto Lot Number)">
+                    LOT: ${calcLotNumber(curRoll)}
+                </div>
+            </div>
+
+            <!-- 2-Column Specs & Photo Grid -->
+            <div class="hero-grid">
+                <!-- Left: Huge Product Specs -->
+                <div class="product-specs-pane">
+                    <div class="hinban-hero-row">
+                        <div style="display: flex; flex-direction: column;">
+                            <span class="hinban-label-small">品番 (PART NUMBER)</span>
+                            <div class="hinban-display">${escapeHtml(hinban)}</div>
+                        </div>
+                        <div class="color-badge" title="色 (Color)">
+                            🎨 ${escapeHtml(color)}
+                        </div>
+                    </div>
+
+                    <div class="spec-details-grid">
+                        <div class="spec-item">
+                            <span class="spec-label">お客様品番 (Customer Part No.)</span>
+                            <span class="spec-value highlight-blue">${escapeHtml(okyakuHinban)}</span>
+                        </div>
+                        <div class="spec-item">
+                            <span class="spec-label">品名 (Product Name)</span>
+                            <span class="spec-value">${escapeHtml(hinmei)}</span>
+                        </div>
+                        <div class="spec-item">
+                            <span class="spec-label">1巻長さ (Roll Length)</span>
+                            <span class="spec-value highlight-brand">${metersPerRoll} m / 巻</span>
+                        </div>
+                        <div class="spec-item">
+                            <span class="spec-label">納入先・ラベル様式</span>
+                            <span class="spec-value" style="font-size: 0.9rem;">
+                                ${shippingDest ? `${escapeHtml(shippingDest)}へ · ` : ''}${labelFormat}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Visual Step Progress Tracker -->
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <span class="spec-label">巻進捗 (Roll Progress):</span>
+                        <div class="roll-tracker">
+                            ${stepDotsHtml}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Warehouse Label Photo Preview & Material Info -->
+                <div class="material-verification-pane">
+                    <div class="photo-preview-card" onclick="openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - 現品票写真')" title="タップして拡大表示 (Tap to Enlarge)">
+                        ${photoUrl ? `
+                            <img src="${photoUrl}" alt="現品票写真">
+                            <div class="photo-badge-overlay">
+                                <span>🔍</span>
+                                <span>タップで写真拡大 (Zoom)</span>
+                            </div>
+                        ` : `
+                            <div class="photo-placeholder">
+                                <span class="photo-placeholder-icon">📷</span>
+                                <span class="photo-placeholder-text">投入工程の現品票写真がありません</span>
+                                <span style="font-size: 0.75rem; color: var(--text-soft);">（Tablet 1で未撮影）</span>
+                            </div>
+                        `}
+                    </div>
+
+                    <div class="raw-material-box">
+                        <div class="raw-meta-row">
+                            <span class="raw-meta-title">原反QR文字列:</span>
+                            <div class="raw-qr-snippet" title="${escapeHtml(rawQr)}">${escapeHtml(rawQr)}</div>
+                        </div>
+                        <div class="raw-meta-row">
+                            <span class="raw-meta-title">原反実測 / 総長さ:</span>
+                            <span class="raw-meta-val">${escapeHtml(String(rawLen))} (総 ${totalMeters}m)</span>
+                        </div>
+                        <div class="raw-meta-row">
+                            <span class="raw-meta-title">メーカー製造ロット / UID:</span>
+                            <span class="raw-meta-val" style="font-family: ui-monospace, monospace;">${escapeHtml(mfgUid)}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Massive Action Button & Edge Case Controls -->
+            <div class="hero-action-container">
+                <button type="button" class="btn-massive-print" id="btnPrintRollLabel" onclick="handlePrintRollLabel()">
+                    <span class="print-icon">🖨️</span>
+                    <div class="print-text-group">
+                        <span class="main-print-label">ラベル印刷 (Print Roll Label)</span>
+                        <span class="sub-print-label">Roll ${curRoll} / ${totalRolls} のラベルを発行して進める</span>
+                    </div>
+                </button>
+
+                <div class="edge-controls-bar">
+                    <button type="button" class="btn-edge reprint-btn" onclick="handleReprintLastRoll()" title="直前に印刷したラベルをそのまま再発行します">
+                        <span>🔄</span>
+                        <span>直前ラベル再印刷 (Re-print)</span>
+                    </button>
+                    <button type="button" class="btn-edge skip-btn" onclick="openScrapModal()" title="キズ・シワなどの不良で1巻破棄して次へ">
+                        <span>⚠️</span>
+                        <span>1巻破棄 / スキップ (Scrap)</span>
+                    </button>
+                    <button type="button" class="btn-edge finish-btn" onclick="openFinishEarlyModal()" title="材料不足などで予定巻き数より早く終了">
+                        <span>🏁</span>
+                        <span>ロット中途完了 (Finish Early)</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderQueueSection() {
+    const container = document.getElementById('queueGridContainer');
+    const badge = document.getElementById('queueCountBadge');
+    if (!container) return;
+
+    const items = state.waitingItems || [];
+    if (badge) badge.textContent = `${items.length}件`;
+
+    if (items.length === 0) {
+        container.innerHTML = `
+            <div style="grid-column: 1 / -1; background: var(--bg-surface); border: 1.5px dashed var(--border-strong); border-radius: var(--card-radius); padding: 32px 20px; text-align: center; color: var(--text-soft); font-weight: 700;">
+                次工程キューに待機中のロットはありません (No waiting lots in line)
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = items.map((item, index) => {
+        const qPos = index + 1;
+        const hinban = item.hinban || '品番未設定';
+        const color = item.color || '標準';
+        const hinmei = item.hinmei || '-';
+        const okyakuHinban = item.okyakuHinban || '';
+        const rolls = item.totalRolls || 1;
+        const photoUrl = item.photoUrl || '';
+        const qId = item._id || item.queueId || '';
+
+        return `
+            <div class="queue-item-card" onclick="handleSelectQueueItem('${qId}', '${escapeHtml(hinban)}')">
+                <div class="queue-card-top">
+                    <div class="queue-pos-badge">順番 #${qPos}</div>
+                    <div class="queue-rolls-tag">${rolls} 巻 予定</div>
+                </div>
+
+                <div class="queue-item-body">
+                    <div class="queue-thumb" onclick="event.stopPropagation(); openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - 現品票')">
+                        ${photoUrl ? `<img src="${photoUrl}" alt="Photo">` : '📷'}
+                    </div>
+                    <div class="queue-info">
+                        <div class="queue-hinban">${escapeHtml(hinban)}</div>
+                        <div class="queue-color-hinmei">🎨 ${escapeHtml(color)} · ${escapeHtml(hinmei)}</div>
+                        ${okyakuHinban ? `<div class="queue-customer">客品番: ${escapeHtml(okyakuHinban)}</div>` : ''}
+                    </div>
+                </div>
+
+                <div class="queue-card-action">
+                    <button type="button" class="queue-switch-btn">
+                        <span>👆</span>
+                        <span>このロットを包装開始 (Start)</span>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function updateLastPrintedInfo() {
+    const el = document.getElementById('lastPrintedInfo');
+    if (!el) return;
+    if (state.lastPrinted) {
+        const timeStr = state.lastPrinted.timeStr || (new Date(state.lastPrinted.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
+        el.textContent = `最終印刷: [${state.lastPrinted.hinban}] Roll ${state.lastPrinted.rollIndex}/${state.lastPrinted.totalRolls} (${timeStr})`;
+    } else {
+        el.textContent = '';
+    }
+}
+
+function calcLotNumber(rollIndex) {
+    let yymmdd = '';
+    if (state.selectedDate && state.selectedDate.includes('-')) {
+        const parts = state.selectedDate.split('-');
+        yymmdd = `${parts[0].slice(-2)}${parts[1].padStart(2, '0')}${parts[2].padStart(2, '0')}`;
+    } else {
+        const now = new Date();
+        const yy = String(now.getFullYear()).slice(-2);
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        yymmdd = `${yy}${mm}${dd}`;
+    }
+    return `${yymmdd}-${rollIndex || 1}`;
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+// -----------------------------------------------------
+// Print Action: Primary
+// -----------------------------------------------------
+async function handlePrintRollLabel() {
+    if (!state.activeItem) {
+        showToast('包装対象のロットがありません', 'warning');
+        return;
+    }
+    if (state.isPrinting) return;
+    state.isPrinting = true;
+
+    const item = state.activeItem;
+    const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
+    const totalRolls = Number(item.totalRolls) || 1;
+
+    // Build fields
+    const fields = buildBrotherPrintFields(item, curRoll, totalRolls);
+    console.log(`🖨️ Printing Roll ${curRoll}/${totalRolls} for [${item.hinban}]:`, fields);
+
+    showPrintProgressModal('ラベル印刷中...', `【${item.hinban}】Roll ${curRoll} / ${totalRolls}`);
+
+    try {
+        const printResult = await executeBrotherPrint(fields);
+
+        if (!printResult.success) {
+            console.warn('Printer warning/error:', printResult.error);
+            // If connection refused (test/browser without brother client), ask if user wants to advance anyway
+            if (printResult.isConnectionRefused) {
+                const advanceAnyway = confirm(
+                    `【プリンター未検出】\n${printResult.error}\n\nBrother Web Print または プリンタークライアントが未起動です。\n\nテストまたは手動印刷として、キューの巻番号を進めますか？`
+                );
+                if (!advanceAnyway) {
+                    updatePrintProgressError(printResult.error);
+                    state.isPrinting = false;
+                    return;
+                }
+            } else {
+                updatePrintProgressError(printResult.error || 'プリンターエラー');
+                state.isPrinting = false;
+                return;
+            }
+        }
+
+        // On success:
+        playChime('success');
+        updatePrintProgressSuccess('印刷完了！', `Roll ${curRoll} / ${totalRolls} を発行しました`);
+
+        // Record last printed
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+        state.lastPrinted = {
+            fields,
+            hinban: item.hinban,
+            rollIndex: curRoll,
+            totalRolls: totalRolls,
+            timestamp: now.toISOString(),
+            timeStr
+        };
+        localStorage.setItem('firstkojo2_last_printed', JSON.stringify(state.lastPrinted));
+
+        // Call advance & print-log API
+        await Promise.allSettled([
+            advanceQueueRoll(item, curRoll, totalRolls),
+            logPrintToServer(item, curRoll, totalRolls, fields, timeStr)
+        ]);
+
+        showToast(`✅ Roll ${curRoll}/${totalRolls} のラベルを発行しました`, 'success');
+    } catch (err) {
+        console.error('Error during print flow:', err);
+        updatePrintProgressError(err.message || '予期せぬエラー');
+    } finally {
+        state.isPrinting = false;
+    }
+}
+
+async function advanceQueueRoll(item, curRoll, totalRolls) {
+    const queueId = item._id || item.queueId;
+    const groupId = item.groupId;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/advance`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: state.selectedDate,
+                machine: state.machineName,
+                queueId,
+                groupId,
+                rollIndex: curRoll,
+                totalRolls
+            })
+        });
+
+        if (!res.ok) {
+            console.warn('Queue advance API response status:', res.status);
+        } else {
+            const data = await res.json();
+            console.log('⏩ Queue advanced:', data);
+        }
+    } catch (e) {
+        console.warn('Could not advance queue on server, updating locally:', e);
+        // Local update
+        if (curRoll >= totalRolls) {
+            item.status = 'completed';
+        } else {
+            item.currentRollIndex = curRoll + 1;
+        }
+        saveLocalQueue();
+    }
+
+    // Refresh queue smoothly
+    await fetchProductionQueue();
+}
+
+async function logPrintToServer(item, curRoll, totalRolls, fields, timeStr) {
+    try {
+        await fetch(`${serverURL}/api/production/print-log`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                scheduleId: item.scheduleId || null,
+                groupId: item.groupId,
+                date: state.selectedDate,
+                machine: state.machineName,
+                worker: state.workerName,
+                hinban: item.hinban,
+                rollIndex: Number(curRoll),
+                totalRolls: Number(totalRolls),
+                lotNo: fields.text_DateT,
+                barcode: fields.barcode_barcode,
+                timestamp: new Date().toISOString(),
+                timeStr: timeStr
+            })
+        });
+    } catch (e) {
+        console.warn('Could not save print-log to server:', e);
+    }
+}
+
+// -----------------------------------------------------
+// Edge Case 1: Re-print Last Roll
+// -----------------------------------------------------
+async function handleReprintLastRoll() {
+    if (!state.lastPrinted || !state.lastPrinted.fields) {
+        showToast('直前の印刷履歴がありません', 'warning');
+        return;
+    }
+
+    const { fields, hinban, rollIndex, totalRolls } = state.lastPrinted;
+
+    const confirmed = confirm(
+        `【再印刷の確認】\n\n品番: ${hinban}\nRoll: ${rollIndex} / ${totalRolls}\nロット: ${fields.text_DateT}\n\nこのラベルを再度プリンターへ送信しますか？\n（※ キューの進捗は進みません）`
+    );
+    if (!confirmed) return;
+
+    showPrintProgressModal('再印刷中...', `【${hinban}】Roll ${rollIndex} / ${totalRolls}`);
+
+    try {
+        const result = await executeBrotherPrint(fields);
+        if (!result.success && !result.isConnectionRefused) {
+            updatePrintProgressError(result.error || '再印刷エラー');
+            return;
+        }
+
+        playChime('success');
+        updatePrintProgressSuccess('再印刷完了', `Roll ${rollIndex} / ${totalRolls}`);
+        showToast(`🔄 [${hinban}] Roll ${rollIndex} を再印刷しました`, 'success');
+    } catch (err) {
+        updatePrintProgressError(err.message || '再印刷に失敗しました');
+    }
+}
+
+// -----------------------------------------------------
+// Edge Case 2: 1 Roll Scrap / Skip
+// -----------------------------------------------------
+async function submitScrapRoll() {
+    if (!state.activeItem) return;
+
+    const item = state.activeItem;
+    const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
+    const totalRolls = Number(item.totalRolls) || 1;
+    const reason = state.selectedScrapReason || '不良破棄';
+    const scrapEntireLot = document.getElementById('chkScrapEntireLot')?.checked || false;
+
+    closeScrapModal();
+    playChime('warning');
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/skip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: state.selectedDate,
+                machine: state.machineName,
+                queueId: item._id || item.queueId,
+                groupId: item.groupId,
+                rollIndex: curRoll,
+                reason,
+                scrapEntireLot
+            })
+        });
+
+        if (!res.ok) {
+            throw new Error(`Server skip failed: HTTP ${res.status}`);
+        }
+
+        showToast(`⚠️ Roll #${curRoll} を破棄処理しました（理由: ${reason}）`, 'warning');
+        await fetchProductionQueue();
+    } catch (err) {
+        console.warn('Scrap API error, advancing locally:', err);
+        if (scrapEntireLot || curRoll >= totalRolls) {
+            item.status = 'scrapped';
+        } else {
+            item.currentRollIndex = curRoll + 1;
+            item.scrappedRolls = (item.scrappedRolls || 0) + 1;
+        }
+        saveLocalQueue();
+        await fetchProductionQueue();
+        showToast(`⚠️ Roll #${curRoll} をスキップしました`, 'warning');
+    }
+}
+
+// -----------------------------------------------------
+// Edge Case 3: Finish Lot Early
+// -----------------------------------------------------
+async function submitFinishEarly() {
+    if (!state.activeItem) return;
+
+    const item = state.activeItem;
+    const inputActual = document.getElementById('inputActualRolls');
+    const selectReason = document.getElementById('selectFinishReason');
+
+    const actualRolls = Number(inputActual?.value || 0);
+    const reason = selectReason?.value || '材料短尺・原反不足';
+
+    closeFinishEarlyModal();
+    playChime('warning');
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/finish-early`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: state.selectedDate,
+                machine: state.machineName,
+                queueId: item._id || item.queueId,
+                groupId: item.groupId,
+                actualRollsProduced: actualRolls,
+                reason
+            })
+        });
+
+        if (!res.ok) {
+            throw new Error(`Server finish-early failed: HTTP ${res.status}`);
+        }
+
+        showToast(`🏁 ロット中途完了: 実 ${actualRolls} 巻で完了しました`, 'info');
+        await fetchProductionQueue();
+    } catch (err) {
+        console.warn('Finish early API error, advancing locally:', err);
+        item.status = 'completed';
+        item.actualRollsProduced = actualRolls;
+        item.finishedEarly = true;
+        saveLocalQueue();
+        await fetchProductionQueue();
+        showToast(`🏁 ロットを中途完了しました (実 ${actualRolls} 巻)`, 'info');
+    }
+}
+
+// -----------------------------------------------------
+// Edge Case 4: Select Queue Item Target
+// -----------------------------------------------------
+async function handleSelectQueueItem(queueId, hinban) {
+    if (!queueId) return;
+
+    const confirmed = confirm(`【包装対象の変更】\n\n「${hinban}」を現在の包装対象に設定しますか？\n（※ 投入順序が前後した場合などに切り替えられます）`);
+    if (!confirmed) return;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/select`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: state.selectedDate,
+                machine: state.machineName,
+                queueId
+            })
+        });
+
+        if (!res.ok) {
+            throw new Error(`Queue select failed: HTTP ${res.status}`);
+        }
+
+        playChime('beep');
+        showToast(`🎯 包装対象を「${hinban}」に切り替えました`, 'info');
+        await fetchProductionQueue();
+    } catch (err) {
+        console.warn('Queue select API error, switching locally:', err);
+        // Local switch
+        const found = state.queue.find(i => (i._id === queueId || i.queueId === queueId));
+        if (found) {
+            state.queue.forEach(i => {
+                if (i.status === 'active') i.status = 'queued';
+            });
+            found.status = 'active';
+            state.activeItem = found;
+            state.waitingItems = state.queue.filter(i => i !== found && i.status !== 'completed');
+            saveLocalQueue();
+            renderApp();
+        }
+    }
+}
+
+// -----------------------------------------------------
+// Demo / Test Queue Item Injection (for testing without feeder)
+// -----------------------------------------------------
+async function injectDemoQueueItem() {
+    const demoItems = [
+        {
+            hinban: '5020-001',
+            color: '黒',
+            hinmei: 'トリムテープ PSA',
+            okyakuHinban: '75811-58010',
+            labelHinban: '',
+            totalRolls: 3,
+            rollMeters: 100,
+            totalMeters: 300,
+            shippingDest: '豊田',
+            rawMaterialQR: 'MTR-5020-BLK-98421,L=300m,KURACHI-PSA',
+            rawMaterialLength: '300m',
+            manufacturerUid: 'LOT-KUR-2609-01',
+            photoUrl: 'src/warehouse_label_sample.png'
+        },
+        {
+            hinban: 'NC2-8821',
+            color: 'グレー',
+            hinmei: '防音フォーム NC2',
+            okyakuHinban: '86120-12340',
+            labelHinban: 'NC2',
+            totalRolls: 2,
+            rollMeters: 50,
+            totalMeters: 100,
+            shippingDest: '田原',
+            rawMaterialQR: 'MTR-NC2-GRY-1102,L=100m',
+            rawMaterialLength: '100m',
+            manufacturerUid: 'LOT-KUR-NC2-99',
+            photoUrl: ''
+        },
+        {
+            hinban: 'CNU/BLZ02B*GD/***W48',
+            color: '黒',
+            hinmei: '衣浦向け専用テープ',
+            okyakuHinban: 'KINUURA-SPEC-01',
+            labelHinban: '',
+            totalRolls: 4,
+            rollMeters: 100,
+            totalMeters: 400,
+            shippingDest: '衣浦',
+            rawMaterialQR: 'KINUURA-RAW-4482',
+            rawMaterialLength: '400m',
+            manufacturerUid: 'MFG-KIN-882',
+            photoUrl: ''
+        }
+    ];
+
+    const pick = demoItems[Math.floor(Math.random() * demoItems.length)];
+    const payload = {
+        date: state.selectedDate,
+        machine: state.machineName,
+        worker: state.workerName,
+        groupId: `DEMO-${Date.now()}`,
+        ...pick
+    };
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+            showToast(`➕ テスト用ロット「${pick.hinban}」を登録しました`, 'success');
+            await fetchProductionQueue();
+            return;
+        }
+    } catch (e) {
+        console.warn('Enqueue API error, saving locally:', e);
+    }
+
+    // Fallback local injection
+    const newItem = {
+        _id: `local_${Date.now()}`,
+        status: state.activeItem ? 'queued' : 'active',
+        currentRollIndex: 1,
+        createdAt: new Date(),
+        ...payload
+    };
+    state.queue.push(newItem);
+    if (!state.activeItem) state.activeItem = newItem;
+    else state.waitingItems.push(newItem);
+    saveLocalQueue();
+    renderApp();
+    showToast(`➕ [ローカル] テスト用ロット「${pick.hinban}」を追加しました`, 'success');
+}
+
+// -----------------------------------------------------
+// Realtime SSE Synchronization
+// -----------------------------------------------------
+function initEventSource() {
+    if (state.eventSource) {
+        try {
+            state.eventSource.close();
+        } catch {
+            // ignore
+        }
+        state.eventSource = null;
+    }
+
+    const sseUrl = `${serverURL}/api/production/events?date=${encodeURIComponent(state.selectedDate)}`;
+    console.log(`🔌 Connecting SSE: ${sseUrl}`);
+
+    try {
+        state.eventSource = new EventSource(sseUrl);
+
+        state.eventSource.onopen = () => {
+            console.log('🟢 SSE connected successfully');
+            setSseBadgeStatus(true);
+            state.reconnectAttempts = 0;
+            // Fetch fresh queue on initial or re-connection
+            fetchProductionQueue();
+        };
+
+        state.eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                console.log('⚡ SSE Event Received:', data);
+
+                if (data.type === 'connected') {
+                    setSseBadgeStatus(true);
+                    return;
+                }
+
+                // Relevant production events
+                const relevantTypes = [
+                    'queue_updated',
+                    'queue_roll_printed',
+                    'queue_scrapped',
+                    'status_update',
+                    'print_log'
+                ];
+
+                if (relevantTypes.includes(data.type)) {
+                    console.log(`🔄 Handling ${data.type} -> updating queue`);
+                    fetchProductionQueue();
+                }
+            } catch (err) {
+                console.warn('SSE message parse error:', err, event.data);
+            }
+        };
+
+        state.eventSource.onerror = (err) => {
+            console.warn('🔴 SSE error/disconnected:', err);
+            setSseBadgeStatus(false);
+
+            if (state.eventSource) {
+                state.eventSource.close();
+                state.eventSource = null;
+            }
+
+            // Exponential backoff reconnect
+            state.reconnectAttempts++;
+            const backoffMs = Math.min(30000, 1000 * Math.pow(1.5, state.reconnectAttempts));
+            clearTimeout(state.reconnectTimeoutId);
+            state.reconnectTimeoutId = setTimeout(() => {
+                initEventSource();
+            }, backoffMs);
+        };
+    } catch (err) {
+        console.error('Failed to create EventSource:', err);
+        setSseBadgeStatus(false);
+    }
+}
+
+function setSseBadgeStatus(connected) {
+    state.sseConnected = connected;
+    const badge = document.getElementById('sseBadge');
+    const text = document.getElementById('sseStatusText');
+
+    if (!badge || !text) return;
+
+    if (connected) {
+        badge.className = 'sse-badge connected';
+        text.textContent = '接続中 (Live)';
+    } else {
+        badge.className = 'sse-badge disconnected';
+        text.textContent = '切断中 (Offline)';
+    }
+}
+
+// -----------------------------------------------------
+// Event Listeners & Initialization
+// -----------------------------------------------------
+function setupEventListeners() {
+    // Date Navigation
+    const btnPrev = document.getElementById('btnPrevDay');
+    const btnNext = document.getElementById('btnNextDay');
+    const btnToday = document.getElementById('btnToday');
+    const datePicker = document.getElementById('datePickerInput');
+
+    if (btnPrev) {
+        btnPrev.addEventListener('click', () => {
+            changeSelectedDate(shiftDateString(state.selectedDate, -1));
+        });
+    }
+
+    if (btnNext) {
+        btnNext.addEventListener('click', () => {
+            changeSelectedDate(shiftDateString(state.selectedDate, 1));
+        });
+    }
+
+    if (btnToday) {
+        btnToday.addEventListener('click', () => {
+            changeSelectedDate(getTodayDateString());
+        });
+    }
+
+    if (datePicker) {
+        datePicker.addEventListener('change', (e) => {
+            if (e.target.value) {
+                changeSelectedDate(e.target.value);
+            }
+        });
+    }
+
+    // Refresh button
+    const btnRefresh = document.getElementById('btnRefresh');
+    if (btnRefresh) {
+        btnRefresh.addEventListener('click', () => {
+            btnRefresh.style.transform = 'rotate(180deg)';
+            setTimeout(() => { btnRefresh.style.transform = ''; }, 300);
+            fetchProductionQueue(true);
+            showToast('キューを更新しました', 'info', 1800);
+        });
+    }
+
+    // Sound toggle button
+    const btnSound = document.getElementById('btnSoundToggle');
+    if (btnSound) {
+        updateSoundButtonUi();
+        btnSound.addEventListener('click', () => {
+            state.soundEnabled = !state.soundEnabled;
+            localStorage.setItem('firstkojo2_sound_enabled', String(state.soundEnabled));
+            updateSoundButtonUi();
+            if (state.soundEnabled) playChime('success');
+            showToast(state.soundEnabled ? '🔊 効果音をONにしました' : '🔇 効果音をOFFにしました', 'info', 1500);
+        });
+    }
+
+    // Fullscreen toggle button
+    const btnFull = document.getElementById('btnFullscreen');
+    if (btnFull) {
+        btnFull.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen?.().catch(() => {});
+            } else {
+                document.exitFullscreen?.().catch(() => {});
+            }
+        });
+    }
+
+    // Close modals on Escape key
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closePhotoModal();
+            closePrintProgressModal();
+            closeScrapModal();
+            closeFinishEarlyModal();
+        }
+    });
+
+    // Close modals when clicking backdrop
+    const modals = document.querySelectorAll('.modal');
+    modals.forEach(m => {
+        m.addEventListener('click', (e) => {
+            if (e.target === m) {
+                m.classList.remove('open');
+            }
+        });
+    });
+}
+
+function updateSoundButtonUi() {
+    const btnSound = document.getElementById('btnSoundToggle');
+    if (btnSound) {
+        btnSound.textContent = state.soundEnabled ? '🔊' : '🔇';
+    }
+}
+
+function changeSelectedDate(newDate) {
+    if (state.selectedDate === newDate) return;
+    state.selectedDate = newDate;
+    sessionStorage.setItem('firstkojo2_date', newDate);
+
+    const datePicker = document.getElementById('datePickerInput');
+    if (datePicker) datePicker.value = newDate;
+
+    // Reconnect SSE for new date
+    initEventSource();
+    fetchProductionQueue(true);
+}
+
+// -----------------------------------------------------
+// Bootstrapping
+// -----------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 firstKojoNippo2 initialized (Tablet 2 Wrapping & Label Printing)');
+    parseUrlParams();
+    setupEventListeners();
+    fetchProductionQueue(true);
+    initEventSource();
+
+    // Fallback polling interval (every 15s) in case SSE is interrupted by tablet sleep/proxy
+    state.pollingIntervalId = setInterval(() => {
+        if (!state.sseConnected) {
+            fetchProductionQueue(false);
+        }
+    }, 15000);
+});

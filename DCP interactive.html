@@ -6292,10 +6292,12 @@
                     if (raw) {
                         const d = JSON.parse(raw);
                         if (d && typeof d === 'object') {
-                            d.count = d.count || 0;
-                            d.totalWaitSeconds = d.totalWaitSeconds || 0;
-                            d.totalWaitMinutes = d.totalWaitMinutes || 0;
-                            d.records = Array.isArray(d.records) ? d.records : [];
+                            d.records = Array.isArray(d.records)
+                                ? d.records.filter(r => r && typeof r === 'object' && r.waitSeconds != null)
+                                : [];
+                            d.count = d.records.length;
+                            d.totalWaitSeconds = d.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                            d.totalWaitMinutes = Math.round(d.totalWaitSeconds / 60);
                             return d;
                         }
                     }
@@ -6313,7 +6315,32 @@
                 if (typeof stopCallStopPulse === 'function') {
                     stopCallStopPulse();
                 }
-            };
+            function hasActiveProduct() {
+                if (typeof window.isScanWorkflowComplete === 'function' && window.isScanWorkflowComplete()) return true;
+                if (typeof isScanComplete === 'function' && isScanComplete()) return true;
+                const pfx = (typeof uniquePrefix !== 'undefined' && uniquePrefix)
+                    ? uniquePrefix
+                    : (typeof breakPrefix !== 'undefined' ? breakPrefix : '');
+                if (pfx && localStorage.getItem(pfx + 'scanComplete') === 'true') return true;
+                if (localStorage.getItem('DCP_scanComplete') === 'true') return true;
+
+                const seb = (document.getElementById('sub-dropdown')?.value || '').trim()
+                    || (document.getElementById('背番号')?.value || '').trim()
+                    || (pfx ? (localStorage.getItem(pfx + 'cached-sebanggo') || '').trim() : '')
+                    || (localStorage.getItem('kurachi_cached-sebanggo') || '').trim()
+                    || (typeof currentProductDetails !== 'undefined' && (currentProductDetails?.sebanggo || '').trim())
+                    || '';
+
+                const hin = (document.getElementById('product-number')?.value || '').trim()
+                    || (document.getElementById('品番')?.value || '').trim()
+                    || (pfx ? (localStorage.getItem(pfx + 'cached-hinban') || '').trim() : '')
+                    || (localStorage.getItem('kurachi_cached-hinban') || '').trim()
+                    || (typeof currentProductDetails !== 'undefined' && (currentProductDetails?.hinban || '').trim())
+                    || '';
+
+                return !!(seb || hin);
+            }
+            window.hasActiveProduct = hasActiveProduct;
 
             // ---- Tracks the machine chosen in the per-call picker ----
             // For grouped pages: material/leader picker stores the chosen machine here.
@@ -6402,51 +6429,105 @@
             }
 
             // specificIP: if provided, only sends to that IP (for per-machine leader call).
-            function sendCNCCallStop(callStopValue, specificIP = null) {
+            async function sendCNCCallStop(callStopValue, specificIP = null) {
                 let ips;
                 if (specificIP) {
                     ips = [specificIP];
                 } else {
                     const ipStr = document.getElementById('ipInfo')?.value;
-                    if (!ipStr) return;
+                    if (!ipStr) return false;
                     ips = ipStr.split(',').map(ip => ip.trim()).filter(ip => ip);
                 }
-                ips.forEach(async ip => {
-                    const url = `http://${ip}:5000/request?callStop=${callStopValue}`;
+                if (ips.length === 0) return false;
+
+                const factory = document.getElementById('selected工場')?.value || '';
+                const machine = stopCallPickedMachine || new URLSearchParams(location.search).get('machine') || '';
+
+                const results = await Promise.all(ips.map(async ip => {
+                    const queryParams = new URLSearchParams({
+                        callStop: String(callStopValue)
+                    });
+                    if (factory) queryParams.set('factory', factory);
+                    if (machine) queryParams.set('machine', machine);
+
+                    const url = `http://${ip}:5000/request?${queryParams.toString()}`;
                     try {
                         const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-                        const timeoutId = ctrl ? setTimeout(() => ctrl.abort(), 950) : null;
-                        await fetch(url, { method: 'GET', mode: 'no-cors', signal: ctrl ? ctrl.signal : undefined });
+                        const timeoutId = ctrl ? setTimeout(() => ctrl.abort(), 3500) : null;
+                        const res = await fetch(url, { method: 'GET', signal: ctrl ? ctrl.signal : undefined });
                         if (timeoutId) clearTimeout(timeoutId);
+                        if (!res.ok) {
+                            console.warn(`[sendCNCCallStop] Mini-PC (${ip}) returned status ${res.status}`);
+                            return false;
+                        }
+                        const data = await res.json().catch(() => null);
+                        if (callStopValue === 1 || callStopValue === '1') {
+                            return !!(data && data.ok && data.cloud_notified !== false);
+                        }
+                        return !!(data && data.ok);
                     } catch (e) {
-                        // Silent catch on network timeout/abort during recurring pulse
+                        console.warn(`[sendCNCCallStop] Error communicating with Mini-PC (${ip}):`, e);
+                        return false;
                     }
-                });
+                }));
+
+                return results.every(r => r === true);
             }
 
+            async function triggerCallStopActivation(specificIP = null, pickedMachine = null) {
+                const success = await sendCNCCallStop(1, specificIP);
+                if (success) {
+                    console.log("✅ [Stop Call] Mini-PC confirmed TV alert sent successfully. Tablet skipping cloud notify.");
+                } else {
+                    console.warn("⚠️ [Stop Call] Mini-PC unreachable or cloud alert failed. Triggering tablet failsafe...");
+                    notifyStopCall('activate', 'leader', pickedMachine || null);
+                }
+                return success;
+            }
+
+            // Kept for backward compatibility (sends callStop=1 once, no recurring pulse)
             function startCallStopPulse(specificIP = null) {
+                triggerCallStopActivation(specificIP, stopCallPickedMachine);
+            }
+
+            let callStopZeroRetryTimer = null;
+            function retrySendCallStopZero(specificIP, maxAttempts = 15, intervalMs = 3000) {
+                if (callStopZeroRetryTimer) clearInterval(callStopZeroRetryTimer);
+                let attempts = 0;
+                callStopZeroRetryTimer = setInterval(async () => {
+                    attempts++;
+                    const ok = await sendCNCCallStop(0, specificIP);
+                    if (ok) {
+                        console.log(`✅ [Stop Call] Released pause on Mini-PC after ${attempts} background retry(ies).`);
+                        clearInterval(callStopZeroRetryTimer);
+                        callStopZeroRetryTimer = null;
+                    } else if (attempts >= maxAttempts) {
+                        console.warn(`❌ [Stop Call] Could not reach Mini-PC after ${attempts} retries.`);
+                        clearInterval(callStopZeroRetryTimer);
+                        callStopZeroRetryTimer = null;
+                    }
+                }, intervalMs);
+            }
+
+            async function stopCallStopPulse(specificIP = null) {
                 if (stopCallPulseInterval) {
                     clearInterval(stopCallPulseInterval);
                     stopCallPulseInterval = null;
                 }
-                // Send immediately on start
-                sendCNCCallStop(1, specificIP);
-                // Pulse callStop=1 once per second to keep machine paused without locking
-                stopCallPulseInterval = setInterval(() => {
-                    sendCNCCallStop(1, specificIP);
-                }, 1000);
-            }
-
-            function stopCallStopPulse(specificIP = null) {
-                if (stopCallPulseInterval) {
-                    clearInterval(stopCallPulseInterval);
-                    stopCallPulseInterval = null;
+                // Send callStop=0 once to release pause cleanly
+                const success = await sendCNCCallStop(0, specificIP);
+                if (!success) {
+                    console.warn(`⚠️ [Stop Call] Mini-PC was offline or unreachable. Scheduling background retries for callStop=0...`);
+                    retrySendCallStopZero(specificIP);
                 }
-                // Send callStop=0 to release pause cleanly
-                sendCNCCallStop(0, specificIP);
+                return success;
             }
 
-            function startStopCall(pickedMachine) {
+            async function startStopCall(pickedMachine) {
+                if (callStopZeroRetryTimer) {
+                    clearInterval(callStopZeroRetryTimer);
+                    callStopZeroRetryTimer = null;
+                }
                 if (localStorage.getItem(breakPrefix + 'activeStopCallStart')) return; // already calling
                 stopCallPickedMachine = pickedMachine || null;
                 const startEpoch = Date.now();
@@ -6457,15 +6538,14 @@
                     localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
                 }
                 openStopCallOverlay(startEpoch);
-                notifyStopCall('activate', 'leader', pickedMachine || null);
                 if (typeof logTabletAction === 'function') {
                     logTabletAction('Stop call activated (Leader called)', 'in-progress', { machine: pickedMachine || 'primary' });
                 }
-                // Pause only the picked machine (or all if not grouped) by pulsing callStop=1 every 1 second
+                // Send callStop=1 ONCE to Mini-PC (with tablet failsafe if Mini-PC fails)
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
-                startCallStopPulse(pickedIP);
+                await triggerCallStopActivation(pickedIP, pickedMachine);
             }
-            function cancelStopCall() {
+            async function cancelStopCall() {
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
                 // Only allowed within the 15s window; ignore otherwise.
                 if (raw && (Date.now() - parseInt(raw, 10)) > STOP_CANCEL_WINDOW_MS) return;
@@ -6473,9 +6553,11 @@
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
                 localStorage.removeItem(breakPrefix + 'activeStopCallStart');
                 localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
-                stopCallStopPulse(pickedIP);
                 closeStopCallOverlay();
+
+                await stopCallStopPulse(pickedIP);
                 notifyStopCall('clear', 'leader', pickedMachine || null);
+
                 if (typeof logTabletAction === 'function') {
                     logTabletAction('Stop call canceled within grace period', 'Reset', { machine: pickedMachine || 'primary' });
                 }
@@ -6570,40 +6652,72 @@
                 }, 400);
             }
 
-            function finalizeStopCall() {
-                if (!pendingStopCallRecord) return;
-                
+            let isFinalizingStopCall = false;
+
+            async function finalizeStopCall() {
+                if (!pendingStopCallRecord || isFinalizingStopCall) return;
+                isFinalizingStopCall = true;
+
+                const resumeBtn = document.getElementById('stopCallResumeCNCButton');
+                if (resumeBtn) resumeBtn.style.display = 'none';
+
+                // Immediately capture and clear to prevent concurrent executions or pushing null
+                const recordToSave = pendingStopCallRecord;
+                pendingStopCallRecord = null;
+
                 const pickedMachine = stopCallPickedMachine;
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
-                stopCallStopPulse(pickedIP);
-                
-                const data = getStopCallData();
-                data.records.push(pendingStopCallRecord);
-                data.count = data.records.length;
-                data.totalWaitSeconds = data.records.reduce((s, r) => s + (r.waitSeconds || 0), 0);
-                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
-                saveStopCallData(data);
-                if (typeof logTabletAction === 'function') {
-                    logTabletAction('Stop call unlocked by Leader', 'Completed', { ...pendingStopCallRecord });
+
+                try {
+                    await stopCallStopPulse(pickedIP);
+                } catch (e) {
+                    console.error('Error stopping call pulse:', e);
                 }
-                
-                pendingStopCallRecord = null;
-                stopCallPickedMachine = null;
-                localStorage.removeItem(breakPrefix + 'activeStopCallStart');
-                localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
-                closeStopCallOverlay();
-                notifyStopCall('clear', 'leader', pickedMachine || null);
-                showToast(_t('toast_leader_recorded'));
+
+                try {
+                    const isProdActive = typeof hasActiveProduct === 'function' ? hasActiveProduct() : true;
+                    if (isProdActive) {
+                        const data = getStopCallData();
+                        if (recordToSave) {
+                            data.records.push(recordToSave);
+                        }
+                        data.count = data.records.length;
+                        data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                        data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                        saveStopCallData(data);
+                    } else {
+                        console.log('ℹ️ [STOP CALL] Tablet has no active product scanned (free from production). Discarding downtime record.');
+                    }
+                    if (typeof logTabletAction === 'function') {
+                        logTabletAction(
+                            isProdActive ? 'Stop call unlocked by Leader' : 'Stop call unlocked by Leader (pre-production / discarded)',
+                            'Completed',
+                            { ...recordToSave, productionActive: isProdActive }
+                        );
+                    }
+
+                    stopCallPickedMachine = null;
+                    localStorage.removeItem(breakPrefix + 'activeStopCallStart');
+                    localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
+                    closeStopCallOverlay();
+                    notifyStopCall('clear', 'leader', pickedMachine || null);
+                    showToast(_t('toast_leader_recorded'));
+                } finally {
+                    isFinalizingStopCall = false;
+                }
             }
             function resumeStopCallIfActive() {
+                const rawCancel = localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+                if (rawCancel) {
+                    openCncCancelOverlay(parseInt(rawCancel, 10));
+                }
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
-                if (raw) {
+                if (raw && !rawCancel) {
                     const savedMachine = localStorage.getItem(breakPrefix + 'activeStopCallMachine') || null;
                     stopCallPickedMachine = savedMachine;
                     const pickedIP = savedMachine ? (groupedMachineIPs[savedMachine] || null) : null;
                     openStopCallOverlay(parseInt(raw, 10));
-                    notifyStopCall('activate', 'leader', savedMachine || null); // re-assert to the TV after a reload/server restart
-                    startCallStopPulse(pickedIP);
+                    triggerCallStopActivation(pickedIP, savedMachine);
                 }
                 const matTarget = localStorage.getItem(breakPrefix + 'activeCall_material');
                 const menuWrap = document.getElementById('callMenuWrapper');
@@ -6619,10 +6733,6 @@
                     notifyStopCall('activate', 'box');
                     if (menuWrap) menuWrap.classList.add('open');
                 }
-                const rawCancel = localStorage.getItem(breakPrefix + 'activeCncCancelStart');
-                if (rawCancel) {
-                    openCncCancelOverlay(parseInt(rawCancel, 10));
-                }
             }
             // =========================================================================
             // DEDICATED CNC CANCEL OVERLAY LOGIC (Hardware Cancel Detected)
@@ -6631,6 +6741,10 @@
             let cncCancelScanner = null;
 
             function openCncCancelOverlay(startEpoch) {
+                // If Stop Call overlay is open, dismiss it so Cancel screen (highest authority) takes full focus
+                if (typeof closeStopCallOverlay === 'function') {
+                    closeStopCallOverlay();
+                }
                 const ov = document.getElementById('cncCancelOverlay');
                 const alreadyOpen = ov && ov.classList.contains('open');
 
@@ -6741,13 +6855,63 @@
                                             waitMinutes: Math.round(waitSeconds / 60)
                                         });
                                     }
+
+                                    // GATEKEEPER IS HIGHEST AUTHORITY:
+                                    // If a Stop Call (pause) was active, finalize its record and release pause cleanly
+                                    const rawStop = localStorage.getItem(breakPrefix + 'activeStopCallStart');
+                                    if (rawStop) {
+                                        const stopStartEpoch = parseInt(rawStop, 10);
+                                        const stopWaitSeconds = Math.max(0, Math.round((Date.now() - stopStartEpoch) / 1000));
+                                        const stopRecord = {
+                                            calledAt: fmtClock(new Date(stopStartEpoch)),
+                                            arrivedAt: fmtClock(new Date()),
+                                            waitSeconds: stopWaitSeconds,
+                                            waitMinutes: Math.round(stopWaitSeconds / 60),
+                                            leaderName: leaderName,
+                                            leaderUsername: result.username || decodedText,
+                                            leaderRole: result.role || '',
+                                            resolvedBy: 'Gatekeeper QR Scan'
+                                        };
+                                        try {
+                                            const isProdActive = typeof hasActiveProduct === 'function' ? hasActiveProduct() : true;
+                                            if (isProdActive) {
+                                                const data = getStopCallData();
+                                                data.records.push(stopRecord);
+                                                data.count = data.records.length;
+                                                data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                                                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                                                saveStopCallData(data);
+                                            } else {
+                                                console.log('ℹ️ [GATEKEEPER UNLOCK] Tablet has no active product scanned (free from production). Discarding stop call record.');
+                                            }
+                                            if (typeof logTabletAction === 'function') {
+                                                logTabletAction(
+                                                    isProdActive ? 'Stop call unlocked by Leader (via Gatekeeper)' : 'Stop call unlocked by Leader via Gatekeeper (pre-production / discarded)',
+                                                    'Completed',
+                                                    { ...stopRecord, productionActive: isProdActive }
+                                                );
+                                            }
+                                        } catch (err) {
+                                            console.error('Error saving stopCallData during Gatekeeper unlock:', err);
+                                        }
+                                        localStorage.removeItem(breakPrefix + 'activeStopCallStart');
+                                        localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
+                                    }
+                                    if (typeof closeStopCallOverlay === 'function') {
+                                        closeStopCallOverlay();
+                                    }
+                                    if (typeof stopCallStopPulse === 'function') {
+                                        stopCallStopPulse(null);
+                                    }
+                                    stopCallPickedMachine = null;
+
                                     if (typeof window.unlockCNCGatekeeper === 'function') {
                                         window.unlockCNCGatekeeper();
                                     }
                                     setTimeout(() => {
                                         closeCncCancelOverlay();
                                         if (typeof showToast === 'function') {
-                                            showToast('✅ 機械ロックを解除しました / Machine lock released');
+                                            showToast('✅ 機械ロック・一時停止を解除しました / Machine lock & pause released');
                                         }
                                     }, 400);
                                 } else {
@@ -6782,6 +6946,9 @@
 
             window.openCncCancelOverlay = openCncCancelOverlay;
             window.closeCncCancelOverlay = closeCncCancelOverlay;
+            window.openStopCallOverlay = openStopCallOverlay;
+            window.closeStopCallOverlay = closeStopCallOverlay;
+            window.stopCallStopPulse = stopCallStopPulse;
             window.startStopCall = startStopCall;
             
             /**

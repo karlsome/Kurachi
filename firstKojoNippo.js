@@ -34,6 +34,15 @@ const state = {
     })(),
     isLoadingSchedule: false,
     listViewMode: localStorage.getItem('firstkojo_list_view_mode') || 'card',
+
+    // Staging Queue & Feed Modal State
+    stagingQueue: [],
+    isQueueCollapsed: localStorage.getItem('firstkojo_queue_collapsed') === 'true',
+    currentFeedItem: null,
+    currentFeedGroup: null,
+    capturedPhotoBase64: null,
+    uploadedPhotoUrl: null,
+    cameraStream: null
 };
 
 // -----------------------------------------------------
@@ -348,6 +357,9 @@ async function fetchDailySchedule(dateStr) {
 
     state.selectedDate = dateStr;
     sessionStorage.setItem('firstkojo_nippo_date', dateStr);
+
+    fetchProductionQueue();
+    setupProductionSSE();
 
     const dateInput = document.getElementById('scheduleDateInput');
     if (dateInput && dateInput.value !== dateStr) {
@@ -1100,6 +1112,7 @@ function renderScheduleTableView(groups, items) {
                 </td>
                 <td onclick="event.stopPropagation()" style="text-align: center;">
                     <div style="display: flex; gap: 4px; justify-content: center; align-items: center;">
+                        <button type="button" class="btn btn-primary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800; background: #10B981;" onclick="openMaterialFeedModalForGroup(${gIdx}, event)" title="材料投入・準備">📦 投入</button>
                         <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800;" onclick="previewBatchGroup(${gIdx}, event)" title="詳細">ℹ️ 詳細</button>
                         ${(lifecycle.status === 'in-progress' || lifecycle.status === 'running') ? `
                             <button type="button" class="btn btn-primary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800; background: #059669;" onclick="showDoneConfirmation(${gIdx}, event)">⏹ 完了</button>
@@ -1132,9 +1145,14 @@ function renderScheduleTableView(groups, items) {
                         ${isRollPrinted ? `<span style="color: #16A34A; font-weight: 800; font-size: 0.75rem;">✓ 印刷済 (${lastPrint?.timeStr || ''})</span>` : `<span style="color: #94A3B8; font-size: 0.75rem;">未印刷</span>`}
                     </td>
                     <td onclick="event.stopPropagation()" style="text-align: center;">
-                        <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 0.75rem; font-weight: 700; ${isRollPrinted ? 'background: #DCFCE7; color: #15803D; border-color: #86EFAC;' : ''}" onclick="printSingleRoll(${gIdx}, ${rIdx}, event)">
-                            ${isRollPrinted ? '✓ 再印刷' : '🖨️ 印刷'}
-                        </button>
+                        <div style="display: flex; gap: 4px; justify-content: center; align-items: center;">
+                            <button type="button" class="btn btn-secondary" style="padding: 2px 6px; font-size: 0.75rem; font-weight: 800; color: #059669; border-color: #86EFAC; background: #ECFDF5;" onclick="openMaterialFeedModalForRoll(${gIdx}, ${rIdx}, event)" title="この巻きの材料投入">
+                                📦 投入
+                            </button>
+                            <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 0.75rem; font-weight: 700; ${isRollPrinted ? 'background: #DCFCE7; color: #15803D; border-color: #86EFAC;' : ''}" onclick="printSingleRoll(${gIdx}, ${rIdx}, event)">
+                                ${isRollPrinted ? '✓ 再印刷' : '🖨️ 印刷'}
+                            </button>
+                        </div>
                     </td>
                     <td style="text-align: center; color: #CBD5E1;">—</td>
                 </tr>
@@ -1219,10 +1237,12 @@ function renderScheduleList(items, startTimeStr) {
                 : 0;
             const isAllPrinted = printedCount >= group.items.length && group.items.length > 0;
             const printAllBtnHTML = `<button type="button" class="btn-batch-action btn-batch-print ${isAllPrinted ? 'is-all-printed' : ''}" onclick="printBatchGroup(${gIdx}, event)" title="${isAllPrinted ? '全巻き印刷済み - 再印刷' : 'このロットの全巻きラベルを一括印刷'}">${isAllPrinted ? `✓ 印刷済 (${printedCount}/${group.items.length})` : '🖨️ 一括印刷'}</button>`;
+            const feedBtnHTML = `<button type="button" class="btn-batch-action btn-feed-staging" onclick="openMaterialFeedModalForGroup(${gIdx}, event)" title="材料投入・キューに追加">📦 材料投入・準備</button>`;
 
             if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
                 statusBadgeHTML = `<span class="batch-status-badge status-in-progress">🟣 生産中 (${lifecycle.actualStartTime || ''}〜)</span>`;
                 actionButtonsHTML = `
+                    ${feedBtnHTML}
                     ${printAllBtnHTML}
                     <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認">ℹ️ 詳細</button>
                     <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${gIdx}, event)" title="生産完了">⏹ 完了</button>
@@ -1231,6 +1251,7 @@ function renderScheduleList(items, startTimeStr) {
             } else if (lifecycle.status === 'completed') {
                 statusBadgeHTML = `<span class="batch-status-badge status-completed">✅ 完了 (${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} • ${lifecycle.actualDurationMins}分)</span>`;
                 actionButtonsHTML = `
+                    ${feedBtnHTML}
                     ${printAllBtnHTML}
                     <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認">ℹ️ 詳細</button>
                     <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${gIdx}, event)" title="再開・リセット">🔄 再開</button>
@@ -1238,6 +1259,7 @@ function renderScheduleList(items, startTimeStr) {
             } else {
                 statusBadgeHTML = `<span class="batch-status-badge status-pending">待機中</span>`;
                 actionButtonsHTML = `
+                    ${feedBtnHTML}
                     ${printAllBtnHTML}
                     <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認 (モニター非表示)">ℹ️ 詳細</button>
                     <button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${gIdx}, event)" title="生産開始 (モニター表示)">▶ 開始</button>
@@ -1295,6 +1317,11 @@ function renderScheduleList(items, startTimeStr) {
                             <span class="roll-meter-pill">${rollItem.meters || 100} m</span>
                         </div>
                         <div class="roll-row-right" style="display: flex; align-items: center; gap: 8px;" onclick="event.stopPropagation()">
+                            <button type="button" class="btn-roll-feed" 
+                                    onclick="openMaterialFeedModalForRoll(${gIdx}, ${rIdx}, event)" 
+                                    title="この巻きの材料投入">
+                                📦 投入
+                            </button>
                             <button type="button" class="btn-roll-print ${isRollPrinted ? 'is-printed' : ''}" 
                                     onclick="printSingleRoll(${gIdx}, ${rIdx}, event)" 
                                     title="${isRollPrinted ? `印刷済み (${lastPrintEntry?.timeStr || ''}) - 再印刷` : `この巻き（#${rollItem.orderIndex}）のラベルを印刷`}">
@@ -2033,7 +2060,8 @@ async function renderInfoTab(data, item) {
                         <div style="font-size: 0.8rem; color: #7E22CE;">開始時間: ${lifecycle.actualStartTime || '--:--'} • モニター表示中</div>
                     </div>
                 </div>
-                <div style="display: flex; gap: 8px;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-primary" style="background: #10B981; font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">📦 材料投入・準備</button>
                     <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${groupIdx}, event)">⏹ 生産完了</button>
                 </div>
             </div>
@@ -2048,7 +2076,10 @@ async function renderInfoTab(data, item) {
                         <div style="font-size: 0.8rem; color: #047857;">実績: ${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} (${lifecycle.actualDurationMins}分)</div>
                     </div>
                 </div>
-                <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${groupIdx}, event)">🔄 再開・リセット</button>
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-primary" style="background: #10B981; font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">📦 材料投入・準備</button>
+                    <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${groupIdx}, event)">🔄 再開・リセット</button>
+                </div>
             </div>
         `;
     } else {
@@ -2062,7 +2093,10 @@ async function renderInfoTab(data, item) {
                         <div style="font-size: 0.8rem; color: #3B82F6;">※タブレット上での事前確認です。モニター表示には影響しません。</div>
                     </div>
                 </div>
-                ${groupIdx >= 0 ? `<button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${groupIdx}, event)">▶ このロットを開始</button>` : ''}
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-primary" style="background: #10B981; font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">📦 材料投入・準備</button>
+                    ${groupIdx >= 0 ? `<button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${groupIdx}, event)">▶ このロットを開始</button>` : ''}
+                </div>
             </div>
         `;
     }
@@ -2080,6 +2114,7 @@ async function renderInfoTab(data, item) {
                     <div class="info-sub-title">${productMaster['品名'] || item.hinmei || ''} ${productMaster['仕様'] ? `— ${productMaster['仕様']}` : ''}</div>
                 </div>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                    <button type="button" class="btn btn-primary" style="background: #10B981; font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">📦 材料投入・準備</button>
                     <span class="tag-pill roll-tag" style="font-size: 0.9rem; padding: 6px 12px;">Roll ${item.rollIndex || 1} / ${item.totalRolls || 1}</span>
                     <span class="tag-pill meter-tag" style="font-size: 0.9rem; padding: 6px 12px;">${item.meters || 0} m</span>
                     <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800;">${item.startTime || '--:--'} - ${item.endTime || '--:--'}</span>
@@ -2132,6 +2167,862 @@ async function renderInfoTab(data, item) {
         <!-- PART 2: Next Part - Ingredient Info -->
         ${ingredientHTML}
     `;
+}
+
+// ===========================================================================
+// FAST-PACED MATERIAL FEEDING & STAGING QUEUE (Tablet 1 - Feeding Station)
+// ===========================================================================
+
+// --- Toast & Snackbar System ---
+let undoSnackbarTimer = null;
+
+function showToast(message, type = 'info', duration = 3200) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `app-toast toast-${type}`;
+    const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+    toast.innerHTML = `
+        <span style="font-size: 1.1rem;">${icon}</span>
+        <span style="line-height: 1.4;">${message}</span>
+    `;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(12px)';
+        toast.style.transition = 'all 0.25s ease';
+        setTimeout(() => {
+            if (toast.parentElement) toast.parentElement.removeChild(toast);
+        }, 250);
+    }, duration);
+}
+
+function showUndoSnackbar(message) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    hideUndoSnackbar();
+
+    const toast = document.createElement('div');
+    toast.id = 'undoSnackbar';
+    toast.className = 'app-toast toast-success';
+    toast.innerHTML = `
+        <span>✅</span>
+        <span style="flex: 1;">${message}</span>
+        <button type="button" class="btn btn-secondary" onclick="undoLastDoneBatch()" style="min-height: 30px; padding: 0 10px; font-size: 0.8rem; background: #FFFFFF; color: var(--text-main); font-weight: 800;">取り消す (Undo)</button>
+    `;
+    container.appendChild(toast);
+
+    undoSnackbarTimer = setTimeout(() => {
+        hideUndoSnackbar();
+    }, 8000);
+}
+
+function hideUndoSnackbar() {
+    if (undoSnackbarTimer) {
+        clearTimeout(undoSnackbarTimer);
+        undoSnackbarTimer = null;
+    }
+    const el = document.getElementById('undoSnackbar');
+    if (el && el.parentElement) {
+        el.parentElement.removeChild(el);
+    }
+}
+
+// --- USB QR Scanner Keystroke Burst Listener ---
+let scannerBurstBuffer = '';
+let lastKeypressTime = 0;
+const SCANNER_BURST_MAX_DELTA_MS = 65;
+const SCANNER_MIN_BURST_CHARS = 3;
+
+function setupUSBScannerListener() {
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const now = Date.now();
+            if (scannerBurstBuffer.length >= SCANNER_MIN_BURST_CHARS && (now - lastKeypressTime) < 260) {
+                const scannedText = scannerBurstBuffer.trim();
+                scannerBurstBuffer = '';
+                e.preventDefault();
+                e.stopPropagation();
+                handleUSBBarcodeScanned(scannedText);
+                return;
+            }
+            scannerBurstBuffer = '';
+            return;
+        }
+
+        if (e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            const now = Date.now();
+            if (now - lastKeypressTime > SCANNER_BURST_MAX_DELTA_MS) {
+                scannerBurstBuffer = e.key;
+            } else {
+                scannerBurstBuffer += e.key;
+            }
+            lastKeypressTime = now;
+        }
+    }, true);
+}
+
+function handleUSBBarcodeScanned(barcode) {
+    console.log('⚡ USB Barcode Burst Detected:', barcode);
+
+    const headerPill = document.getElementById('scannerHeaderStatus');
+    if (headerPill) {
+        headerPill.textContent = `✓ スキャン: ${barcode.slice(0, 16)}`;
+        headerPill.style.background = '#FEF3C7';
+        headerPill.style.borderColor = '#FDE68A';
+        headerPill.style.color = '#92400E';
+        setTimeout(() => {
+            headerPill.textContent = '🟢 スキャナー待機中';
+            headerPill.style.background = '#ECFDF5';
+            headerPill.style.borderColor = '#A7F3D0';
+            headerPill.style.color = '#065F46';
+        }, 3500);
+    }
+
+    const feedModal = document.getElementById('materialFeedModal');
+    const isFeedOpen = feedModal && (feedModal.classList.contains('open') || feedModal.style.display === 'flex');
+
+    if (isFeedOpen) {
+        const qrInput = document.getElementById('feedRawQRInput');
+        if (qrInput) qrInput.value = barcode;
+
+        // Auto-extract parts if Kurachi standard comma-separated format
+        if (barcode.includes(',')) {
+            const parts = barcode.split(',').map(s => s.trim());
+            if (parts.length >= 2 && parts[1]) {
+                const mfgInput = document.getElementById('feedMfgUidInput');
+                if (mfgInput && !mfgInput.value) mfgInput.value = parts[1];
+            }
+            if (parts.length >= 3 && !isNaN(Number(parts[2]))) {
+                const lenInput = document.getElementById('feedRawLengthInput');
+                if (lenInput) lenInput.value = parts[2];
+            }
+        }
+
+        updateScannerModalBadge(`✓ スキャン成功: ${barcode}`, true);
+        showToast(`⚡ バーコード読取完了: ${barcode}`, 'success', 2200);
+    } else {
+        showToast(`⚡ バーコード読取: ${barcode}`, 'info', 2500);
+    }
+}
+
+function updateScannerModalBadge(text, isScanned = false) {
+    const indicator = document.getElementById('feedModalScannerIndicator');
+    const textEl = document.getElementById('feedModalScannerText');
+    if (textEl) textEl.textContent = text;
+    if (indicator) {
+        if (isScanned) {
+            indicator.classList.add('scanned-active');
+            setTimeout(() => {
+                indicator.classList.remove('scanned-active');
+                if (textEl) textEl.textContent = 'USBスキャナー待機中 (バーコードまたはQRコードをスキャン)';
+            }, 3500);
+        } else {
+            indicator.classList.remove('scanned-active');
+        }
+    }
+}
+
+// --- Feed & Staging Modal Control ---
+function openMaterialFeedModalForGroup(groupIndex, event) {
+    if (event) event.stopPropagation();
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+    if (group.type === 'setup') return;
+
+    const firstItem = group.items[0];
+    openMaterialFeedModal(firstItem, group);
+}
+
+function openMaterialFeedModalForRoll(groupIndex, rollIndex, event) {
+    if (event) event.stopPropagation();
+    if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
+    const group = state.currentGroups[groupIndex];
+    const rollItem = group.items[rollIndex];
+    if (!rollItem) return;
+
+    openMaterialFeedModal(rollItem, group);
+}
+
+function openMaterialFeedModalForCurrentItem() {
+    if (!state.selectedItem) {
+        showToast('対象ロットを選択してください', 'error');
+        return;
+    }
+    const targetGroup = state.currentGroups ? state.currentGroups.find(g => g.items.some(it => it.id === state.selectedItem.id)) : null;
+    openMaterialFeedModal(state.selectedItem, targetGroup);
+}
+
+function openMaterialFeedModal(item, group) {
+    state.currentFeedItem = item;
+    state.currentFeedGroup = group;
+    state.capturedPhotoBase64 = null;
+    state.uploadedPhotoUrl = null;
+
+    const modal = document.getElementById('materialFeedModal');
+    if (!modal) return;
+
+    const hinban = item.hinban || group?.hinban || '-';
+    const kizai = item.kizai || group?.kizai || '-';
+    const color = item.color || group?.color || '-';
+    const zuban = item.zuban || group?.zuban || '-';
+    const dest = item.shippingDest || group?.shippingDest || '-';
+    const rollIdx = item.rollIndex || 1;
+    const totalRolls = item.totalRolls || group?.items?.length || 1;
+    const meters = item.meters || group?.totalMeters || 100;
+    const orderIndex = item.orderIndex || 1;
+
+    document.getElementById('feedModalHinban').textContent = hinban;
+    document.getElementById('feedModalOrderRange').textContent = `#${orderIndex}`;
+    document.getElementById('feedModalKizai').textContent = `基材: ${kizai}`;
+    document.getElementById('feedModalColor').textContent = `色: ${color}`;
+    document.getElementById('feedModalZuban').textContent = `図番: ${zuban}`;
+    document.getElementById('feedModalDest').textContent = `出荷先: ${dest}`;
+    document.getElementById('feedModalRolls').textContent = `Roll ${rollIdx} / ${totalRolls} 巻き`;
+    document.getElementById('feedModalMeters').textContent = `${meters} m`;
+
+    // Compute default lot number: YYMMDD-rollIndex
+    let yymmdd = '';
+    if (state.selectedDate && state.selectedDate.includes('-')) {
+        const parts = state.selectedDate.split('-');
+        yymmdd = `${parts[0].slice(-2)}${parts[1].padStart(2, '0')}${parts[2].padStart(2, '0')}`;
+    } else {
+        const now = new Date();
+        const yy = String(now.getFullYear()).slice(-2);
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        yymmdd = `${yy}${mm}${dd}`;
+    }
+    const defaultLotNo = `${yymmdd}-${rollIdx}`;
+
+    const lotNoInput = document.getElementById('feedLotNoInput');
+    if (lotNoInput) lotNoInput.value = defaultLotNo;
+
+    const lengthInput = document.getElementById('feedRawLengthInput');
+    if (lengthInput) lengthInput.value = meters;
+
+    const qrInput = document.getElementById('feedRawQRInput');
+    if (qrInput) {
+        qrInput.value = '';
+        setTimeout(() => qrInput.focus(), 160);
+    }
+
+    const mfgUidInput = document.getElementById('feedMfgUidInput');
+    if (mfgUidInput) mfgUidInput.value = '';
+
+    const workerDisplay = document.getElementById('feedWorkerDisplay');
+    if (workerDisplay) workerDisplay.value = state.workerName || '未選択';
+
+    removeCapturedPhoto();
+    updateScannerModalBadge('USBスキャナー待機中 (バーコードまたはQRコードをスキャン)', false);
+
+    modal.classList.add('open', 'active');
+    modal.style.display = 'flex';
+}
+
+function closeMaterialFeedModal() {
+    const modal = document.getElementById('materialFeedModal');
+    if (modal) {
+        modal.classList.remove('open', 'active');
+        modal.style.display = 'none';
+    }
+    state.currentFeedItem = null;
+    state.currentFeedGroup = null;
+}
+
+// --- Native Camera Capture & Fallback ---
+async function startCameraCapture() {
+    const modal = document.getElementById('nativeCameraModal');
+    const video = document.getElementById('webcamVideo');
+    if (!modal || !video) return;
+
+    modal.classList.add('open');
+
+    if (state.cameraStream) {
+        try { state.cameraStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+        state.cameraStream = null;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.warn('getUserMedia is not supported, switching to file input fallback');
+        closeWebcamModal();
+        triggerFileInputFallback();
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: 'environment',
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+            }
+        });
+        state.cameraStream = stream;
+        video.srcObject = stream;
+        await video.play();
+    } catch (err) {
+        console.warn('Webcam stream error:', err);
+        closeWebcamModal();
+        showToast('カメラを起動できませんでした。ファイル選択へ切り替えます。', 'info', 2500);
+        triggerFileInputFallback();
+    }
+}
+
+function captureWebcamSnapshot() {
+    const video = document.getElementById('webcamVideo');
+    const canvas = document.getElementById('webcamCanvas');
+    if (!video || !canvas) return;
+
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const base64 = canvas.toDataURL('image/jpeg', 0.85);
+    setCapturedPhoto(base64);
+    closeWebcamModal();
+    showToast('📸 写真を撮影しました', 'success', 2000);
+}
+
+function closeWebcamModal() {
+    const modal = document.getElementById('nativeCameraModal');
+    if (modal) modal.classList.remove('open');
+
+    if (state.cameraStream) {
+        try {
+            state.cameraStream.getTracks().forEach(t => t.stop());
+        } catch (e) {}
+        state.cameraStream = null;
+    }
+}
+
+function fallbackFromCameraToFile() {
+    closeWebcamModal();
+    triggerFileInputFallback();
+}
+
+function triggerFileInputFallback() {
+    const fileInput = document.getElementById('materialPhotoFileInput');
+    if (fileInput) fileInput.click();
+}
+
+function handleFileChosen(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const base64 = e.target?.result;
+        if (base64) {
+            setCapturedPhoto(base64);
+            showToast('📁 写真を読み込みました', 'success', 2000);
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+function setCapturedPhoto(base64) {
+    state.capturedPhotoBase64 = base64;
+    state.uploadedPhotoUrl = null;
+
+    const thumb = document.getElementById('feedPhotoThumb');
+    const wrap = document.getElementById('feedPhotoPreviewWrap');
+    const badge = document.getElementById('feedPhotoStatusBadge');
+
+    if (thumb) thumb.src = base64;
+    if (wrap) wrap.style.display = 'flex';
+    if (badge) {
+        badge.textContent = '✓ 撮影済み';
+        badge.style.color = 'var(--brand)';
+    }
+}
+
+function removeCapturedPhoto() {
+    state.capturedPhotoBase64 = null;
+    state.uploadedPhotoUrl = null;
+
+    const thumb = document.getElementById('feedPhotoThumb');
+    const wrap = document.getElementById('feedPhotoPreviewWrap');
+    const badge = document.getElementById('feedPhotoStatusBadge');
+    const fileInput = document.getElementById('materialPhotoFileInput');
+
+    if (thumb) thumb.src = '';
+    if (wrap) wrap.style.display = 'none';
+    if (badge) {
+        badge.textContent = '未撮影';
+        badge.style.color = 'var(--text-soft)';
+    }
+    if (fileInput) fileInput.value = '';
+}
+
+function openPhotoEnlarged(url) {
+    const targetUrl = url || state.capturedPhotoBase64 || state.uploadedPhotoUrl;
+    if (!targetUrl) return;
+
+    const modal = document.getElementById('imagePreviewModal');
+    const img = document.getElementById('enlargedPreviewImg');
+    if (modal && img) {
+        img.src = targetUrl;
+        modal.classList.add('open', 'active');
+        modal.style.display = 'flex';
+    }
+}
+
+function closePhotoEnlarged() {
+    const modal = document.getElementById('imagePreviewModal');
+    if (modal) {
+        modal.classList.remove('open', 'active');
+        modal.style.display = 'none';
+    }
+}
+
+// --- Upload Photo to Firebase Storage ---
+async function uploadLabelPhotoToServer(base64, lotNo, hinban) {
+    const payload = {
+        base64: base64,
+        date: state.selectedDate,
+        machine: state.machineName || 'PSA2',
+        worker: state.workerName || 'worker',
+        lotNo: lotNo || 'nolot',
+        hinban: hinban || ''
+    };
+
+    const res = await fetch(`${serverURL}/api/firstkojo/upload-label-photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `写真アップロードエラー (${res.status})`);
+    }
+
+    const data = await res.json();
+    if (!data.success || !data.url) {
+        throw new Error(data.error || '写真URLが取得できませんでした');
+    }
+    return data.url;
+}
+
+// --- Submit Feed & Enqueue ---
+async function submitFeedAndEnqueue() {
+    if (!state.workerName) {
+        alert('作業者が選択されていません。ユーザー設定タブで作業者を選択してください。');
+        switchMainTab(0);
+        return;
+    }
+
+    const item = state.currentFeedItem;
+    if (!item) {
+        alert('対象ロットが選択されていません。');
+        return;
+    }
+
+    let photoUrl = state.uploadedPhotoUrl;
+    if (!state.capturedPhotoBase64 && !photoUrl) {
+        const proceed = confirm('材料ラベルの写真が撮影されていません。\n写真なしのまま投入キューに追加しますか？');
+        if (!proceed) return;
+    }
+
+    const btnSubmit = document.getElementById('btnFeedEnqueue');
+    if (btnSubmit) {
+        btnSubmit.disabled = true;
+        btnSubmit.textContent = '⏳ キュー追加中...';
+    }
+
+    try {
+        const lotNoVal = document.getElementById('feedLotNoInput')?.value?.trim() || '';
+        const rawQRVal = document.getElementById('feedRawQRInput')?.value?.trim() || '';
+        const rawLengthVal = document.getElementById('feedRawLengthInput')?.value || '';
+        const mfgUidVal = document.getElementById('feedMfgUidInput')?.value?.trim() || '';
+
+        // Upload label photo to Firebase Storage if not uploaded yet
+        if (state.capturedPhotoBase64 && !photoUrl) {
+            photoUrl = await uploadLabelPhotoToServer(state.capturedPhotoBase64, lotNoVal, item.hinban);
+            state.uploadedPhotoUrl = photoUrl;
+        }
+
+        const enqueuePayload = {
+            date: state.selectedDate,
+            machine: state.machineName || 'PSA2',
+            worker: state.workerName,
+            groupId: item.groupId || item.id,
+            hinban: item.hinban || '',
+            hinmei: item.hinmei || '',
+            kizai: item.kizai || '',
+            color: item.color || '',
+            zuban: item.zuban || '',
+            okyakuHinban: item.okyakuHinban || '',
+            labelHinban: item.labelHinban || '',
+            shippingDest: item.shippingDest || '',
+            totalRolls: Number(item.totalRolls) || 1,
+            totalMeters: Number(item.totalMeters) || Number(item.meters) || 0,
+            rollMeters: Number(rawLengthVal) || Number(item.meters) || 0,
+            rollIndex: Number(item.rollIndex) || 1,
+            lotNo: lotNoVal,
+            rawMaterialQR: rawQRVal,
+            rawMaterialLength: rawLengthVal,
+            manufacturerUid: mfgUidVal,
+            photoUrl: photoUrl || ''
+        };
+
+        console.log('🚀 Enqueueing material to production queue:', enqueuePayload);
+
+        const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(enqueuePayload)
+        });
+
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        if (!data.success) {
+            throw new Error(data.error || 'キュー追加に失敗しました');
+        }
+
+        // Broadcast TV displayer update
+        notifyPdfDisplayer(item, item.zuban);
+
+        // Close feed modal immediately so worker can continue fast-paced flow
+        closeMaterialFeedModal();
+
+        showToast(`✅ ロット [${item.hinban}] を投入キューに追加しました`, 'success', 3500);
+
+        // Refresh staging queue immediately
+        await fetchProductionQueue();
+
+    } catch (err) {
+        console.error('❌ Error enqueuing item:', err);
+        alert(`投入エラー: ${err.message}`);
+    } finally {
+        if (btnSubmit) {
+            btnSubmit.disabled = false;
+            btnSubmit.textContent = '🚀 投入・キューに追加 (Feed & Add to Queue)';
+        }
+    }
+}
+
+// --- Visual Staging Queue Dock ---
+function toggleStagingQueueCollapse() {
+    const dock = document.getElementById('stagingQueueDock');
+    const btn = document.getElementById('btnStagingQueueToggle');
+    if (!dock) return;
+
+    dock.classList.toggle('collapsed');
+    const isCollapsed = dock.classList.contains('collapsed');
+    state.isQueueCollapsed = isCollapsed;
+    localStorage.setItem('firstkojo_queue_collapsed', String(isCollapsed));
+
+    if (btn) btn.textContent = isCollapsed ? '▼' : '▲';
+}
+
+async function fetchProductionQueue() {
+    try {
+        const machine = state.machineName || 'PSA2';
+        const res = await fetch(`${serverURL}/api/production/queue?date=${encodeURIComponent(state.selectedDate)}&machine=${encodeURIComponent(machine)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success && Array.isArray(data.queue)) {
+            state.stagingQueue = data.queue;
+            renderStagingQueue();
+        }
+    } catch (err) {
+        console.warn('⚠️ Could not fetch production queue:', err);
+    }
+}
+
+function renderStagingQueue() {
+    const container = document.getElementById('stagingQueueList');
+    const badge = document.getElementById('stagingQueueCountBadge');
+    if (!container) return;
+
+    const activeAndQueued = state.stagingQueue.filter(item => item.status === 'active' || item.status === 'queued');
+
+    if (badge) {
+        badge.textContent = `${activeAndQueued.length} 件`;
+    }
+
+    if (activeAndQueued.length === 0) {
+        container.innerHTML = `
+            <div class="staging-queue-empty">
+                📥 現在キューに入っている材料はありません。下のリストから「📦 材料投入・準備」を押して投入してください。
+            </div>
+        `;
+        return;
+    }
+
+    const activeItem = activeAndQueued.find(it => it.status === 'active');
+    const queuedItems = activeAndQueued.filter(it => it.status === 'queued');
+
+    let html = '';
+
+    // 1. Active Item
+    if (activeItem) {
+        const currentRoll = activeItem.currentRollIndex || activeItem.rollIndex || 1;
+        const totalRolls = activeItem.totalRolls || 1;
+        const rollPercent = Math.round((currentRoll / totalRolls) * 100);
+        const photoThumb = activeItem.photoUrl
+            ? `<img class="staging-thumb-preview" src="${activeItem.photoUrl}" alt="ラベル写真" onclick="openPhotoEnlarged('${activeItem.photoUrl}')" title="クリックで拡大">`
+            : `<div class="staging-thumb-placeholder" title="写真なし">📷</div>`;
+
+        html += `
+            <div class="staging-card is-active" data-queue-id="${activeItem._id}">
+                <div class="staging-card-left">
+                    <div class="staging-card-badge-col">
+                        <span class="staging-status-tag tag-active">🟢 貼合中 (Active)</span>
+                        <span class="staging-pos-badge">現在処理中</span>
+                    </div>
+
+                    ${photoThumb}
+
+                    <div class="staging-card-info">
+                        <div class="staging-card-title-row">
+                            <span class="staging-card-hinban">${activeItem.hinban}</span>
+                            ${activeItem.kizai ? `<span class="staging-meta-pill">${activeItem.kizai}</span>` : ''}
+                            ${activeItem.color ? `<span class="staging-meta-pill">${activeItem.color}</span>` : ''}
+                            ${activeItem.zuban ? `<span class="staging-meta-pill">${activeItem.zuban}</span>` : ''}
+                        </div>
+                        <div class="staging-card-sub">
+                            <span>担当: <strong>${activeItem.worker || '作業者'}</strong></span>
+                            <span>•</span>
+                            <span>ロット: <strong>${activeItem.lotNo || '-'}</strong></span>
+                            ${activeItem.shippingDest ? `<span>• 行先: ${activeItem.shippingDest}</span>` : ''}
+                        </div>
+                        <div class="staging-card-chips">
+                            <span class="staging-meta-pill pill-rolls">Roll ${currentRoll} / ${totalRolls} 巻き (${rollPercent}%)</span>
+                            <span class="staging-meta-pill pill-lot">${activeItem.rollMeters || activeItem.totalMeters || 0} m</span>
+                            ${activeItem.manufacturerUid ? `<span class="staging-meta-pill">ID: ${activeItem.manufacturerUid}</span>` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="staging-card-actions" onclick="event.stopPropagation()">
+                    <button type="button" class="btn-staging-action btn-staging-advance" onclick="advanceQueueItemPrompt('${activeItem._id}')" title="現在の巻きを完了し次へ進める">
+                        ⏹ 完了 / 次へ
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    // 2. Queued / Staged Items
+    queuedItems.forEach((item, qIdx) => {
+        const photoThumb = item.photoUrl
+            ? `<img class="staging-thumb-preview" src="${item.photoUrl}" alt="ラベル写真" onclick="openPhotoEnlarged('${item.photoUrl}')" title="クリックで拡大">`
+            : `<div class="staging-thumb-placeholder" title="写真なし">📷</div>`;
+
+        const canMoveUp = qIdx > 0;
+        const canMoveDown = qIdx < queuedItems.length - 1;
+
+        html += `
+            <div class="staging-card is-queued" data-queue-id="${item._id}">
+                <div class="staging-card-left">
+                    <div class="staging-card-badge-col">
+                        <span class="staging-status-tag tag-queued">待機中</span>
+                        <span class="staging-pos-badge">#${qIdx + 1} 番目</span>
+                    </div>
+
+                    ${photoThumb}
+
+                    <div class="staging-card-info">
+                        <div class="staging-card-title-row">
+                            <span class="staging-card-hinban">${item.hinban}</span>
+                            ${item.kizai ? `<span class="staging-meta-pill">${item.kizai}</span>` : ''}
+                            ${item.color ? `<span class="staging-meta-pill">${item.color}</span>` : ''}
+                        </div>
+                        <div class="staging-card-sub">
+                            <span>ロット: <strong>${item.lotNo || '-'}</strong></span>
+                            <span>•</span>
+                            <span>全 ${item.totalRolls || 1} 巻き (${item.totalMeters || item.rollMeters || 0}m)</span>
+                        </div>
+                        <div class="staging-card-chips">
+                            <span class="staging-meta-pill">Roll #${item.rollIndex || 1}</span>
+                            ${item.manufacturerUid ? `<span class="staging-meta-pill">製造元: ${item.manufacturerUid}</span>` : ''}
+                            ${item.rawMaterialLength ? `<span class="staging-meta-pill">材料長: ${item.rawMaterialLength}m</span>` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="staging-card-actions" onclick="event.stopPropagation()">
+                    <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'up')" ${!canMoveUp ? 'disabled' : ''} title="順序を繰り上げ">▲</button>
+                    <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'down')" ${!canMoveDown ? 'disabled' : ''} title="順序を繰り下げ">▼</button>
+                    <button type="button" class="btn-staging-action btn-staging-cancel" onclick="cancelQueueItem('${item._id}', '${item.hinban}')" title="この材料投入を取り消す">✕ 取消</button>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+async function cancelQueueItem(queueId, hinban) {
+    if (!confirm(`投入キューからロット「${hinban || ''}」を取り消しますか？`)) return;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/skip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: state.selectedDate,
+                machine: state.machineName || 'PSA2',
+                queueId,
+                reason: '作業者による取消'
+            })
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.success) {
+            showToast(`ロット「${hinban}」のキューを取り消しました`, 'info');
+            await fetchProductionQueue();
+        }
+    } catch (err) {
+        console.error('Error cancelling queue item:', err);
+        alert(`取消エラー: ${err.message}`);
+    }
+}
+
+async function reorderQueueItem(queueId, direction) {
+    const queuedItems = state.stagingQueue.filter(it => it.status === 'queued');
+    const idx = queuedItems.findIndex(it => String(it._id) === String(queueId));
+    if (idx < 0) return;
+
+    if (direction === 'up' && idx > 0) {
+        const temp = queuedItems[idx];
+        queuedItems[idx] = queuedItems[idx - 1];
+        queuedItems[idx - 1] = temp;
+    } else if (direction === 'down' && idx < queuedItems.length - 1) {
+        const temp = queuedItems[idx];
+        queuedItems[idx] = queuedItems[idx + 1];
+        queuedItems[idx + 1] = temp;
+    } else {
+        return;
+    }
+
+    const orderedQueueIds = queuedItems.map(it => it._id);
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/reorder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: state.selectedDate,
+                machine: state.machineName || 'PSA2',
+                orderedQueueIds
+            })
+        });
+        if (res.ok) {
+            await fetchProductionQueue();
+        }
+    } catch (err) {
+        console.warn('Reorder error:', err);
+    }
+}
+
+async function advanceQueueItemPrompt(queueId) {
+    const item = state.stagingQueue.find(it => String(it._id) === String(queueId) && it.status === 'active');
+    if (!item) return;
+
+    const currentRoll = item.currentRollIndex || item.rollIndex || 1;
+    const totalRolls = item.totalRolls || 1;
+
+    let confirmMsg = `ロット「${item.hinban}」の Roll ${currentRoll} / ${totalRolls} 巻き目を完了しますか？`;
+    if (currentRoll >= totalRolls) {
+        confirmMsg = `ロット「${item.hinban}」の全巻き (${totalRolls}/${totalRolls}) を完了し、次のキューへ移行しますか？`;
+    }
+
+    if (!confirm(confirmMsg)) return;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/advance`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: state.selectedDate,
+                machine: state.machineName || 'PSA2',
+                queueId: item._id,
+                groupId: item.groupId,
+                rollIndex: currentRoll + 1,
+                totalRolls: totalRolls
+            })
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.success) {
+            showToast(`ロールを進めました (Roll ${currentRoll}/${totalRolls})`, 'success');
+            await fetchProductionQueue();
+        }
+    } catch (err) {
+        console.error('Advance queue error:', err);
+        alert(`進行エラー: ${err.message}`);
+    }
+}
+
+// --- SSE Realtime Synchronization ---
+let productionEventSource = null;
+
+function setupProductionSSE() {
+    if (productionEventSource) {
+        try { productionEventSource.close(); } catch (e) {}
+        productionEventSource = null;
+    }
+
+    const sseUrl = `${serverURL}/api/production/events?date=${encodeURIComponent(state.selectedDate)}`;
+    console.log(`🔌 Connecting Production SSE -> ${sseUrl}`);
+    try {
+        productionEventSource = new EventSource(sseUrl);
+        productionEventSource.onopen = () => {
+            console.log('⚡ Production SSE Connected');
+        };
+        productionEventSource.onmessage = (event) => {
+            if (!event.data) return;
+            try {
+                const data = JSON.parse(event.data);
+                handleProductionSSEEvent(data);
+            } catch (e) {
+                // Heartbeat / ignore
+            }
+        };
+        productionEventSource.onerror = (err) => {
+            console.warn('⚠️ Production SSE reconnecting:', err);
+        };
+    } catch (e) {
+        console.warn('⚠️ Failed to initialize EventSource:', e);
+    }
+}
+
+function handleProductionSSEEvent(data) {
+    console.log('⚡ Received SSE event:', data.type, data);
+    if (data.type === 'queue_updated' || data.type === 'queue_scrapped' || data.type === 'roll_advanced') {
+        fetchProductionQueue();
+    } else if (data.type === 'print_log') {
+        if (data.groupId && data.printEntry) {
+            const lc = getGroupLifecycle(data.groupId);
+            const history = Array.isArray(lc.printHistory) ? lc.printHistory : [];
+            const exists = history.some(p => p.timestamp === data.printEntry.timestamp || (p.rollIndex === data.printEntry.rollIndex && p.lotNo === data.printEntry.lotNo));
+            if (!exists) {
+                setGroupLifecycle(data.groupId, { printHistory: [...history, data.printEntry] });
+                renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+            }
+        }
+        fetchProductionQueue();
+    } else if (data.type === 'status_update') {
+        if (data.groupId && data.status) {
+            setGroupLifecycle(data.groupId, { status: data.status, ...(data.record || {}) });
+            renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        }
+        fetchProductionQueue();
+    }
 }
 
 // -----------------------------------------------------
@@ -2209,6 +3100,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial schedule fetch for the selected date
     fetchDailySchedule(state.selectedDate);
+
+    // Initialize USB Barcode Scanner Listener
+    setupUSBScannerListener();
+
+    // Restore queue collapsed state if previously saved
+    if (state.isQueueCollapsed) {
+        const dock = document.getElementById('stagingQueueDock');
+        const btn = document.getElementById('btnStagingQueueToggle');
+        if (dock) dock.classList.add('collapsed');
+        if (btn) btn.textContent = '▼';
+    }
 
     // Worker input modal events
     const workerInputEl = document.getElementById('workerInput');

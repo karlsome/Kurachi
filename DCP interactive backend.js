@@ -4776,14 +4776,14 @@ function showLotPhotoPopup(lotNumber, anchorEl) {
   const pop = document.createElement('div');
   pop.id = 'lotPhotoPopup';
   pop.style.cssText = `
-    position: fixed; z-index: 100050; width: 210px;
+    position: fixed; z-index: 100050; width: 220px;
     background: #fff; border: 1px solid var(--border); border-radius: 12px;
     box-shadow: 0 12px 32px rgba(16,24,40,0.18); padding: 10px;
     display: flex; flex-direction: column; gap: 8px;`;
   pop.innerHTML = `
-    <div style="font-size:0.74rem;font-weight:800;color:var(--text-main);display:flex;justify-content:space-between;align-items:center;">
-      <span>📷 ${lotNumber}</span>
-      <span id="lotPopupClose" style="cursor:pointer;color:var(--text-muted);font-size:1rem;">✕</span>
+    <div style="font-size:0.74rem;font-weight:800;color:var(--text-main);display:flex;justify-content:space-between;align-items:center;gap:6px;">
+      <span style="min-width:0;word-break:break-word;">📷 ${typeof formatLotTagLabel === 'function' ? formatLotTagLabel(lotNumber) : lotNumber}</span>
+      <span id="lotPopupClose" style="cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;flex-shrink:0;padding:2px;">✕</span>
     </div>
     <img id="lotPopupThumb" src="${photo ? photo.blobUrl : ''}" alt="lot photo"
          style="width:100%;height:160px;object-fit:contain;border-radius:8px;background:var(--bg-inset);cursor:zoom-in;">
@@ -4822,6 +4822,41 @@ function showLotPhotoPopup(lotNumber, anchorEl) {
     window.addEventListener('resize', positionLotPopup);
   }, 0);
 }
+
+// Format label for lot tag (e.g. "2323-1 (6shots)" or "2323-1 (in-progress)")
+function formatLotTagLabel(lotNumber) {
+  if (!lotNumber) return '';
+  let records = [];
+  if (typeof window.getAllLotRecords === 'function') {
+    records = window.getAllLotRecords().filter(r => r && r.lotNumber === lotNumber);
+  }
+
+  const lang = (typeof getCurrentLanguage === 'function' ? getCurrentLanguage() : null)
+    || localStorage.getItem('appLanguage')
+    || 'ja';
+
+  const isClosed = records.length > 0 && records.every(r => !r.open && r.shots != null && r.shots !== '');
+
+  if (isClosed) {
+    const totalShots = records.reduce((sum, r) => sum + (parseInt(r.shots, 10) || 0), 0);
+    let unit = (typeof _t === 'function' ? _t('lot_shots_unit') : null) || 'ショット';
+    if (lang === 'en') {
+      unit = (totalShots === 1) ? 'shot' : 'shots';
+    }
+    const space = (lang === 'pt') ? ' ' : '';
+    return `${lotNumber} (${totalShots}${space}${unit})`;
+  } else {
+    let inProg = (typeof _t === 'function' ? _t('lot_in_progress') : null) || '進行中';
+    return `${lotNumber} (${inProg})`;
+  }
+}
+
+// Re-render lot tags when the language changes
+document.addEventListener('languageChanged', () => {
+  if (typeof renderMaterialLotTags === 'function') {
+    renderMaterialLotTags();
+  }
+});
 
 // Render lot tags
 function renderMaterialLotTags() {
@@ -4863,7 +4898,7 @@ function renderMaterialLotTags() {
       tag.appendChild(icon);
 
       const lotText = document.createElement('span');
-      lotText.textContent = lot.lotNumber;
+      lotText.textContent = formatLotTagLabel(lot.lotNumber);
       tag.appendChild(lotText);
 
       // Delete button — also deletes the lot's linked photo
@@ -7384,9 +7419,17 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
   // Validate that no lot is missing shot count
   let hasMissingShots = false;
+  if (typeof window.reconcileMaterialLots === 'function') {
+    window.reconcileMaterialLots();
+  }
   if (typeof window.getAllLotRecords === 'function') {
     const records = window.getAllLotRecords();
-    hasMissingShots = records.some(r => r.open || r.shots == null || r.shots === '');
+    const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots))
+      ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
+      : [];
+    const recordsMissingShots = records.some(r => r.open || r.shots == null || r.shots === '');
+    const lotsMissingFromRecords = mLots.some(l => !records.some(r => r.lotNumber === l));
+    hasMissingShots = recordsMissingShots || lotsMissingFromRecords;
   }
 
   const shotInput = document.getElementById('shot');
@@ -11302,6 +11345,7 @@ window.isScanWorkflowComplete = function () {
 // Function to show Step 0 Modal (Worker Name Verification)
 window.showStep0Modal = function () {
   clearScanWorkflowComplete();
+  if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
 
   const modal = document.getElementById('step0Modal');
   const confirmState = document.getElementById('step0ConfirmState');
@@ -11554,6 +11598,7 @@ function resetAllSteps() {
   // Reset step to 0 and clear from localStorage
   saveCurrentStep(0);
   clearScanWorkflowComplete();
+  if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
   localStorage.removeItem(`${uniquePrefix}sub-dropdown`);
 
   // Call resetForm() to clear all form data
@@ -11707,6 +11752,9 @@ document.getElementById('startStep1Scan').addEventListener('click', function (ev
         // Fresh production entry: clear any per-lot tracking left over from a
         // previous (possibly abandoned) session so no phantom "previous lot"
         // shots prompt appears on the first scan.
+        materialLots = [];
+        saveMaterialLots();
+        renderMaterialLotTags();
         if (typeof window.lotProductionReset === 'function') window.lotProductionReset();
         window.__lotScanMachine = null;
         window.__pendingPrevLot = null;
@@ -12024,8 +12072,18 @@ document.getElementById('startStep2Scan').addEventListener('click', async functi
           await step2Scanner.stop();
           step2Scanner = null;
 
-          if (_isGrouped && !_machineDone) {
-            console.log("Lot already listed; recording it for another machine:", _scanMachine);
+          // Check if this specific machine already has this lot on its timeline
+          const cleanMachine = (_scanMachine && _scanMachine.includes(','))
+            ? (window.__lotScanMachine || _scanMachine.split(',')[0].trim())
+            : _scanMachine;
+          let machineHasLot = false;
+          if (typeof window.getAllLotRecords === 'function') {
+            const allRecs = window.getAllLotRecords();
+            machineHasLot = allRecs.some(r => (r.machine === cleanMachine || r.machine === _scanMachine) && r.lotNumber === lotNumber);
+          }
+
+          if (!machineHasLot || (_isGrouped && !_machineDone)) {
+            console.log("Lot already listed in materialLots, but recording on machine timeline:", _scanMachine);
             _recordAndAdvance();
             return;
           }
@@ -13080,6 +13138,9 @@ if (manualSendModal) {
         window.__processQuantityAutoCalculated = false;
       }
     }
+    if (typeof renderMaterialLotTags === 'function') {
+      renderMaterialLotTags();
+    }
   }
 
   // Add a newly scanned lot to a machine's timeline; return the previously-open
@@ -13137,6 +13198,35 @@ if (manualSendModal) {
     if (typeof window.assertMachineState === 'function') window.assertMachineState();
     return prevOpen;
   }
+
+  function reconcileMaterialLots() {
+    refreshLots();
+    const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0)
+      ? groupedMachines
+      : [(document.getElementById('process') ? document.getElementById('process').value : '') || (document.getElementById('machine-selector') ? document.getElementById('machine-selector').value : '') || 'UNKNOWN'];
+
+    // Only auto-reconcile onto the machine timeline if there is a single machine
+    if (machines.length === 1 && machines[0] && machines[0] !== 'UNKNOWN') {
+      const m = machines[0];
+      const list = lotsByMachine[m] || (lotsByMachine[m] = []);
+      const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots))
+        ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
+        : [];
+
+      let added = false;
+      mLots.forEach(lotNum => {
+        if (!list.some(r => r.lotNumber === lotNum)) {
+          recordLotScan(lotNum, m, 'auto');
+          added = true;
+        }
+      });
+      if (added) {
+        save();
+        updateShotTotalField();
+      }
+    }
+  }
+  window.reconcileMaterialLots = reconcileMaterialLots;
 
   window.isMachineLotScanned = function (machineName) {
     const m = String(machineName || '').trim().toUpperCase();
@@ -13347,6 +13437,7 @@ if (manualSendModal) {
   // Collect ショット数 for each still-open lot or lot with missing shots.
   function promptFinalLots() {
     if (document.getElementById('lpModal')) return; // Already showing prompt
+    if (typeof reconcileMaterialLots === 'function') reconcileMaterialLots();
     refreshLots();
     let open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
 
@@ -13514,6 +13605,7 @@ if (manualSendModal) {
   };
 
   function renderShotEditModal() {
+    if (typeof reconcileMaterialLots === 'function') reconcileMaterialLots();
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;inset:0;z-index:100200;background:rgba(10,15,26,.8);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(5px);';
 
@@ -17702,8 +17794,8 @@ if (manualSendModal) {
     if (states.length === 0) return;
 
     // 1. Emergency cancel detected / Machine in hold -> Enforce Dedicated CNC Cancel Screen
-    // If ANY machine is in MANUAL_CANCEL, the cancel screen MUST be shown and stay open!
-    const manualCancelState = states.find(s => s && s.holding && s.hold_reason === 'MANUAL_CANCEL');
+    // If ANY machine is in MANUAL_CANCEL / CANCEL, the cancel screen MUST be shown and stay open!
+    const manualCancelState = states.find(s => s && s.holding && (s.hold_reason === 'MANUAL_CANCEL' || s.hold_reason === 'CANCEL'));
     const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
     const cancelOverlay = document.getElementById('cncCancelOverlay');
     const isCancelAlreadyOpen = cancelOverlay && cancelOverlay.classList.contains('open');
@@ -17720,13 +17812,135 @@ if (manualSendModal) {
       // ONLY auto-dismiss if ALL known machines are UNLOCKED (no machine holding in MANUAL_CANCEL)
       if (cncCancelActive || isCancelAlreadyOpen) {
         console.log("🔓 [CNC GATEKEEPER] Source of truth (All Mini-PCs) is unlocked -> Auto-dismissing Cancel Screen & releasing cloud stop-call!");
-        if (typeof closeCncCancelOverlay === 'function') {
+        if (typeof window.closeCncCancelOverlay === 'function') {
+          window.closeCncCancelOverlay();
+        } else if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
         }
-        if (typeof notifyStopCall === 'function') {
-          notifyStopCall('clear', 'leader');
-        } else if (typeof window.notifyStopCall === 'function') {
+        if (typeof window.notifyStopCall === 'function') {
           window.notifyStopCall('clear', 'leader');
+        } else if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'leader');
+        }
+        const rawStopCall = localStorage.getItem(pfx + 'activeStopCallStart');
+        if (rawStopCall) {
+          const stopStartEpoch = parseInt(rawStopCall, 10);
+          if (stopStartEpoch > 0) {
+            const waitSec = Math.max(0, Math.round((Date.now() - stopStartEpoch) / 1000));
+            try {
+              const isProdActive = (typeof window.hasActiveProduct === 'function' && window.hasActiveProduct())
+                || (typeof hasActiveProduct === 'function' && hasActiveProduct());
+              if (isProdActive) {
+                const rawData = localStorage.getItem(pfx + 'stopCallData');
+                const data = rawData ? JSON.parse(rawData) : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
+                if (!Array.isArray(data.records)) data.records = [];
+                data.records.push({
+                  calledAt: new Date(stopStartEpoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  arrivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  waitSeconds: waitSec,
+                  waitMinutes: Math.round(waitSec / 60),
+                  leaderName: 'Script Unlock / Console',
+                  leaderUsername: 'system',
+                  leaderRole: 'Auto',
+                  resolvedBy: 'Script Unlocked'
+                });
+                data.count = data.records.length;
+                data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                localStorage.setItem(pfx + 'stopCallData', JSON.stringify(data));
+              } else {
+                console.log('ℹ️ [AUTO-DISMISS] Tablet has no active product scanned (free from production). Discarding stop call downtime.');
+              }
+              if (typeof logTabletAction === 'function') {
+                logTabletAction(
+                  isProdActive ? 'Stop call resolved by script unlock' : 'Stop call resolved by script unlock (pre-production / discarded)',
+                  'Completed',
+                  { waitSeconds: waitSec, productionActive: isProdActive }
+                );
+              }
+            } catch (err) {
+              console.error('Error logging auto-dismissed stop call during gatekeeper clear:', err);
+            }
+          }
+          localStorage.removeItem(pfx + 'activeStopCallStart');
+          localStorage.removeItem(pfx + 'activeStopCallMachine');
+          if (typeof window.closeStopCallOverlay === 'function') window.closeStopCallOverlay();
+          else if (typeof closeStopCallOverlay === 'function') closeStopCallOverlay();
+          if (typeof window.stopCallStopPulse === 'function') window.stopCallStopPulse(null);
+          else if (typeof stopCallStopPulse === 'function') stopCallStopPulse(null);
+        }
+        if (typeof showToast === 'function') {
+          showToast('✅ 機械ロックが解除されました / Machine lock released');
+        }
+      }
+    }
+
+    // 1.5. Auto-dismiss Stop Call / Call Leader overlay if the Mini-PC is unlocked and not in pause
+    const stopCallOverlay = document.getElementById('stopCallOverlay');
+    const isStopCallOpen = stopCallOverlay && stopCallOverlay.classList.contains('open');
+    const stopCallActive = localStorage.getItem(pfx + 'activeStopCallStart');
+
+    if (stopCallActive || isStopCallOpen) {
+      const stopCallStartEpoch = parseInt(stopCallActive || '0', 10);
+      const elapsedSinceCall = Date.now() - stopCallStartEpoch;
+      // Allow a 3-second grace window after call was placed so it doesn't race with the activation request
+      if (elapsedSinceCall > 3000) {
+        const anyInCallStop = states.some(s => s && (s.call_stop_active || s.display_state === 'PAUSED'));
+        const anyHolding = states.some(s => s && s.holding);
+        if (!anyInCallStop && !anyHolding) {
+          console.log("🔓 [CNC GATEKEEPER] Source of truth reports Mini-PC is UNLOCKED and NOT in pause -> Auto-dismissing Call Leader screen!");
+          if (stopCallStartEpoch > 0) {
+            const waitSec = Math.max(0, Math.round((Date.now() - stopCallStartEpoch) / 1000));
+            try {
+              const isProdActive = (typeof window.hasActiveProduct === 'function' && window.hasActiveProduct())
+                || (typeof hasActiveProduct === 'function' && hasActiveProduct());
+              if (isProdActive) {
+                const rawData = localStorage.getItem(pfx + 'stopCallData');
+                const data = rawData ? JSON.parse(rawData) : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
+                if (!Array.isArray(data.records)) data.records = [];
+                data.records.push({
+                  calledAt: new Date(stopCallStartEpoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  arrivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  waitSeconds: waitSec,
+                  waitMinutes: Math.round(waitSec / 60),
+                  leaderName: 'Script Unlock / Console',
+                  leaderUsername: 'system',
+                  leaderRole: 'Auto',
+                  resolvedBy: 'Script Unlocked'
+                });
+                data.count = data.records.length;
+                data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                localStorage.setItem(pfx + 'stopCallData', JSON.stringify(data));
+              } else {
+                console.log('ℹ️ [AUTO-DISMISS] Tablet has no active product scanned (free from production). Discarding stop call downtime.');
+              }
+              if (typeof logTabletAction === 'function') {
+                logTabletAction(
+                  isProdActive ? 'Stop call resolved by script unlock' : 'Stop call resolved by script unlock (pre-production / discarded)',
+                  'Completed',
+                  { waitSeconds: waitSec, productionActive: isProdActive }
+                );
+              }
+            } catch (err) {
+              console.error('Error logging auto-dismissed stop call:', err);
+            }
+          }
+          localStorage.removeItem(pfx + 'activeStopCallStart');
+          localStorage.removeItem(pfx + 'activeStopCallMachine');
+          if (typeof window.closeStopCallOverlay === 'function') {
+            window.closeStopCallOverlay();
+          } else if (typeof closeStopCallOverlay === 'function') {
+            closeStopCallOverlay();
+          }
+          if (typeof window.notifyStopCall === 'function') {
+            window.notifyStopCall('clear', 'leader');
+          } else if (typeof notifyStopCall === 'function') {
+            notifyStopCall('clear', 'leader');
+          }
+          if (typeof showToast === 'function') {
+            showToast('✅ リーダー呼び出し・一時停止が解除されました / Stop call released');
+          }
         }
       }
     }
@@ -17984,8 +18198,18 @@ if (manualSendModal) {
       try {
         const data = JSON.parse(e.data || '{}');
         console.log(`🚨 [CNC GATEKEEPER] Cancel detected (${ip}):`, data);
-        if (machineStates[ip]) machineStates[ip].scheduled_cycle_stop = false;
+        if (machineStates[ip]) {
+          machineStates[ip].scheduled_cycle_stop = false;
+          if (data.holding) {
+            machineStates[ip].holding = true;
+            machineStates[ip].hold_reason = (data.reason === 'CANCEL') ? 'MANUAL_CANCEL' : (data.reason || 'MANUAL_CANCEL');
+          }
+        }
         releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
+        if (data.holding === false) {
+          // Grace cancel or non-holding abort -> Do not lock or alert TV
+          return;
+        }
         const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
         if (!breakActive && typeof openCncCancelOverlay === 'function') {
           openCncCancelOverlay();
@@ -18113,7 +18337,8 @@ if (manualSendModal) {
         holding: false,
         hold_reason: null,
         scheduled_break_stop: false,
-        scheduled_cycle_stop: false
+        scheduled_cycle_stop: false,
+        call_stop_active: false
       });
       delete cycleStopIntent[ip];
       delete breakIntentAt[ip];
@@ -18127,8 +18352,21 @@ if (manualSendModal) {
       if (!anyStillHolding && !anyStillArmed) {
         closeCycleStopOverlay();
         closeBreakWaitOverlay();
-        if (typeof closeCncCancelOverlay === 'function') {
+        if (typeof window.closeCncCancelOverlay === 'function') {
+          window.closeCncCancelOverlay();
+        } else if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
+        }
+        const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+        if (localStorage.getItem(pfx + 'activeStopCallStart')) {
+          localStorage.removeItem(pfx + 'activeStopCallStart');
+          localStorage.removeItem(pfx + 'activeStopCallMachine');
+          if (typeof window.closeStopCallOverlay === 'function') window.closeStopCallOverlay();
+          else if (typeof closeStopCallOverlay === 'function') closeStopCallOverlay();
+          if (typeof window.stopCallStopPulse === 'function') window.stopCallStopPulse(null);
+          else if (typeof stopCallStopPulse === 'function') stopCallStopPulse(null);
+          if (typeof window.notifyStopCall === 'function') window.notifyStopCall('clear', 'leader');
+          else if (typeof notifyStopCall === 'function') notifyStopCall('clear', 'leader');
         }
       }
     });
@@ -18298,8 +18536,25 @@ if (manualSendModal) {
         machineStates[k].hold_reason = null;
         machineStates[k].scheduled_break_stop = false;
         machineStates[k].scheduled_cycle_stop = false;
+        machineStates[k].call_stop_active = false;
       }
     });
+
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    if (localStorage.getItem(pfx + 'activeStopCallStart')) {
+      localStorage.removeItem(pfx + 'activeStopCallStart');
+      localStorage.removeItem(pfx + 'activeStopCallMachine');
+    }
+    if (typeof closeStopCallOverlay === 'function') {
+      closeStopCallOverlay();
+    }
+    if (typeof stopCallStopPulse === 'function') {
+      stopCallStopPulse(null);
+    }
+    if (typeof notifyStopCall === 'function') {
+      notifyStopCall('clear', 'leader');
+    }
+
     allIps.forEach(ip => {
       fetch(`http://${ip}:5000/unlock`, { method: 'POST' })
         .then(r => r.json())
@@ -18307,6 +18562,7 @@ if (manualSendModal) {
         .catch(() => {
           fetch(`http://${ip}:8766/unlock`, { method: 'POST' }).catch(() => { });
         });
+      fetch(`http://${ip}:5000/request?callStop=0`).catch(() => {});
     });
   };
 
