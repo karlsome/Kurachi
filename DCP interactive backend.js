@@ -17792,8 +17792,8 @@ if (manualSendModal) {
     if (states.length === 0) return;
 
     // 1. Emergency cancel detected / Machine in hold -> Enforce Dedicated CNC Cancel Screen
-    // If ANY machine is in MANUAL_CANCEL, the cancel screen MUST be shown and stay open!
-    const manualCancelState = states.find(s => s && s.holding && s.hold_reason === 'MANUAL_CANCEL');
+    // If ANY machine is in MANUAL_CANCEL / CANCEL, the cancel screen MUST be shown and stay open!
+    const manualCancelState = states.find(s => s && s.holding && (s.hold_reason === 'MANUAL_CANCEL' || s.hold_reason === 'CANCEL'));
     const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
     const cancelOverlay = document.getElementById('cncCancelOverlay');
     const isCancelAlreadyOpen = cancelOverlay && cancelOverlay.classList.contains('open');
@@ -18148,8 +18148,18 @@ if (manualSendModal) {
       try {
         const data = JSON.parse(e.data || '{}');
         console.log(`🚨 [CNC GATEKEEPER] Cancel detected (${ip}):`, data);
-        if (machineStates[ip]) machineStates[ip].scheduled_cycle_stop = false;
+        if (machineStates[ip]) {
+          machineStates[ip].scheduled_cycle_stop = false;
+          if (data.holding) {
+            machineStates[ip].holding = true;
+            machineStates[ip].hold_reason = (data.reason === 'CANCEL') ? 'MANUAL_CANCEL' : (data.reason || 'MANUAL_CANCEL');
+          }
+        }
         releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
+        if (data.holding === false) {
+          // Grace cancel or non-holding abort -> Do not lock or alert TV
+          return;
+        }
         const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
         if (!breakActive && typeof openCncCancelOverlay === 'function') {
           openCncCancelOverlay();
