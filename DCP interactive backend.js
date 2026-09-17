@@ -17820,8 +17820,36 @@ if (manualSendModal) {
         } else if (typeof notifyStopCall === 'function') {
           notifyStopCall('clear', 'leader');
         }
-        localStorage.removeItem(pfx + 'activeCncCancelStart');
-        if (localStorage.getItem(pfx + 'activeStopCallStart')) {
+        const rawStopCall = localStorage.getItem(pfx + 'activeStopCallStart');
+        if (rawStopCall) {
+          const stopStartEpoch = parseInt(rawStopCall, 10);
+          if (stopStartEpoch > 0) {
+            const waitSec = Math.max(0, Math.round((Date.now() - stopStartEpoch) / 1000));
+            try {
+              const rawData = localStorage.getItem(pfx + 'stopCallData');
+              const data = rawData ? JSON.parse(rawData) : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
+              if (!Array.isArray(data.records)) data.records = [];
+              data.records.push({
+                calledAt: new Date(stopStartEpoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                arrivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                waitSeconds: waitSec,
+                waitMinutes: Math.round(waitSec / 60),
+                leaderName: 'Script Unlock / Console',
+                leaderUsername: 'system',
+                leaderRole: 'Auto',
+                resolvedBy: 'Script Unlocked'
+              });
+              data.count = data.records.length;
+              data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+              data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+              localStorage.setItem(pfx + 'stopCallData', JSON.stringify(data));
+              if (typeof logTabletAction === 'function') {
+                logTabletAction('Stop call resolved by script unlock', 'Completed', { waitSeconds: waitSec });
+              }
+            } catch (err) {
+              console.error('Error logging auto-dismissed stop call during gatekeeper clear:', err);
+            }
+          }
           localStorage.removeItem(pfx + 'activeStopCallStart');
           localStorage.removeItem(pfx + 'activeStopCallMachine');
           if (typeof window.closeStopCallOverlay === 'function') window.closeStopCallOverlay();
