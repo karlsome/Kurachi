@@ -1904,6 +1904,787 @@
             0% { background-position: 200% 0; }
             100% { background-position: -200% 0; }
         }
+
+        /* ============================================================
+           STAGING QUEUE DOCK & MATERIAL FEEDING FLOW (Tablet 1)
+           ============================================================ */
+        .staging-queue-dock {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border);
+            border-radius: var(--card-radius);
+            box-shadow: var(--shadow-card);
+            margin-bottom: 16px;
+            overflow: hidden;
+            transition: all var(--transition-smooth);
+        }
+
+        .staging-queue-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: linear-gradient(180deg, #FFFFFF 0%, var(--bg-subtle) 100%);
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .staging-queue-header:hover {
+            background: var(--bg-subtle);
+        }
+
+        .staging-queue-title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .staging-queue-icon {
+            font-size: 1.25rem;
+            line-height: 1;
+        }
+
+        .staging-queue-title {
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: var(--text-main);
+            letter-spacing: -0.01em;
+        }
+
+        .staging-queue-count-badge {
+            background: var(--brand-soft);
+            color: var(--brand);
+            border: 1px solid rgba(31, 157, 107, 0.3);
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 999px;
+        }
+
+        .staging-queue-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .scanner-header-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #ECFDF5;
+            color: #065F46;
+            border: 1px solid #A7F3D0;
+            white-space: nowrap;
+        }
+
+        .scanner-header-pill.pulsing::before {
+            content: '';
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #10B981;
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            animation: scannerPulse 1.8s infinite;
+        }
+
+        @keyframes scannerPulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        .staging-queue-toggle-btn {
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            width: 28px;
+            height: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            transition: var(--transition-smooth);
+        }
+
+        .staging-queue-toggle-btn:hover {
+            border-color: var(--brand);
+            color: var(--brand);
+        }
+
+        .staging-queue-body {
+            padding: 14px 16px;
+            transition: max-height 0.25s ease, opacity 0.25s ease;
+            max-height: 520px;
+            overflow-y: auto;
+            opacity: 1;
+        }
+
+        .staging-queue-dock.collapsed .staging-queue-body {
+            max-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            opacity: 0;
+            overflow: hidden;
+        }
+
+        .staging-queue-dock.collapsed .staging-queue-header {
+            border-bottom: none;
+        }
+
+        .staging-queue-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        /* Queue Empty State */
+        .staging-queue-empty {
+            text-align: center;
+            padding: 16px 12px;
+            color: var(--text-soft);
+            font-size: 0.875rem;
+            background: var(--bg-subtle);
+            border-radius: 8px;
+            border: 1px dashed var(--border-strong);
+        }
+
+        /* Queue Item Cards */
+        .staging-card {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            transition: var(--transition-smooth);
+            position: relative;
+            flex-wrap: wrap;
+        }
+
+        .staging-card:hover {
+            border-color: var(--border-strong);
+            box-shadow: var(--shadow-card);
+        }
+
+        .staging-card.is-active {
+            background: #F0FDF4;
+            border-color: #86EFAC;
+            border-left: 5px solid var(--brand);
+        }
+
+        .staging-card.is-queued {
+            background: #FAFAFD;
+            border-left: 5px solid #94A3B8;
+        }
+
+        .staging-card-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 240px;
+        }
+
+        .staging-card-badge-col {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        .staging-status-tag {
+            font-size: 0.725rem;
+            font-weight: 800;
+            padding: 3px 8px;
+            border-radius: 999px;
+            white-space: nowrap;
+            letter-spacing: -0.01em;
+        }
+
+        .staging-status-tag.tag-active {
+            background: #10B981;
+            color: #FFFFFF;
+        }
+
+        .staging-status-tag.tag-queued {
+            background: #E2E8F0;
+            color: #475569;
+        }
+
+        .staging-pos-badge {
+            font-size: 0.7rem;
+            font-weight: 800;
+            color: var(--text-soft);
+        }
+
+        .staging-thumb-preview {
+            width: 50px;
+            height: 50px;
+            border-radius: 6px;
+            object-fit: cover;
+            border: 1px solid var(--border-strong);
+            cursor: pointer;
+            background: var(--bg-inset);
+            flex-shrink: 0;
+            transition: transform var(--transition-smooth);
+        }
+
+        .staging-thumb-preview:hover {
+            transform: scale(1.08);
+            border-color: var(--brand);
+        }
+
+        .staging-thumb-placeholder {
+            width: 50px;
+            height: 50px;
+            border-radius: 6px;
+            border: 1px dashed var(--border-strong);
+            background: var(--bg-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            color: var(--text-soft);
+            flex-shrink: 0;
+        }
+
+        .staging-card-info {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .staging-card-title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .staging-card-hinban {
+            font-size: 1rem;
+            font-weight: 900;
+            color: var(--text-main);
+            letter-spacing: -0.02em;
+        }
+
+        .staging-card-sub {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .staging-card-chips {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 2px;
+        }
+
+        .staging-meta-pill {
+            font-size: 0.725rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: var(--bg-inset);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            white-space: nowrap;
+        }
+
+        .staging-meta-pill.pill-rolls {
+            background: #EFF6FF;
+            color: #1D4ED8;
+            border-color: #BFDBFE;
+            font-weight: 800;
+        }
+
+        .staging-meta-pill.pill-lot {
+            background: #FEF3C7;
+            color: #92400E;
+            border-color: #FDE68A;
+        }
+
+        .staging-card-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .btn-staging-action {
+            min-height: 36px;
+            padding: 0 10px;
+            font-size: 0.78rem;
+            font-weight: 800;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 1px solid var(--border-strong);
+            background: var(--bg-surface);
+            color: var(--text-main);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            transition: var(--transition-smooth);
+        }
+
+        .btn-staging-action:hover {
+            border-color: var(--text-soft);
+            background: var(--bg-subtle);
+        }
+
+        .btn-staging-reorder {
+            width: 34px;
+            min-height: 34px;
+            padding: 0;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .btn-staging-reorder:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+
+        .btn-staging-cancel {
+            color: var(--red);
+            border-color: rgba(229, 72, 77, 0.3);
+            background: var(--red-soft);
+        }
+
+        .btn-staging-cancel:hover {
+            background: #FEE2E2;
+            border-color: var(--red);
+        }
+
+        .btn-staging-advance {
+            background: #10B981;
+            color: #FFFFFF;
+            border-color: #059669;
+            box-shadow: 0 1px 3px rgba(16, 185, 129, 0.2);
+        }
+
+        .btn-staging-advance:hover {
+            background: #059669;
+        }
+
+        /* ---------------- Button for Schedule Cards ---------------- */
+        .btn-feed-staging {
+            background: #10B981 !important;
+            color: #FFFFFF !important;
+            border: none !important;
+            box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);
+            font-weight: 800;
+        }
+
+        .btn-feed-staging:hover {
+            background: #059669 !important;
+            transform: translateY(-1px);
+        }
+
+        .btn-roll-feed {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 9px;
+            font-size: 0.775rem;
+            font-weight: 800;
+            background: #ECFDF5;
+            border: 1.2px solid #86EFAC;
+            border-radius: 6px;
+            color: #059669;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+        }
+
+        .btn-roll-feed:hover {
+            background: #D1FAE5;
+            border-color: #34D399;
+            color: #047857;
+            transform: scale(1.04);
+        }
+
+        /* ---------------- Feed Material Modal ---------------- */
+        #materialFeedModal > div {
+            max-width: 680px;
+            width: 95%;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            padding: 24px;
+        }
+
+        .feed-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 12px;
+        }
+
+        .feed-modal-title {
+            font-size: 1.2rem;
+            font-weight: 900;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .feed-modal-close-btn {
+            background: transparent;
+            border: none;
+            font-size: 1.4rem;
+            color: var(--text-soft);
+            cursor: pointer;
+            line-height: 1;
+            padding: 4px;
+            border-radius: 4px;
+        }
+
+        .feed-modal-close-btn:hover {
+            color: var(--text-main);
+            background: var(--bg-inset);
+        }
+
+        .feed-lot-summary-card {
+            background: var(--bg-subtle);
+            border: 1.5px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .feed-lot-title-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .feed-lot-hinban {
+            font-size: 1.15rem;
+            font-weight: 900;
+            color: var(--brand);
+        }
+
+        .feed-lot-pills-row {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        /* Photo Capture Area */
+        .feed-section-block {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .feed-section-title {
+            font-size: 0.875rem;
+            font-weight: 800;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .feed-photo-actions-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn-photo-capture {
+            background: #2563EB;
+            color: #FFFFFF;
+            font-weight: 800;
+            border: none;
+            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+        }
+
+        .btn-photo-capture:hover {
+            background: #1D4ED8;
+        }
+
+        .feed-photo-preview-wrap {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 10px;
+            background: var(--bg-subtle);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .feed-photo-preview-img {
+            max-height: 110px;
+            max-width: 140px;
+            object-fit: contain;
+            border-radius: 6px;
+            border: 1px solid var(--border-strong);
+            background: #000000;
+            cursor: pointer;
+        }
+
+        /* Scanner Area */
+        .scanner-status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: #ECFDF5;
+            border: 1px solid #A7F3D0;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 800;
+            color: #065F46;
+            transition: all var(--transition-smooth);
+        }
+
+        .scanner-status-indicator.scanned-active {
+            background: #FEF3C7;
+            border-color: #FDE68A;
+            color: #92400E;
+            animation: scannerFlash 0.5s ease;
+        }
+
+        @keyframes scannerFlash {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); }
+        }
+
+        .feed-inputs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .feed-field-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .feed-field-label {
+            font-size: 0.775rem;
+            font-weight: 800;
+            color: var(--text-muted);
+        }
+
+        .feed-field-input {
+            width: 100%;
+            min-height: 44px;
+            padding: 10px 12px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            font-family: inherit;
+            border: 1.5px solid var(--border-strong);
+            border-radius: var(--btn-radius);
+            background: var(--bg-surface);
+            color: var(--text-main);
+            outline: none;
+            transition: border-color var(--transition-smooth), box-shadow var(--transition-smooth);
+            box-sizing: border-box;
+        }
+
+        .feed-field-input:focus {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 3px rgba(46, 111, 242, 0.15);
+        }
+
+        .feed-field-input[readonly] {
+            background: var(--bg-inset);
+            cursor: not-allowed;
+        }
+
+        .btn-feed-submit {
+            background: var(--brand);
+            color: #FFFFFF;
+            font-size: 1.05rem;
+            font-weight: 900;
+            min-height: 52px;
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 3px 12px rgba(31, 157, 107, 0.35);
+            cursor: pointer;
+            width: 100%;
+            transition: var(--transition-smooth);
+        }
+
+        .btn-feed-submit:hover:not(:disabled) {
+            background: var(--brand-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-feed-submit:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* ---------------- Native Camera Modal ---------------- */
+        #nativeCameraModal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.96);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            z-index: 100020;
+        }
+
+        #nativeCameraModal.open {
+            display: flex !important;
+        }
+
+        .camera-dialog-box {
+            background: #1E293B;
+            border-radius: 16px;
+            padding: 20px;
+            max-width: 680px;
+            width: 95%;
+            color: #FFFFFF;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .camera-video-wrap {
+            position: relative;
+            width: 100%;
+            background: #000000;
+            border-radius: 12px;
+            overflow: hidden;
+            aspect-ratio: 4/3;
+            max-height: 54vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #webcamVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .camera-actions-row {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn-cam-snap {
+            background: #10B981;
+            color: #FFFFFF;
+            font-size: 1.1rem;
+            font-weight: 800;
+            padding: 12px 32px;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
+        }
+
+        .btn-cam-snap:hover {
+            background: #059669;
+        }
+
+        .btn-cam-cancel {
+            background: rgba(255, 255, 255, 0.15);
+            color: #FFFFFF;
+            font-size: 0.95rem;
+            font-weight: 700;
+            padding: 12px 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            cursor: pointer;
+        }
+
+        .btn-cam-cancel:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        /* ---------------- Toast Notification ---------------- */
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100030;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+            max-width: 90vw;
+        }
+
+        .app-toast {
+            pointer-events: auto;
+            background: #1E293B;
+            color: #FFFFFF;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 0.925rem;
+            font-weight: 700;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: toastSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .app-toast.toast-success {
+            background: #065F46;
+            border-color: #10B981;
+        }
+
+        .app-toast.toast-error {
+            background: #991B1B;
+            border-color: #EF4444;
+        }
+
+        @keyframes toastSlideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
     </style>
 </head>
 
@@ -2046,6 +2827,28 @@
                     </div>
                 </div>
 
+                <!-- Staging Queue Dock / Bar -->
+                <div class="staging-queue-dock" id="stagingQueueDock">
+                    <div class="staging-queue-header" onclick="toggleStagingQueueCollapse()">
+                        <div class="staging-queue-title-wrap">
+                            <span class="staging-queue-icon">⚡</span>
+                            <span class="staging-queue-title">投入中・準備キュー (In-Feed & Staged Queue)</span>
+                            <span class="staging-queue-count-badge" id="stagingQueueCountBadge">0 件</span>
+                        </div>
+                        <div class="staging-queue-header-actions">
+                            <span class="scanner-header-pill pulsing" id="scannerHeaderStatus">🟢 スキャナー待機中</span>
+                            <button type="button" class="staging-queue-toggle-btn" id="btnStagingQueueToggle" aria-label="キュー開閉">▲</button>
+                        </div>
+                    </div>
+                    <div class="staging-queue-body" id="stagingQueueBody">
+                        <div class="staging-queue-list" id="stagingQueueList">
+                            <div class="staging-queue-empty">
+                                📥 現在キューに入っている材料はありません。下のリストから「📦 材料投入・準備」を押して投入してください。
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Schedule Items List -->
                 <div class="schedule-list-container" id="scheduleListContainer">
                     <!-- Dynamic Schedule items injected here -->
@@ -2148,6 +2951,157 @@
             <p id="printModalSub" style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">プリンターに印刷データを送信しています。<br>しばらくお待ちください。</p>
         </div>
     </div>
+
+    <!-- Material Feed & Staging Modal -->
+    <div id="materialFeedModal" class="modal">
+        <div>
+            <div class="feed-modal-header">
+                <div class="feed-modal-title">
+                    <span>📦</span>
+                    <span>材料投入・準備 (Feed Material & Enqueue)</span>
+                </div>
+                <button type="button" class="feed-modal-close-btn" onclick="closeMaterialFeedModal()" title="閉じる">✕</button>
+            </div>
+
+            <!-- Lot Summary -->
+            <div class="feed-lot-summary-card">
+                <div class="feed-lot-title-row">
+                    <span class="feed-lot-hinban" id="feedModalHinban">-</span>
+                    <span id="feedModalOrderRange" style="font-weight: 800; font-size: 0.85rem; color: var(--text-soft);">#1</span>
+                </div>
+                <div class="feed-lot-pills-row">
+                    <span class="tag-pill" id="feedModalKizai">基材: -</span>
+                    <span class="tag-pill color-tag" id="feedModalColor">色: -</span>
+                    <span class="tag-pill" id="feedModalZuban">図番: -</span>
+                    <span class="tag-pill dest-tag" id="feedModalDest">出荷先: -</span>
+                    <span class="tag-pill roll-tag" id="feedModalRolls">1 / 1 巻き</span>
+                    <span class="tag-pill meter-tag" id="feedModalMeters">100 m</span>
+                </div>
+            </div>
+
+            <!-- Material Label Photo Capture -->
+            <div class="feed-section-block">
+                <div class="feed-section-title">
+                    <span>📷 原材料ラベル写真 (Material Label Photo)</span>
+                    <span id="feedPhotoStatusBadge" style="font-size: 0.75rem; font-weight: 700; color: var(--text-soft);">未撮影</span>
+                </div>
+                
+                <div class="feed-photo-actions-row" id="feedPhotoActionsRow">
+                    <button type="button" class="btn btn-photo-capture" onclick="startCameraCapture()">
+                        📷 ラベル撮影 (Take Photo)
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="triggerFileInputFallback()" style="font-size: 0.825rem; padding: 0 12px;">
+                        📁 ファイル選択 (File Fallback)
+                    </button>
+                    <input type="file" id="materialPhotoFileInput" accept="image/*" capture="environment" style="display: none;" onchange="handleFileChosen(event)">
+                </div>
+
+                <!-- Preview Thumbnail Area (Hidden until captured) -->
+                <div class="feed-photo-preview-wrap" id="feedPhotoPreviewWrap" style="display: none;">
+                    <img id="feedPhotoThumb" class="feed-photo-preview-img" src="" alt="材料ラベル" onclick="openPhotoEnlarged()">
+                    <div style="display: flex; flex-direction: column; gap: 6px; flex: 1;">
+                        <span style="font-size: 0.825rem; font-weight: 800; color: var(--brand);">✓ ラベル写真撮影済み</span>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="btn btn-secondary" onclick="startCameraCapture()" style="min-height: 32px; padding: 0 10px; font-size: 0.775rem;">🔄 再撮影</button>
+                            <button type="button" class="btn btn-secondary" onclick="removeCapturedPhoto()" style="min-height: 32px; padding: 0 10px; font-size: 0.775rem; color: var(--red);">🗑️ 削除</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- USB QR Scanner Listener & Manual Inputs -->
+            <div class="feed-section-block">
+                <div class="feed-section-title">
+                    <span>⚡ 原材料情報入力・スキャナー</span>
+                </div>
+
+                <div class="scanner-status-indicator" id="feedModalScannerIndicator">
+                    <span>🟢</span>
+                    <span id="feedModalScannerText">USBスキャナー待機中 (バーコードまたはQRコードをスキャン)</span>
+                </div>
+
+                <div class="feed-field-wrap">
+                    <label class="feed-field-label" for="feedRawQRInput">原材料バーコード / QR (Raw Material QR) *自動入力または手動</label>
+                    <input type="text" id="feedRawQRInput" class="feed-field-input" placeholder="スキャナーで読み取るか直接入力..." autocomplete="off">
+                </div>
+
+                <div class="feed-inputs-grid">
+                    <div class="feed-field-wrap">
+                        <label class="feed-field-label" for="feedRawLengthInput">材料長 / Length (m)</label>
+                        <input type="number" id="feedRawLengthInput" class="feed-field-input" placeholder="100" step="any">
+                    </div>
+                    <div class="feed-field-wrap">
+                        <label class="feed-field-label" for="feedMfgUidInput">製造元ID / Manufacturer UID</label>
+                        <input type="text" id="feedMfgUidInput" class="feed-field-input" placeholder="例: LOT-998811">
+                    </div>
+                    <div class="feed-field-wrap">
+                        <label class="feed-field-label" for="feedLotNoInput">投入ロット番号 (Lot No.)</label>
+                        <input type="text" id="feedLotNoInput" class="feed-field-input" placeholder="260917-1">
+                    </div>
+                    <div class="feed-field-wrap">
+                        <label class="feed-field-label" for="feedWorkerDisplay">担当作業者 (Worker)</label>
+                        <input type="text" id="feedWorkerDisplay" class="feed-field-input" readonly>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Action Footer -->
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
+                <button type="button" class="btn-feed-submit" id="btnFeedEnqueue" onclick="submitFeedAndEnqueue()">
+                    🚀 投入・キューに追加 (Feed & Add to Queue)
+                </button>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 0.75rem; color: var(--text-soft);">※キュー追加後、TV画面へ自動反映され直ちに次の材料を準備できます</span>
+                    <button type="button" class="btn btn-secondary" onclick="closeMaterialFeedModal()" style="min-height: 36px; padding: 0 14px; font-size: 0.8rem;">閉じる (Close)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Native Camera Capture Modal -->
+    <div id="nativeCameraModal">
+        <div class="camera-dialog-box">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="font-size: 1.15rem; font-weight: 800; margin: 0;">📷 材料ラベル撮影 (Label Photo Camera)</h3>
+                <button type="button" onclick="closeWebcamModal()" style="background: transparent; border: none; color: #94A3B8; font-size: 1.5rem; cursor: pointer;">✕</button>
+            </div>
+            
+            <div class="camera-video-wrap">
+                <video id="webcamVideo" autoplay playsinline muted></video>
+                <canvas id="webcamCanvas" style="display: none;"></canvas>
+            </div>
+
+            <p style="font-size: 0.825rem; color: #CBD5E1; margin: 0;">材料ラベル全体が枠内に収まるように撮影してください</p>
+
+            <div class="camera-actions-row">
+                <button type="button" class="btn-cam-snap" id="btnWebcamSnap" onclick="captureWebcamSnapshot()">
+                    📸 撮影する (Capture)
+                </button>
+                <button type="button" class="btn-cam-cancel" onclick="closeWebcamModal()">
+                    ✕ キャンセル
+                </button>
+            </div>
+
+            <div>
+                <button type="button" onclick="fallbackFromCameraToFile()" style="background: transparent; border: none; color: #93C5FD; font-size: 0.8rem; text-decoration: underline; cursor: pointer; padding: 4px;">
+                    📁 カメラが使えない場合はファイル選択へ切り替え
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fullscreen Photo Preview Modal -->
+    <div id="imagePreviewModal" class="modal" onclick="closePhotoEnlarged()">
+        <div style="background: transparent; border: none; box-shadow: none; max-width: 90vw; max-height: 90vh; text-align: center;" onclick="event.stopPropagation()">
+            <img id="enlargedPreviewImg" src="" alt="拡大ラベル写真" style="max-width: 88vw; max-height: 80vh; border-radius: 12px; box-shadow: 0 16px 36px rgba(0,0,0,0.6); object-fit: contain;">
+            <div style="margin-top: 14px;">
+                <button type="button" class="btn btn-secondary" onclick="closePhotoEnlarged()" style="background: #FFFFFF; font-weight: 800;">✕ 閉じる (Close)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
 
     <!-- Script imports -->
     <script src="firstKojoNippo.js"></script>
