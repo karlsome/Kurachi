@@ -10872,6 +10872,10 @@ app.post('/api/analytics-data', async (req, res) => {
     factoryAccess = [],
     factoryFilter, // CRITICAL: Factory filter parameter
     bans,          // Optional: array of 背番号 to restrict results to
+    partNumbers,   // Optional: array of 品番 to restrict results to
+    hinbans,       // Optional: alias for partNumbers
+    models,        // Optional: array of モデル to restrict results to
+    advancedFilters, // Optional: array of MongoDB filter clauses
     collectionName = 'kensaDB',
     dbName = "submittedDB"
   } = req.body;
@@ -10912,6 +10916,96 @@ app.post('/api/analytics-data', async (req, res) => {
     if (Array.isArray(bans) && bans.length > 0) {
       baseQuery['背番号'] = { $in: bans };
       console.log(`🔖 Applied 背番号 filter: ${bans.length} products`);
+    }
+
+    // Apply 品番 (part number) filter
+    const resolvedPartNumbers = partNumbers || hinbans;
+    if (Array.isArray(resolvedPartNumbers) && resolvedPartNumbers.length > 0) {
+      baseQuery['品番'] = { $in: resolvedPartNumbers };
+      console.log(`🔖 Applied 品番 filter: ${resolvedPartNumbers.length} part numbers`);
+    }
+
+    // Apply モデル (model) filter - resolved via masterDB (submittedDB records don't store モデル directly)
+    if (Array.isArray(models) && models.length > 0) {
+      try {
+        const masterDb = client.db('Sasaki_Coating_MasterDB');
+        const masterDocs = await masterDb.collection('masterDB').find(
+          { モデル: { $in: models } },
+          { projection: { 背番号: 1, 品番: 1, _id: 0 } }
+        ).toArray();
+        const modelBans = [...new Set(masterDocs.map(d => d.背番号).filter(Boolean))];
+        const modelHinbans = [...new Set(masterDocs.map(d => d.品番).filter(Boolean))];
+        console.log(`🔖 Resolved ${models.length} models to ${modelBans.length} 背番号 and ${modelHinbans.length} 品番`);
+        if (modelBans.length > 0) {
+          if (baseQuery['背番号'] && baseQuery['背番号'].$in) {
+            baseQuery['背番号'].$in = baseQuery['背番号'].$in.filter(b => modelBans.includes(b));
+          } else {
+            baseQuery['背番号'] = { $in: modelBans };
+          }
+        } else if (modelHinbans.length > 0) {
+          if (baseQuery['品番'] && baseQuery['品番'].$in) {
+            baseQuery['品番'].$in = baseQuery['品番'].$in.filter(p => modelHinbans.includes(p));
+          } else {
+            baseQuery['品番'] = { $in: modelHinbans };
+          }
+        } else {
+          baseQuery['背番号'] = { $in: ['__NO_MATCH__'] };
+        }
+      } catch (err) {
+        console.error('Failed to resolve models in masterDB:', err);
+      }
+    }
+
+    // Apply advanced filter clauses if provided
+    if (Array.isArray(advancedFilters) && advancedFilters.length > 0) {
+      if (!baseQuery.$and) {
+        baseQuery = { $and: [baseQuery] };
+      }
+      for (const clause of advancedFilters) {
+        if (!clause || typeof clause !== 'object' || Object.keys(clause).length === 0) continue;
+
+        let normalizedClause = { ...clause };
+
+        // 1. Resolve モデル if queried (submittedDB records don't store モデル directly)
+        if ('モデル' in normalizedClause) {
+          try {
+            const masterDb = client.db('Sasaki_Coating_MasterDB');
+            const modelCond = normalizedClause['モデル'];
+            const resolvedModelCond = Array.isArray(modelCond) ? { $in: modelCond } : modelCond;
+            const masterDocs = await masterDb.collection('masterDB').find(
+              { モデル: resolvedModelCond },
+              { projection: { 背番号: 1, 品番: 1, _id: 0 } }
+            ).toArray();
+            const modelBans = [...new Set(masterDocs.map(d => d.背番号).filter(Boolean))];
+            const modelHinbans = [...new Set(masterDocs.map(d => d.品番).filter(Boolean))];
+            if (modelBans.length > 0) {
+              normalizedClause = { 背番号: { $in: modelBans } };
+            } else if (modelHinbans.length > 0) {
+              normalizedClause = { 品番: { $in: modelHinbans } };
+            } else {
+              normalizedClause = { 背番号: '__NO_MATCH__' };
+            }
+          } catch (err) {
+            console.error('Failed to resolve モデル in advanced filter clause:', err);
+          }
+        } else {
+          // 2. Normalize array values for scalar fields: { field: [val] } -> unwrap or { $in: val }
+          for (const key of Object.keys(normalizedClause)) {
+            if (key.startsWith('$')) continue;
+            const val = normalizedClause[key];
+            if (Array.isArray(val)) {
+              if (val.length === 1) {
+                normalizedClause[key] = val[0];
+              } else if (val.length > 1) {
+                normalizedClause[key] = { $in: val };
+              }
+            }
+          }
+        }
+
+        baseQuery.$and.push(normalizedClause);
+      }
+      console.log(`🔍 Applied ${advancedFilters.length} advanced filter clauses. Query:`, JSON.stringify(baseQuery));
     }
 
     // Build climate data query (for temperature/humidity)
@@ -25483,11 +25577,16 @@ app.get('/api/equipment/list', async (req, res) => {
  */
 app.post('/api/equipment/data', async (req, res) => {
     try {
-        const { startDate, endDate, equipment } = req.body;
+        const { startDate, endDate, equipment, hinban, seiban, hinbans, parts } = req.body;
         
         console.log('📊 Fetching equipment data (optimized)...');
         console.log(`   Date range: ${startDate} to ${endDate}`);
         console.log(`   Equipment count: ${equipment?.length || 'all'}`);
+        if (Array.isArray(parts) && parts.length > 0) {
+            console.log(`   Parts count: ${parts.length}`);
+        } else if (hinban) {
+            console.log(`   Part: ${hinban} / ${seiban || 'all'}`);
+        }
         
         const db = client.db('submittedDB');
         const collection = db.collection('pressDB');
@@ -25505,24 +25604,35 @@ app.post('/api/equipment/data', async (req, res) => {
             matchQuery.設備 = { $in: equipment };
         }
         
-        // Fetch data with only needed fields (projection)
-        const results = await collection.find(matchQuery, {
-            projection: {
-                設備: 1,
-                工場: 1,
-                Date: 1,
-                品番: 1,
-                背番号: 1,
-                ショット数: 1,
-                Process_Quantity: 1,
-                Total_NG: 1,
-                SRS_Total_NG: 1,
-                Time_start: 1,
-                Time_end: 1,
-                作業者: 1,
-                STATUS: 1
+        if (Array.isArray(parts) && parts.length > 0) {
+            const orList = parts.map(p => {
+                const c = {};
+                if (p.hinban) c.品番 = p.hinban;
+                if (p.seiban) c.背番号 = p.seiban;
+                return c;
+            }).filter(c => Object.keys(c).length > 0);
+            if (orList.length > 0) {
+                matchQuery.$or = orList;
             }
-        }).toArray();
+        } else if (Array.isArray(hinbans) && hinbans.length > 0) {
+            matchQuery.品番 = { $in: hinbans };
+        } else if (Array.isArray(hinban) && hinban.length > 0) {
+            matchQuery.品番 = { $in: hinban };
+        } else {
+            if (hinban) matchQuery.品番 = hinban;
+            if (seiban) matchQuery.背番号 = seiban;
+        }
+        
+        // Fetch data with all fields for full record details
+        const results = await collection.find(matchQuery)
+            .sort({ Date: -1, Time_start: -1 })
+            .toArray();
+        
+        // Normalize Worker_Name and 作業者 so both are populated
+        results.forEach(r => {
+            if (!r.Worker_Name && r['作業者']) r.Worker_Name = r['作業者'];
+            if (!r['作業者'] && r.Worker_Name) r['作業者'] = r.Worker_Name;
+        });
         
         console.log(`✅ Found ${results.length} records`);
         
@@ -25537,6 +25647,168 @@ app.post('/api/equipment/data', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to fetch equipment data: ' + error.message
+        });
+    }
+});
+
+/**
+ * POST /api/equipment/part-comparison
+ * Dedicated endpoint for cross-machine part benchmarking (品番 / 背番号)
+ * Returns both aggregated machine comparison statistics and full record details.
+ */
+app.post('/api/equipment/part-comparison', async (req, res) => {
+    try {
+        const { hinban, seiban, hinbans, parts, startDate, endDate } = req.body;
+        
+        console.log('🔍 Cross-machine part comparison requested:');
+        if (Array.isArray(parts) && parts.length > 0) {
+            console.log(`   Parts count: ${parts.length} (${parts.map(p => p.hinban).join(', ')})`);
+        } else if (Array.isArray(hinbans) && hinbans.length > 0) {
+            console.log(`   Hinbans count: ${hinbans.length} (${hinbans.join(', ')})`);
+        } else {
+            console.log(`   Part: ${hinban || 'any'} / ${seiban || 'any'}`);
+        }
+        console.log(`   Date Range: ${startDate || 'all'} ~ ${endDate || 'all'}`);
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('pressDB');
+        
+        const matchQuery = {};
+        
+        if (Array.isArray(parts) && parts.length > 0) {
+            const orList = parts.map(p => {
+                const c = {};
+                if (p.hinban) c.品番 = p.hinban;
+                if (p.seiban) c.背番号 = p.seiban;
+                return c;
+            }).filter(c => Object.keys(c).length > 0);
+            if (orList.length > 0) {
+                matchQuery.$or = orList;
+            }
+        } else if (Array.isArray(hinbans) && hinbans.length > 0) {
+            matchQuery.品番 = { $in: hinbans };
+        } else if (Array.isArray(hinban) && hinban.length > 0) {
+            matchQuery.品番 = { $in: hinban };
+        } else {
+            if (hinban) matchQuery.品番 = hinban;
+            if (seiban) matchQuery.背番号 = seiban;
+        }
+        
+        if (startDate || endDate) {
+            matchQuery.Date = {};
+            if (startDate) matchQuery.Date.$gte = startDate;
+            if (endDate) matchQuery.Date.$lte = endDate;
+        }
+        
+        const records = await collection.find(matchQuery)
+            .sort({ Date: -1, Time_start: -1 })
+            .toArray();
+            
+        // Normalize Worker_Name and 作業者
+        records.forEach(r => {
+            if (!r.Worker_Name && r['作業者']) r.Worker_Name = r['作業者'];
+            if (!r['作業者'] && r.Worker_Name) r['作業者'] = r.Worker_Name;
+        });
+        
+        // Aggregate statistics per machine
+        const machinesMap = {};
+        let grandTotalShots = 0;
+        let grandTotalDefects = 0;
+        
+        records.forEach(r => {
+            const mach = r.設備 || r.machine || 'Unknown';
+            if (!machinesMap[mach]) {
+                machinesMap[mach] = {
+                    machine: mach,
+                    totalShots: 0,
+                    goodShots: 0,
+                    totalDefects: 0,
+                    totalMinutes: 0,
+                    recordCount: 0,
+                    firstSeen: r.Date,
+                    lastSeen: r.Date,
+                    records: []
+                };
+            }
+            
+            const shots = Number(r['ショット数'] || r.shots || r.Process_Quantity || r.Total_Count || r.totalCount || r.total_count || r.良品数 || 0);
+            const defects = Number(r.Total_NG || r.SRS_Total_NG || r['不良数'] || r.Bad_Count || r.badCount || r.Defect_Count || 0);
+            
+            machinesMap[mach].totalShots += shots;
+            machinesMap[mach].totalDefects += defects;
+            machinesMap[mach].goodShots += Math.max(0, shots - defects);
+            machinesMap[mach].recordCount += 1;
+            machinesMap[mach].records.push(r);
+            
+            // Track date span
+            if (r.Date && (!machinesMap[mach].firstSeen || r.Date < machinesMap[mach].firstSeen)) {
+                machinesMap[mach].firstSeen = r.Date;
+            }
+            if (r.Date && (!machinesMap[mach].lastSeen || r.Date > machinesMap[mach].lastSeen)) {
+                machinesMap[mach].lastSeen = r.Date;
+            }
+            
+            // Duration calculation if time fields exist
+            if (r.Time_start && r.Time_end) {
+                const [sh, sm] = r.Time_start.split(':').map(Number);
+                const [eh, em] = r.Time_end.split(':').map(Number);
+                if (!isNaN(sh) && !isNaN(sm) && !isNaN(eh) && !isNaN(em)) {
+                    let mins = (eh * 60 + em) - (sh * 60 + sm);
+                    if (mins < 0) mins += 1440; // overnight
+                    if (mins > 0 && mins < 1440) machinesMap[mach].totalMinutes += mins;
+                }
+            }
+            
+            grandTotalShots += shots;
+            grandTotalDefects += defects;
+        });
+        
+        const machineList = Object.values(machinesMap).map(m => {
+            const defectRate = m.totalShots > 0 ? (m.totalDefects / m.totalShots) * 100 : 0;
+            const operatingHours = +(m.totalMinutes / 60).toFixed(1);
+            const share = grandTotalShots > 0 ? (m.totalShots / grandTotalShots) * 100 : 0;
+            const shotsPerHour = operatingHours > 0 ? Math.round(m.totalShots / operatingHours) : 0;
+            
+            return {
+                machine: m.machine,
+                totalShots: m.totalShots,
+                goodShots: m.goodShots,
+                totalDefects: m.totalDefects,
+                defectRate: +defectRate.toFixed(2),
+                operatingHours,
+                shotsPerHour,
+                share: +share.toFixed(1),
+                recordCount: m.recordCount,
+                firstSeen: m.firstSeen,
+                lastSeen: m.lastSeen,
+                records: m.records
+            };
+        }).sort((a, b) => b.totalShots - a.totalShots);
+        
+        const overallDefectRate = grandTotalShots > 0 ? (grandTotalDefects / grandTotalShots) * 100 : 0;
+        
+        console.log(`✅ Part comparison found ${records.length} records across ${machineList.length} machines`);
+        
+        res.json({
+            success: true,
+            hinban,
+            seiban,
+            overall: {
+                totalShots: grandTotalShots,
+                totalDefects: grandTotalDefects,
+                defectRate: +overallDefectRate.toFixed(2),
+                machineCount: machineList.length,
+                recordCount: records.length
+            },
+            machines: machineList,
+            records
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in /api/equipment/part-comparison:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to process part cross-machine comparison: ' + error.message
         });
     }
 });
@@ -36947,6 +37219,41 @@ app.post('/api/production/sync-excel-save', async (req, res) => {
 // ==========================================
 // Analytics: Material Lots (材料ロット) Usage, Meters, Shots & Traceability
 // ==========================================
+// MasterDB In-Memory Cache for Material Analytics
+let cachedMasterItems = null;
+let lastMasterItemsFetchTime = 0;
+const MASTER_ITEMS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+async function getMasterItemsMap(masterCollection) {
+  const now = Date.now();
+  if (cachedMasterItems && (now - lastMasterItemsFetchTime < MASTER_ITEMS_CACHE_TTL)) {
+    return cachedMasterItems;
+  }
+  const items = await masterCollection.find({}, {
+    projection: {
+      "品番": 1,
+      "背番号": 1,
+      "品名": 1,
+      "材料背番号": 1,
+      "材料品番": 1,
+      "材料": 1,
+      "色": 1,
+      "imageURL": 1
+    }
+  }).toArray();
+
+  const masterByHinban = new Map();
+  const masterBySeiban = new Map();
+  for (const item of items) {
+    if (item['品番']) masterByHinban.set(String(item['品番']).trim(), item);
+    if (item['背番号']) masterBySeiban.set(String(item['背番号']).trim(), item);
+  }
+
+  cachedMasterItems = { masterByHinban, masterBySeiban };
+  lastMasterItemsFetchTime = now;
+  return cachedMasterItems;
+}
+
 async function handleMaterialLotAnalytics(req, res) {
   try {
     const params = req.method === 'POST' ? req.body : req.query;
@@ -36968,26 +37275,8 @@ async function handleMaterialLotAnalytics(req, res) {
     const collection = db.collection('pressDB');
     const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
 
-    // 1. Fetch MasterDB items for material linking (材料背番号, 材料品番, 材料, 品名, etc.)
-    const masterItems = await masterCollection.find({}, {
-      projection: {
-        "品番": 1,
-        "背番号": 1,
-        "品名": 1,
-        "材料背番号": 1,
-        "材料品番": 1,
-        "材料": 1,
-        "色": 1,
-        "imageURL": 1
-      }
-    }).toArray();
-
-    const masterByHinban = new Map();
-    const masterBySeiban = new Map();
-    for (const item of masterItems) {
-      if (item['品番']) masterByHinban.set(String(item['品番']).trim(), item);
-      if (item['背番号']) masterBySeiban.set(String(item['背番号']).trim(), item);
-    }
+    // 1. Fetch MasterDB items with in-memory caching
+    const { masterByHinban, masterBySeiban } = await getMasterItemsMap(masterCollection);
 
     // 2. Build PressDB Query - Only process documents that have Lot_Details
     const query = {
@@ -37001,6 +37290,18 @@ async function handleMaterialLotAnalytics(req, res) {
       query.Date = { $gte: String(startDate) };
     } else if (endDate) {
       query.Date = { $lte: String(endDate) };
+    } else {
+      // Defensive fallback: default to 1 week (past 7 days) if no date provided
+      const now = new Date();
+      const past7 = new Date(now);
+      past7.setDate(now.getDate() - 6);
+      const fmt = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
+      };
+      query.Date = { $gte: fmt(past7), $lte: fmt(now) };
     }
 
     if (factory) {
@@ -37052,7 +37353,28 @@ async function handleMaterialLotAnalytics(req, res) {
       }
     }
 
-    const records = await collection.find(query).sort({ Date: -1, createdAt: -1, _id: -1 }).limit(3000).toArray();
+    // Sort by latest Date first
+    const records = await collection.find(query, {
+      projection: {
+        _id: 1,
+        "工場": 1,
+        "品番": 1,
+        "背番号": 1,
+        "Worker_Name": 1,
+        "Date": 1,
+        "Time_start": 1,
+        "Time_end": 1,
+        "設備": 1,
+        "Total_NG": 1,
+        "Comment": 1,
+        "createdAt": 1,
+        "materialLabelImages": 1,
+        "材料ラベル画像": 1,
+        "初物チェック画像": 1,
+        "終物チェック画像": 1,
+        "Lot_Details": 1
+      }
+    }).sort({ Date: -1, createdAt: -1, _id: -1 }).limit(3000).toArray();
 
     // Aggregations
     const lotMap = new Map();
@@ -37071,6 +37393,7 @@ async function handleMaterialLotAnalytics(req, res) {
     let totalShotsOverall = 0;
     let totalPiecesOverall = 0;
     let totalImagesCountOverall = 0;
+    let totalDefectImagesCountOverall = 0;
 
     for (const doc of records) {
       const docId = doc._id ? doc._id.toString() : '';
@@ -37098,29 +37421,9 @@ async function handleMaterialLotAnalytics(req, res) {
       const prodImage = masterInfo.imageURL || '';
       const prodColor = masterInfo['色'] || '';
 
-      if (matSeiban && matSeiban !== '—') allMaterialSeibans.add(matSeiban);
-      if (matHinban && matHinban !== '—') allMaterialHinbans.add(matHinban);
-      if (matName && matName !== '—') allMaterialNames.add(matName);
-
-      // Filter by materialSeiban or materialHinban if requested
-      if (materialSeiban && matSeiban.toLowerCase() !== String(materialSeiban).toLowerCase()) {
-        continue;
-      }
-      if (materialHinban && matHinban.toLowerCase() !== String(materialHinban).toLowerCase()) {
-        continue;
-      }
-
-      // Collect material label images
-      let images = [];
-      if (Array.isArray(doc.materialLabelImages) && doc.materialLabelImages.length > 0) {
-        images = doc.materialLabelImages.filter(Boolean);
-      } else if (doc['材料ラベル画像']) {
-        images = [doc['材料ラベル画像']];
-      }
       const firstCheckImg = doc['初物チェック画像'] || null;
       const lastCheckImg = doc['終物チェック画像'] || null;
 
-      totalImagesCountOverall += images.length;
       if (docFactory && docFactory !== '—') allFactories.add(docFactory);
       if (docHinban) allHinbans.add(docHinban);
       if (docSeiban) allSeibans.add(docSeiban);
@@ -37131,7 +37434,8 @@ async function handleMaterialLotAnalytics(req, res) {
 
       const lotDetails = Array.isArray(doc.Lot_Details) ? doc.Lot_Details : [];
 
-      for (const item of lotDetails) {
+      for (let lotIdx = 0; lotIdx < lotDetails.length; lotIdx++) {
+        const item = lotDetails[lotIdx];
         const rawLotNum = String(item.lotNumber || '').trim();
         if (!rawLotNum) continue;
 
@@ -37147,12 +37451,49 @@ async function handleMaterialLotAnalytics(req, res) {
         const itemFeedPitch = item.feedPitch !== undefined && item.feedPitch !== null ? Number(item.feedPitch) : null;
         const itemPcPerCycle = item.pcPerCycle !== undefined && item.pcPerCycle !== null ? Number(item.pcPerCycle) : null;
 
+        // Material Seiban: prefer item.materialSeiban from scanned QR, fallback to MasterDB matSeiban
+        const effectiveMatSeiban = (item.materialSeiban && String(item.materialSeiban).trim() && String(item.materialSeiban).trim() !== '—')
+          ? String(item.materialSeiban).trim()
+          : matSeiban;
+
+        if (effectiveMatSeiban && effectiveMatSeiban !== '—') allMaterialSeibans.add(effectiveMatSeiban);
+        if (matHinban && matHinban !== '—') allMaterialHinbans.add(matHinban);
+        if (matName && matName !== '—') allMaterialNames.add(matName);
+
+        // Filter by materialSeiban or materialHinban if requested
+        if (materialSeiban && effectiveMatSeiban.toLowerCase() !== String(materialSeiban).toLowerCase()) {
+          continue;
+        }
+        if (materialHinban && matHinban.toLowerCase() !== String(materialHinban).toLowerCase()) {
+          continue;
+        }
+
         totalMetersOverall += itemMeters;
         totalShotsOverall += itemShots;
         totalPiecesOverall += itemPieces;
 
+        // Per-lot Images from new Lot_Details structure:
+        // 1. Label Image: item.image, fallback to doc.materialLabelImages[lotIdx] or doc['材料ラベル画像']
+        let lotItemLabelImage = item.image || null;
+        if (!lotItemLabelImage) {
+          if (Array.isArray(doc.materialLabelImages) && doc.materialLabelImages[lotIdx]) {
+            lotItemLabelImage = doc.materialLabelImages[lotIdx];
+          } else if (doc['材料ラベル画像'] && lotIdx === 0) {
+            lotItemLabelImage = doc['材料ラベル画像'];
+          }
+        }
+
+        // 2. Defect Images: item.defectImage (can be array or string)
+        let lotItemDefectImages = [];
+        if (Array.isArray(item.defectImage)) {
+          lotItemDefectImages = item.defectImage.filter(Boolean);
+        } else if (item.defectImage) {
+          lotItemDefectImages = [item.defectImage];
+        }
+
         const runItem = {
           pressId: docId,
+          rawRecord: doc,
           lotNumber: rawLotNum,
           factory: docFactory,
           machine: itemMachine,
@@ -37161,7 +37502,7 @@ async function handleMaterialLotAnalytics(req, res) {
           productName: prodName,
           productImage: prodImage,
           productColor: prodColor,
-          materialSeiban: matSeiban,
+          materialSeiban: effectiveMatSeiban,
           materialHinban: matHinban,
           materialName: matName,
           worker: docWorker,
@@ -37175,21 +37516,25 @@ async function handleMaterialLotAnalytics(req, res) {
           pieces: itemPieces,
           totalNg: docTotalNg,
           comment: docComment,
-          materialLabelImages: images,
+          labelImage: lotItemLabelImage,
+          defectImages: lotItemDefectImages,
+          materialLabelImages: lotItemLabelImage ? [lotItemLabelImage] : [],
           firstCheckImage: firstCheckImg,
           lastCheckImage: lastCheckImg,
+          scannedQR: item.scannedQR || '',
+          timestamp: item.timestamp || '',
           createdAt: docCreatedAt
         };
 
         flatRuns.push(runItem);
 
-        const lotKey = `${matSeiban || 'UNKNOWN'}__${rawLotNum}`;
+        const lotKey = `${effectiveMatSeiban || 'UNKNOWN'}__${rawLotNum}`;
 
         if (!lotMap.has(lotKey)) {
           lotMap.set(lotKey, {
             key: lotKey,
             lotNumber: rawLotNum,
-            materialSeiban: matSeiban,
+            materialSeiban: effectiveMatSeiban,
             materialHinban: matHinban,
             materialName: matName,
             totalMeters: 0,
@@ -37200,7 +37545,9 @@ async function handleMaterialLotAnalytics(req, res) {
             factories: new Set(),
             workers: new Set(),
             dates: new Set(),
-            images: new Set(),
+            labelImages: new Set(),
+            defectImages: new Set(),
+            latestDate: docDate || '',
             runs: []
           });
         }
@@ -37210,8 +37557,8 @@ async function handleMaterialLotAnalytics(req, res) {
         lotAgg.totalShots += itemShots;
         lotAgg.totalPieces += itemPieces;
 
-        // In case earlier record didn't have material name but this one does
-        if (matSeiban && matSeiban !== '—' && (!lotAgg.materialSeiban || lotAgg.materialSeiban === '—')) lotAgg.materialSeiban = matSeiban;
+        // In case earlier record didn't have material info but this one does
+        if (effectiveMatSeiban && effectiveMatSeiban !== '—' && (!lotAgg.materialSeiban || lotAgg.materialSeiban === '—')) lotAgg.materialSeiban = effectiveMatSeiban;
         if (matHinban && matHinban !== '—' && (!lotAgg.materialHinban || lotAgg.materialHinban === '—')) lotAgg.materialHinban = matHinban;
         if (matName && matName !== '—' && (!lotAgg.materialName || lotAgg.materialName === '—')) lotAgg.materialName = matName;
 
@@ -37240,36 +37587,58 @@ async function handleMaterialLotAnalytics(req, res) {
         }
         if (docFactory && docFactory !== '—') lotAgg.factories.add(docFactory);
         if (docWorker && docWorker !== '—') lotAgg.workers.add(docWorker);
-        if (docDate) lotAgg.dates.add(docDate);
-        images.forEach(img => lotAgg.images.add(img));
+        if (docDate) {
+          lotAgg.dates.add(docDate);
+          if (!lotAgg.latestDate || docDate > lotAgg.latestDate) {
+            lotAgg.latestDate = docDate;
+          }
+        }
+
+        if (lotItemLabelImage) {
+          lotAgg.labelImages.add(lotItemLabelImage);
+          totalImagesCountOverall++;
+        }
+        lotItemDefectImages.forEach(img => {
+          lotAgg.defectImages.add(img);
+          totalDefectImagesCountOverall++;
+        });
+
         lotAgg.runs.push(runItem);
       }
     }
 
-    // Convert lotMap to sorted array (highest meters first)
-    const lots = Array.from(lotMap.values()).map(lot => ({
-      key: lot.key,
-      lotNumber: lot.lotNumber,
-      materialSeiban: lot.materialSeiban || '—',
-      materialHinban: lot.materialHinban || '—',
-      materialName: lot.materialName || '—',
-      displayTitle: lot.materialSeiban && lot.materialSeiban !== '—' ? `${lot.materialSeiban} - ${lot.lotNumber}` : lot.lotNumber,
-      totalMeters: Number(lot.totalMeters.toFixed(2)),
-      totalShots: lot.totalShots,
-      totalPieces: lot.totalPieces,
-      products: Array.from(lot.products.values()).map(p => ({
-        ...p,
-        totalMeters: Number(p.totalMeters.toFixed(2)),
-        machines: Array.from(p.machines)
-      })),
-      machines: Array.from(lot.machines),
-      factories: Array.from(lot.factories),
-      workers: Array.from(lot.workers),
-      dates: Array.from(lot.dates).sort().reverse(),
-      runsCount: lot.runs.length,
-      images: Array.from(lot.images),
-      runs: lot.runs.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || ''))
-    })).sort((a, b) => b.totalMeters - a.totalMeters || b.totalShots - a.totalShots);
+    // Convert lotMap to sorted array: sort by latest Date first, then highest meters
+    const lots = Array.from(lotMap.values()).map(lot => {
+      const datesArr = Array.from(lot.dates).sort().reverse();
+      const labelImgs = Array.from(lot.labelImages);
+      const defectImgs = Array.from(lot.defectImages);
+      return {
+        key: lot.key,
+        lotNumber: lot.lotNumber,
+        materialSeiban: lot.materialSeiban || '—',
+        materialHinban: lot.materialHinban || '—',
+        materialName: lot.materialName || '—',
+        displayTitle: lot.materialSeiban && lot.materialSeiban !== '—' ? `${lot.materialSeiban} - ${lot.lotNumber}` : lot.lotNumber,
+        totalMeters: Number(lot.totalMeters.toFixed(2)),
+        totalShots: lot.totalShots,
+        totalPieces: lot.totalPieces,
+        latestDate: datesArr[0] || lot.latestDate || '',
+        products: Array.from(lot.products.values()).map(p => ({
+          ...p,
+          totalMeters: Number(p.totalMeters.toFixed(2)),
+          machines: Array.from(p.machines)
+        })),
+        machines: Array.from(lot.machines),
+        factories: Array.from(lot.factories),
+        workers: Array.from(lot.workers),
+        dates: datesArr,
+        runsCount: lot.runs.length,
+        labelImages: labelImgs,
+        defectImages: defectImgs,
+        images: [...labelImgs, ...defectImgs],
+        runs: lot.runs.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '') || (b.createdAt || '').localeCompare(a.createdAt || ''))
+      };
+    }).sort((a, b) => (b.latestDate || '').localeCompare(a.latestDate || '') || b.totalMeters - a.totalMeters);
 
     res.json({
       success: true,
@@ -37279,10 +37648,11 @@ async function handleMaterialLotAnalytics(req, res) {
         totalShots: totalShotsOverall,
         totalPieces: totalPiecesOverall,
         totalPressRuns: records.length,
-        totalImagesCount: totalImagesCountOverall
+        totalImagesCount: totalImagesCountOverall,
+        totalDefectImagesCount: totalDefectImagesCountOverall
       },
       lots,
-      runs: flatRuns.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '')),
+      runs: flatRuns.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '') || (b.createdAt || '').localeCompare(a.createdAt || '')),
       filterOptions: {
         materialSeibans: Array.from(allMaterialSeibans).sort(),
         materialHinbans: Array.from(allMaterialHinbans).sort(),
