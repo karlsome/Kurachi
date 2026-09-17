@@ -17810,13 +17810,87 @@ if (manualSendModal) {
       // ONLY auto-dismiss if ALL known machines are UNLOCKED (no machine holding in MANUAL_CANCEL)
       if (cncCancelActive || isCancelAlreadyOpen) {
         console.log("🔓 [CNC GATEKEEPER] Source of truth (All Mini-PCs) is unlocked -> Auto-dismissing Cancel Screen & releasing cloud stop-call!");
-        if (typeof closeCncCancelOverlay === 'function') {
+        if (typeof window.closeCncCancelOverlay === 'function') {
+          window.closeCncCancelOverlay();
+        } else if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
         }
-        if (typeof notifyStopCall === 'function') {
-          notifyStopCall('clear', 'leader');
-        } else if (typeof window.notifyStopCall === 'function') {
+        if (typeof window.notifyStopCall === 'function') {
           window.notifyStopCall('clear', 'leader');
+        } else if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'leader');
+        }
+        localStorage.removeItem(pfx + 'activeCncCancelStart');
+        if (localStorage.getItem(pfx + 'activeStopCallStart')) {
+          localStorage.removeItem(pfx + 'activeStopCallStart');
+          localStorage.removeItem(pfx + 'activeStopCallMachine');
+          if (typeof window.closeStopCallOverlay === 'function') window.closeStopCallOverlay();
+          else if (typeof closeStopCallOverlay === 'function') closeStopCallOverlay();
+          if (typeof window.stopCallStopPulse === 'function') window.stopCallStopPulse(null);
+          else if (typeof stopCallStopPulse === 'function') stopCallStopPulse(null);
+        }
+        if (typeof showToast === 'function') {
+          showToast('✅ 機械ロックが解除されました / Machine lock released');
+        }
+      }
+    }
+
+    // 1.5. Auto-dismiss Stop Call / Call Leader overlay if the Mini-PC is unlocked and not in pause
+    const stopCallOverlay = document.getElementById('stopCallOverlay');
+    const isStopCallOpen = stopCallOverlay && stopCallOverlay.classList.contains('open');
+    const stopCallActive = localStorage.getItem(pfx + 'activeStopCallStart');
+
+    if (stopCallActive || isStopCallOpen) {
+      const stopCallStartEpoch = parseInt(stopCallActive || '0', 10);
+      const elapsedSinceCall = Date.now() - stopCallStartEpoch;
+      // Allow a 3-second grace window after call was placed so it doesn't race with the activation request
+      if (elapsedSinceCall > 3000) {
+        const anyInCallStop = states.some(s => s && (s.call_stop_active || s.display_state === 'PAUSED'));
+        const anyHolding = states.some(s => s && s.holding);
+        if (!anyInCallStop && !anyHolding) {
+          console.log("🔓 [CNC GATEKEEPER] Source of truth reports Mini-PC is UNLOCKED and NOT in pause -> Auto-dismissing Call Leader screen!");
+          if (stopCallStartEpoch > 0) {
+            const waitSec = Math.max(0, Math.round((Date.now() - stopCallStartEpoch) / 1000));
+            try {
+              const rawData = localStorage.getItem(pfx + 'stopCallData');
+              const data = rawData ? JSON.parse(rawData) : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
+              if (!Array.isArray(data.records)) data.records = [];
+              data.records.push({
+                calledAt: new Date(stopCallStartEpoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                arrivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                waitSeconds: waitSec,
+                waitMinutes: Math.round(waitSec / 60),
+                leaderName: 'Script Unlock / Console',
+                leaderUsername: 'system',
+                leaderRole: 'Auto',
+                resolvedBy: 'Script Unlocked'
+              });
+              data.count = data.records.length;
+              data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+              data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+              localStorage.setItem(pfx + 'stopCallData', JSON.stringify(data));
+              if (typeof logTabletAction === 'function') {
+                logTabletAction('Stop call resolved by script unlock', 'Completed', { waitSeconds: waitSec });
+              }
+            } catch (err) {
+              console.error('Error logging auto-dismissed stop call:', err);
+            }
+          }
+          localStorage.removeItem(pfx + 'activeStopCallStart');
+          localStorage.removeItem(pfx + 'activeStopCallMachine');
+          if (typeof window.closeStopCallOverlay === 'function') {
+            window.closeStopCallOverlay();
+          } else if (typeof closeStopCallOverlay === 'function') {
+            closeStopCallOverlay();
+          }
+          if (typeof window.notifyStopCall === 'function') {
+            window.notifyStopCall('clear', 'leader');
+          } else if (typeof notifyStopCall === 'function') {
+            notifyStopCall('clear', 'leader');
+          }
+          if (typeof showToast === 'function') {
+            showToast('✅ リーダー呼び出し・一時停止が解除されました / Stop call released');
+          }
         }
       }
     }
@@ -18203,7 +18277,8 @@ if (manualSendModal) {
         holding: false,
         hold_reason: null,
         scheduled_break_stop: false,
-        scheduled_cycle_stop: false
+        scheduled_cycle_stop: false,
+        call_stop_active: false
       });
       delete cycleStopIntent[ip];
       delete breakIntentAt[ip];
@@ -18217,8 +18292,21 @@ if (manualSendModal) {
       if (!anyStillHolding && !anyStillArmed) {
         closeCycleStopOverlay();
         closeBreakWaitOverlay();
-        if (typeof closeCncCancelOverlay === 'function') {
+        if (typeof window.closeCncCancelOverlay === 'function') {
+          window.closeCncCancelOverlay();
+        } else if (typeof closeCncCancelOverlay === 'function') {
           closeCncCancelOverlay();
+        }
+        const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+        if (localStorage.getItem(pfx + 'activeStopCallStart')) {
+          localStorage.removeItem(pfx + 'activeStopCallStart');
+          localStorage.removeItem(pfx + 'activeStopCallMachine');
+          if (typeof window.closeStopCallOverlay === 'function') window.closeStopCallOverlay();
+          else if (typeof closeStopCallOverlay === 'function') closeStopCallOverlay();
+          if (typeof window.stopCallStopPulse === 'function') window.stopCallStopPulse(null);
+          else if (typeof stopCallStopPulse === 'function') stopCallStopPulse(null);
+          if (typeof window.notifyStopCall === 'function') window.notifyStopCall('clear', 'leader');
+          else if (typeof notifyStopCall === 'function') notifyStopCall('clear', 'leader');
         }
       }
     });
@@ -18388,8 +18476,25 @@ if (manualSendModal) {
         machineStates[k].hold_reason = null;
         machineStates[k].scheduled_break_stop = false;
         machineStates[k].scheduled_cycle_stop = false;
+        machineStates[k].call_stop_active = false;
       }
     });
+
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    if (localStorage.getItem(pfx + 'activeStopCallStart')) {
+      localStorage.removeItem(pfx + 'activeStopCallStart');
+      localStorage.removeItem(pfx + 'activeStopCallMachine');
+    }
+    if (typeof closeStopCallOverlay === 'function') {
+      closeStopCallOverlay();
+    }
+    if (typeof stopCallStopPulse === 'function') {
+      stopCallStopPulse(null);
+    }
+    if (typeof notifyStopCall === 'function') {
+      notifyStopCall('clear', 'leader');
+    }
+
     allIps.forEach(ip => {
       fetch(`http://${ip}:5000/unlock`, { method: 'POST' })
         .then(r => r.json())
@@ -18397,6 +18502,7 @@ if (manualSendModal) {
         .catch(() => {
           fetch(`http://${ip}:8766/unlock`, { method: 'POST' }).catch(() => { });
         });
+      fetch(`http://${ip}:5000/request?callStop=0`).catch(() => {});
     });
   };
 

@@ -6292,10 +6292,12 @@
                     if (raw) {
                         const d = JSON.parse(raw);
                         if (d && typeof d === 'object') {
-                            d.count = d.count || 0;
-                            d.totalWaitSeconds = d.totalWaitSeconds || 0;
-                            d.totalWaitMinutes = d.totalWaitMinutes || 0;
-                            d.records = Array.isArray(d.records) ? d.records : [];
+                            d.records = Array.isArray(d.records)
+                                ? d.records.filter(r => r && typeof r === 'object' && r.waitSeconds != null)
+                                : [];
+                            d.count = d.records.length;
+                            d.totalWaitSeconds = d.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                            d.totalWaitMinutes = Math.round(d.totalWaitSeconds / 60);
                             return d;
                         }
                     }
@@ -6463,16 +6465,44 @@
                 triggerCallStopActivation(specificIP, stopCallPickedMachine);
             }
 
+            let callStopZeroRetryTimer = null;
+            function retrySendCallStopZero(specificIP, maxAttempts = 15, intervalMs = 3000) {
+                if (callStopZeroRetryTimer) clearInterval(callStopZeroRetryTimer);
+                let attempts = 0;
+                callStopZeroRetryTimer = setInterval(async () => {
+                    attempts++;
+                    const ok = await sendCNCCallStop(0, specificIP);
+                    if (ok) {
+                        console.log(`✅ [Stop Call] Released pause on Mini-PC after ${attempts} background retry(ies).`);
+                        clearInterval(callStopZeroRetryTimer);
+                        callStopZeroRetryTimer = null;
+                    } else if (attempts >= maxAttempts) {
+                        console.warn(`❌ [Stop Call] Could not reach Mini-PC after ${attempts} retries.`);
+                        clearInterval(callStopZeroRetryTimer);
+                        callStopZeroRetryTimer = null;
+                    }
+                }, intervalMs);
+            }
+
             async function stopCallStopPulse(specificIP = null) {
                 if (stopCallPulseInterval) {
                     clearInterval(stopCallPulseInterval);
                     stopCallPulseInterval = null;
                 }
                 // Send callStop=0 once to release pause cleanly
-                return await sendCNCCallStop(0, specificIP);
+                const success = await sendCNCCallStop(0, specificIP);
+                if (!success) {
+                    console.warn(`⚠️ [Stop Call] Mini-PC was offline or unreachable. Scheduling background retries for callStop=0...`);
+                    retrySendCallStopZero(specificIP);
+                }
+                return success;
             }
 
             async function startStopCall(pickedMachine) {
+                if (callStopZeroRetryTimer) {
+                    clearInterval(callStopZeroRetryTimer);
+                    callStopZeroRetryTimer = null;
+                }
                 if (localStorage.getItem(breakPrefix + 'activeStopCallStart')) return; // already calling
                 stopCallPickedMachine = pickedMachine || null;
                 const startEpoch = Date.now();
@@ -6597,34 +6627,58 @@
                 }, 400);
             }
 
+            let isFinalizingStopCall = false;
+
             async function finalizeStopCall() {
-                if (!pendingStopCallRecord) return;
-                
+                if (!pendingStopCallRecord || isFinalizingStopCall) return;
+                isFinalizingStopCall = true;
+
+                const resumeBtn = document.getElementById('stopCallResumeCNCButton');
+                if (resumeBtn) resumeBtn.style.display = 'none';
+
+                // Immediately capture and clear to prevent concurrent executions or pushing null
+                const recordToSave = pendingStopCallRecord;
+                pendingStopCallRecord = null;
+
                 const pickedMachine = stopCallPickedMachine;
                 const pickedIP = pickedMachine ? (groupedMachineIPs[pickedMachine] || null) : null;
-                await stopCallStopPulse(pickedIP);
-                
-                const data = getStopCallData();
-                data.records.push(pendingStopCallRecord);
-                data.count = data.records.length;
-                data.totalWaitSeconds = data.records.reduce((s, r) => s + (r.waitSeconds || 0), 0);
-                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
-                saveStopCallData(data);
-                if (typeof logTabletAction === 'function') {
-                    logTabletAction('Stop call unlocked by Leader', 'Completed', { ...pendingStopCallRecord });
+
+                try {
+                    await stopCallStopPulse(pickedIP);
+                } catch (e) {
+                    console.error('Error stopping call pulse:', e);
                 }
-                
-                pendingStopCallRecord = null;
-                stopCallPickedMachine = null;
-                localStorage.removeItem(breakPrefix + 'activeStopCallStart');
-                localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
-                closeStopCallOverlay();
-                notifyStopCall('clear', 'leader', pickedMachine || null);
-                showToast(_t('toast_leader_recorded'));
+
+                try {
+                    const data = getStopCallData();
+                    if (recordToSave) {
+                        data.records.push(recordToSave);
+                    }
+                    data.count = data.records.length;
+                    data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                    data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                    saveStopCallData(data);
+                    if (typeof logTabletAction === 'function') {
+                        logTabletAction('Stop call unlocked by Leader', 'Completed', { ...recordToSave });
+                    }
+
+                    stopCallPickedMachine = null;
+                    localStorage.removeItem(breakPrefix + 'activeStopCallStart');
+                    localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
+                    closeStopCallOverlay();
+                    notifyStopCall('clear', 'leader', pickedMachine || null);
+                    showToast(_t('toast_leader_recorded'));
+                } finally {
+                    isFinalizingStopCall = false;
+                }
             }
             function resumeStopCallIfActive() {
+                const rawCancel = localStorage.getItem(breakPrefix + 'activeCncCancelStart');
+                if (rawCancel) {
+                    openCncCancelOverlay(parseInt(rawCancel, 10));
+                }
                 const raw = localStorage.getItem(breakPrefix + 'activeStopCallStart');
-                if (raw) {
+                if (raw && !rawCancel) {
                     const savedMachine = localStorage.getItem(breakPrefix + 'activeStopCallMachine') || null;
                     stopCallPickedMachine = savedMachine;
                     const pickedIP = savedMachine ? (groupedMachineIPs[savedMachine] || null) : null;
@@ -6645,10 +6699,6 @@
                     notifyStopCall('activate', 'box');
                     if (menuWrap) menuWrap.classList.add('open');
                 }
-                const rawCancel = localStorage.getItem(breakPrefix + 'activeCncCancelStart');
-                if (rawCancel) {
-                    openCncCancelOverlay(parseInt(rawCancel, 10));
-                }
             }
             // =========================================================================
             // DEDICATED CNC CANCEL OVERLAY LOGIC (Hardware Cancel Detected)
@@ -6657,6 +6707,10 @@
             let cncCancelScanner = null;
 
             function openCncCancelOverlay(startEpoch) {
+                // If Stop Call overlay is open, dismiss it so Cancel screen (highest authority) takes full focus
+                if (typeof closeStopCallOverlay === 'function') {
+                    closeStopCallOverlay();
+                }
                 const ov = document.getElementById('cncCancelOverlay');
                 const alreadyOpen = ov && ov.classList.contains('open');
 
@@ -6767,13 +6821,54 @@
                                             waitMinutes: Math.round(waitSeconds / 60)
                                         });
                                     }
+
+                                    // GATEKEEPER IS HIGHEST AUTHORITY:
+                                    // If a Stop Call (pause) was active, finalize its record and release pause cleanly
+                                    const rawStop = localStorage.getItem(breakPrefix + 'activeStopCallStart');
+                                    if (rawStop) {
+                                        const stopStartEpoch = parseInt(rawStop, 10);
+                                        const stopWaitSeconds = Math.max(0, Math.round((Date.now() - stopStartEpoch) / 1000));
+                                        const stopRecord = {
+                                            calledAt: fmtClock(new Date(stopStartEpoch)),
+                                            arrivedAt: fmtClock(new Date()),
+                                            waitSeconds: stopWaitSeconds,
+                                            waitMinutes: Math.round(stopWaitSeconds / 60),
+                                            leaderName: leaderName,
+                                            leaderUsername: result.username || decodedText,
+                                            leaderRole: result.role || '',
+                                            resolvedBy: 'Gatekeeper QR Scan'
+                                        };
+                                        try {
+                                            const data = getStopCallData();
+                                            data.records.push(stopRecord);
+                                            data.count = data.records.length;
+                                            data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                                            data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                                            saveStopCallData(data);
+                                            if (typeof logTabletAction === 'function') {
+                                                logTabletAction('Stop call unlocked by Leader (via Gatekeeper)', 'Completed', stopRecord);
+                                            }
+                                        } catch (err) {
+                                            console.error('Error saving stopCallData during Gatekeeper unlock:', err);
+                                        }
+                                        localStorage.removeItem(breakPrefix + 'activeStopCallStart');
+                                        localStorage.removeItem(breakPrefix + 'activeStopCallMachine');
+                                    }
+                                    if (typeof closeStopCallOverlay === 'function') {
+                                        closeStopCallOverlay();
+                                    }
+                                    if (typeof stopCallStopPulse === 'function') {
+                                        stopCallStopPulse(null);
+                                    }
+                                    stopCallPickedMachine = null;
+
                                     if (typeof window.unlockCNCGatekeeper === 'function') {
                                         window.unlockCNCGatekeeper();
                                     }
                                     setTimeout(() => {
                                         closeCncCancelOverlay();
                                         if (typeof showToast === 'function') {
-                                            showToast('✅ 機械ロックを解除しました / Machine lock released');
+                                            showToast('✅ 機械ロック・一時停止を解除しました / Machine lock & pause released');
                                         }
                                     }, 400);
                                 } else {
@@ -6808,6 +6903,9 @@
 
             window.openCncCancelOverlay = openCncCancelOverlay;
             window.closeCncCancelOverlay = closeCncCancelOverlay;
+            window.openStopCallOverlay = openStopCallOverlay;
+            window.closeStopCallOverlay = closeStopCallOverlay;
+            window.stopCallStopPulse = stopCallStopPulse;
             window.startStopCall = startStopCall;
             
             /**
