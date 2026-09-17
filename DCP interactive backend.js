@@ -11345,6 +11345,7 @@ window.isScanWorkflowComplete = function () {
 // Function to show Step 0 Modal (Worker Name Verification)
 window.showStep0Modal = function () {
   clearScanWorkflowComplete();
+  if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
 
   const modal = document.getElementById('step0Modal');
   const confirmState = document.getElementById('step0ConfirmState');
@@ -11597,6 +11598,7 @@ function resetAllSteps() {
   // Reset step to 0 and clear from localStorage
   saveCurrentStep(0);
   clearScanWorkflowComplete();
+  if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
   localStorage.removeItem(`${uniquePrefix}sub-dropdown`);
 
   // Call resetForm() to clear all form data
@@ -17826,25 +17828,35 @@ if (manualSendModal) {
           if (stopStartEpoch > 0) {
             const waitSec = Math.max(0, Math.round((Date.now() - stopStartEpoch) / 1000));
             try {
-              const rawData = localStorage.getItem(pfx + 'stopCallData');
-              const data = rawData ? JSON.parse(rawData) : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
-              if (!Array.isArray(data.records)) data.records = [];
-              data.records.push({
-                calledAt: new Date(stopStartEpoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                arrivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                waitSeconds: waitSec,
-                waitMinutes: Math.round(waitSec / 60),
-                leaderName: 'Script Unlock / Console',
-                leaderUsername: 'system',
-                leaderRole: 'Auto',
-                resolvedBy: 'Script Unlocked'
-              });
-              data.count = data.records.length;
-              data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
-              data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
-              localStorage.setItem(pfx + 'stopCallData', JSON.stringify(data));
+              const isProdActive = (typeof window.hasActiveProduct === 'function' && window.hasActiveProduct())
+                || (typeof hasActiveProduct === 'function' && hasActiveProduct());
+              if (isProdActive) {
+                const rawData = localStorage.getItem(pfx + 'stopCallData');
+                const data = rawData ? JSON.parse(rawData) : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
+                if (!Array.isArray(data.records)) data.records = [];
+                data.records.push({
+                  calledAt: new Date(stopStartEpoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  arrivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  waitSeconds: waitSec,
+                  waitMinutes: Math.round(waitSec / 60),
+                  leaderName: 'Script Unlock / Console',
+                  leaderUsername: 'system',
+                  leaderRole: 'Auto',
+                  resolvedBy: 'Script Unlocked'
+                });
+                data.count = data.records.length;
+                data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                localStorage.setItem(pfx + 'stopCallData', JSON.stringify(data));
+              } else {
+                console.log('ℹ️ [AUTO-DISMISS] Tablet has no active product scanned (free from production). Discarding stop call downtime.');
+              }
               if (typeof logTabletAction === 'function') {
-                logTabletAction('Stop call resolved by script unlock', 'Completed', { waitSeconds: waitSec });
+                logTabletAction(
+                  isProdActive ? 'Stop call resolved by script unlock' : 'Stop call resolved by script unlock (pre-production / discarded)',
+                  'Completed',
+                  { waitSeconds: waitSec, productionActive: isProdActive }
+                );
               }
             } catch (err) {
               console.error('Error logging auto-dismissed stop call during gatekeeper clear:', err);
@@ -17880,25 +17892,35 @@ if (manualSendModal) {
           if (stopCallStartEpoch > 0) {
             const waitSec = Math.max(0, Math.round((Date.now() - stopCallStartEpoch) / 1000));
             try {
-              const rawData = localStorage.getItem(pfx + 'stopCallData');
-              const data = rawData ? JSON.parse(rawData) : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
-              if (!Array.isArray(data.records)) data.records = [];
-              data.records.push({
-                calledAt: new Date(stopCallStartEpoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                arrivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                waitSeconds: waitSec,
-                waitMinutes: Math.round(waitSec / 60),
-                leaderName: 'Script Unlock / Console',
-                leaderUsername: 'system',
-                leaderRole: 'Auto',
-                resolvedBy: 'Script Unlocked'
-              });
-              data.count = data.records.length;
-              data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
-              data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
-              localStorage.setItem(pfx + 'stopCallData', JSON.stringify(data));
+              const isProdActive = (typeof window.hasActiveProduct === 'function' && window.hasActiveProduct())
+                || (typeof hasActiveProduct === 'function' && hasActiveProduct());
+              if (isProdActive) {
+                const rawData = localStorage.getItem(pfx + 'stopCallData');
+                const data = rawData ? JSON.parse(rawData) : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
+                if (!Array.isArray(data.records)) data.records = [];
+                data.records.push({
+                  calledAt: new Date(stopCallStartEpoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  arrivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  waitSeconds: waitSec,
+                  waitMinutes: Math.round(waitSec / 60),
+                  leaderName: 'Script Unlock / Console',
+                  leaderUsername: 'system',
+                  leaderRole: 'Auto',
+                  resolvedBy: 'Script Unlocked'
+                });
+                data.count = data.records.length;
+                data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                localStorage.setItem(pfx + 'stopCallData', JSON.stringify(data));
+              } else {
+                console.log('ℹ️ [AUTO-DISMISS] Tablet has no active product scanned (free from production). Discarding stop call downtime.');
+              }
               if (typeof logTabletAction === 'function') {
-                logTabletAction('Stop call resolved by script unlock', 'Completed', { waitSeconds: waitSec });
+                logTabletAction(
+                  isProdActive ? 'Stop call resolved by script unlock' : 'Stop call resolved by script unlock (pre-production / discarded)',
+                  'Completed',
+                  { waitSeconds: waitSec, productionActive: isProdActive }
+                );
               }
             } catch (err) {
               console.error('Error logging auto-dismissed stop call:', err);

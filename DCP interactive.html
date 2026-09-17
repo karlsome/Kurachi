@@ -6315,7 +6315,32 @@
                 if (typeof stopCallStopPulse === 'function') {
                     stopCallStopPulse();
                 }
-            };
+            function hasActiveProduct() {
+                if (typeof window.isScanWorkflowComplete === 'function' && window.isScanWorkflowComplete()) return true;
+                if (typeof isScanComplete === 'function' && isScanComplete()) return true;
+                const pfx = (typeof uniquePrefix !== 'undefined' && uniquePrefix)
+                    ? uniquePrefix
+                    : (typeof breakPrefix !== 'undefined' ? breakPrefix : '');
+                if (pfx && localStorage.getItem(pfx + 'scanComplete') === 'true') return true;
+                if (localStorage.getItem('DCP_scanComplete') === 'true') return true;
+
+                const seb = (document.getElementById('sub-dropdown')?.value || '').trim()
+                    || (document.getElementById('背番号')?.value || '').trim()
+                    || (pfx ? (localStorage.getItem(pfx + 'cached-sebanggo') || '').trim() : '')
+                    || (localStorage.getItem('kurachi_cached-sebanggo') || '').trim()
+                    || (typeof currentProductDetails !== 'undefined' && (currentProductDetails?.sebanggo || '').trim())
+                    || '';
+
+                const hin = (document.getElementById('product-number')?.value || '').trim()
+                    || (document.getElementById('品番')?.value || '').trim()
+                    || (pfx ? (localStorage.getItem(pfx + 'cached-hinban') || '').trim() : '')
+                    || (localStorage.getItem('kurachi_cached-hinban') || '').trim()
+                    || (typeof currentProductDetails !== 'undefined' && (currentProductDetails?.hinban || '').trim())
+                    || '';
+
+                return !!(seb || hin);
+            }
+            window.hasActiveProduct = hasActiveProduct;
 
             // ---- Tracks the machine chosen in the per-call picker ----
             // For grouped pages: material/leader picker stores the chosen machine here.
@@ -6650,16 +6675,25 @@
                 }
 
                 try {
-                    const data = getStopCallData();
-                    if (recordToSave) {
-                        data.records.push(recordToSave);
+                    const isProdActive = typeof hasActiveProduct === 'function' ? hasActiveProduct() : true;
+                    if (isProdActive) {
+                        const data = getStopCallData();
+                        if (recordToSave) {
+                            data.records.push(recordToSave);
+                        }
+                        data.count = data.records.length;
+                        data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                        data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                        saveStopCallData(data);
+                    } else {
+                        console.log('ℹ️ [STOP CALL] Tablet has no active product scanned (free from production). Discarding downtime record.');
                     }
-                    data.count = data.records.length;
-                    data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
-                    data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
-                    saveStopCallData(data);
                     if (typeof logTabletAction === 'function') {
-                        logTabletAction('Stop call unlocked by Leader', 'Completed', { ...recordToSave });
+                        logTabletAction(
+                            isProdActive ? 'Stop call unlocked by Leader' : 'Stop call unlocked by Leader (pre-production / discarded)',
+                            'Completed',
+                            { ...recordToSave, productionActive: isProdActive }
+                        );
                     }
 
                     stopCallPickedMachine = null;
@@ -6839,14 +6873,23 @@
                                             resolvedBy: 'Gatekeeper QR Scan'
                                         };
                                         try {
-                                            const data = getStopCallData();
-                                            data.records.push(stopRecord);
-                                            data.count = data.records.length;
-                                            data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
-                                            data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
-                                            saveStopCallData(data);
+                                            const isProdActive = typeof hasActiveProduct === 'function' ? hasActiveProduct() : true;
+                                            if (isProdActive) {
+                                                const data = getStopCallData();
+                                                data.records.push(stopRecord);
+                                                data.count = data.records.length;
+                                                data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                                                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                                                saveStopCallData(data);
+                                            } else {
+                                                console.log('ℹ️ [GATEKEEPER UNLOCK] Tablet has no active product scanned (free from production). Discarding stop call record.');
+                                            }
                                             if (typeof logTabletAction === 'function') {
-                                                logTabletAction('Stop call unlocked by Leader (via Gatekeeper)', 'Completed', stopRecord);
+                                                logTabletAction(
+                                                    isProdActive ? 'Stop call unlocked by Leader (via Gatekeeper)' : 'Stop call unlocked by Leader via Gatekeeper (pre-production / discarded)',
+                                                    'Completed',
+                                                    { ...stopRecord, productionActive: isProdActive }
+                                                );
                                             }
                                         } catch (err) {
                                             console.error('Error saving stopCallData during Gatekeeper unlock:', err);
