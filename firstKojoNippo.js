@@ -3839,7 +3839,10 @@ async function learnQRFromCurrentInputs() {
             const banner = document.getElementById('feedLearnQRBanner');
             if (banner) banner.style.display = 'none';
 
-            showToast(`🎉 「${kizai}」のQR形式を学習しました！全端末に即時共有されました。`, 'success', 3500);
+            const proceedBtn = document.getElementById('btnManualProceedPhoto');
+            if (proceedBtn) proceedBtn.textContent = '確認して写真撮影へ進む →';
+
+            showToast(`「${kizai}」のQR形式を学習しました。全端末に即時共有されました。`, 'success', 3500);
         } else {
             alert('学習の保存に失敗しました: ' + (result?.message || 'Server error'));
         }
@@ -3968,24 +3971,30 @@ function handleUSBBarcodeScanned(barcode) {
 
         const badge = document.getElementById('feedScannerLiveBadge');
         if (badge) {
-            badge.textContent = `✓ 読取: ${bichoVal} m`;
+            badge.textContent = `読取: ${bichoVal} m`;
             badge.className = 'feed-scanner-badge is-scanned';
         }
 
+        // Always switch to manual confirmation view so the user can verify
+        // the 3 lengths, date/lot, and hinban before taking the photo!
+        switchFeedModalView('manual');
+
+        const proceedBtn = document.getElementById('btnManualProceedPhoto');
+
         if (isKnownLearnedPattern) {
-            // Already learned format confirmed in MongoDB: proceed directly to camera!
-            showToast(`⚡ 学習済QR読取成功 (${bichoVal}m) → カメラを起動します`, 'success', 1800);
-            setTimeout(() => {
-                triggerNativeCameraForModal();
-            }, 350);
+            // Already learned format: Hide teaching banner, prompt user confirmation
+            const banner = document.getElementById('feedLearnQRBanner');
+            if (banner) banner.style.display = 'none';
+            if (proceedBtn) proceedBtn.textContent = '確認して写真撮影へ進む →';
+            showToast(`学習済QR読取完了 (${bichoVal}m)。内容を確認して写真撮影へ進んでください`, 'success', 2500);
         } else {
-            // UNKNOWN QR FORMAT: Always switch to manual teaching screen so user can review/edit and teach it!
-            switchFeedModalView('manual');
+            // Unlearned format: Show teaching banner so user can verify and teach it
             checkLearnQRBannerEligibility();
-            showToast(`💡 未知のQR形式です。各項目を確認・追加し、「この形式を学習」してください。`, 'info', 3500);
+            if (proceedBtn) proceedBtn.textContent = '写真撮影へ進む →';
+            showToast('未学習のQR形式です。各項目を確認し、必要に応じて学習してください。', 'info', 3000);
         }
     } else {
-        showToast(`⚡ バーコード読取: ${barcode}`, 'info', 2500);
+        showToast(`バーコード読取: ${barcode}`, 'info', 2500);
     }
 }
 
