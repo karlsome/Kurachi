@@ -62,7 +62,8 @@ const state = {
     })(),
     currentModalHinban: '',
     currentModalLotNo: '',
-    currentModalRawQR: ''
+    currentModalRawQR: '',
+    currentModalCustomSlices: {}
 };
 
 // -----------------------------------------------------
@@ -2779,6 +2780,195 @@ function splitQRIntoTokens(barcode, delimiter) {
     return str.split(/\s+/);
 }
 
+// -----------------------------------------------------
+// Comprehensive Date Normalization & Candidate Detection
+// (Supports all 18+ formats: yyyy/mm/dd, yyyy-mm-dd, yyyy.mm.dd, yyyy_mm_dd,
+//  yyyymmdd, yy/mm/dd, yy-mm-dd, yy.mm.dd, yy_mm_dd, yymmdd,
+//  yyyy/mmdd, yyyy-mmdd, yy/mmdd, yy-mmdd, yyyymm/dd, yyyymm-dd, yymm/dd, yymm-dd)
+// -----------------------------------------------------
+function normalizeDateStringToISO(str) {
+    if (!str) return '';
+    const trimmed = String(str).trim();
+    if (!trimmed) return '';
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+
+    function formatYMD(y, m, d) {
+        let yNum = parseInt(y, 10);
+        const mNum = parseInt(m, 10);
+        const dNum = parseInt(d, 10);
+        if (isNaN(mNum) || mNum < 1 || mNum > 12) return null;
+        if (isNaN(dNum) || dNum < 1 || dNum > 31) return null;
+        if (y.length === 2) {
+            yNum = yNum >= 70 ? (1900 + yNum) : (2000 + yNum);
+        } else if (yNum < 1970 || yNum > 2099) {
+            return null;
+        }
+        return `${yNum}-${String(mNum).padStart(2, '0')}-${String(dNum).padStart(2, '0')}`;
+    }
+
+    let m;
+    // 1. Two separators: YYYY/MM/DD, YY/MM/DD with /, -, ., _
+    if ((m = trimmed.match(/^(\d{4}|\d{2})[/.\-_](\d{1,2})[/.\-_](\d{1,2})$/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+
+    // 2. Japanese format: YYYY年MM月DD日
+    if ((m = trimmed.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日?$/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+
+    // 3. Single separator: year / mmdd -> 2026/0918, 2026-0918, 26/0918, 26-0918, 2026.0918, 2026_0918
+    if ((m = trimmed.match(/^(\d{4}|\d{2})[/.\-_](\d{2})(\d{2})$/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+
+    // 4. Single separator: yyyymm / dd or yymm / dd -> 202609/18, 202609-18, 2609/18, 2609-18
+    if ((m = trimmed.match(/^(\d{4})(\d{2})[/.\-_](\d{1,2})$/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+    if ((m = trimmed.match(/^(\d{2})(\d{2})[/.\-_](\d{1,2})$/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+
+    // 5. 8 digits compact: YYYYMMDD -> 20260918
+    if ((m = trimmed.match(/^(\d{4})(\d{2})(\d{2})$/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+
+    // 6. 6 digits compact: YYMMDD -> 260918
+    if ((m = trimmed.match(/^(\d{2})(\d{2})(\d{2})$/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+
+    // 7. Embedded date inside string: e.g. "14002026/09/03" or "140020260918"
+    if ((m = trimmed.match(/(20\d{2}|19\d{2})[/.\-_](\d{1,2})[/.\-_](\d{1,2})/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+    if ((m = trimmed.match(/(20\d{2}|19\d{2})[/.\-_](\d{2})(\d{2})/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+    if ((m = trimmed.match(/(20\d{2}|19\d{2})(\d{2})[/.\-_](\d{1,2})/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+    if ((m = trimmed.match(/(20\d{2}|19\d{2})(\d{2})(\d{2})/))) {
+        const res = formatYMD(m[1], m[2], m[3]);
+        if (res) return res;
+    }
+
+    return trimmed;
+}
+
+function extractDateCandidatesFromToken(tokenStr) {
+    if (!tokenStr) return [];
+    const str = String(tokenStr);
+    const candidates = [];
+
+    function formatYMD(y, m, d) {
+        let yNum = parseInt(y, 10);
+        const mNum = parseInt(m, 10);
+        const dNum = parseInt(d, 10);
+        if (isNaN(mNum) || mNum < 1 || mNum > 12) return null;
+        if (isNaN(dNum) || dNum < 1 || dNum > 31) return null;
+        if (y.length === 2) {
+            yNum = yNum >= 70 ? (1900 + yNum) : (2000 + yNum);
+        } else if (yNum < 1970 || yNum > 2099) {
+            return null;
+        }
+        return `${yNum}-${String(mNum).padStart(2, '0')}-${String(dNum).padStart(2, '0')}`;
+    }
+
+    const regexes = [
+        /(20\d{2}|19\d{2})[/.\-_](\d{1,2})[/.\-_](\d{1,2})/g,
+        /(20\d{2}|19\d{2})[/.\-_](\d{2})(\d{2})/g,
+        /(20\d{2}|19\d{2})(\d{2})[/.\-_](\d{1,2})/g,
+        /(20\d{2}|19\d{2})(\d{2})(\d{2})/g,
+        /(?:^|[^0-9])(\d{2})[/.\-_](\d{1,2})[/.\-_](\d{1,2})/g,
+        /(?:^|[^0-9])(\d{2})[/.\-_](\d{2})(\d{2})/g,
+        /(?:^|[^0-9])(\d{2})(\d{2})[/.\-_](\d{1,2})/g,
+        /(?:^|[^0-9])(\d{2})(\d{2})(\d{2})(?:$|[^0-9])/g
+    ];
+
+    const seen = new Set();
+    regexes.forEach(rgx => {
+        let match;
+        while ((match = rgx.exec(str)) !== null) {
+            let start = match.index;
+            let raw = match[0];
+            let y = match[1], m = match[2], d = match[3];
+            if (raw.length > 0 && !/[0-9]/.test(raw[0])) {
+                start += 1;
+                raw = raw.slice(1);
+            }
+            if (raw.length > 0 && !/[0-9]/.test(raw[raw.length - 1])) {
+                raw = raw.slice(0, -1);
+            }
+            const norm = formatYMD(y, m, d);
+            const key = `${start}:${raw.length}`;
+            if (norm && !seen.has(key)) {
+                seen.add(key);
+                candidates.push({
+                    rawDate: raw,
+                    normDate: norm,
+                    start: start,
+                    length: raw.length
+                });
+            }
+        }
+    });
+
+    return candidates;
+}
+
+function findSubstringSliceInTokens(tokens, targetVal) {
+    if (!tokens || !targetVal) return null;
+    const cleanTarget = String(targetVal).trim();
+    if (!cleanTarget) return null;
+
+    // 1. Direct match
+    for (let idx = 0; idx < tokens.length; idx++) {
+        const tok = tokens[idx];
+        const pos = tok.toUpperCase().indexOf(cleanTarget.toUpperCase());
+        if (pos >= 0) {
+            return {
+                tokenIndex: idx,
+                start: pos,
+                length: cleanTarget.length,
+                isDate: /^\d{4}-\d{2}-\d{2}$/.test(cleanTarget)
+            };
+        }
+    }
+
+    // 2. Date match
+    const dateNormTarget = normalizeDateStringToISO(cleanTarget);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateNormTarget)) {
+        for (let idx = 0; idx < tokens.length; idx++) {
+            const dateCands = extractDateCandidatesFromToken(tokens[idx]);
+            const found = dateCands.find(c => c.normDate === dateNormTarget);
+            if (found) {
+                return {
+                    tokenIndex: idx,
+                    start: found.start,
+                    length: found.length,
+                    isDate: true
+                };
+            }
+        }
+    }
+
+    return null;
+}
+
 function parseBarcodeWithLearnedPattern(pattern, barcode) {
     if (!pattern || !barcode) return null;
     if (pattern.hasQR === false) return null;
@@ -2812,8 +3002,13 @@ function parseBarcodeWithLearnedPattern(pattern, barcode) {
         hinban = tokens[mapping.hinbanIndex];
     }
 
-    if (mapping.lotIndex !== null && mapping.lotIndex !== undefined && tokens[mapping.lotIndex] !== undefined) {
-        lotNo = tokens[mapping.lotIndex];
+    // Support substring lotSlice (e.g. date extracted from 14002026/09/03)
+    if (mapping.lotSlice && tokens[mapping.lotSlice.tokenIndex] !== undefined) {
+        const fullTok = tokens[mapping.lotSlice.tokenIndex];
+        const sliced = fullTok.substring(mapping.lotSlice.start, mapping.lotSlice.start + mapping.lotSlice.length);
+        lotNo = normalizeDateStringToISO(sliced);
+    } else if (mapping.lotIndex !== null && mapping.lotIndex !== undefined && tokens[mapping.lotIndex] !== undefined) {
+        lotNo = normalizeDateStringToISO(tokens[mapping.lotIndex]);
     }
 
     // Auto-calculate bicho if socho and shiki are given but bicho was omitted in QR
@@ -2913,6 +3108,10 @@ function parseBarcodeHeuristics(barcode) {
         }
     }
 
+    if (lotVal) {
+        lotVal = normalizeDateStringToISO(lotVal);
+    }
+
     return {
         socho: sochoVal,
         shiki: shikiVal,
@@ -2977,7 +3176,7 @@ function openFieldPickerModal(fieldKey) {
 
     const label = fieldLabels[fieldKey] || '項目';
     if (titleEl) titleEl.textContent = `${label} を選択`;
-    if (subEl) subEl.textContent = `QRコードから検出された値（全 ${tokens.length} 件）:`;
+    if (subEl) subEl.textContent = `QRコードから検出された値（全 ${tokens.length} 件）\n※長押しまたは「分割」で一部を取り出せます`;
 
     // Determine current value to highlight
     let currentVal = '';
@@ -2992,39 +3191,127 @@ function openFieldPickerModal(fieldKey) {
     if (listEl) {
         listEl.innerHTML = '';
         tokens.forEach((tok, idx) => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'feed-token-choice-btn';
-            const isSelected = (currentVal !== '' && currentVal === tok);
-            if (isSelected) btn.classList.add('is-selected');
+            const rowDiv = document.createElement('div');
+            rowDiv.setAttribute('role', 'button');
+            rowDiv.setAttribute('tabindex', '0');
+            rowDiv.className = 'feed-token-choice-btn';
+            rowDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; user-select: none; -webkit-user-select: none; font-family: inherit;';
 
-            const contentDiv = document.createElement('div');
-            contentDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; overflow: hidden;';
+            // Check if selected
+            const isSelected = (currentVal !== '' && (currentVal === tok || (fieldKey === 'lot' && normalizeDateStringToISO(tok) === currentVal)));
+            if (isSelected) rowDiv.classList.add('is-selected');
+
+            // Left side: Index badge + Token text (with smart preview for date)
+            const leftDiv = document.createElement('div');
+            leftDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1; pointer-events: none;';
 
             const badge = document.createElement('span');
             badge.className = 'feed-token-index-badge';
             badge.textContent = `#${idx + 1}`;
 
-            const textSpan = document.createElement('span');
-            textSpan.style.cssText = 'font-size: 1.05rem; font-weight: 800; word-break: break-all; font-family: monospace;';
-            textSpan.textContent = tok;
+            const textWrap = document.createElement('div');
+            textWrap.style.cssText = 'display: flex; flex-direction: column; overflow: hidden;';
 
-            contentDiv.appendChild(badge);
-            contentDiv.appendChild(textSpan);
-            btn.appendChild(contentDiv);
+            const textSpan = document.createElement('span');
+            textSpan.style.cssText = 'font-size: 1.05rem; font-weight: 700; word-break: break-all; font-family: inherit;';
+            textSpan.textContent = tok;
+            textWrap.appendChild(textSpan);
+
+            // If this is lot selection and token contains a date, show subtle preview
+            if (fieldKey === 'lot') {
+                const norm = normalizeDateStringToISO(tok);
+                if (/^\d{4}-\d{2}-\d{2}$/.test(norm) && norm !== tok) {
+                    const normSpan = document.createElement('span');
+                    normSpan.style.cssText = 'font-size: 0.72rem; color: #047857; font-weight: 700; margin-top: 1px; font-family: inherit;';
+                    normSpan.textContent = `変換後: ${norm}`;
+                    textWrap.appendChild(normSpan);
+                }
+            }
+
+            leftDiv.appendChild(badge);
+            leftDiv.appendChild(textWrap);
+            rowDiv.appendChild(leftDiv);
+
+            // Right side: Selected badge + Split button
+            const rightDiv = document.createElement('div');
+            rightDiv.style.cssText = 'display: flex; align-items: center; gap: 8px; flex-shrink: 0;';
 
             if (isSelected) {
                 const selTag = document.createElement('span');
-                selTag.style.cssText = 'font-size: 0.8rem; background: var(--blue); color: #fff; padding: 2px 8px; border-radius: 9999px; font-weight: 800; white-space: nowrap;';
-                selTag.textContent = '✓ 選択中';
-                btn.appendChild(selTag);
+                selTag.style.cssText = 'font-size: 0.75rem; background: var(--blue); color: #fff; padding: 2px 8px; border-radius: 9999px; font-weight: 700; white-space: nowrap; font-family: inherit;';
+                selTag.textContent = '選択中';
+                rightDiv.appendChild(selTag);
             }
 
-            btn.addEventListener('click', () => {
+            // Dedicated Split Button (clean, no emoji)
+            const splitBtn = document.createElement('button');
+            splitBtn.type = 'button';
+            splitBtn.className = 'feed-token-split-btn';
+            splitBtn.title = '文字列の一部を切り取って抽出';
+            splitBtn.textContent = '分割';
+            splitBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openTokenSplitModal(tok, idx, fieldKey);
+            });
+            rightDiv.appendChild(splitBtn);
+
+            rowDiv.appendChild(rightDiv);
+
+            // Setup Long-press (hold 450ms)
+            let pressTimer = null;
+            let isLongPress = false;
+            let startX = 0, startY = 0;
+
+            const startPress = (e) => {
+                isLongPress = false;
+                if (e.touches && e.touches[0]) {
+                    startX = e.touches[0].clientX;
+                    startY = e.touches[0].clientY;
+                }
+                pressTimer = setTimeout(() => {
+                    isLongPress = true;
+                    if (navigator.vibrate) navigator.vibrate(50);
+                    rowDiv.style.transform = 'scale(0.97)';
+                    setTimeout(() => { rowDiv.style.transform = ''; }, 150);
+                    openTokenSplitModal(tok, idx, fieldKey);
+                }, 450);
+            };
+
+            const cancelPress = () => {
+                if (pressTimer) {
+                    clearTimeout(pressTimer);
+                    pressTimer = null;
+                }
+            };
+
+            const checkMove = (e) => {
+                if (e.touches && e.touches[0]) {
+                    const diffX = Math.abs(e.touches[0].clientX - startX);
+                    const diffY = Math.abs(e.touches[0].clientY - startY);
+                    if (diffX > 10 || diffY > 10) {
+                        cancelPress();
+                    }
+                }
+            };
+
+            rowDiv.addEventListener('touchstart', startPress, { passive: true });
+            rowDiv.addEventListener('touchmove', checkMove, { passive: true });
+            rowDiv.addEventListener('touchend', cancelPress, { passive: true });
+            rowDiv.addEventListener('touchcancel', cancelPress, { passive: true });
+
+            rowDiv.addEventListener('mousedown', startPress);
+            rowDiv.addEventListener('mouseup', cancelPress);
+            rowDiv.addEventListener('mouseleave', cancelPress);
+
+            rowDiv.addEventListener('click', () => {
+                if (isLongPress) {
+                    isLongPress = false;
+                    return;
+                }
                 selectFieldTokenValue(fieldKey, tok);
             });
 
-            listEl.appendChild(btn);
+            listEl.appendChild(rowDiv);
         });
     }
 
@@ -3043,11 +3330,315 @@ function closeFeedValuePickerModal() {
     currentPickerTargetField = null;
 }
 
+// -----------------------------------------------------
+// Token Substring / Split Modal Controllers
+// -----------------------------------------------------
+let currentSplitContext = {
+    originalToken: '',
+    tokenIndex: -1,
+    fieldKey: '',
+    startIndex: 0,
+    length: 1,
+    extractedValue: '',
+    convertedValue: '',
+    anchorCharIdx: null
+};
+
+function openTokenSplitModal(tokenStr, tokenIndex, fieldKey) {
+    if (!tokenStr) return;
+    const cleanToken = String(tokenStr);
+
+    currentSplitContext = {
+        originalToken: cleanToken,
+        tokenIndex: tokenIndex,
+        fieldKey: fieldKey,
+        startIndex: 0,
+        length: cleanToken.length,
+        extractedValue: cleanToken,
+        convertedValue: cleanToken,
+        anchorCharIdx: null
+    };
+
+    const modalEl = document.getElementById('qrTokenSplitModal');
+    const titleEl = document.getElementById('splitModalTitle');
+    const badgeEl = document.getElementById('splitModalTokenBadge');
+    const origEl = document.getElementById('splitModalOriginalToken');
+    const suggestionsListEl = document.getElementById('splitModalSuggestionsList');
+    const charBoxesEl = document.getElementById('splitModalCharBoxes');
+    const startInput = document.getElementById('splitStartIndex');
+    const lenInput = document.getElementById('splitLength');
+
+    const fieldLabels = {
+        hinban: '品番 / 基材コード',
+        lot: 'メーカーロット / 日付',
+        socho: '総長 (m)',
+        shiki: 'S引き長 (m)',
+        bicho: '美長 / 実長 (m)'
+    };
+    const label = fieldLabels[fieldKey] || '項目';
+    if (titleEl) titleEl.textContent = `${label} の一部を抽出`;
+    if (badgeEl) badgeEl.textContent = `#${tokenIndex + 1}`;
+    if (origEl) origEl.textContent = cleanToken;
+
+    // 1. Generate Smart Suggestions (All 18+ Date Formats & Numbers)
+    const suggestions = [];
+    const dateCands = extractDateCandidatesFromToken(cleanToken);
+
+    dateCands.forEach(cand => {
+        suggestions.push({
+            label: `日付: ${cand.normDate}`,
+            start: cand.start,
+            length: cand.length,
+            isDate: true,
+            priority: 1
+        });
+
+        // Portion before date (e.g. 1400 in 14002026/09/03)
+        if (cand.start > 0) {
+            const prefixVal = cleanToken.substring(0, cand.start);
+            const isNum = !isNaN(parseFloat(prefixVal));
+            suggestions.push({
+                label: `${isNum ? '幅/数値' : '前部'}: ${prefixVal}`,
+                start: 0,
+                length: cand.start,
+                isDate: false,
+                priority: 2
+            });
+        }
+
+        // Portion after date
+        const afterIdx = cand.start + cand.length;
+        if (afterIdx < cleanToken.length) {
+            const suffixVal = cleanToken.substring(afterIdx);
+            suggestions.push({
+                label: `後部: ${suffixVal}`,
+                start: afterIdx,
+                length: suffixVal.length,
+                isDate: false,
+                priority: 3
+            });
+        }
+    });
+
+    // Populate suggestions chips
+    if (suggestionsListEl) {
+        suggestionsListEl.innerHTML = '';
+        if (suggestions.length === 0) {
+            const emptySpan = document.createElement('span');
+            emptySpan.style.cssText = 'font-size: 0.78rem; color: var(--text-muted); font-style: italic; font-family: inherit;';
+            emptySpan.textContent = '自動検出候補はありません。下の文字一覧から範囲を選択してください。';
+            suggestionsListEl.appendChild(emptySpan);
+        } else {
+            suggestions.forEach(sug => {
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'feed-split-chip';
+                chip.textContent = sug.label;
+                chip.addEventListener('click', () => {
+                    applySplitRange(sug.start, sug.length);
+                });
+                suggestionsListEl.appendChild(chip);
+            });
+        }
+    }
+
+    // Default Selection:
+    // If fieldKey is 'lot' and a date suggestion exists, pre-select the date!
+    const dateSug = suggestions.find(s => s.isDate);
+    if (fieldKey === 'lot' && dateSug) {
+        currentSplitContext.startIndex = dateSug.start;
+        currentSplitContext.length = dateSug.length;
+    } else {
+        currentSplitContext.startIndex = 0;
+        currentSplitContext.length = cleanToken.length;
+    }
+
+    // Build Interactive Character Boxes
+    if (charBoxesEl) {
+        charBoxesEl.innerHTML = '';
+        for (let i = 0; i < cleanToken.length; i++) {
+            const charBox = document.createElement('div');
+            charBox.className = 'feed-split-char-box';
+            charBox.setAttribute('data-char-idx', String(i));
+
+            const idxSpan = document.createElement('span');
+            idxSpan.className = 'char-idx';
+            idxSpan.textContent = String(i);
+
+            const letterSpan = document.createElement('span');
+            letterSpan.className = 'char-letter';
+            letterSpan.textContent = cleanToken[i];
+
+            charBox.appendChild(idxSpan);
+            charBox.appendChild(letterSpan);
+
+            charBox.addEventListener('click', () => {
+                onSplitCharBoxClick(i);
+            });
+
+            charBoxesEl.appendChild(charBox);
+        }
+    }
+
+    if (startInput) startInput.value = currentSplitContext.startIndex;
+    if (lenInput) lenInput.value = currentSplitContext.length;
+
+    updateSplitModalVisuals();
+    updateSplitModalPreview();
+
+    if (modalEl) {
+        modalEl.classList.add('open');
+        modalEl.style.display = 'flex';
+    }
+}
+
+function closeTokenSplitModal() {
+    const modalEl = document.getElementById('qrTokenSplitModal');
+    if (modalEl) {
+        modalEl.classList.remove('open');
+        modalEl.style.display = 'none';
+    }
+}
+
+function onSplitCharBoxClick(charIdx) {
+    if (currentSplitContext.anchorCharIdx === null) {
+        // First click: anchor start
+        currentSplitContext.anchorCharIdx = charIdx;
+        currentSplitContext.startIndex = charIdx;
+        currentSplitContext.length = 1;
+    } else {
+        // Second click: range between anchor and clicked
+        const start = Math.min(currentSplitContext.anchorCharIdx, charIdx);
+        const end = Math.max(currentSplitContext.anchorCharIdx, charIdx);
+        currentSplitContext.startIndex = start;
+        currentSplitContext.length = (end - start) + 1;
+        currentSplitContext.anchorCharIdx = null;
+    }
+
+    const startInput = document.getElementById('splitStartIndex');
+    const lenInput = document.getElementById('splitLength');
+    if (startInput) startInput.value = currentSplitContext.startIndex;
+    if (lenInput) lenInput.value = currentSplitContext.length;
+
+    updateSplitModalVisuals();
+    updateSplitModalPreview();
+}
+
+function applySplitRange(start, length) {
+    const totalLen = currentSplitContext.originalToken.length;
+    const clampedStart = Math.max(0, Math.min(totalLen - 1, start));
+    const clampedLen = Math.max(1, Math.min(totalLen - clampedStart, length));
+
+    currentSplitContext.startIndex = clampedStart;
+    currentSplitContext.length = clampedLen;
+    currentSplitContext.anchorCharIdx = null;
+
+    const startInput = document.getElementById('splitStartIndex');
+    const lenInput = document.getElementById('splitLength');
+    if (startInput) startInput.value = clampedStart;
+    if (lenInput) lenInput.value = clampedLen;
+
+    updateSplitModalVisuals();
+    updateSplitModalPreview();
+}
+
+function adjustSplitRange(type, delta) {
+    if (type === 'start') {
+        const newStart = currentSplitContext.startIndex + delta;
+        applySplitRange(newStart, currentSplitContext.length);
+    } else if (type === 'len') {
+        const newLen = currentSplitContext.length + delta;
+        applySplitRange(currentSplitContext.startIndex, newLen);
+    }
+}
+
+function onSplitRangeInputChange() {
+    const startInput = document.getElementById('splitStartIndex');
+    const lenInput = document.getElementById('splitLength');
+    const s = parseInt(startInput?.value, 10) || 0;
+    const l = parseInt(lenInput?.value, 10) || 1;
+    applySplitRange(s, l);
+}
+
+function updateSplitModalVisuals() {
+    const boxes = document.querySelectorAll('#splitModalCharBoxes .feed-split-char-box');
+    const start = currentSplitContext.startIndex;
+    const end = start + currentSplitContext.length - 1;
+
+    boxes.forEach((box, i) => {
+        if (i >= start && i <= end) {
+            box.classList.add('in-range');
+        } else {
+            box.classList.remove('in-range');
+        }
+    });
+}
+
+function updateSplitModalPreview() {
+    const str = currentSplitContext.originalToken;
+    const start = currentSplitContext.startIndex;
+    const len = currentSplitContext.length;
+    const rawSlice = str.substring(start, start + len);
+    currentSplitContext.extractedValue = rawSlice;
+
+    // Automatic Date Conversion to YYYY-MM-DD
+    let converted = rawSlice;
+    let isDateConverted = false;
+
+    if (currentSplitContext.fieldKey === 'lot' || /(20\d{2}|19\d{2})[./-]?\d{2}[./-]?\d{2}/.test(rawSlice)) {
+        const norm = normalizeDateStringToISO(rawSlice);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
+            converted = norm;
+            isDateConverted = true;
+        }
+    }
+
+    currentSplitContext.convertedValue = converted;
+
+    const previewEl = document.getElementById('splitModalPreviewText');
+    const noticeEl = document.getElementById('splitModalDateNotice');
+
+    if (previewEl) {
+        previewEl.textContent = converted || '(未選択)';
+    }
+
+    if (noticeEl) {
+        if (isDateConverted) {
+            noticeEl.style.display = 'block';
+            noticeEl.textContent = `日付形式 (${converted}) に自動変換されます`;
+        } else {
+            noticeEl.style.display = 'none';
+        }
+    }
+}
+
+function confirmTokenSplitSelection() {
+    if (!currentSplitContext.fieldKey) return;
+
+    let finalVal = currentSplitContext.convertedValue || currentSplitContext.extractedValue;
+    if (currentSplitContext.fieldKey === 'lot') {
+        finalVal = normalizeDateStringToISO(finalVal);
+    }
+
+    // Save custom slice rule
+    if (!state.currentModalCustomSlices) state.currentModalCustomSlices = {};
+    state.currentModalCustomSlices[currentSplitContext.fieldKey] = {
+        tokenIndex: currentSplitContext.tokenIndex,
+        start: currentSplitContext.startIndex,
+        length: currentSplitContext.length,
+        isDate: (currentSplitContext.fieldKey === 'lot' || /^\d{4}-\d{2}-\d{2}$/.test(finalVal))
+    };
+
+    closeTokenSplitModal();
+    selectFieldTokenValue(currentSplitContext.fieldKey, finalVal);
+}
+
 function selectFieldTokenValue(fieldKey, tokenVal) {
     if (fieldKey === 'hinban') {
         state.currentModalHinban = tokenVal;
     } else if (fieldKey === 'lot') {
-        state.currentModalLotNo = tokenVal;
+        // Auto-convert to YYYY-MM-DD on the input box
+        state.currentModalLotNo = normalizeDateStringToISO(tokenVal);
     } else if (fieldKey === 'socho') {
         state.currentModalSocho = tokenVal;
         const so = parseFloat(tokenVal) || 0;
@@ -3076,7 +3667,8 @@ function selectFieldTokenValue(fieldKey, tokenVal) {
         shiki: 'S引き長',
         bicho: '美長'
     };
-    showToast(`✓ ${fieldLabels[fieldKey] || '項目'} を「${tokenVal}」に設定しました`, 'info', 1800);
+    const displayVal = (fieldKey === 'lot') ? state.currentModalLotNo : tokenVal;
+    showToast(`${fieldLabels[fieldKey] || '項目'} を「${displayVal}」に設定しました`, 'info', 1800);
 }
 
 function handleValuePickerManualEntry() {
@@ -3094,9 +3686,9 @@ function handleValuePickerManualEntry() {
         }
     } else if (target === 'lot') {
         const current = state.currentModalLotNo || '';
-        const newVal = prompt('メーカーロット / 日付を手動入力してください:', current);
+        const newVal = prompt('メーカーロット / 日付を手動入力してください (例: 2026-09-18):', current);
         if (newVal !== null) {
-            state.currentModalLotNo = newVal.trim();
+            state.currentModalLotNo = normalizeDateStringToISO(newVal.trim());
             updateManualDisplays();
             saveCurrentModalManualEdits();
             checkLearnQRBannerEligibility();
@@ -3146,6 +3738,15 @@ async function learnQRFromCurrentInputs() {
     let shikiIndex = null;
     let hinbanIndex = null;
     let lotIndex = null;
+
+    // Check custom substring slices (or auto-detect if lot is a slice of a token)
+    let lotSlice = state.currentModalCustomSlices?.lot || null;
+    if (!lotSlice && lotVal) {
+        lotSlice = findSubstringSliceInTokens(tokens, state.currentModalLotNo || lotVal);
+    }
+    if (lotSlice) {
+        lotIndex = lotSlice.tokenIndex;
+    }
 
     // Pass 1: Exact matches
     tokens.forEach((tok, idx) => {
@@ -3203,11 +3804,12 @@ async function learnQRFromCurrentInputs() {
             hasShiki: shikiIndex !== null,
             hasBicho: bichoIndex !== null,
             hasHinban: hinbanIndex !== null,
-            hasLot: lotIndex !== null
+            hasLot: (lotIndex !== null || lotSlice !== null)
         },
         mapping: {
             hinbanIndex,
             lotIndex,
+            lotSlice,
             sochoIndex,
             shikiIndex,
             bichoIndex
@@ -3359,7 +3961,7 @@ function handleUSBBarcodeScanned(barcode) {
         state.currentModalShiki = shikiVal;
         state.currentModalBicho = bichoVal;
         if (hinbanVal) state.currentModalHinban = hinbanVal;
-        if (lotVal) state.currentModalLotNo = lotVal;
+        if (lotVal) state.currentModalLotNo = normalizeDateStringToISO(lotVal);
 
         saveCurrentModalManualEdits();
         updateManualDisplays();
@@ -3602,8 +4204,9 @@ function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
     state.currentModalShiki = edit.shiki || '0';
     state.currentModalBicho = edit.bicho || (edit.meters !== undefined ? edit.meters : (item.meters || ''));
     state.currentModalHinban = edit.hinban || item.kizai || item.hinban || group?.kizai || group?.hinban || '';
-    state.currentModalLotNo = edit.lotNo || '';
+    state.currentModalLotNo = normalizeDateStringToISO(edit.lotNo || '');
     state.currentModalRawQR = edit.rawQR || '';
+    state.currentModalCustomSlices = {};
 
     // Check if this material is registered as NO QR
     const learnedPattern = findLearnedPatternForKizai(kizai);
