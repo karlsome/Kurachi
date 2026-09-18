@@ -6315,6 +6315,8 @@
                 if (typeof stopCallStopPulse === 'function') {
                     stopCallStopPulse();
                 }
+            };
+
             function hasActiveProduct() {
                 if (typeof window.isScanWorkflowComplete === 'function' && window.isScanWorkflowComplete()) return true;
                 if (typeof isScanComplete === 'function' && isScanComplete()) return true;
