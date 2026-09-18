@@ -2803,38 +2803,52 @@
             transform: scale(1.04);
         }
 
-        /* ---------------- Feed Material Modal ---------------- */
-        #materialFeedModal > div {
-            max-width: 680px;
-            width: 95%;
-            max-height: 90vh;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-            padding: 24px;
+        /* ---------------- Simple Material Feed Modal ---------------- */
+        #materialFeedModal > div,
+        .feed-modal-card-simple {
+            max-width: 440px !important;
+            width: 92% !important;
+            background: var(--bg-surface) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: var(--card-radius) !important;
+            box-shadow: var(--shadow-pop) !important;
+            font-family: inherit !important;
+            padding: 24px 20px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 16px !important;
+            max-height: 90vh !important;
+            overflow-y: auto !important;
         }
 
-        .feed-modal-header {
+        .feed-simple-header {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: space-between;
+            gap: 12px;
             border-bottom: 1px solid var(--border);
             padding-bottom: 12px;
         }
 
-        .feed-modal-title {
-            font-size: 1.2rem;
-            font-weight: 900;
+        .feed-simple-title {
+            font-size: 1.15rem;
+            font-weight: 800;
             color: var(--text-main);
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            margin: 0;
+            line-height: 1.3;
+        }
+
+        .feed-simple-sub {
+            font-size: 0.825rem;
+            font-weight: 700;
+            color: var(--text-soft);
+            margin-top: 2px;
         }
 
         .feed-modal-close-btn {
             background: transparent;
             border: none;
-            font-size: 1.4rem;
+            font-size: 1.3rem;
             color: var(--text-soft);
             cursor: pointer;
             line-height: 1;
@@ -2847,190 +2861,318 @@
             background: var(--bg-inset);
         }
 
-        .feed-lot-summary-card {
-            background: var(--bg-subtle);
-            border: 1.5px solid var(--border);
-            border-radius: var(--card-radius);
-            padding: 14px 16px;
+        .feed-view-pane {
             display: flex;
             flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Scan Mode */
+        .feed-scan-box {
+            padding: 30px 16px;
+            text-align: center;
+            background: var(--bg-subtle);
+            border: 1.5px dashed var(--border-strong);
+            border-radius: var(--card-radius);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             gap: 8px;
         }
 
-        .feed-lot-title-row {
-            display: flex;
-            align-items: baseline;
-            justify-content: space-between;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-
-        .feed-lot-hinban {
-            font-size: 1.15rem;
-            font-weight: 900;
+        .feed-qr-icon-wrap {
+            width: 72px;
+            height: 72px;
+            border-radius: 16px;
+            background: var(--brand-soft);
+            border: 2px solid var(--brand);
             color: var(--brand);
-        }
-
-        .feed-lot-pills-row {
             display: flex;
-            gap: 6px;
             align-items: center;
-            flex-wrap: wrap;
+            justify-content: center;
+            margin-bottom: 4px;
         }
 
-        /* Photo Capture Area */
-        .feed-section-block {
-            background: var(--bg-surface);
-            border: 1.5px solid var(--border);
-            border-radius: var(--card-radius);
-            padding: 14px 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .feed-section-title {
-            font-size: 0.875rem;
+        .feed-scan-prompt {
+            font-size: 1.15rem;
             font-weight: 800;
             color: var(--text-main);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+            margin: 0;
         }
 
-        .feed-photo-actions-row {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            flex-wrap: wrap;
+        .feed-scan-detail {
+            font-size: 0.825rem;
+            color: var(--text-muted);
+            margin: 0;
+            line-height: 1.4;
         }
 
-        .btn-photo-capture {
-            background: #2563EB;
-            color: #FFFFFF;
+        .feed-scanner-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: var(--r-pill);
+            font-size: 0.775rem;
             font-weight: 800;
-            border: none;
-            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
-        }
-
-        .btn-photo-capture:hover {
-            background: #1D4ED8;
-        }
-
-        .feed-photo-preview-wrap {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            padding: 10px;
-            background: var(--bg-subtle);
-            border-radius: 8px;
-            border: 1px solid var(--border);
-        }
-
-        .feed-photo-preview-img {
-            max-height: 110px;
-            max-width: 140px;
-            object-fit: contain;
-            border-radius: 6px;
-            border: 1px solid var(--border-strong);
-            background: #000000;
-            cursor: pointer;
-        }
-
-        /* Scanner Area */
-        .scanner-status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
             background: #ECFDF5;
             border: 1px solid #A7F3D0;
-            border-radius: 6px;
-            font-size: 0.8rem;
-            font-weight: 800;
             color: #065F46;
-            transition: all var(--transition-smooth);
+            margin-top: 6px;
         }
 
-        .scanner-status-indicator.scanned-active {
+        .feed-scanner-badge.is-scanned {
             background: #FEF3C7;
             border-color: #FDE68A;
             color: #92400E;
-            animation: scannerFlash 0.5s ease;
         }
 
-        @keyframes scannerFlash {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.02); }
-            100% { transform: scale(1); }
+        .scanner-wedge-hidden {
+            position: absolute;
+            opacity: 0;
+            width: 1px;
+            height: 1px;
+            pointer-events: none;
         }
 
-        .feed-inputs-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        /* Manual Input Mode */
+        .feed-manual-instruct {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-align: center;
+            margin: 0;
+        }
+
+        .feed-manual-fields-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .feed-numpad-field {
+            background: var(--bg-subtle);
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+            transition: all var(--transition-smooth);
+        }
+
+        .feed-numpad-field:hover,
+        .feed-numpad-field:active {
+            border-color: var(--brand);
+            background: var(--bg-surface);
+        }
+
+        .feed-numpad-field.is-bicho {
+            background: var(--brand-soft);
+            border-color: #A7F3D0;
+        }
+
+        .feed-numpad-field-label {
+            font-size: 0.875rem;
+            font-weight: 800;
+            color: var(--text-soft);
+        }
+
+        .feed-numpad-field.is-bicho .feed-numpad-field-label {
+            color: var(--brand);
+        }
+
+        .feed-numpad-field-val {
+            font-size: 1.25rem;
+            font-weight: 800;
+            font-family: 'Nunito Sans', monospace;
+            color: var(--text-main);
+        }
+
+        .feed-numpad-field-val.bicho-val {
+            color: var(--brand);
+            font-size: 1.35rem;
+            font-weight: 900;
+        }
+
+        .feed-calc-sign {
+            text-align: center;
+            font-size: 1.15rem;
+            font-weight: 900;
+            color: var(--text-soft);
+            line-height: 1;
+        }
+
+        /* Footer */
+        .feed-simple-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+        }
+
+        .feed-link-exclude {
+            background: none;
+            border: none;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--red);
+            cursor: pointer;
+            text-decoration: underline;
+            padding: 4px;
+        }
+
+        .btn-cancel-flat {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            color: var(--text-main);
+            padding: 9px 18px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            transition: background var(--transition-smooth);
+        }
+
+        .btn-cancel-flat:hover {
+            background: var(--bg-inset);
+        }
+
+        .btn-submit-enqueue-flat {
+            background: var(--brand);
+            border: none;
+            color: #FFFFFF;
+            padding: 10px 22px;
+            font-size: 0.95rem;
+            font-weight: 800;
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            transition: background var(--transition-smooth);
+            white-space: nowrap;
+        }
+
+        .btn-submit-enqueue-flat:hover:not(:disabled) {
+            background: var(--brand-hover);
+        }
+
+        .btn-submit-enqueue-flat:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* ---------------- Numeric Keypad Modal (from DCP Interactive) ---------------- */
+        #materialKeypadModal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100050;
+            padding: 16px;
+        }
+
+        #materialKeypadModal.open {
+            display: flex !important;
+        }
+
+        .material-keypad-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            max-width: 320px;
+            width: 100%;
+            box-shadow: var(--shadow-pop);
+            display: flex;
+            flex-direction: column;
             gap: 12px;
         }
 
-        .feed-field-wrap {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-
-        .feed-field-label {
-            font-size: 0.775rem;
-            font-weight: 800;
-            color: var(--text-muted);
-        }
-
-        .feed-field-input {
-            width: 100%;
-            min-height: 44px;
-            padding: 10px 12px;
-            font-size: 0.95rem;
-            font-weight: 700;
-            font-family: inherit;
+        .material-keypad-display {
+            background: var(--bg-subtle);
             border: 1.5px solid var(--border-strong);
-            border-radius: var(--btn-radius);
-            background: var(--bg-surface);
+            border-radius: 10px;
+            padding: 12px 16px;
+            text-align: right;
+            font-size: 1.75rem;
+            font-weight: 800;
+            font-family: 'Nunito Sans', monospace;
             color: var(--text-main);
-            outline: none;
-            transition: border-color var(--transition-smooth), box-shadow var(--transition-smooth);
+            min-height: 54px;
+            line-height: 1.2;
             box-sizing: border-box;
         }
 
-        .feed-field-input:focus {
-            border-color: var(--blue);
-            box-shadow: 0 0 0 3px rgba(46, 111, 242, 0.15);
+        .checklist-keypad-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
         }
 
-        .feed-field-input[readonly] {
+        .checklist-keypad-btn {
+            padding: 14px 0;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-subtle);
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: var(--text-main);
+            cursor: pointer;
+            text-align: center;
+            user-select: none;
+            transition: background 0.1s ease;
+        }
+
+        .checklist-keypad-btn:active {
             background: var(--bg-inset);
-            cursor: not-allowed;
         }
 
-        .btn-feed-submit {
+        /* ---------------- Line Item Flat Camera Pill & Feed Button ---------------- */
+        .flat-camera-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: var(--r-pill);
+            font-size: 0.75rem;
+            font-weight: 800;
+            white-space: nowrap;
+            user-select: none;
+        }
+
+        .flat-camera-pill.is-unshot {
+            background: #FEF2F2;
+            border: 1px solid #FCA5A5;
+            color: #EF4444;
+        }
+
+        .flat-camera-pill.is-shot {
+            background: #ECFDF5;
+            border: 1px solid #A7F3D0;
+            color: #065F46;
+        }
+
+        .btn-feed-row-flat {
             background: var(--brand);
             color: #FFFFFF;
-            font-size: 1.05rem;
-            font-weight: 900;
-            min-height: 52px;
             border: none;
-            border-radius: 10px;
-            box-shadow: 0 3px 12px rgba(31, 157, 107, 0.35);
+            padding: 6px 14px;
+            font-size: 0.85rem;
+            font-weight: 800;
+            border-radius: var(--btn-radius);
             cursor: pointer;
-            width: 100%;
-            transition: var(--transition-smooth);
+            transition: background var(--transition-smooth);
+            white-space: nowrap;
         }
 
-        .btn-feed-submit:hover:not(:disabled) {
+        .btn-feed-row-flat:hover {
             background: var(--brand-hover);
-            transform: translateY(-1px);
-        }
-
-        .btn-feed-submit:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
         }
 
         /* ---------------- Native Camera Modal ---------------- */
@@ -3469,105 +3611,103 @@
         </div>
     </div>
 
-    <!-- Material Feed & Staging Modal -->
+    <!-- Simple Material Feed Modal -->
     <div id="materialFeedModal" class="modal">
-        <div>
-            <div class="feed-modal-header">
-                <div class="feed-modal-title">
-                    <span>材料投入・キュー追加 (Feed Material & Enqueue)</span>
-                </div>
+        <div class="feed-modal-card-simple">
+            <!-- Modal Header: [基材コード - roll#1] -->
+            <div class="feed-simple-header">
+                <h3 id="feedModalHeaderTitle" class="feed-simple-title">基材コード - roll#1</h3>
                 <button type="button" class="feed-modal-close-btn" onclick="closeMaterialFeedModal()" title="閉じる">✕</button>
             </div>
 
-            <!-- Lot Summary -->
-            <div class="feed-lot-summary-card">
-                <div class="feed-lot-title-row">
-                    <span class="feed-lot-hinban" id="feedModalKizaiTitle">-</span>
-                    <span id="feedModalOrderRange" style="font-weight: 800; font-size: 0.85rem; color: var(--text-soft);">#1</span>
+            <!-- VIEW 1: Scan Mode (Default - ONLY SCAN UI) -->
+            <div id="feedScanView" class="feed-view-pane">
+                <div class="feed-scan-box">
+                    <div class="feed-qr-icon-wrap">
+                        <svg viewBox="0 0 24 24" width="44" height="44" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M7 17h.01"/><path d="M17 17h.01"/><path d="M7 7h.01"/><path d="M17 7h.01"/></svg>
+                    </div>
+                    <div class="feed-scan-prompt">QRコードをスキャンしてください</div>
+                    <div class="feed-scan-detail">材料ラベルのQRコードをスキャナーで読み取ってください</div>
+                    <div id="feedScannerLiveBadge" class="feed-scanner-badge">🟢 スキャナー待機中</div>
                 </div>
-                <div class="feed-lot-pills-row">
-                    <span class="tag-pill color-tag" id="feedModalColor">色: -</span>
-                    <span class="tag-pill" id="feedModalZuban">図番: -</span>
-                    <span class="tag-pill dest-tag" id="feedModalDest">出荷先: -</span>
-                    <span class="tag-pill roll-tag" id="feedModalRolls">1 / 1 巻き</span>
-                    <span class="tag-pill meter-tag" id="feedModalMeters">100 m</span>
+
+                <!-- Hidden USB scanner input (inputmode="none" prevents tablet on-screen keyboard) -->
+                <input type="text" id="feedRawQRInput" class="scanner-wedge-hidden" autocomplete="off" inputmode="none" tabindex="-1">
+
+                <div class="feed-simple-footer">
+                    <button type="button" class="btn-cancel-flat" onclick="closeMaterialFeedModal()">閉じる</button>
+                    <button type="button" class="btn-feed-row-flat" style="padding: 10px 22px; font-size: 0.95rem;" onclick="switchFeedModalView('manual')">手動入力</button>
+                </div>
+                <div style="text-align: center; margin-top: -6px;">
+                    <button type="button" class="feed-link-exclude" onclick="excludeCurrentModalRoll()">この巻きを除外</button>
                 </div>
             </div>
 
-            <!-- Material Label Photo Capture -->
-            <div class="feed-section-block">
-                <div class="feed-section-title">
-                    <span>原材料ラベル写真 (Material Label Photo)</span>
-                    <span id="feedPhotoStatusBadge" style="font-size: 0.75rem; font-weight: 700; color: var(--text-soft);">未撮影</span>
-                </div>
-                
-                <div class="feed-photo-actions-row" id="feedPhotoActionsRow">
-                    <button type="button" class="btn btn-photo-capture" onclick="startCameraCapture()">
-                        ラベル撮影 (Take Photo)
-                    </button>
-                    <button type="button" class="btn btn-secondary" onclick="triggerFileInputFallback()" style="font-size: 0.825rem; padding: 0 12px;">
-                        ファイル選択 (File Fallback)
-                    </button>
-                    <input type="file" id="materialPhotoFileInput" accept="image/*" capture="environment" style="display: none;" onchange="handleFileChosen(event)">
+            <!-- VIEW 2: Manual Input Mode (Shown when 手動入力 is pressed) -->
+            <div id="feedManualView" class="feed-view-pane" style="display: none;">
+                <p class="feed-manual-instruct">項目をタップして数値を入力してください</p>
+
+                <div class="feed-manual-fields-wrap">
+                    <!-- 総長 -->
+                    <div class="feed-numpad-field" onclick="openMaterialKeypad('socho')">
+                        <span class="feed-numpad-field-label">総長 (m)</span>
+                        <span class="feed-numpad-field-val" id="manualSochoDisplay">未入力</span>
+                    </div>
+
+                    <div class="feed-calc-sign">−</div>
+
+                    <!-- S引き長 -->
+                    <div class="feed-numpad-field" onclick="openMaterialKeypad('shiki')">
+                        <span class="feed-numpad-field-label">S引き長 (m)</span>
+                        <span class="feed-numpad-field-val" id="manualShikiDisplay">0</span>
+                    </div>
+
+                    <div class="feed-calc-sign">=</div>
+
+                    <!-- 美長 / 純長 -->
+                    <div class="feed-numpad-field is-bicho" onclick="openMaterialKeypad('bicho')">
+                        <span class="feed-numpad-field-label">美長 / 純長 (m)</span>
+                        <span class="feed-numpad-field-val bicho-val" id="manualBichoDisplay">0 m</span>
+                    </div>
                 </div>
 
-                <!-- Preview Thumbnail Area (Hidden until captured) -->
-                <div class="feed-photo-preview-wrap" id="feedPhotoPreviewWrap" style="display: none;">
-                    <img id="feedPhotoThumb" class="feed-photo-preview-img" src="" alt="材料ラベル" onclick="openPhotoEnlarged()">
-                    <div style="display: flex; flex-direction: column; gap: 6px; flex: 1;">
-                        <span style="font-size: 0.825rem; font-weight: 800; color: var(--brand);">ラベル写真撮影済み</span>
-                        <div style="display: flex; gap: 8px;">
-                            <button type="button" class="btn btn-secondary" onclick="startCameraCapture()" style="min-height: 32px; padding: 0 10px; font-size: 0.775rem;">再撮影</button>
-                            <button type="button" class="btn btn-secondary" onclick="removeCapturedPhoto()" style="min-height: 32px; padding: 0 10px; font-size: 0.775rem; color: var(--red);">削除</button>
-                        </div>
-                    </div>
+                <div class="feed-simple-footer">
+                    <button type="button" class="btn-cancel-flat" onclick="switchFeedModalView('scan')">← スキャンに戻る</button>
+                    <button type="button" class="btn-submit-enqueue-flat" id="btnManualProceedPhoto" onclick="proceedToCameraFromManual()">写真撮影へ進む →</button>
                 </div>
             </div>
 
-            <!-- USB QR Scanner Listener & Manual Inputs -->
-            <div class="feed-section-block">
-                <div class="feed-section-title">
-                    <span>原材料情報入力・スキャナー</span>
-                </div>
+            <!-- Hidden native camera input -->
+            <input type="file" id="modalRollCameraInput" accept="image/*" capture="environment" style="display: none;" onchange="handleModalRollCameraCapture(event)">
+        </div>
+    </div>
 
-                <div class="scanner-status-indicator" id="feedModalScannerIndicator">
-                    <span id="feedModalScannerText">USBスキャナー待機中 (バーコードまたはQRコードをスキャン)</span>
-                </div>
-
-                <div class="feed-field-wrap">
-                    <label class="feed-field-label" for="feedRawQRInput">原材料バーコード / QR (Raw Material QR) *自動入力または手動</label>
-                    <input type="text" id="feedRawQRInput" class="feed-field-input" placeholder="スキャナーで読み取るか直接入力..." autocomplete="off">
-                </div>
-
-                <div class="feed-inputs-grid">
-                    <div class="feed-field-wrap">
-                        <label class="feed-field-label" for="feedRawLengthInput">材料長 / Length (m)</label>
-                        <input type="number" id="feedRawLengthInput" class="feed-field-input" placeholder="100" step="any">
-                    </div>
-                    <div class="feed-field-wrap">
-                        <label class="feed-field-label" for="feedMfgUidInput">製造元ID / Manufacturer UID</label>
-                        <input type="text" id="feedMfgUidInput" class="feed-field-input" placeholder="例: LOT-998811">
-                    </div>
-                    <div class="feed-field-wrap">
-                        <label class="feed-field-label" for="feedLotNoInput">投入ロット番号 (Lot No.)</label>
-                        <input type="text" id="feedLotNoInput" class="feed-field-input" placeholder="260917-1">
-                    </div>
-                    <div class="feed-field-wrap">
-                        <label class="feed-field-label" for="feedWorkerDisplay">担当作業者 (Worker)</label>
-                        <input type="text" id="feedWorkerDisplay" class="feed-field-input" readonly>
-                    </div>
-                </div>
+    <!-- Numeric Keypad Modal (Copied from DCP interactive) -->
+    <div id="materialKeypadModal">
+        <div class="material-keypad-card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 id="materialKeypadTitle" style="font-size:1.05rem; font-weight:800; color: var(--text-main); margin: 0;">Numeric Input</h3>
+                <button type="button" class="feed-modal-close-btn" onclick="closeMaterialKeypad()">✕</button>
             </div>
-
-            <!-- Modal Action Footer -->
-            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
-                <button type="button" class="btn-feed-submit" id="btnFeedEnqueue" onclick="submitFeedAndEnqueue()">
-                    投入・キューに追加 (Feed & Add to Queue)
-                </button>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 0.75rem; color: var(--text-soft);">※キュー追加後、TV画面へ自動反映され直ちに次の材料を準備できます</span>
-                    <button type="button" class="btn btn-secondary" onclick="closeMaterialFeedModal()" style="min-height: 36px; padding: 0 14px; font-size: 0.8rem;">閉じる (Close)</button>
-                </div>
+            <div id="materialKeypadValue" class="material-keypad-display"></div>
+            <div class="checklist-keypad-grid">
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('7')">7</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('8')">8</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('9')">9</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('4')">4</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('5')">5</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('6')">6</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('1')">1</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('2')">2</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('3')">3</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('-')">-</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('0')">0</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('.')">.</button>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button type="button" class="checklist-keypad-btn" style="flex:1; background:#ef4444; color:#fff;" onclick="materialKeypadClear()">C</button>
+                <button type="button" class="checklist-keypad-btn" style="flex:1; background:#6b7280; color:#fff;" onclick="materialKeypadBackspace()">⌫</button>
+                <button type="button" class="checklist-keypad-btn" style="flex:2; background:var(--brand); color:#fff;" onclick="materialKeypadConfirm()">OK</button>
             </div>
         </div>
     </div>

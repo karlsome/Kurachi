@@ -1032,11 +1032,17 @@ function getItemKey(item, gIdx, rIdx) {
 }
 
 function getItemEdit(itemId, defaultItem = {}) {
-    if (!itemId) return { meters: 100, isExcluded: false, photoUrl: '', photoBase64: '', enqueued: false };
+    if (!itemId) return { meters: 100, isExcluded: false, photoUrl: '', photoBase64: '', enqueued: false, socho: '', shiki: '', bicho: '', qrScanned: '' };
     const edits = getItemEdits();
     const existing = edits[itemId] || {};
+    const defaultMeters = Number(defaultItem.meters) || 100;
+    const bichoVal = existing.bicho !== undefined && existing.bicho !== '' ? existing.bicho : (existing.meters !== undefined ? existing.meters : defaultMeters);
     return {
-        meters: existing.meters !== undefined ? existing.meters : (Number(defaultItem.meters) || 100),
+        meters: bichoVal,
+        bicho: bichoVal,
+        socho: existing.socho !== undefined ? existing.socho : '',
+        shiki: existing.shiki !== undefined ? existing.shiki : '',
+        qrScanned: existing.qrScanned || '',
         isExcluded: existing.isExcluded === true,
         photoUrl: existing.photoUrl || '',
         photoBase64: existing.photoBase64 || '',
@@ -1470,7 +1476,7 @@ function renderScheduleTableView(groups, items) {
                 <td>${statusBadge}</td>
                 <td onclick="event.stopPropagation()" style="text-align: center;">
                     <div style="display: flex; gap: 6px; justify-content: center; align-items: center;">
-                        <button type="button" class="btn-feed-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="enqueueBatchGroup(${gIdx}, event)">投入</button>
+                        <button type="button" class="btn-feed-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="openMaterialFeedModalForGroup(${gIdx}, event)">投入</button>
                         <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event)">詳細</button>
                     </div>
                 </td>
@@ -1624,9 +1630,6 @@ function renderScheduleList(items, startTimeStr) {
                                     <span class="toggle-label">${isExpanded ? '閉じる' : `内訳 (${remainingItems.length}巻)`}</span>
                                     <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
                                 </button>
-                                <button type="button" class="btn-feed-primary" onclick="enqueueBatchGroup(${gIdx}, event)" title="このロットの未投入巻きを一括投入（写真必須）">
-                                    投入
-                                </button>
                                 <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event)">
                                     詳細
                                 </button>
@@ -1639,9 +1642,8 @@ function renderScheduleList(items, startTimeStr) {
                 const itemId = getItemKey(rollItem, gIdx, rIdx);
                 const edit = getItemEdit(itemId, rollItem);
                 const isExcluded = edit.isExcluded === true;
-                const currentMeters = edit.meters !== undefined ? edit.meters : (Number(rollItem.meters) || 100);
+                const currentMeters = edit.bicho || edit.meters || (Number(rollItem.meters) || 100);
                 const hasPhoto = !!(edit.photoUrl || edit.photoBase64);
-                const photoSrc = edit.photoUrl || edit.photoBase64;
                 const actualRollIndex = rollItem.rollIndex || (rIdx + 1);
 
                 if (isExcluded) {
@@ -1658,9 +1660,6 @@ function renderScheduleList(items, startTimeStr) {
                                             <button type="button" class="btn-roll-exclude is-excluded" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きを復帰（キュー投入対象に戻す）">
                                                 復帰
                                             </button>
-                                            <button type="button" class="btn-feed-primary" disabled style="opacity: 0.4; cursor: not-allowed; padding: 5px 12px; font-size: 0.8rem;" title="除外中のため投入不可">
-                                                投入
-                                            </button>
                                             <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
                                                 詳細
                                             </button>
@@ -1670,44 +1669,27 @@ function renderScheduleList(items, startTimeStr) {
                 }
 
                 return `
-                                <div class="batch-roll-row" data-item-id="${itemId}">
+                                <div class="batch-roll-row" data-item-id="${itemId}" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${rIdx}, event)" title="タップして材料投入・QRスキャン・ラベル撮影">
                                     <div class="roll-row-left">
                                         <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
                                         <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
                                         <span class="tag-pill roll-tag" style="font-size: 0.8rem; padding: 2px 8px;">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} 巻き</span>
 
-                                        <!-- Editable Roll Meters -->
-                                        <div class="roll-meter-edit-wrap" onclick="event.stopPropagation()" title="タップして長さを変更">
-                                            <input type="number" class="roll-meter-input" value="${currentMeters}" min="1" step="1" onchange="updateRollMeters('${itemId}', this.value, ${gIdx}, ${rIdx})" aria-label="巻き長さ(m)">
-                                            <span class="roll-meter-unit">m</span>
-                                        </div>
+                                        <!-- Length Display -->
+                                        <span class="tag-pill meter-tag" style="font-size: 0.8rem; padding: 2px 8px;" title="美長 / 純長">${currentMeters ? currentMeters + ' m' : '未入力'}</span>
 
-                                        <!-- Per-Item Photo Button -->
-                                        <div class="roll-photo-container" onclick="event.stopPropagation()">
-                                            ${hasPhoto ? `
-                                                <div class="roll-photo-wrap">
-                                                    <img src="${photoSrc}" class="roll-photo-thumb" onclick="openPhotoEnlarged('${photoSrc}')" title="クリックで拡大">
-                                                    <button type="button" class="btn-roll-photo has-photo" onclick="openRollPhotoCapture('${itemId}', ${gIdx}, ${rIdx}, event)" title="ラベル写真を再撮影">
-                                                        再撮影
-                                                    </button>
-                                                </div>
-                                            ` : `
-                                                <div class="roll-photo-wrap">
-                                                    <button type="button" class="btn-roll-photo" onclick="openRollPhotoCapture('${itemId}', ${gIdx}, ${rIdx}, event)" title="材料ラベルの写真を撮影">
-                                                        <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                                                        写真撮影
-                                                    </button>
-                                                    <span class="badge-unshot">必須</span>
-                                                </div>
-                                            `}
-                                        </div>
+                                        <!-- Flat Camera Status Pill (Flat Red if unshot, Flat Green if shot) -->
+                                        <span class="flat-camera-pill ${hasPhoto ? 'is-shot' : 'is-unshot'}" title="${hasPhoto ? 'ラベル写真撮影済' : 'ラベル写真未撮影 (必須)'}">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                            ${hasPhoto ? '撮影済' : '未撮影'}
+                                        </span>
                                     </div>
 
                                     <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
-                                        <button type="button" class="btn-roll-exclude" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きを一時的に除外（キュー投入対象から外す）">
+                                        <button type="button" class="btn-roll-exclude" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きを一時的に除外">
                                             除外
                                         </button>
-                                        <button type="button" class="btn-feed-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="enqueueSingleRollItem('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きを投入キューに追加">
+                                        <button type="button" class="btn-feed-row-flat" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きのQRスキャン・撮影・投入">
                                             投入
                                         </button>
                                         <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
@@ -2689,56 +2671,336 @@ function handleUSBBarcodeScanned(barcode) {
     const feedModal = document.getElementById('materialFeedModal');
     const isFeedOpen = feedModal && (feedModal.classList.contains('open') || feedModal.style.display === 'flex');
 
-    if (isFeedOpen) {
+    if (isFeedOpen && state.currentModalRollContext) {
         const qrInput = document.getElementById('feedRawQRInput');
         if (qrInput) qrInput.value = barcode;
 
-        // Auto-extract parts if Kurachi standard comma-separated format
-        if (barcode.includes(',')) {
-            const parts = barcode.split(',').map(s => s.trim());
-            if (parts.length >= 2 && parts[1]) {
-                const mfgInput = document.getElementById('feedMfgUidInput');
-                if (mfgInput && !mfgInput.value) mfgInput.value = parts[1];
-            }
-            if (parts.length >= 3 && !isNaN(Number(parts[2]))) {
-                const lenInput = document.getElementById('feedRawLengthInput');
-                if (lenInput) lenInput.value = parts[2];
+        let sochoVal = '';
+        let shikiVal = '0';
+        let bichoVal = null;
+        let matched = false;
+
+        // Pattern 1: Labels with Japanese headers (e.g. 総長: 42.1 / S引: 0.35 / 実長/純長/美長: 41.5)
+        const sochoMatch = barcode.match(/総長\s*[:：=]?\s*([0-9.]+)/i);
+        const shikiMatch = barcode.match(/S引[長]?\s*[:：=]?\s*([0-9.]+)/i);
+        const bichoMatch = barcode.match(/(?:実長|純長|美長)\s*[:：=]?\s*([0-9.]+)/i);
+
+        if (sochoMatch) { sochoVal = sochoMatch[1]; matched = true; }
+        if (shikiMatch) { shikiVal = shikiMatch[1]; matched = true; }
+        if (bichoMatch) { bichoVal = parseFloat(bichoMatch[1]); matched = true; }
+
+        if (sochoMatch && shikiMatch && bichoVal === null) {
+            bichoVal = Math.max(0, parseFloat((parseFloat(sochoMatch[1]) - parseFloat(shikiMatch[1])).toFixed(2)));
+        }
+
+        // Pattern 2: Comma or tab separated format (e.g. "42.1,0.35,41.5")
+        if (!matched && (barcode.includes(',') || barcode.includes('\t'))) {
+            const parts = barcode.split(/,|\t/).map(s => s.trim());
+            const numbers = parts.map(p => parseFloat(p)).filter(n => !isNaN(n));
+            if (numbers.length >= 3) {
+                sochoVal = String(numbers[0]);
+                shikiVal = String(numbers[1]);
+                bichoVal = numbers[2];
+                matched = true;
+            } else if (numbers.length === 2) {
+                sochoVal = String(numbers[0]);
+                shikiVal = String(numbers[1]);
+                bichoVal = Math.max(0, parseFloat((numbers[0] - numbers[1]).toFixed(2)));
+                matched = true;
+            } else if (numbers.length === 1) {
+                bichoVal = numbers[0];
+                matched = true;
             }
         }
 
-        updateScannerModalBadge(`✓ スキャン成功: ${barcode}`, true);
-        showToast(`⚡ バーコード読取完了: ${barcode}`, 'success', 2200);
+        // Pattern 3: Standalone single number
+        if (!matched) {
+            const singleNum = parseFloat(barcode.trim());
+            if (!isNaN(singleNum) && singleNum > 0) {
+                bichoVal = singleNum;
+                matched = true;
+            }
+        }
+
+        if (bichoVal === null || isNaN(bichoVal)) {
+            bichoVal = Number(state.currentModalRollContext.item?.meters) || 100;
+        }
+
+        state.currentModalSocho = sochoVal;
+        state.currentModalShiki = shikiVal;
+        state.currentModalBicho = bichoVal;
+
+        saveCurrentModalManualEdits();
+
+        const badge = document.getElementById('feedScannerLiveBadge');
+        if (badge) {
+            badge.textContent = `✓ 読取成功: ${bichoVal} m`;
+            badge.className = 'feed-scanner-badge is-scanned';
+        }
+
+        showToast(`⚡ QR読取成功 (${bichoVal}m) → カメラを起動します`, 'success', 1800);
+
+        // Auto trigger native camera after short confirmation
+        setTimeout(() => {
+            triggerNativeCameraForModal();
+        }, 350);
     } else {
         showToast(`⚡ バーコード読取: ${barcode}`, 'info', 2500);
     }
 }
 
-function updateScannerModalBadge(text, isScanned = false) {
-    const indicator = document.getElementById('feedModalScannerIndicator');
-    const textEl = document.getElementById('feedModalScannerText');
-    if (textEl) textEl.textContent = text;
-    if (indicator) {
-        if (isScanned) {
-            indicator.classList.add('scanned-active');
-            setTimeout(() => {
-                indicator.classList.remove('scanned-active');
-                if (textEl) textEl.textContent = 'USBスキャナー待機中 (バーコードまたはQRコードをスキャン)';
-            }, 3500);
-        } else {
-            indicator.classList.remove('scanned-active');
+function setupFeedRawQRInput() {
+    const input = document.getElementById('feedRawQRInput');
+    if (!input) return;
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const val = input.value.trim();
+            if (val) {
+                handleUSBBarcodeScanned(val);
+            }
         }
+    });
+}
+
+// --- Keypad and Manual Input State ---
+let currentKeypadTarget = null; // 'socho' | 'shiki' | 'bicho'
+let currentKeypadBuffer = '';
+
+function switchFeedModalView(view) {
+    const scanView = document.getElementById('feedScanView');
+    const manualView = document.getElementById('feedManualView');
+
+    // Ensure virtual keyboard never pops up on tablet
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+    }
+
+    if (view === 'manual') {
+        if (scanView) scanView.style.display = 'none';
+        if (manualView) manualView.style.display = 'flex';
+        updateManualDisplays();
+    } else {
+        if (scanView) scanView.style.display = 'flex';
+        if (manualView) manualView.style.display = 'none';
     }
 }
 
-// --- Feed & Staging Modal Control ---
+function updateManualDisplays() {
+    const sochoEl = document.getElementById('manualSochoDisplay');
+    const shikiEl = document.getElementById('manualShikiDisplay');
+    const bichoEl = document.getElementById('manualBichoDisplay');
+
+    if (sochoEl) {
+        sochoEl.textContent = (state.currentModalSocho !== '' && state.currentModalSocho !== undefined) ? `${state.currentModalSocho} m` : '未入力';
+    }
+    if (shikiEl) {
+        shikiEl.textContent = (state.currentModalShiki !== '' && state.currentModalShiki !== undefined) ? `${state.currentModalShiki} m` : '0 m';
+    }
+    if (bichoEl) {
+        bichoEl.textContent = (state.currentModalBicho !== '' && state.currentModalBicho !== undefined) ? `${state.currentModalBicho} m` : '0 m';
+    }
+}
+
+function saveCurrentModalManualEdits() {
+    const ctx = state.currentModalRollContext;
+    if (!ctx || !ctx.itemId) return;
+
+    const bichoVal = parseFloat(state.currentModalBicho);
+    const metersVal = !isNaN(bichoVal) ? bichoVal : (parseFloat(state.currentModalSocho) || 100);
+
+    setItemEdit(ctx.itemId, {
+        socho: state.currentModalSocho,
+        shiki: state.currentModalShiki,
+        bicho: !isNaN(bichoVal) ? bichoVal : '',
+        meters: metersVal
+    });
+
+    const row = document.querySelector(`.batch-roll-row[data-item-id="${ctx.itemId}"]`);
+    if (row) {
+        const meterTag = row.querySelector('.meter-tag');
+        if (meterTag) meterTag.textContent = `${metersVal} m`;
+    }
+}
+
+// --- Numeric Keypad Handlers (Copied from DCP interactive) ---
+function openMaterialKeypad(targetField) {
+    currentKeypadTarget = targetField;
+    const titleEl = document.getElementById('materialKeypadTitle');
+    const dispEl = document.getElementById('materialKeypadValue');
+    const keypadModal = document.getElementById('materialKeypadModal');
+
+    if (targetField === 'socho') {
+        if (titleEl) titleEl.textContent = '総長 (m) を入力';
+        currentKeypadBuffer = (state.currentModalSocho !== undefined && state.currentModalSocho !== '') ? String(state.currentModalSocho) : '';
+    } else if (targetField === 'shiki') {
+        if (titleEl) titleEl.textContent = 'S引き長 (m) を入力';
+        currentKeypadBuffer = (state.currentModalShiki !== undefined && state.currentModalShiki !== '') ? String(state.currentModalShiki) : '0';
+    } else {
+        if (titleEl) titleEl.textContent = '美長 / 純長 (m) を入力';
+        currentKeypadBuffer = (state.currentModalBicho !== undefined && state.currentModalBicho !== '') ? String(state.currentModalBicho) : '';
+    }
+
+    if (dispEl) dispEl.textContent = currentKeypadBuffer || '0';
+    if (keypadModal) {
+        keypadModal.classList.add('open');
+        keypadModal.style.display = 'flex';
+    }
+}
+
+function closeMaterialKeypad() {
+    const keypadModal = document.getElementById('materialKeypadModal');
+    if (keypadModal) {
+        keypadModal.classList.remove('open');
+        keypadModal.style.display = 'none';
+    }
+    currentKeypadTarget = null;
+    currentKeypadBuffer = '';
+}
+
+function materialKeypadPress(char) {
+    const dispEl = document.getElementById('materialKeypadValue');
+    if (currentKeypadBuffer === '0' && char !== '.') {
+        currentKeypadBuffer = char;
+    } else if (char === '.' && currentKeypadBuffer.includes('.')) {
+        return;
+    } else {
+        currentKeypadBuffer += char;
+    }
+    if (dispEl) dispEl.textContent = currentKeypadBuffer || '0';
+}
+
+function materialKeypadClear() {
+    currentKeypadBuffer = '';
+    const dispEl = document.getElementById('materialKeypadValue');
+    if (dispEl) dispEl.textContent = '0';
+}
+
+function materialKeypadBackspace() {
+    currentKeypadBuffer = currentKeypadBuffer.slice(0, -1);
+    const dispEl = document.getElementById('materialKeypadValue');
+    if (dispEl) dispEl.textContent = currentKeypadBuffer || '0';
+}
+
+function materialKeypadConfirm() {
+    const val = currentKeypadBuffer;
+    if (currentKeypadTarget === 'socho') {
+        state.currentModalSocho = val;
+        const so = parseFloat(val) || 0;
+        const sh = parseFloat(state.currentModalShiki) || 0;
+        state.currentModalBicho = Math.max(0, parseFloat((so - sh).toFixed(2)));
+    } else if (currentKeypadTarget === 'shiki') {
+        state.currentModalShiki = val || '0';
+        const so = parseFloat(state.currentModalSocho) || 0;
+        const sh = parseFloat(val) || 0;
+        if (state.currentModalSocho) {
+            state.currentModalBicho = Math.max(0, parseFloat((so - sh).toFixed(2)));
+        }
+    } else if (currentKeypadTarget === 'bicho') {
+        state.currentModalBicho = val;
+    }
+
+    updateManualDisplays();
+    saveCurrentModalManualEdits();
+    closeMaterialKeypad();
+}
+
+function proceedToCameraFromManual() {
+    const bichoVal = parseFloat(state.currentModalBicho);
+    if (isNaN(bichoVal) || bichoVal <= 0) {
+        alert('美長 / 純長（実長）が未入力です。\n総長とS引き長、または美長をタップして入力してください。');
+        return;
+    }
+    saveCurrentModalManualEdits();
+    triggerNativeCameraForModal();
+}
+
+// --- Feed Modal Control (Item-by-Item, Clean Scan UI) ---
+function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
+    if (event) event.stopPropagation();
+
+    if (!state.currentGroups || !state.currentGroups[gIdx]) {
+        console.warn('Group not found for index:', gIdx);
+        return;
+    }
+    const group = state.currentGroups[gIdx];
+    if (group.type === 'setup') return;
+
+    const item = (group.items && group.items[rIdx]) || group.items[0];
+    if (!item) return;
+
+    const resolvedItemId = itemId || getItemKey(item, gIdx, rIdx);
+    state.currentModalRollContext = { itemId: resolvedItemId, gIdx, rIdx, item, group };
+    state.currentFeedItem = item;
+    state.currentFeedGroup = group;
+
+    const edit = getItemEdit(resolvedItemId, item);
+
+    const modal = document.getElementById('materialFeedModal');
+    if (!modal) return;
+
+    // 1. Set Title: 基材コード - roll#1
+    const kizai = item.kizai || group?.kizai || item.hinban || group?.hinban || '基材コード';
+    const rollIdx = item.rollIndex || (rIdx + 1);
+    const titleEl = document.getElementById('feedModalHeaderTitle');
+    if (titleEl) {
+        titleEl.textContent = `${kizai} - roll#${rollIdx}`;
+    }
+
+    // 2. Initialize length values
+    state.currentModalSocho = edit.socho || '';
+    state.currentModalShiki = edit.shiki || '0';
+    state.currentModalBicho = edit.bicho || (edit.meters !== undefined ? edit.meters : (item.meters || ''));
+
+    // 3. Reset to Scan UI (Default - ONLY SCAN UI)
+    switchFeedModalView('scan');
+
+    const badge = document.getElementById('feedScannerLiveBadge');
+    if (badge) {
+        badge.textContent = '🟢 スキャナー待機中';
+        badge.className = 'feed-scanner-badge';
+    }
+
+    const qrInput = document.getElementById('feedRawQRInput');
+    if (qrInput) {
+        qrInput.value = '';
+    }
+
+    // Explicitly blur any active element so tablet virtual keyboard never opens
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+    }
+
+    // 4. Update Exclude button text
+    const excludeBtn = document.querySelector('.feed-link-exclude');
+    if (excludeBtn) {
+        excludeBtn.textContent = edit.isExcluded ? 'この巻きを復帰' : 'この巻きを除外';
+        excludeBtn.style.color = edit.isExcluded ? 'var(--brand)' : 'var(--text-muted)';
+    }
+
+    // 5. Open modal
+    modal.classList.add('open', 'active');
+    modal.style.display = 'flex';
+}
+
 function openMaterialFeedModalForGroup(groupIndex, event) {
     if (event) event.stopPropagation();
     if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
     const group = state.currentGroups[groupIndex];
     if (group.type === 'setup') return;
 
-    const firstItem = group.items[0];
-    openMaterialFeedModal(firstItem, group);
+    let targetIdx = 0;
+    for (let i = 0; i < group.items.length; i++) {
+        const it = group.items[i];
+        const k = getItemKey(it, groupIndex, i);
+        if (!getItemEdit(k, it).enqueued) {
+            targetIdx = i;
+            break;
+        }
+    }
+    const targetItem = group.items[targetIdx];
+    const targetKey = getItemKey(targetItem, groupIndex, targetIdx);
+    openMaterialFeedModalForRollItem(targetKey, groupIndex, targetIdx, event);
 }
 
 function openMaterialFeedModalForRoll(groupIndex, rollIndex, event) {
@@ -2748,7 +3010,8 @@ function openMaterialFeedModalForRoll(groupIndex, rollIndex, event) {
     const rollItem = group.items[rollIndex];
     if (!rollItem) return;
 
-    openMaterialFeedModal(rollItem, group);
+    const itemId = getItemKey(rollItem, groupIndex, rollIndex);
+    openMaterialFeedModalForRollItem(itemId, groupIndex, rollIndex, event);
 }
 
 function openMaterialFeedModalForCurrentItem() {
@@ -2757,84 +3020,20 @@ function openMaterialFeedModalForCurrentItem() {
         return;
     }
     const targetGroup = state.currentGroups ? state.currentGroups.find(g => g.items.some(it => it.id === state.selectedItem.id)) : null;
-    openMaterialFeedModal(state.selectedItem, targetGroup);
+    const gIdx = targetGroup ? state.currentGroups.indexOf(targetGroup) : 0;
+    const rIdx = targetGroup ? targetGroup.items.findIndex(it => it.id === state.selectedItem.id) : 0;
+    const itemId = getItemKey(state.selectedItem, gIdx, rIdx);
+    openMaterialFeedModalForRollItem(itemId, gIdx, rIdx);
 }
 
 function openMaterialFeedModal(item, group) {
-    state.currentFeedItem = item;
-    state.currentFeedGroup = group;
-    state.capturedPhotoBase64 = null;
-    state.uploadedPhotoUrl = null;
-
-    const modal = document.getElementById('materialFeedModal');
-    if (!modal) return;
-
-    const hinban = item.hinban || group?.hinban || '-';
-    const kizai = item.kizai || group?.kizai || '-';
-    const color = item.color || group?.color || '-';
-    const zuban = item.zuban || group?.zuban || '-';
-    const dest = item.shippingDest || group?.shippingDest || '-';
-    const rollIdx = item.rollIndex || 1;
-    const totalRolls = item.totalRolls || group?.items?.length || 1;
-    const meters = item.meters || group?.totalMeters || 100;
-    const orderIndex = item.orderIndex || 1;
-
-    const kizaiTitleEl = document.getElementById('feedModalKizaiTitle');
-    if (kizaiTitleEl) kizaiTitleEl.textContent = kizai !== '-' ? kizai : hinban;
-    const hinbanEl = document.getElementById('feedModalHinban');
-    if (hinbanEl) hinbanEl.textContent = kizai !== '-' ? kizai : hinban;
-    const orderRangeEl = document.getElementById('feedModalOrderRange');
-    if (orderRangeEl) orderRangeEl.textContent = `#${orderIndex}`;
-    const kizaiEl = document.getElementById('feedModalKizai');
-    if (kizaiEl) kizaiEl.textContent = `基材: ${kizai}`;
-    const colorEl = document.getElementById('feedModalColor');
-    if (colorEl) colorEl.textContent = `色: ${color}`;
-    const zubanEl = document.getElementById('feedModalZuban');
-    if (zubanEl) zubanEl.textContent = `図番: ${zuban}`;
-    const destEl = document.getElementById('feedModalDest');
-    if (destEl) destEl.textContent = `出荷先: ${dest}`;
-    const rollsEl = document.getElementById('feedModalRolls');
-    if (rollsEl) rollsEl.textContent = `Roll ${rollIdx} / ${totalRolls} 巻き`;
-    const metersEl = document.getElementById('feedModalMeters');
-    if (metersEl) metersEl.textContent = `${meters} m`;
-
-    // Compute default lot number: YYMMDD-rollIndex
-    let yymmdd = '';
-    if (state.selectedDate && state.selectedDate.includes('-')) {
-        const parts = state.selectedDate.split('-');
-        yymmdd = `${parts[0].slice(-2)}${parts[1].padStart(2, '0')}${parts[2].padStart(2, '0')}`;
-    } else {
-        const now = new Date();
-        const yy = String(now.getFullYear()).slice(-2);
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const dd = String(now.getDate()).padStart(2, '0');
-        yymmdd = `${yy}${mm}${dd}`;
-    }
-    const defaultLotNo = `${yymmdd}-${rollIdx}`;
-
-    const lotNoInput = document.getElementById('feedLotNoInput');
-    if (lotNoInput) lotNoInput.value = defaultLotNo;
-
-    const lengthInput = document.getElementById('feedRawLengthInput');
-    if (lengthInput) lengthInput.value = meters;
-
-    const qrInput = document.getElementById('feedRawQRInput');
-    if (qrInput) {
-        qrInput.value = '';
-        setTimeout(() => qrInput.focus(), 160);
-    }
-
-    const mfgUidInput = document.getElementById('feedMfgUidInput');
-    if (mfgUidInput) mfgUidInput.value = '';
-
-    const workerDisplay = document.getElementById('feedWorkerDisplay');
-    if (workerDisplay) workerDisplay.value = state.workerName || '未選択';
-
-    removeCapturedPhoto();
-    updateScannerModalBadge('USBスキャナー待機中 (バーコードまたはQRコードをスキャン)', false);
-
-    modal.classList.add('open', 'active');
-    modal.style.display = 'flex';
+    if (!item) return;
+    const gIdx = state.currentGroups ? state.currentGroups.findIndex(g => g.items && g.items.some(it => it.id === item.id)) : 0;
+    const safeGIdx = gIdx >= 0 ? gIdx : 0;
+    const rIdx = group && group.items ? group.items.findIndex(it => it.id === item.id) : 0;
+    const safeRIdx = rIdx >= 0 ? rIdx : 0;
+    const itemId = getItemKey(item, safeGIdx, safeRIdx);
+    openMaterialFeedModalForRollItem(itemId, safeGIdx, safeRIdx);
 }
 
 function closeMaterialFeedModal() {
@@ -2843,196 +3042,76 @@ function closeMaterialFeedModal() {
         modal.classList.remove('open', 'active');
         modal.style.display = 'none';
     }
+    closeMaterialKeypad();
+    state.currentModalRollContext = null;
     state.currentFeedItem = null;
     state.currentFeedGroup = null;
 }
 
-// --- Native Camera Capture & Fallback ---
-async function startCameraCapture() {
+// --- Native Device Camera Capture ---
+function triggerNativeCameraForModal() {
+    const fileInput = document.getElementById('modalRollCameraInput');
+    if (fileInput) {
+        fileInput.click();
+    }
+}
+
+function handleModalRollCameraCapture(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const base64 = e.target?.result;
+        if (!base64) return;
+
+        const ctx = state.currentModalRollContext;
+        if (!ctx) return;
+
+        // Save photo base64 locally
+        setItemEdit(ctx.itemId, { photoBase64: base64, photoUrl: base64 });
+
+        showToast('📸 写真を保存しました。キューに追加しています...', 'info', 1800);
+
+        // Update camera pill on row in list
+        const row = document.querySelector(`.batch-roll-row[data-item-id="${ctx.itemId}"]`);
+        if (row) {
+            const pill = row.querySelector('.flat-camera-pill');
+            if (pill) {
+                pill.className = 'flat-camera-pill is-shot';
+                pill.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2 3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> 撮影済`;
+            }
+        }
+
+        // Immediately submit roll to queue
+        await submitModalRollToQueue();
+    };
+    reader.readAsDataURL(file);
+
+    // Clear input value so taking photo again triggers onchange
+    event.target.value = '';
+}
+
+// Fallbacks for camera modal if referenced
+function closeWebcamModal() {
     const modal = document.getElementById('nativeCameraModal');
-    const video = document.getElementById('webcamVideo');
-    if (!modal || !video) return;
-
-    modal.classList.add('open');
-
+    if (modal) modal.classList.remove('open');
     if (state.cameraStream) {
         try { state.cameraStream.getTracks().forEach(t => t.stop()); } catch (e) { }
         state.cameraStream = null;
     }
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        console.warn('getUserMedia is not supported, switching to file input fallback');
-        closeWebcamModal();
-        triggerFileInputFallback();
-        return;
-    }
-
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: 'environment',
-                width: { ideal: 1920 },
-                height: { ideal: 1080 }
-            }
-        });
-        state.cameraStream = stream;
-        video.srcObject = stream;
-        await video.play();
-    } catch (err) {
-        console.warn('Webcam stream error:', err);
-        closeWebcamModal();
-        showToast('カメラを起動できませんでした。ファイル選択へ切り替えます。', 'info', 2500);
-        triggerFileInputFallback();
-    }
-}
-
-function captureWebcamSnapshot() {
-    const video = document.getElementById('webcamVideo');
-    const canvas = document.getElementById('webcamCanvas');
-    if (!video || !canvas) return;
-
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    const base64 = canvas.toDataURL('image/jpeg', 0.85);
-    setCapturedPhoto(base64);
-    closeWebcamModal();
-    showToast('📸 写真を撮影しました', 'success', 2000);
-}
-
-function closeWebcamModal() {
-    const modal = document.getElementById('nativeCameraModal');
-    if (modal) modal.classList.remove('open');
-
-    if (state.cameraStream) {
-        try {
-            state.cameraStream.getTracks().forEach(t => t.stop());
-        } catch (e) { }
-        state.cameraStream = null;
-    }
-}
-
-function fallbackFromCameraToFile() {
-    closeWebcamModal();
-    if (state.activeRollPhotoTarget) {
-        const fileInput = document.getElementById('rollPhotoFileInput');
-        if (fileInput) fileInput.click();
-    } else {
-        triggerFileInputFallback();
-    }
-}
-
-function triggerFileInputFallback() {
-    const fileInput = document.getElementById('materialPhotoFileInput');
-    if (fileInput) fileInput.click();
 }
 
 function openRollPhotoCapture(itemId, gIdx, rIdx, event) {
     if (event) event.stopPropagation();
-    state.activeRollPhotoTarget = { itemId, gIdx, rIdx };
-    startCameraCapture();
-}
-
-function handleRollFileChosen(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const base64 = e.target?.result;
-        if (base64) {
-            setCapturedPhoto(base64);
-            showToast('ラベル写真を読み込みました', 'success', 2000);
-        }
-    };
-    reader.readAsDataURL(file);
-}
-
-function handleFileChosen(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const base64 = e.target?.result;
-        if (base64) {
-            setCapturedPhoto(base64);
-            showToast('写真を読み込みました', 'success', 2000);
-        }
-    };
-    reader.readAsDataURL(file);
-}
-
-function setCapturedPhoto(base64) {
-    state.capturedPhotoBase64 = base64;
-    state.uploadedPhotoUrl = null;
-
-    // 1. If photo was taken for a specific roll item in list
-    if (state.activeRollPhotoTarget) {
-        const { itemId, gIdx, rIdx } = state.activeRollPhotoTarget;
-        setItemEdit(itemId, { photoBase64: base64, photoUrl: base64 });
-
-        // Background upload
-        const group = state.currentGroups?.[gIdx];
-        const item = group?.items?.[rIdx];
-        const lotNoVal = `${state.selectedDate.replace(/-/g, '').slice(2)}-${item?.rollIndex || rIdx + 1}`;
-        uploadLabelPhotoToServer(base64, lotNoVal, item?.hinban || 'material').then(url => {
-            if (url) setItemEdit(itemId, { photoUrl: url });
-        }).catch(err => console.warn('Background label photo upload error:', err));
-
-        // Update thumbnail on the roll row
-        const row = document.querySelector(`.batch-roll-row[data-item-id="${itemId}"]`);
-        if (row) {
-            const photoWrap = row.querySelector('.roll-photo-container');
-            if (photoWrap) {
-                photoWrap.innerHTML = `
-                    <div class="roll-photo-wrap">
-                        <img src="${base64}" class="roll-photo-thumb" onclick="openPhotoEnlarged('${base64}')" title="クリックで拡大">
-                        <button type="button" class="btn-roll-photo has-photo" onclick="openRollPhotoCapture('${itemId}', ${gIdx}, ${rIdx}, event)">再撮影</button>
-                    </div>
-                `;
-            }
-        }
-
-        state.activeRollPhotoTarget = null;
-        return;
-    }
-
-    // 2. Feed modal fallback
-    const thumb = document.getElementById('feedPhotoThumb');
-    const wrap = document.getElementById('feedPhotoPreviewWrap');
-    const badge = document.getElementById('feedPhotoStatusBadge');
-
-    if (thumb) thumb.src = base64;
-    if (wrap) wrap.style.display = 'flex';
-    if (badge) {
-        badge.textContent = '撮影済み';
-        badge.style.color = 'var(--brand)';
-    }
-}
-
-function removeCapturedPhoto() {
-    state.capturedPhotoBase64 = null;
-    state.uploadedPhotoUrl = null;
-
-    const thumb = document.getElementById('feedPhotoThumb');
-    const wrap = document.getElementById('feedPhotoPreviewWrap');
-    const badge = document.getElementById('feedPhotoStatusBadge');
-    const fileInput = document.getElementById('materialPhotoFileInput');
-
-    if (thumb) thumb.src = '';
-    if (wrap) wrap.style.display = 'none';
-    if (badge) {
-        badge.textContent = '未撮影';
-        badge.style.color = 'var(--text-soft)';
-    }
-    if (fileInput) fileInput.value = '';
+    openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event);
+    setTimeout(() => triggerNativeCameraForModal(), 200);
 }
 
 function openPhotoEnlarged(url) {
-    const targetUrl = url || state.capturedPhotoBase64 || state.uploadedPhotoUrl;
+    const ctx = state.currentModalRollContext;
+    const edit = ctx ? getItemEdit(ctx.itemId, ctx.item) : null;
+    const targetUrl = url || edit?.photoUrl || edit?.photoBase64 || state.capturedPhotoBase64 || state.uploadedPhotoUrl;
     if (!targetUrl) return;
 
     const modal = document.getElementById('imagePreviewModal');
@@ -3052,7 +3131,7 @@ function closePhotoEnlarged() {
     }
 }
 
-// --- Upload Photo to Firebase Storage ---
+// --- Upload Photo to Server / Firebase ---
 async function uploadLabelPhotoToServer(base64, lotNo, hinban) {
     const payload = {
         base64: base64,
@@ -3081,69 +3160,80 @@ async function uploadLabelPhotoToServer(base64, lotNo, hinban) {
     return data.url;
 }
 
-// --- Submit Feed & Enqueue ---
-async function submitFeedAndEnqueue() {
+// --- Enqueue Roll from Modal ---
+async function submitModalRollToQueue() {
+    const ctx = state.currentModalRollContext;
+    if (!ctx || !ctx.item) {
+        alert('対象の巻きが選択されていません。');
+        return;
+    }
+
     if (!state.workerName) {
         alert('作業者が選択されていません。ユーザー設定タブで作業者を選択してください。');
         switchMainTab(0);
         return;
     }
 
-    const item = state.currentFeedItem;
-    if (!item) {
-        alert('対象ロットが選択されていません。');
+    const { itemId, gIdx, rIdx, item, group } = ctx;
+    const edit = getItemEdit(itemId, item);
+
+    // 1. Validate length: bicho must be > 0
+    const bichoVal = parseFloat(state.currentModalBicho || edit.bicho || edit.meters || item.meters || 100);
+    if (isNaN(bichoVal) || bichoVal <= 0) {
+        alert('材料長（美長 / 実長 / 純長）が未入力です。\nQRコードをスキャンするか、手動入力してください。');
         return;
     }
 
-    let photoUrl = state.uploadedPhotoUrl;
-    if (!state.capturedPhotoBase64 && !photoUrl) {
-        const proceed = confirm('材料ラベルの写真が撮影されていません。\n写真なしのまま投入キューに追加しますか？');
-        if (!proceed) return;
-    }
-
-    const btnSubmit = document.getElementById('btnFeedEnqueue');
-    if (btnSubmit) {
-        btnSubmit.disabled = true;
-        btnSubmit.textContent = 'キュー追加中...';
+    // 2. Validate photo
+    if (!edit.photoBase64 && !edit.photoUrl) {
+        alert('原材料ラベルの写真撮影が必須です。');
+        return;
     }
 
     try {
-        const lotNoVal = document.getElementById('feedLotNoInput')?.value?.trim() || '';
-        const rawQRVal = document.getElementById('feedRawQRInput')?.value?.trim() || '';
-        const rawLengthVal = document.getElementById('feedRawLengthInput')?.value || '';
-        const mfgUidVal = document.getElementById('feedMfgUidInput')?.value?.trim() || '';
+        let photoUrl = edit.photoUrl || '';
+        const lotNoVal = edit.lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
 
-        // Upload label photo to Firebase Storage if not uploaded yet
-        if (state.capturedPhotoBase64 && !photoUrl) {
-            photoUrl = await uploadLabelPhotoToServer(state.capturedPhotoBase64, lotNoVal, item.hinban);
-            state.uploadedPhotoUrl = photoUrl;
+        // If photo not yet uploaded to server, upload now
+        if (edit.photoBase64 && (!photoUrl || !photoUrl.startsWith('http'))) {
+            try {
+                photoUrl = await uploadLabelPhotoToServer(edit.photoBase64, lotNoVal, item.hinban);
+                setItemEdit(itemId, { photoUrl: photoUrl });
+            } catch (err) {
+                console.warn('Photo upload failed, using base64:', err);
+                photoUrl = edit.photoBase64;
+            }
         }
+
+        const rawQRVal = document.getElementById('feedRawQRInput')?.value?.trim() || edit.qrScanned || '';
+        const kizaiCode = item.kizai || group?.kizai || item.hinban || '';
+        const rollIdx = item.rollIndex || (rIdx + 1);
 
         const enqueuePayload = {
             date: state.selectedDate,
             machine: state.machineName || 'PSA2',
-            worker: state.workerName,
-            groupId: item.groupId || item.id,
+            worker: state.workerName || '作業者',
+            groupId: group?.groupId || item.groupId || item.id,
             hinban: item.hinban || '',
             hinmei: item.hinmei || '',
-            kizai: item.kizai || '',
-            color: item.color || '',
-            zuban: item.zuban || '',
+            kizai: kizaiCode,
+            color: item.color || group?.color || '',
+            zuban: item.zuban || group?.zuban || '',
             okyakuHinban: item.okyakuHinban || '',
             labelHinban: item.labelHinban || '',
-            shippingDest: item.shippingDest || '',
-            totalRolls: Number(item.totalRolls) || 1,
-            totalMeters: Number(item.totalMeters) || Number(item.meters) || 0,
-            rollMeters: Number(rawLengthVal) || Number(item.meters) || 0,
-            rollIndex: Number(item.rollIndex) || 1,
+            shippingDest: item.shippingDest || group?.shippingDest || '',
+            totalRolls: Number(item.totalRolls) || Number(group?.items?.length) || 1,
+            totalMeters: Number(group?.totalMeters) || bichoVal,
+            rollMeters: bichoVal,
+            rollIndex: rollIdx,
             lotNo: lotNoVal,
             rawMaterialQR: rawQRVal,
-            rawMaterialLength: rawLengthVal,
-            manufacturerUid: mfgUidVal,
+            rawMaterialLength: String(bichoVal),
+            manufacturerUid: '',
             photoUrl: photoUrl || ''
         };
 
-        console.log('Enqueueing material to production queue:', enqueuePayload);
+        console.log('Enqueueing single roll to queue:', enqueuePayload);
 
         const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
             method: 'POST',
@@ -3161,26 +3251,53 @@ async function submitFeedAndEnqueue() {
             throw new Error(data.error || 'キュー追加に失敗しました');
         }
 
-        // Broadcast TV displayer update
-        notifyPdfDisplayer(item, item.zuban);
+        const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+        setItemEdit(itemId, {
+            enqueued: true,
+            enqueuedAt: timeNow,
+            lotNo: lotNoVal,
+            hinban: item.hinban || '',
+            kizai: kizaiCode,
+            orderIndex: item.orderIndex || (rIdx + 1),
+            rollIndex: rollIdx,
+            bicho: bichoVal,
+            meters: bichoVal
+        });
 
-        // Close feed modal immediately so worker can continue fast-paced flow
+        notifyPdfDisplayer(item, item.zuban);
         closeMaterialFeedModal();
 
-        showToast(`材料 [${item.kizai || item.hinban}] を投入キューに追加しました`, 'success', 3500);
+        showToast(`✓ ${kizaiCode} - roll#${rollIdx} を投入キューに追加しました`, 'success', 3000);
 
-        // Refresh staging queue immediately
         await fetchProductionQueue();
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        updateHistoryBadges();
 
     } catch (err) {
-        console.error('Error enqueuing item:', err);
+        console.error('Error submitting modal roll to queue:', err);
         alert(`投入エラー: ${err.message}`);
-    } finally {
-        if (btnSubmit) {
-            btnSubmit.disabled = false;
-            btnSubmit.textContent = '投入・キューに追加 (Feed & Add to Queue)';
-        }
     }
+}
+
+// Alias for legacy calls
+const submitFeedAndEnqueue = submitModalRollToQueue;
+
+// --- Exclude Roll from Modal ---
+function excludeCurrentModalRoll() {
+    const ctx = state.currentModalRollContext;
+    if (!ctx || !ctx.itemId) return;
+
+    const { itemId, rIdx, item } = ctx;
+    const edit = getItemEdit(itemId, item);
+    const newExcluded = !edit.isExcluded;
+
+    setItemEdit(itemId, { isExcluded: newExcluded });
+    closeMaterialFeedModal();
+
+    showToast(newExcluded ? `Roll #${item.rollIndex || (rIdx + 1)} を除外しました（履歴タブで復帰可能）` : `Roll #${item.rollIndex || (rIdx + 1)} を復帰しました`, 'info', 2500);
+
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+    updateHistoryBadges();
 }
 
 // --- Visual Staging Queue Dock ---
@@ -3710,6 +3827,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize USB Barcode Scanner Listener
     setupUSBScannerListener();
+    setupFeedRawQRInput();
 
     // Restore queue collapsed state if previously saved
     if (state.isQueueCollapsed) {
