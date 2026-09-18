@@ -36617,10 +36617,10 @@ app.post('/api/production/print-log', async (req, res) => {
 // First Factory (第一工場) Label Photo Upload & Queue Management API
 // ---------------------------------------------------------------------------
 
-// 1. Firebase Storage label photo upload
-app.post('/api/firstkojo/upload-label-photo', async (req, res) => {
+// 1. Dedicated Firebase Storage label photo upload
+app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], async (req, res) => {
   try {
-    const { base64, date, machine, worker, lotNo, hinban } = req.body;
+    const { base64, date, machine, worker, lotNo, hinban, queueId, itemId } = req.body;
 
     if (!base64) {
       return res.status(400).json({ error: 'Missing base64 image data' });
@@ -36637,7 +36637,8 @@ app.post('/api/firstkojo/upload-label-photo', async (req, res) => {
     const targetLotNo = lotNo || 'nolot';
     const timestamp = Date.now();
 
-    const filePath = `firstKojo/${targetMachine}/${targetDate}_${targetWorker}_${targetLotNo}_${timestamp}_materialLabel.jpg`;
+    // Directory structure: firstKojo/${date}/${machine}/${worker}_${lotNo}_${timestamp}_materialLabel.jpg
+    const filePath = req.body.filePath || `firstKojo/${targetDate}/${targetMachine}/${targetWorker}_${targetLotNo}_${timestamp}_materialLabel.jpg`;
     const file = bucket.file(filePath);
 
     await uploadToFirebaseWithRetry(file, buffer, {
@@ -36653,7 +36654,39 @@ app.post('/api/firstkojo/upload-label-photo', async (req, res) => {
     const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
 
     console.log(`📸 Uploaded first factory label photo: ${publicUrl}`);
-    res.json({ success: true, url: publicUrl });
+
+    // If an item in firstFactoryQueue is associated, update its photoUrl in MongoDB
+    try {
+      const db = client.db('submittedDB');
+      const queueCol = db.collection('firstFactoryQueue');
+      let updateFilter = null;
+
+      if (queueId) {
+        const { ObjectId } = require('mongodb');
+        try { updateFilter = { _id: new ObjectId(queueId) }; } catch (e) { }
+      }
+      if (!updateFilter && targetLotNo && targetLotNo !== 'nolot') {
+        updateFilter = { date: targetDate, lotNo: targetLotNo };
+      }
+
+      if (updateFilter) {
+        const updateResult = await queueCol.updateOne(updateFilter, { $set: { photoUrl: publicUrl } });
+        if (updateResult.modifiedCount > 0) {
+          console.log(`🔗 Linked photoUrl to firstFactoryQueue item:`, updateFilter);
+          broadcastProductionEvent({ type: 'queue_updated', date: targetDate, photoUrl: publicUrl });
+        }
+      }
+    } catch (dbErr) {
+      console.warn('⚠️ Could not link photo to firstFactoryQueue document:', dbErr.message);
+    }
+
+    res.json({
+      success: true,
+      url: publicUrl,
+      imageUrl: publicUrl,
+      photoUrl: publicUrl,
+      filePath
+    });
   } catch (error) {
     console.error('❌ Error uploading first factory label photo:', error);
     res.status(500).json({ error: 'Failed to upload label photo', details: error.message });

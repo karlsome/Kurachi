@@ -1100,7 +1100,13 @@ function setItemEdit(itemId, patch) {
     try {
         const key = getItemStateStorageKey();
         const edits = getItemEdits();
-        edits[itemId] = { ...(edits[itemId] || {}), ...patch };
+        const safePatch = { ...patch };
+        // Never store heavy base64 images in localStorage to prevent QuotaExceededError
+        if (safePatch.photoBase64) {
+            safePatch.hasPhoto = true;
+            delete safePatch.photoBase64;
+        }
+        edits[itemId] = { ...(edits[itemId] || {}), ...safePatch };
         localStorage.setItem(key, JSON.stringify(edits));
     } catch (e) {
         console.error('Error saving item edit:', e);
@@ -1678,7 +1684,7 @@ function renderScheduleList(items, startTimeStr) {
                 const edit = getItemEdit(itemId, rollItem);
                 const isExcluded = edit.isExcluded === true;
                 const currentMeters = edit.bicho || edit.meters || (Number(rollItem.meters) || 100);
-                const hasPhoto = !!(edit.photoUrl || edit.photoBase64);
+                const hasPhoto = !!(edit.photoUrl || edit.hasPhoto || edit.photoBase64);
                 const actualRollIndex = rollItem.rollIndex || (rIdx + 1);
 
                 if (isExcluded) {
@@ -3083,6 +3089,312 @@ function closeMaterialFeedModal() {
     state.currentFeedGroup = null;
 }
 
+// -----------------------------------------------------
+// IndexedDB Local Photo Storage (Zero localStorage Quota Bloat)
+// -----------------------------------------------------
+const firstKojoPhotoDB = (() => {
+    let _db = null;
+    const DB_NAME = 'firstKojoPhotoDB';
+    const DB_VERSION = 1;
+    const STORE = 'photos';
+
+    function openDB() {
+        if (_db) return Promise.resolve(_db);
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(DB_NAME, DB_VERSION);
+            req.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(STORE)) {
+                    db.createObjectStore(STORE, { keyPath: 'itemId' });
+                }
+            };
+            req.onsuccess = (e) => {
+                _db = e.target.result;
+                resolve(_db);
+            };
+            req.onerror = (e) => reject(e.target.error);
+        });
+    }
+
+    return {
+        async savePhoto(itemId, data) {
+            const db = await openDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE, 'readwrite');
+                const store = tx.objectStore(STORE);
+                const record = {
+                    itemId,
+                    base64: data.base64,
+                    date: data.date || state.selectedDate,
+                    machine: data.machine || state.machineName || 'PSA2',
+                    worker: data.worker || state.workerName || 'worker',
+                    lotNo: data.lotNo || 'nolot',
+                    hinban: data.hinban || '',
+                    kizai: data.kizai || '',
+                    timestamp: data.timestamp || Date.now(),
+                    status: data.status || 'pending', // 'pending' | 'uploading' | 'uploaded' | 'failed'
+                    uploadAttempts: data.uploadAttempts || 0,
+                    photoUrl: data.photoUrl || null
+                };
+                store.put(record);
+                tx.oncomplete = () => resolve(record);
+                tx.onerror = (e) => reject(e.target.error);
+            });
+        },
+
+        async getPhoto(itemId) {
+            const db = await openDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE, 'readonly');
+                const req = tx.objectStore(STORE).get(itemId);
+                req.onsuccess = () => resolve(req.result || null);
+                req.onerror = (e) => reject(e.target.error);
+            });
+        },
+
+        async updatePhoto(itemId, patch) {
+            const db = await openDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE, 'readwrite');
+                const store = tx.objectStore(STORE);
+                const req = store.get(itemId);
+                req.onsuccess = () => {
+                    const record = req.result;
+                    if (record) {
+                        const updated = { ...record, ...patch };
+                        store.put(updated);
+                        resolve(updated);
+                    } else {
+                        resolve(null);
+                    }
+                };
+                tx.onerror = (e) => reject(e.target.error);
+            });
+        },
+
+        async getAllPending() {
+            const db = await openDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE, 'readonly');
+                const req = tx.objectStore(STORE).getAll();
+                req.onsuccess = () => {
+                    const all = req.result || [];
+                    resolve(all.filter(r => r.status === 'pending' || r.status === 'failed'));
+                };
+                req.onerror = (e) => reject(e.target.error);
+            });
+        },
+
+        async deletePhoto(itemId) {
+            const db = await openDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE, 'readwrite');
+                tx.objectStore(STORE).delete(itemId);
+                tx.oncomplete = () => resolve();
+                tx.onerror = (e) => reject(e.target.error);
+            });
+        }
+    };
+})();
+
+// -----------------------------------------------------
+// Blur Detection Utilities (Laplacian Variance from DCP interactive)
+// -----------------------------------------------------
+async function detectBlur(base64Image, threshold = 100) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            // Downscale to max 400x400 for speed
+            const scale = Math.min(400 / img.width, 400 / img.height, 1);
+            const w = Math.round(img.width * scale);
+            const h = Math.round(img.height * scale);
+            canvas.width = w;
+            canvas.height = h;
+            ctx.drawImage(img, 0, 0, w, h);
+
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const pixels = imgData.data;
+            const width = imgData.width;
+            const height = imgData.height;
+
+            // Convert to grayscale
+            const gray = new Uint8Array(width * height);
+            for (let i = 0; i < pixels.length; i += 4) {
+                gray[i / 4] = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
+            }
+
+            // Laplacian kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0]
+            let sum = 0;
+            let sumSq = 0;
+            let count = 0;
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const idx = y * width + x;
+                    const val =
+                        gray[idx - width] +
+                        gray[idx - 1] +
+                        (gray[idx] * -4) +
+                        gray[idx + 1] +
+                        gray[idx + width];
+
+                    sum += val;
+                    sumSq += val * val;
+                    count++;
+                }
+            }
+
+            const mean = sum / count;
+            const variance = (sumSq / count) - (mean * mean);
+            console.log(`🔍 Blur score (Laplacian Variance): ${variance.toFixed(2)} (Threshold: ${threshold})`);
+            resolve({ isBlurry: variance < threshold, score: variance });
+        };
+        img.onerror = () => resolve({ isBlurry: false, score: 999 });
+        img.src = base64Image.startsWith('data:') ? base64Image : 'data:image/jpeg;base64,' + base64Image;
+    });
+}
+
+function showBlurWarning(score, onRetake, onOk) {
+    const existing = document.getElementById('blurWarningModal');
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+
+    const modal = document.createElement('div');
+    modal.id = 'blurWarningModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:100500;display:flex;justify-content:center;align-items:center;padding:20px;';
+
+    modal.innerHTML = `
+        <div style="background:var(--bg-surface, #fff);border-radius:16px;padding:24px;max-width:360px;width:100%;text-align:center;box-shadow:var(--shadow-pop, 0 10px 40px rgba(0,0,0,0.3));font-family:inherit;">
+            <div style="font-size:3rem;margin-bottom:10px;">⚠️</div>
+            <h3 style="margin:0 0 8px;color:#b3261e;font-size:1.25rem;font-weight:800;">写真が少しぼやけています<br><span style="font-size:0.95rem;font-weight:600;color:var(--text-muted, #475569);">Photo appears blurry</span></h3>
+            <p style="margin:0 0 18px;color:var(--text-soft, #64748B);font-size:0.875rem;line-height:1.4;">
+                文字やQRコードが読みにくい可能性があります。<br>このまま使用しますか？
+            </p>
+            <div style="display:flex;gap:10px;flex-direction:column;">
+                <button id="blurRetakeBtn" type="button" style="width:100%;padding:13px;background:var(--blue, #2E6FF2);color:#fff;border:none;border-radius:10px;font-size:1rem;font-weight:800;cursor:pointer;">
+                    📸 再撮影する / Retake
+                </button>
+                <button id="blurOkBtn" type="button" style="width:100%;padding:13px;background:var(--bg-inset, #F1F5F9);color:var(--text-main, #0F172A);border:1px solid var(--border, #E2E8F0);border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer;">
+                    このまま使用する / OK (Ignore)
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#blurRetakeBtn').onclick = () => {
+        if (modal.parentNode) modal.parentNode.removeChild(modal);
+        if (onRetake) onRetake();
+    };
+
+    modal.querySelector('#blurOkBtn').onclick = () => {
+        if (modal.parentNode) modal.parentNode.removeChild(modal);
+        if (onOk) onOk();
+    };
+}
+
+// -----------------------------------------------------
+// Background Photo Upload Queue with Auto-Retry
+// -----------------------------------------------------
+const photoUploadQueue = [];
+let isProcessingPhotoQueue = false;
+
+function enqueueBackgroundPhotoUpload(itemId) {
+    if (!photoUploadQueue.includes(itemId)) {
+        photoUploadQueue.push(itemId);
+    }
+    processBackgroundPhotoQueue();
+}
+
+async function processBackgroundPhotoQueue() {
+    if (isProcessingPhotoQueue) return;
+    isProcessingPhotoQueue = true;
+
+    while (photoUploadQueue.length > 0) {
+        const itemId = photoUploadQueue.shift();
+        try {
+            await uploadSinglePhotoWithRetry(itemId);
+        } catch (err) {
+            console.warn(`⚠️ Background upload failed for ${itemId} after retries:`, err);
+        }
+    }
+
+    isProcessingPhotoQueue = false;
+}
+
+async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
+    const record = await firstKojoPhotoDB.getPhoto(itemId);
+    if (!record || !record.base64) return;
+    if (record.status === 'uploaded' && record.photoUrl) return;
+
+    await firstKojoPhotoDB.updatePhoto(itemId, { status: 'uploading' });
+
+    let attempts = record.uploadAttempts || 0;
+    let uploadedUrl = null;
+
+    for (let i = attempts; i < maxRetries; i++) {
+        try {
+            const timestamp = record.timestamp || Date.now();
+            const targetDate = record.date || state.selectedDate || new Date().toISOString().slice(0, 10);
+            const targetMachine = record.machine || state.machineName || 'PSA2';
+            const targetWorker = record.worker || state.workerName || 'worker';
+            const targetLotNo = record.lotNo || 'nolot';
+
+            // Directory structure: firstKojo/${date}/${machine}/${worker}_${lotNo}_${timestamp}_materialLabel.jpg
+            const filePath = `firstKojo/${targetDate}/${targetMachine}/${targetWorker}_${targetLotNo}_${timestamp}_materialLabel.jpg`;
+
+            const payload = {
+                base64: record.base64,
+                filePath: filePath,
+                date: targetDate,
+                machine: targetMachine,
+                worker: targetWorker,
+                lotNo: targetLotNo,
+                hinban: record.hinban || ''
+            };
+
+            const res = await fetch(`${serverURL}/api/firstkojo/upload-label-photo`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
+            const data = await res.json();
+            if (data.success && (data.url || data.imageUrl || data.photoUrl)) {
+                uploadedUrl = data.url || data.imageUrl || data.photoUrl;
+                break;
+            } else {
+                throw new Error(data.error || 'No URL returned');
+            }
+        } catch (err) {
+            attempts++;
+            await firstKojoPhotoDB.updatePhoto(itemId, { uploadAttempts: attempts });
+            console.warn(`⚠️ Upload attempt ${attempts}/${maxRetries} failed for ${itemId}:`, err.message);
+            if (i < maxRetries - 1) {
+                // Exponential backoff: 1s, 2.5s, 5s
+                const delay = Math.pow(2, i) * 1000 + Math.random() * 500;
+                await new Promise(r => setTimeout(r, delay));
+            }
+        }
+    }
+
+    if (uploadedUrl) {
+        await firstKojoPhotoDB.updatePhoto(itemId, {
+            status: 'uploaded',
+            photoUrl: uploadedUrl
+        });
+        setItemEdit(itemId, { photoUrl: uploadedUrl });
+        console.log(`✅ Background upload finished for ${itemId}: ${uploadedUrl}`);
+    } else {
+        await firstKojoPhotoDB.updatePhoto(itemId, { status: 'failed' });
+    }
+}
+
 // --- Native Device Camera Capture ---
 function triggerNativeCameraForModal() {
     const fileInput = document.getElementById('modalRollCameraInput');
@@ -3103,28 +3415,66 @@ function handleModalRollCameraCapture(event) {
         const ctx = state.currentModalRollContext;
         if (!ctx) return;
 
-        // Save photo base64 locally
-        setItemEdit(ctx.itemId, { photoBase64: base64, photoUrl: base64 });
-
-        showToast('📸 写真を保存しました。キューに追加しています...', 'info', 1800);
-
-        // Update camera pill on row in list
-        const row = document.querySelector(`.batch-roll-row[data-item-id="${ctx.itemId}"]`);
-        if (row) {
-            const pill = row.querySelector('.flat-camera-pill');
-            if (pill) {
-                pill.className = 'flat-camera-pill is-shot';
-                pill.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2 3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> 撮影済`;
-            }
+        // 1. Run blur detection
+        const blurResult = await detectBlur(base64, 100);
+        if (blurResult.isBlurry) {
+            showBlurWarning(blurResult.score,
+                () => {
+                    // User chose Retake -> re-trigger camera
+                    triggerNativeCameraForModal();
+                },
+                () => {
+                    // User chose Ignore -> proceed
+                    savePhotoAndEnqueue(ctx, base64);
+                }
+            );
+        } else {
+            savePhotoAndEnqueue(ctx, base64);
         }
-
-        // Immediately submit roll to queue
-        await submitModalRollToQueue();
     };
     reader.readAsDataURL(file);
 
     // Clear input value so taking photo again triggers onchange
     event.target.value = '';
+}
+
+async function savePhotoAndEnqueue(ctx, base64) {
+    const { itemId, rIdx, item, group } = ctx;
+    const lotNoVal = getItemEdit(itemId, item).lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
+
+    // 1. Save directly into IndexedDB (zero localStorage bloat)
+    await firstKojoPhotoDB.savePhoto(itemId, {
+        base64: base64,
+        date: state.selectedDate,
+        machine: state.machineName || 'PSA2',
+        worker: state.workerName || 'worker',
+        lotNo: lotNoVal,
+        hinban: item.hinban || group?.hinban || '',
+        kizai: item.kizai || group?.kizai || '',
+        timestamp: Date.now(),
+        status: 'pending'
+    });
+
+    // 2. Mark lightweight photo indicator in item edit (NO base64 in localStorage!)
+    setItemEdit(itemId, { hasPhoto: true });
+
+    // 3. Immediately turn the camera button/pill on the list item from red to green
+    const row = document.querySelector(`.batch-roll-row[data-item-id="${itemId}"]`);
+    if (row) {
+        const pill = row.querySelector('.flat-camera-pill');
+        if (pill) {
+            pill.className = 'flat-camera-pill is-shot';
+            pill.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2 3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> 撮影済`;
+        }
+    }
+
+    showToast('📸 写真を保存しました。バックグラウンドで同期します...', 'success', 1800);
+
+    // 4. Enqueue background upload to Firebase Storage with auto-retry
+    enqueueBackgroundPhotoUpload(itemId);
+
+    // 5. Automatically proceed to enqueue roll
+    await submitModalRollToQueue();
 }
 
 // Fallbacks for camera modal if referenced
@@ -3143,10 +3493,19 @@ function openRollPhotoCapture(itemId, gIdx, rIdx, event) {
     setTimeout(() => triggerNativeCameraForModal(), 200);
 }
 
-function openPhotoEnlarged(url) {
+async function openPhotoEnlarged(url) {
     const ctx = state.currentModalRollContext;
-    const edit = ctx ? getItemEdit(ctx.itemId, ctx.item) : null;
-    const targetUrl = url || edit?.photoUrl || edit?.photoBase64 || state.capturedPhotoBase64 || state.uploadedPhotoUrl;
+    let targetUrl = url;
+
+    if (!targetUrl && ctx?.itemId) {
+        const dbRecord = await firstKojoPhotoDB.getPhoto(ctx.itemId);
+        targetUrl = dbRecord?.base64 || dbRecord?.photoUrl;
+    }
+
+    if (!targetUrl) {
+        const edit = ctx ? getItemEdit(ctx.itemId, ctx.item) : null;
+        targetUrl = edit?.photoUrl || state.uploadedPhotoUrl;
+    }
     if (!targetUrl) return;
 
     const modal = document.getElementById('imagePreviewModal');
@@ -3164,35 +3523,6 @@ function closePhotoEnlarged() {
         modal.classList.remove('open', 'active');
         modal.style.display = 'none';
     }
-}
-
-// --- Upload Photo to Server / Firebase ---
-async function uploadLabelPhotoToServer(base64, lotNo, hinban) {
-    const payload = {
-        base64: base64,
-        date: state.selectedDate,
-        machine: state.machineName || 'PSA2',
-        worker: state.workerName || 'worker',
-        lotNo: lotNo || 'nolot',
-        hinban: hinban || ''
-    };
-
-    const res = await fetch(`${serverURL}/api/firstkojo/upload-label-photo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-
-    if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `写真アップロードエラー (${res.status})`);
-    }
-
-    const data = await res.json();
-    if (!data.success || !data.url) {
-        throw new Error(data.error || '写真URLが取得できませんでした');
-    }
-    return data.url;
 }
 
 // --- Enqueue Roll from Modal ---
@@ -3219,26 +3549,16 @@ async function submitModalRollToQueue() {
         return;
     }
 
-    // 2. Validate photo
-    if (!edit.photoBase64 && !edit.photoUrl) {
+    // 2. Validate photo presence (IndexedDB or edit state)
+    const dbPhoto = await firstKojoPhotoDB.getPhoto(itemId);
+    if (!edit.hasPhoto && !dbPhoto && !edit.photoUrl) {
         alert('原材料ラベルの写真撮影が必須です。');
         return;
     }
 
     try {
-        let photoUrl = edit.photoUrl || '';
+        let photoUrl = edit.photoUrl || dbPhoto?.photoUrl || '';
         const lotNoVal = edit.lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
-
-        // If photo not yet uploaded to server, upload now
-        if (edit.photoBase64 && (!photoUrl || !photoUrl.startsWith('http'))) {
-            try {
-                photoUrl = await uploadLabelPhotoToServer(edit.photoBase64, lotNoVal, item.hinban);
-                setItemEdit(itemId, { photoUrl: photoUrl });
-            } catch (err) {
-                console.warn('Photo upload failed, using base64:', err);
-                photoUrl = edit.photoBase64;
-            }
-        }
 
         const rawQRVal = document.getElementById('feedRawQRInput')?.value?.trim() || edit.qrScanned || '';
         const kizaiCode = item.kizai || group?.kizai || item.hinban || '';
@@ -3910,4 +4230,21 @@ document.addEventListener('DOMContentLoaded', () => {
             if (workerModal) workerModal.style.display = 'none';
         });
     }
+
+    // Resume pending background photo uploads from IndexedDB
+    firstKojoPhotoDB.getAllPending().then(pending => {
+        if (pending && pending.length > 0) {
+            console.log(`📡 Resuming ${pending.length} pending photo upload(s)...`);
+            pending.forEach(rec => enqueueBackgroundPhotoUpload(rec.itemId));
+        }
+    }).catch(err => console.warn('Could not check pending photo uploads:', err));
+});
+
+window.addEventListener('online', () => {
+    firstKojoPhotoDB.getAllPending().then(pending => {
+        if (pending && pending.length > 0) {
+            console.log(`🌐 Online: Resuming ${pending.length} pending photo upload(s)...`);
+            pending.forEach(rec => enqueueBackgroundPhotoUpload(rec.itemId));
+        }
+    }).catch(err => console.warn('Could not check pending uploads on online event:', err));
 });
