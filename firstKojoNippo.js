@@ -1202,6 +1202,8 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
             machine: state.machineName || 'PSA2',
             worker: state.workerName || '作業者',
             groupId: group?.groupId || item.groupId || item.id,
+            itemId: itemId,
+            orderIndex: item.orderIndex || (rIdx + 1),
             hinban: item.hinban || '',
             hinmei: item.hinmei || '',
             kizai: item.kizai || group?.kizai || '',
@@ -1213,12 +1215,14 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
             totalRolls: Number(item.totalRolls) || Number(group?.items?.length) || 1,
             totalMeters: Number(group?.totalMeters) || Number(edit.meters) || 0,
             rollMeters: Number(edit.meters) || Number(item.meters) || 0,
+            meters: Number(edit.meters) || Number(item.meters) || 0,
             rollIndex: Number(item.rollIndex) || (rIdx + 1),
             lotNo: lotNoVal,
-            rawMaterialQR: '',
+            rawMaterialQR: edit.qrScanned || '',
             rawMaterialLength: String(edit.meters || item.meters || ''),
             manufacturerUid: '',
-            photoUrl: photoUrl || ''
+            photoUrl: photoUrl || '',
+            status: 'queue'
         };
 
         const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
@@ -1237,10 +1241,12 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
             throw new Error(data.error || 'キュー追加に失敗しました');
         }
 
+        const mongoId = data._id || data.item?._id || '';
         const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
         setItemEdit(itemId, {
             enqueued: true,
             enqueuedAt: timeNow,
+            mongoProductionId: mongoId,
             lotNo: lotNoVal,
             hinban: item.hinban || '',
             kizai: item.kizai || group?.kizai || '',
@@ -3569,6 +3575,8 @@ async function submitModalRollToQueue() {
             machine: state.machineName || 'PSA2',
             worker: state.workerName || '作業者',
             groupId: group?.groupId || item.groupId || item.id,
+            itemId: itemId,
+            orderIndex: item.orderIndex || (rIdx + 1),
             hinban: item.hinban || '',
             hinmei: item.hinmei || '',
             kizai: kizaiCode,
@@ -3580,12 +3588,14 @@ async function submitModalRollToQueue() {
             totalRolls: Number(item.totalRolls) || Number(group?.items?.length) || 1,
             totalMeters: Number(group?.totalMeters) || bichoVal,
             rollMeters: bichoVal,
+            meters: bichoVal,
             rollIndex: rollIdx,
             lotNo: lotNoVal,
             rawMaterialQR: rawQRVal,
             rawMaterialLength: String(bichoVal),
             manufacturerUid: '',
-            photoUrl: photoUrl || ''
+            photoUrl: photoUrl || '',
+            status: 'queue'
         };
 
         console.log('Enqueueing single roll to queue:', enqueuePayload);
@@ -3606,17 +3616,21 @@ async function submitModalRollToQueue() {
             throw new Error(data.error || 'キュー追加に失敗しました');
         }
 
+        const mongoId = data._id || data.item?._id || '';
         const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
         setItemEdit(itemId, {
             enqueued: true,
             enqueuedAt: timeNow,
+            mongoProductionId: mongoId,
             lotNo: lotNoVal,
             hinban: item.hinban || '',
             kizai: kizaiCode,
             orderIndex: item.orderIndex || (rIdx + 1),
             rollIndex: rollIdx,
             bicho: bichoVal,
-            meters: bichoVal
+            meters: bichoVal,
+            rawMaterialQR: rawQRVal,
+            photoUrl: photoUrl || ''
         });
 
         notifyPdfDisplayer(item, item.zuban);

@@ -760,8 +760,12 @@ function renderHeroCard() {
                         <span>🔄</span>
                         <span>直前ラベル再印刷 (Re-print)</span>
                     </button>
-                    <button type="button" class="btn-edge skip-btn" onclick="openScrapModal()" title="キズ・シワなどの不良で1巻破棄して次へ">
+                    <button type="button" class="btn-edge cant-print-btn" onclick="handleCantPrintAdvance()" style="border-color: #F59E0B; color: #B45309; background: #FFFBEB;" title="プリンター障害等で印刷できない場合に手動で完了して次へ進めます">
                         <span>⚠️</span>
+                        <span>印刷不可・次へ (Can't Print)</span>
+                    </button>
+                    <button type="button" class="btn-edge skip-btn" onclick="openScrapModal()" title="キズ・シワなどの不良で1巻破棄して次へ">
+                        <span>🗑️</span>
                         <span>1巻破棄 / スキップ (Scrap)</span>
                     </button>
                     <button type="button" class="btn-edge finish-btn" onclick="openFinishEarlyModal()" title="材料不足などで予定巻き数より早く終了">
@@ -890,26 +894,16 @@ async function handlePrintRollLabel() {
     try {
         const printResult = await executeBrotherPrint(fields);
 
+        // Strictly check for print success - DO NOT ADVANCE if printing failed
         if (!printResult.success) {
             console.warn('Printer warning/error:', printResult.error);
-            // If connection refused (test/browser without brother client), ask if user wants to advance anyway
-            if (printResult.isConnectionRefused) {
-                const advanceAnyway = confirm(
-                    `【プリンター未検出】\n${printResult.error}\n\nBrother Web Print または プリンタークライアントが未起動です。\n\nテストまたは手動印刷として、キューの巻番号を進めますか？`
-                );
-                if (!advanceAnyway) {
-                    updatePrintProgressError(printResult.error);
-                    state.isPrinting = false;
-                    return;
-                }
-            } else {
-                updatePrintProgressError(printResult.error || 'プリンターエラー');
-                state.isPrinting = false;
-                return;
-            }
+            updatePrintProgressError(printResult.error || 'プリンターエラー (印刷未完了)');
+            state.isPrinting = false;
+            showToast('❌ 印刷に失敗しました。プリンターを確認してください。（障害時は「印刷不可・次へ」ボタンで進めます）', 'error', 6000);
+            return;
         }
 
-        // On success:
+        // On confirmed print success:
         playChime('success');
         updatePrintProgressSuccess('印刷完了！', `Roll ${curRoll} / ${totalRolls} を発行しました`);
 
@@ -926,11 +920,20 @@ async function handlePrintRollLabel() {
         };
         localStorage.setItem('firstkojo2_last_printed', JSON.stringify(state.lastPrinted));
 
-        // Call advance & print-log API
-        await Promise.allSettled([
-            advanceQueueRoll(item, curRoll, totalRolls),
-            logPrintToServer(item, curRoll, totalRolls, fields, timeStr)
-        ]);
+        // Call advance API with print log details
+        const printLogPayload = {
+            rollIndex: curRoll,
+            totalRolls: totalRolls,
+            lotNo: item.lotNo || fields.txtLotNo || '',
+            barcode: fields.txtBarcode || '',
+            worker: state.workerName || '包装作業者',
+            machine: state.machineName,
+            timestamp: now.toISOString(),
+            timeStr,
+            printSuccess: true
+        };
+
+        await advanceQueueRoll(item, curRoll, totalRolls, { printLog: printLogPayload });
 
         showToast(`✅ Roll ${curRoll}/${totalRolls} のラベルを発行しました`, 'success');
     } catch (err) {
@@ -941,22 +944,63 @@ async function handlePrintRollLabel() {
     }
 }
 
-async function advanceQueueRoll(item, curRoll, totalRolls) {
+// -----------------------------------------------------
+// Manual Advance when Printer is Broken / Unavailable
+// -----------------------------------------------------
+async function handleCantPrintAdvance() {
+    if (!state.activeItem) {
+        showToast('包装対象のロットがありません', 'warning');
+        return;
+    }
+    if (state.isPrinting) return;
+
+    const item = state.activeItem;
+    const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
+    const totalRolls = Number(item.totalRolls) || 1;
+
+    const confirmed = confirm(
+        `【印刷不可の確認】\n\nプリンター障害・用紙切れ等でラベル印刷ができませんか？\n\nRoll ${curRoll} / ${totalRolls} の印刷をスキップして「完了」にし、次の巻へ進めますか？`
+    );
+    if (!confirmed) return;
+
+    showPrintProgressModal('手動進行中...', `【${item.hinban}】Roll ${curRoll} / ${totalRolls} (印刷不可・進行)`);
+
+    try {
+        await advanceQueueRoll(item, curRoll, totalRolls, {
+            manualAdvance: true,
+            reason: '印刷不可による手動進行'
+        });
+        updatePrintProgressSuccess('完了！', `Roll ${curRoll} / ${totalRolls} を印刷不可として完了しました`);
+        showToast(`⚠️ Roll ${curRoll}/${totalRolls} を印刷不可として完了し、次へ進めました`, 'warning', 4000);
+    } catch (err) {
+        console.error('Error during manual advance:', err);
+        updatePrintProgressError(err.message || '進行エラー');
+    }
+}
+
+async function advanceQueueRoll(item, curRoll, totalRolls, options = {}) {
     const queueId = item._id || item.queueId;
     const groupId = item.groupId;
 
     try {
+        const payload = {
+            _id: queueId,
+            queueId: queueId,
+            groupId,
+            date: state.selectedDate,
+            machine: state.machineName,
+            worker: state.workerName || '包装作業者',
+            rollIndex: curRoll,
+            totalRolls,
+            manualAdvance: Boolean(options.manualAdvance),
+            reason: options.reason || '',
+            printLog: options.printLog || null
+        };
+
         const res = await fetch(`${serverURL}/api/production/queue/advance`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                date: state.selectedDate,
-                machine: state.machineName,
-                queueId,
-                groupId,
-                rollIndex: curRoll,
-                totalRolls
-            })
+            body: JSON.stringify(payload)
         });
 
         if (!res.ok) {
@@ -968,11 +1012,7 @@ async function advanceQueueRoll(item, curRoll, totalRolls) {
     } catch (e) {
         console.warn('Could not advance queue on server, updating locally:', e);
         // Local update
-        if (curRoll >= totalRolls) {
-            item.status = 'completed';
-        } else {
-            item.currentRollIndex = curRoll + 1;
-        }
+        item.status = 'completed';
         saveLocalQueue();
     }
 
