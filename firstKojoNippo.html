@@ -3133,6 +3133,87 @@
             background: var(--bg-inset);
         }
 
+        /* ---------------- QR Token / Candidate Value Picker Modal ---------------- */
+        #feedValuePickerModal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.55);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100060;
+            padding: 16px;
+            backdrop-filter: blur(2px);
+        }
+
+        #feedValuePickerModal.open {
+            display: flex !important;
+        }
+
+        .feed-token-picker-card {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            max-width: 440px;
+            width: 100%;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--shadow-pop);
+        }
+
+        .feed-token-picker-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+            max-height: 48vh;
+            padding-right: 4px;
+            margin-top: 8px;
+        }
+
+        .feed-token-choice-btn {
+            background: var(--bg-subtle);
+            border: 1.5px solid var(--border);
+            border-radius: var(--btn-radius);
+            padding: 12px 14px;
+            text-align: left;
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-main);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: var(--transition-smooth);
+            font-family: inherit;
+        }
+
+        .feed-token-choice-btn:hover,
+        .feed-token-choice-btn:active {
+            border-color: var(--blue);
+            background: var(--blue-soft);
+            color: var(--blue);
+        }
+
+        .feed-token-choice-btn.is-selected {
+            border-color: var(--blue);
+            background: var(--blue-soft);
+            color: var(--blue);
+            font-weight: 800;
+        }
+
+        .feed-token-index-badge {
+            font-size: 0.72rem;
+            background: rgba(100, 116, 139, 0.15);
+            color: var(--text-muted);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-weight: 600;
+        }
+
         /* ---------------- Line Item Flat Camera Pill & Feed Button ---------------- */
         .flat-camera-pill {
             display: inline-flex;
@@ -3645,30 +3726,58 @@
 
             <!-- VIEW 2: Manual Input Mode (Shown when 手動入力 is pressed) -->
             <div id="feedManualView" class="feed-view-pane" style="display: none;">
-                <p class="feed-manual-instruct">項目をタップして数値を入力してください</p>
+                <p class="feed-manual-instruct">項目をタップして数値を入力・確認してください</p>
 
                 <div class="feed-manual-fields-wrap">
-                    <!-- 総長 -->
-                    <div class="feed-numpad-field" onclick="openMaterialKeypad('socho')">
-                        <span class="feed-numpad-field-label">総長 (m)</span>
-                        <span class="feed-numpad-field-val" id="manualSochoDisplay">未入力</span>
+                    <!-- 3 Lengths -->
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <!-- 総長 -->
+                        <div class="feed-numpad-field" onclick="openFieldPickerModal('socho')">
+                            <span class="feed-numpad-field-label">総長 (m)</span>
+                            <span class="feed-numpad-field-val" id="manualSochoDisplay">未入力</span>
+                        </div>
+
+                        <!-- S引き長 -->
+                        <div class="feed-numpad-field" onclick="openFieldPickerModal('shiki')">
+                            <span class="feed-numpad-field-label">S引き長 (m)</span>
+                            <span class="feed-numpad-field-val" id="manualShikiDisplay">0</span>
+                        </div>
+
+                        <!-- 美長 / 純長 (実長) -->
+                        <div class="feed-numpad-field is-bicho" onclick="openFieldPickerModal('bicho')">
+                            <span class="feed-numpad-field-label">美長 / 実長 (m) ★必須</span>
+                            <span class="feed-numpad-field-val bicho-val" id="manualBichoDisplay">0 m</span>
+                        </div>
                     </div>
 
-                    <div class="feed-calc-sign">−</div>
+                    <!-- 2 Metadata Fields: 品番 & ロット番号/日付 -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px;">
+                        <div class="feed-numpad-field" style="padding: 10px 12px; flex-direction: column; align-items: flex-start; gap: 4px;" onclick="openFieldPickerModal('hinban')">
+                            <span class="feed-numpad-field-label" style="font-size: 0.75rem;">品番 / 基材コード</span>
+                            <span class="feed-numpad-field-val" id="manualHinbanDisplay" style="font-size: 0.95rem; word-break: break-all;">-</span>
+                        </div>
 
-                    <!-- S引き長 -->
-                    <div class="feed-numpad-field" onclick="openMaterialKeypad('shiki')">
-                        <span class="feed-numpad-field-label">S引き長 (m)</span>
-                        <span class="feed-numpad-field-val" id="manualShikiDisplay">0</span>
+                        <div class="feed-numpad-field" style="padding: 10px 12px; flex-direction: column; align-items: flex-start; gap: 4px;" onclick="openFieldPickerModal('lot')">
+                            <span class="feed-numpad-field-label" style="font-size: 0.75rem;">メーカーロット / 日付</span>
+                            <span class="feed-numpad-field-val" id="manualLotDisplay" style="font-size: 0.95rem; word-break: break-all;">-</span>
+                        </div>
                     </div>
+                </div>
 
-                    <div class="feed-calc-sign">=</div>
+                <!-- Learn QR Prompt Banner (Shown when an unknown QR code was scanned) -->
+                <div id="feedLearnQRBanner" style="display: none; margin: 12px 0 6px 0; background: #FEF3C7; border: 1.5px solid #FCD34D; border-radius: var(--btn-radius); padding: 12px 14px; text-align: center;">
+                    <div style="font-size: 0.88rem; color: #92400E; font-weight: 800; margin-bottom: 4px;">💡 未学習のQRコードです</div>
+                    <div style="font-size: 0.78rem; color: #78350F; margin-bottom: 8px;">各項目（3長・品番・ロット）を確認/入力し、学習ボタンを押してください</div>
+                    <div id="feedLearnQRSnippet" style="font-family: monospace; font-size: 0.72rem; color: #92400E; background: #FFFBEB; border: 1px dashed #FCD34D; border-radius: 4px; padding: 4px 8px; margin-bottom: 10px; word-break: break-all; max-height: 48px; overflow-y: auto;"></div>
+                    <button type="button" class="btn-feed-row-flat" style="background: #F59E0B; color: #FFFFFF; font-size: 0.92rem; padding: 10px 20px; border: none; font-weight: 800; width: 100%; border-radius: 6px; box-shadow: 0 2px 4px rgba(245,158,11,0.3);" onclick="learnQRFromCurrentInputs()">
+                        🎓 この形式を学習して全端末に共有
+                    </button>
+                </div>
 
-                    <!-- 美長 / 純長 -->
-                    <div class="feed-numpad-field is-bicho" onclick="openMaterialKeypad('bicho')">
-                        <span class="feed-numpad-field-label">美長 / 純長 (m)</span>
-                        <span class="feed-numpad-field-val bicho-val" id="manualBichoDisplay">0 m</span>
-                    </div>
+                <div id="feedNoQRLinkWrap" style="text-align: center; margin-top: 8px;">
+                    <button type="button" class="feed-link-exclude" style="font-size: 0.8rem; color: var(--text-soft);" onclick="markCurrentMaterialAsNoQR()">
+                        ℹ️ この基材はQRなしとして登録（次回から手動優先）
+                    </button>
                 </div>
 
                 <div class="feed-simple-footer">
@@ -3708,6 +3817,34 @@
                 <button type="button" class="checklist-keypad-btn" style="flex:1; background:#ef4444; color:#fff;" onclick="materialKeypadClear()">C</button>
                 <button type="button" class="checklist-keypad-btn" style="flex:1; background:#6b7280; color:#fff;" onclick="materialKeypadBackspace()">⌫</button>
                 <button type="button" class="checklist-keypad-btn" style="flex:2; background:var(--brand); color:#fff;" onclick="materialKeypadConfirm()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Value Selection / QR Token Picker Modal -->
+    <div id="feedValuePickerModal">
+        <div class="feed-token-picker-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <div>
+                    <h3 id="feedValuePickerTitle" style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); margin: 0;">項目を選択</h3>
+                    <div id="feedValuePickerSubtitle" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">QRコードから検出された値を選択してください</div>
+                </div>
+                <button type="button" class="feed-modal-close-btn" onclick="closeFeedValuePickerModal()">✕</button>
+            </div>
+
+            <!-- List of extracted QR token candidates -->
+            <div id="feedValuePickerTokensList" class="feed-token-picker-list">
+                <!-- Dynamically populated tokens -->
+            </div>
+
+            <!-- Bottom actions: Manual Entry & Cancel -->
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px;">
+                <button type="button" class="btn-feed-row-flat" style="background: var(--blue-soft); border: 1.5px solid var(--blue); color: var(--blue); font-weight: 800; padding: 12px; font-size: 0.95rem; border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="handleValuePickerManualEntry()">
+                    <span style="font-size: 1.1rem;">⌨️</span> QRの値にないため手動入力する
+                </button>
+                <button type="button" class="btn-cancel-flat" style="padding: 10px;" onclick="closeFeedValuePickerModal()">
+                    キャンセル
+                </button>
             </div>
         </div>
     </div>

@@ -36614,6 +36614,122 @@ app.post('/api/production/print-log', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// First Factory (第一工場) Raw Material QR Code Learning API
+// (Database: Sasaki_Coating_MasterDB, Collection: firstKojoLearnedQR)
+// ---------------------------------------------------------------------------
+
+// GET all learned QR patterns
+app.get('/api/firstkojo/learned-qr', async (req, res) => {
+  try {
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const col = db.collection('firstKojoLearnedQR');
+    const patterns = await col.find({}).sort({ updatedAt: -1 }).toArray();
+    res.json({ success: true, patterns });
+  } catch (error) {
+    console.error('❌ Error in GET /api/firstkojo/learned-qr:', error);
+    res.status(500).json({ error: 'Failed to fetch learned QR patterns', details: error.message });
+  }
+});
+
+// POST save / update learned QR pattern
+app.post('/api/firstkojo/learned-qr', async (req, res) => {
+  try {
+    const {
+      kizai,
+      kizaiPrefix,
+      supplier,
+      sampleRawQR,
+      patternType,
+      delimiter,
+      fieldsPresent,
+      mapping,
+      hasQR,
+      learnedBy
+    } = req.body;
+
+    if (!kizai && !kizaiPrefix) {
+      return res.status(400).json({ error: 'kizai or kizaiPrefix is required' });
+    }
+
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const col = db.collection('firstKojoLearnedQR');
+
+    const key = (kizai || kizaiPrefix).trim();
+    const filter = { kizai: key };
+
+    const updateDoc = {
+      $set: {
+        kizai: key,
+        kizaiPrefix: kizaiPrefix || key.slice(0, 5),
+        supplier: supplier || '',
+        sampleRawQR: sampleRawQR || '',
+        patternType: patternType || 'delimited',
+        delimiter: delimiter || ',',
+        fieldsPresent: fieldsPresent || {},
+        mapping: mapping || {},
+        hasQR: hasQR !== false,
+        learnedBy: learnedBy || '作業者',
+        updatedAt: new Date()
+      },
+      $setOnInsert: {
+        createdAt: new Date()
+      }
+    };
+
+    const result = await col.findOneAndUpdate(
+      filter,
+      updateDoc,
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    const savedPattern = result.value || result;
+    console.log(`🎓 Learned QR pattern saved for [${key}]:`, {
+      patternType,
+      delimiter,
+      hasQR: hasQR !== false,
+      mapping
+    });
+
+    // Broadcast update in realtime to all tablets
+    broadcastProductionEvent({
+      type: 'qr_patterns_updated',
+      kizai: key,
+      pattern: savedPattern,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ success: true, pattern: savedPattern });
+  } catch (error) {
+    console.error('❌ Error in POST /api/firstkojo/learned-qr:', error);
+    res.status(500).json({ error: 'Failed to save learned QR pattern', details: error.message });
+  }
+});
+
+// DELETE learned QR pattern
+app.delete('/api/firstkojo/learned-qr/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ObjectId } = require('mongodb');
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const col = db.collection('firstKojoLearnedQR');
+
+    const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { kizai: id };
+    await col.deleteOne(query);
+
+    broadcastProductionEvent({
+      type: 'qr_patterns_updated',
+      deletedId: id,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in DELETE /api/firstkojo/learned-qr:', error);
+    res.status(500).json({ error: 'Failed to delete pattern', details: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // First Factory (第一工場) Label Photo Upload & Queue Management API
 // ---------------------------------------------------------------------------
 
@@ -36771,7 +36887,10 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       rawMaterialLength,
       manufacturerUid,
       photoUrl,
-      status
+      status,
+      socho,
+      shiki,
+      bicho
     } = req.body;
 
     if (!date) {
@@ -36803,8 +36922,11 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       status: { $in: ['active', 'in-progress'] }
     });
 
-    // If an item is already in-progress, this roll is 'queue'. If none in-progress, this becomes 'in-progress'
-    const finalStatus = status || (activeItem ? 'queue' : 'in-progress');
+    // If an item is already in-progress on this machine, this roll is 'queue'.
+    // If NO roll is currently in-progress (e.g. shift start or previous lot finished), this roll directly becomes 'in-progress'!
+    const finalStatus = (status && status !== 'queue' && status !== 'queued')
+      ? status
+      : (activeItem ? 'queue' : 'in-progress');
     const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
 
     const newItem = {
@@ -36828,6 +36950,9 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       totalMeters: Number(totalMeters) || 0,
       rollMeters: Number(rollMeters) || Number(meters) || 0,
       meters: Number(rollMeters) || Number(meters) || 0,
+      socho: socho || '',
+      shiki: shiki || '0',
+      bicho: bicho !== undefined && bicho !== null ? Number(bicho) : (Number(rollMeters) || Number(meters) || 0),
       rollIndex: Number(rollIndex) || 1,
       currentRollIndex: Number(rollIndex) || 1,
       lotNo: lotNo || '',

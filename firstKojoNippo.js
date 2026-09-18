@@ -50,7 +50,19 @@ const state = {
     currentFeedGroup: null,
     capturedPhotoBase64: null,
     uploadedPhotoUrl: null,
-    cameraStream: null
+    cameraStream: null,
+
+    // Learned QR patterns cached locally (zero scan latency)
+    learnedQRPatterns: (() => {
+        try {
+            return JSON.parse(localStorage.getItem('firstkojo_learned_qr_patterns') || '[]');
+        } catch (e) {
+            return [];
+        }
+    })(),
+    currentModalHinban: '',
+    currentModalLotNo: '',
+    currentModalRawQR: ''
 };
 
 // -----------------------------------------------------
@@ -1221,8 +1233,7 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
             rawMaterialQR: edit.qrScanned || '',
             rawMaterialLength: String(edit.meters || item.meters || ''),
             manufacturerUid: '',
-            photoUrl: photoUrl || '',
-            status: 'queue'
+            photoUrl: photoUrl || ''
         };
 
         const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
@@ -1242,11 +1253,13 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
         }
 
         const mongoId = data._id || data.item?._id || '';
+        const assignedStatus = data.item?.status || 'in-progress';
         const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
         setItemEdit(itemId, {
             enqueued: true,
             enqueuedAt: timeNow,
             mongoProductionId: mongoId,
+            status: assignedStatus,
             lotNo: lotNoVal,
             hinban: item.hinban || '',
             kizai: item.kizai || group?.kizai || '',
@@ -2698,6 +2711,595 @@ function setupUSBScannerListener() {
     }, true);
 }
 
+// =====================================================
+// =====================================================
+// Cloud-Synchronized QR Code Learning System
+// (Database: Sasaki_Coating_MasterDB, Collection: firstKojoLearnedQR)
+// =====================================================
+
+async function fetchLearnedQRPatterns() {
+    try {
+        const res = await fetch(`${serverURL}/api/firstkojo/learned-qr`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data && data.success && Array.isArray(data.patterns)) {
+            state.learnedQRPatterns = data.patterns;
+            localStorage.setItem('firstkojo_learned_qr_patterns', JSON.stringify(data.patterns));
+            console.log(`[QR Learning] Synced ${data.patterns.length} learned QR patterns from MongoDB.`);
+        }
+    } catch (err) {
+        console.warn('[QR Learning] Failed to fetch patterns from MongoDB, relying on local storage cache:', err);
+    }
+}
+
+function findLearnedPatternForKizai(kizai, rawBarcode) {
+    if (!Array.isArray(state.learnedQRPatterns) || state.learnedQRPatterns.length === 0) return null;
+    const cleanKizai = kizai ? String(kizai).trim().toUpperCase() : '';
+    const cleanBarcode = rawBarcode ? String(rawBarcode).trim().toUpperCase() : '';
+
+    if (cleanKizai) {
+        // 1. Exact kizai match
+        let match = state.learnedQRPatterns.find(p => p.kizai && String(p.kizai).trim().toUpperCase() === cleanKizai);
+        if (match) return match;
+
+        // 2. Contains match
+        match = state.learnedQRPatterns.find(p => p.kizai && (cleanKizai.includes(String(p.kizai).trim().toUpperCase()) || String(p.kizai).trim().toUpperCase().includes(cleanKizai)));
+        if (match) return match;
+
+        // 3. Prefix match
+        match = state.learnedQRPatterns.find(p => p.kizaiPrefix && cleanKizai.startsWith(String(p.kizaiPrefix).trim().toUpperCase()));
+        if (match) return match;
+    }
+
+    if (cleanBarcode) {
+        // 4. Barcode contains learned kizai or prefix
+        let match = state.learnedQRPatterns.find(p => p.kizai && cleanBarcode.includes(String(p.kizai).trim().toUpperCase()));
+        if (match) return match;
+        match = state.learnedQRPatterns.find(p => p.kizaiPrefix && p.kizaiPrefix.length >= 3 && cleanBarcode.includes(String(p.kizaiPrefix).trim().toUpperCase()));
+        if (match) return match;
+    }
+
+    return null;
+}
+
+function splitQRIntoTokens(barcode, delimiter) {
+    if (!barcode) return [];
+    const str = barcode.trim();
+    if (delimiter === 'whitespace' || delimiter === ' ' || !delimiter) {
+        if (str.includes(',') && !/\s{2,}/.test(str)) return str.split(',').map(s => s.trim());
+        if (str.includes('\t')) return str.split('\t').map(s => s.trim());
+        return str.split(/\s+/);
+    }
+    if (delimiter === ',' && !str.includes(',') && str.includes('\t')) {
+        return str.split('\t').map(s => s.trim());
+    }
+    if (str.includes(delimiter)) {
+        return str.split(delimiter).map(s => s.trim());
+    }
+    return str.split(/\s+/);
+}
+
+function parseBarcodeWithLearnedPattern(pattern, barcode) {
+    if (!pattern || !barcode) return null;
+    if (pattern.hasQR === false) return null;
+
+    const tokens = splitQRIntoTokens(barcode, pattern.delimiter);
+    if (!tokens || tokens.length === 0) return null;
+
+    const mapping = pattern.mapping || {};
+    let socho = '';
+    let shiki = '0';
+    let bicho = null;
+    let hinban = '';
+    let lotNo = '';
+
+    if (mapping.sochoIndex !== null && mapping.sochoIndex !== undefined && tokens[mapping.sochoIndex] !== undefined) {
+        const num = parseFloat(tokens[mapping.sochoIndex]);
+        if (!isNaN(num)) socho = String(num);
+    }
+
+    if (mapping.shikiIndex !== null && mapping.shikiIndex !== undefined && tokens[mapping.shikiIndex] !== undefined) {
+        const num = parseFloat(tokens[mapping.shikiIndex]);
+        if (!isNaN(num)) shiki = String(num);
+    }
+
+    if (mapping.bichoIndex !== null && mapping.bichoIndex !== undefined && tokens[mapping.bichoIndex] !== undefined) {
+        const num = parseFloat(tokens[mapping.bichoIndex]);
+        if (!isNaN(num)) bicho = num;
+    }
+
+    if (mapping.hinbanIndex !== null && mapping.hinbanIndex !== undefined && tokens[mapping.hinbanIndex] !== undefined) {
+        hinban = tokens[mapping.hinbanIndex];
+    }
+
+    if (mapping.lotIndex !== null && mapping.lotIndex !== undefined && tokens[mapping.lotIndex] !== undefined) {
+        lotNo = tokens[mapping.lotIndex];
+    }
+
+    // Auto-calculate bicho if socho and shiki are given but bicho was omitted in QR
+    if (bicho === null && socho !== '') {
+        const so = parseFloat(socho) || 0;
+        const sh = parseFloat(shiki) || 0;
+        bicho = Math.max(0, parseFloat((so - sh).toFixed(2)));
+    }
+
+    if (bicho !== null && !isNaN(bicho)) {
+        return { socho, shiki, bicho, hinban, lotNo, isLearned: true };
+    }
+    return null;
+}
+
+function parseBarcodeHeuristics(barcode) {
+    let sochoVal = '';
+    let shikiVal = '0';
+    let bichoVal = null;
+    let hinbanVal = '';
+    let lotVal = '';
+    let matched = false;
+
+    // Pattern 1: Labels with Japanese headers (e.g. 総長: 42.1 / S引: 0.35 / 実長/純長/美長: 41.5)
+    const sochoMatch = barcode.match(/総長\s*[:：=]?\s*([0-9.]+)/i);
+    const shikiMatch = barcode.match(/S引[長]?\s*[:：=]?\s*([0-9.]+)/i);
+    const bichoMatch = barcode.match(/(?:実長|純長|美長)\s*[:：=]?\s*([0-9.]+)/i);
+    const hinbanMatch = barcode.match(/(?:品番|基材|型番)\s*[:：=]?\s*([A-Za-z0-9\-_/*]+)/i);
+    const lotMatch = barcode.match(/(?:ロット|LOT|LotNo|ロット番号)\s*[:：=]?\s*([A-Za-z0-9\-_/]+)/i);
+
+    if (sochoMatch) { sochoVal = sochoMatch[1]; matched = true; }
+    if (shikiMatch) { shikiVal = shikiMatch[1]; matched = true; }
+    if (bichoMatch) { bichoVal = parseFloat(bichoMatch[1]); matched = true; }
+    if (hinbanMatch) { hinbanVal = hinbanMatch[1].trim(); }
+    if (lotMatch) { lotVal = lotMatch[1].trim(); }
+
+    if (sochoMatch && shikiMatch && bichoVal === null) {
+        bichoVal = Math.max(0, parseFloat((parseFloat(sochoMatch[1]) - parseFloat(shikiMatch[1])).toFixed(2)));
+    }
+
+    // Pattern 2: Multi-space, comma, tab, or semicolon separated format
+    if (!matched) {
+        let parts = [];
+        if (barcode.includes(',')) parts = barcode.split(',').map(s => s.trim());
+        else if (barcode.includes('\t')) parts = barcode.split('\t').map(s => s.trim());
+        else if (barcode.includes(';')) parts = barcode.split(';').map(s => s.trim());
+        else if (/\s{2,}/.test(barcode)) parts = barcode.trim().split(/\s+/);
+        else if (barcode.includes(' ')) parts = barcode.trim().split(/\s+/);
+
+        if (parts.length > 1) {
+            const decimalNumbers = [];
+            const nonNumbers = [];
+
+            parts.forEach((p, idx) => {
+                const n = parseFloat(p);
+                // Numbers that look like lengths (e.g. 42.1, 0.4, 41.5)
+                if (!isNaN(n) && (p.includes('.') || (n >= 5 && n <= 500 && !/^\d{4}$/.test(p)))) {
+                    decimalNumbers.push({ str: p, num: n, idx });
+                } else if (isNaN(n) || /^[A-Za-z]/.test(p) || p.includes('/') || p.includes('-')) {
+                    nonNumbers.push({ str: p, idx });
+                }
+            });
+
+            if (decimalNumbers.length >= 3) {
+                sochoVal = String(decimalNumbers[0].str);
+                shikiVal = String(decimalNumbers[1].str);
+                bichoVal = decimalNumbers[2].num;
+                matched = true;
+            } else if (decimalNumbers.length === 2) {
+                sochoVal = String(decimalNumbers[0].str);
+                shikiVal = String(decimalNumbers[1].str);
+                bichoVal = Math.max(0, parseFloat((decimalNumbers[0].num - decimalNumbers[1].num).toFixed(2)));
+                matched = true;
+            } else if (decimalNumbers.length === 1) {
+                bichoVal = decimalNumbers[0].num;
+                matched = true;
+            }
+
+            // Identify potential lot and hinban candidates
+            nonNumbers.forEach(item => {
+                const s = item.str;
+                if ((s.includes('/') || s.includes('-') || /^\d{6,}$/.test(s)) && !lotVal) {
+                    lotVal = s;
+                } else if (/^[A-Za-z0-9\-_]{4,}$/.test(s) && !hinbanVal) {
+                    hinbanVal = s;
+                }
+            });
+        }
+    }
+
+    // Pattern 3: Standalone single number
+    if (!matched) {
+        const singleNum = parseFloat(barcode.trim());
+        if (!isNaN(singleNum) && singleNum > 0) {
+            bichoVal = singleNum;
+            matched = true;
+        }
+    }
+
+    return {
+        socho: sochoVal,
+        shiki: shikiVal,
+        bicho: bichoVal,
+        hinban: hinbanVal,
+        lotNo: lotVal,
+        matched
+    };
+}
+
+function checkLearnQRBannerEligibility() {
+    const banner = document.getElementById('feedLearnQRBanner');
+    if (!banner) return;
+    if (state.currentModalRawQR && state.currentModalRawQR.trim().length > 0) {
+        banner.style.display = 'block';
+        const snippet = document.getElementById('feedLearnQRSnippet');
+        if (snippet) {
+            snippet.textContent = state.currentModalRawQR.slice(0, 100) + (state.currentModalRawQR.length > 100 ? '...' : '');
+        }
+    } else {
+        banner.style.display = 'none';
+    }
+}
+
+let currentPickerTargetField = null;
+
+function detectQRDelimiter(rawQR) {
+    if (!rawQR) return 'whitespace';
+    if (rawQR.includes(',')) return ',';
+    if (rawQR.includes('\t')) return '\t';
+    if (rawQR.includes(';')) return ';';
+    if (rawQR.includes('|')) return '|';
+    if (/\s{2,}/.test(rawQR)) return 'whitespace';
+    if (rawQR.includes(' ')) return 'whitespace';
+    return 'whitespace';
+}
+
+function openFieldPickerModal(fieldKey) {
+    currentPickerTargetField = fieldKey;
+    const rawQR = (state.currentModalRawQR || document.getElementById('feedRawQRInput')?.value || '').trim();
+    const delimiter = detectQRDelimiter(rawQR);
+    const tokens = splitQRIntoTokens(rawQR, delimiter);
+
+    // If no QR was scanned or no tokens exist, open manual entry directly
+    if (tokens.length === 0) {
+        handleValuePickerManualEntry();
+        return;
+    }
+
+    const titleEl = document.getElementById('feedValuePickerTitle');
+    const subEl = document.getElementById('feedValuePickerSubtitle');
+    const listEl = document.getElementById('feedValuePickerTokensList');
+    const modalEl = document.getElementById('feedValuePickerModal');
+
+    const fieldLabels = {
+        hinban: '品番 / 基材コード',
+        lot: 'メーカーロット / 日付',
+        socho: '総長 (m)',
+        shiki: 'S引き長 (m)',
+        bicho: '美長 / 実長 (m)'
+    };
+
+    const label = fieldLabels[fieldKey] || '項目';
+    if (titleEl) titleEl.textContent = `${label} を選択`;
+    if (subEl) subEl.textContent = `QRコードから検出された値（全 ${tokens.length} 件）:`;
+
+    // Determine current value to highlight
+    let currentVal = '';
+    if (fieldKey === 'hinban') currentVal = state.currentModalHinban;
+    else if (fieldKey === 'lot') currentVal = state.currentModalLotNo;
+    else if (fieldKey === 'socho') currentVal = state.currentModalSocho;
+    else if (fieldKey === 'shiki') currentVal = state.currentModalShiki;
+    else if (fieldKey === 'bicho') currentVal = state.currentModalBicho;
+
+    currentVal = (currentVal !== undefined && currentVal !== null) ? String(currentVal).trim() : '';
+
+    if (listEl) {
+        listEl.innerHTML = '';
+        tokens.forEach((tok, idx) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'feed-token-choice-btn';
+            const isSelected = (currentVal !== '' && currentVal === tok);
+            if (isSelected) btn.classList.add('is-selected');
+
+            const contentDiv = document.createElement('div');
+            contentDiv.style.cssText = 'display: flex; align-items: center; gap: 10px; overflow: hidden;';
+
+            const badge = document.createElement('span');
+            badge.className = 'feed-token-index-badge';
+            badge.textContent = `#${idx + 1}`;
+
+            const textSpan = document.createElement('span');
+            textSpan.style.cssText = 'font-size: 1.05rem; font-weight: 800; word-break: break-all; font-family: monospace;';
+            textSpan.textContent = tok;
+
+            contentDiv.appendChild(badge);
+            contentDiv.appendChild(textSpan);
+            btn.appendChild(contentDiv);
+
+            if (isSelected) {
+                const selTag = document.createElement('span');
+                selTag.style.cssText = 'font-size: 0.8rem; background: var(--blue); color: #fff; padding: 2px 8px; border-radius: 9999px; font-weight: 800; white-space: nowrap;';
+                selTag.textContent = '✓ 選択中';
+                btn.appendChild(selTag);
+            }
+
+            btn.addEventListener('click', () => {
+                selectFieldTokenValue(fieldKey, tok);
+            });
+
+            listEl.appendChild(btn);
+        });
+    }
+
+    if (modalEl) {
+        modalEl.classList.add('open');
+        modalEl.style.display = 'flex';
+    }
+}
+
+function closeFeedValuePickerModal() {
+    const modalEl = document.getElementById('feedValuePickerModal');
+    if (modalEl) {
+        modalEl.classList.remove('open');
+        modalEl.style.display = 'none';
+    }
+    currentPickerTargetField = null;
+}
+
+function selectFieldTokenValue(fieldKey, tokenVal) {
+    if (fieldKey === 'hinban') {
+        state.currentModalHinban = tokenVal;
+    } else if (fieldKey === 'lot') {
+        state.currentModalLotNo = tokenVal;
+    } else if (fieldKey === 'socho') {
+        state.currentModalSocho = tokenVal;
+        const so = parseFloat(tokenVal) || 0;
+        const sh = parseFloat(state.currentModalShiki) || 0;
+        state.currentModalBicho = Math.max(0, parseFloat((so - sh).toFixed(2)));
+    } else if (fieldKey === 'shiki') {
+        state.currentModalShiki = tokenVal || '0';
+        const so = parseFloat(state.currentModalSocho) || 0;
+        const sh = parseFloat(tokenVal) || 0;
+        if (state.currentModalSocho) {
+            state.currentModalBicho = Math.max(0, parseFloat((so - sh).toFixed(2)));
+        }
+    } else if (fieldKey === 'bicho') {
+        state.currentModalBicho = tokenVal;
+    }
+
+    updateManualDisplays();
+    saveCurrentModalManualEdits();
+    checkLearnQRBannerEligibility();
+    closeFeedValuePickerModal();
+
+    const fieldLabels = {
+        hinban: '品番',
+        lot: 'ロット',
+        socho: '総長',
+        shiki: 'S引き長',
+        bicho: '美長'
+    };
+    showToast(`✓ ${fieldLabels[fieldKey] || '項目'} を「${tokenVal}」に設定しました`, 'info', 1800);
+}
+
+function handleValuePickerManualEntry() {
+    const target = currentPickerTargetField;
+    closeFeedValuePickerModal();
+
+    if (target === 'hinban') {
+        const current = state.currentModalHinban || '';
+        const newVal = prompt('品番 / 基材コードを手動入力してください:', current);
+        if (newVal !== null) {
+            state.currentModalHinban = newVal.trim();
+            updateManualDisplays();
+            saveCurrentModalManualEdits();
+            checkLearnQRBannerEligibility();
+        }
+    } else if (target === 'lot') {
+        const current = state.currentModalLotNo || '';
+        const newVal = prompt('メーカーロット / 日付を手動入力してください:', current);
+        if (newVal !== null) {
+            state.currentModalLotNo = newVal.trim();
+            updateManualDisplays();
+            saveCurrentModalManualEdits();
+            checkLearnQRBannerEligibility();
+        }
+    } else if (target === 'socho' || target === 'shiki' || target === 'bicho') {
+        openMaterialKeypad(target);
+    }
+}
+
+function promptEditManualHinban() {
+    openFieldPickerModal('hinban');
+}
+
+function promptEditManualLot() {
+    openFieldPickerModal('lot');
+}
+
+async function learnQRFromCurrentInputs() {
+    const rawQR = (state.currentModalRawQR || document.getElementById('feedRawQRInput')?.value || '').trim();
+    if (!rawQR) {
+        alert('学習用のQRコードがまだスキャンされていません。\nバーコードリーダーでQRをスキャンしてから学習ボタンを押してください。');
+        return;
+    }
+
+    const kizai = (state.currentModalHinban ||
+                   state.currentModalRollContext?.item?.kizai ||
+                   state.currentModalRollContext?.group?.kizai ||
+                   state.currentModalRollContext?.item?.hinban ||
+                   '').trim();
+
+    if (!kizai) {
+        alert('基材コードまたは品番が見つかりません。品番欄を入力してください。');
+        return;
+    }
+
+    const delimiter = detectQRDelimiter(rawQR);
+    const tokens = splitQRIntoTokens(rawQR, delimiter);
+
+    const bichoVal = parseFloat(state.currentModalBicho);
+    const sochoVal = parseFloat(state.currentModalSocho);
+    const shikiVal = parseFloat(state.currentModalShiki);
+    const hinbanVal = (state.currentModalHinban || '').trim().toUpperCase();
+    const lotVal = (state.currentModalLotNo || '').trim().toUpperCase();
+
+    let bichoIndex = null;
+    let sochoIndex = null;
+    let shikiIndex = null;
+    let hinbanIndex = null;
+    let lotIndex = null;
+
+    // Pass 1: Exact matches
+    tokens.forEach((tok, idx) => {
+        const upper = tok.toUpperCase();
+        const num = parseFloat(tok);
+
+        if (hinbanVal && upper === hinbanVal && hinbanIndex === null) {
+            hinbanIndex = idx;
+        }
+        if (lotVal && upper === lotVal && lotIndex === null) {
+            lotIndex = idx;
+        }
+
+        // Check number matches
+        if (!isNaN(num)) {
+            if (!isNaN(bichoVal) && Math.abs(num - bichoVal) < 0.001 && bichoIndex === null) {
+                bichoIndex = idx;
+            } else if (!isNaN(sochoVal) && Math.abs(num - sochoVal) < 0.001 && sochoIndex === null) {
+                sochoIndex = idx;
+            } else if (!isNaN(shikiVal) && Math.abs(num - shikiVal) < 0.001 && shikiIndex === null) {
+                shikiIndex = idx;
+            }
+        }
+    });
+
+    // Pass 2: Partial matches for text if still null
+    tokens.forEach((tok, idx) => {
+        const upper = tok.toUpperCase();
+        if (idx !== hinbanIndex && idx !== lotIndex && idx !== bichoIndex && idx !== sochoIndex && idx !== shikiIndex) {
+            if (hinbanVal && hinbanIndex === null && (upper.includes(hinbanVal) || hinbanVal.includes(upper))) {
+                hinbanIndex = idx;
+            }
+            if (lotVal && lotIndex === null && (upper.includes(lotVal) || lotVal.includes(upper))) {
+                lotIndex = idx;
+            }
+        }
+    });
+
+    if (bichoIndex === null && (isNaN(bichoVal) || bichoVal <= 0)) {
+        alert('美長 / 実長（必須）が正しく入力されていません。美長欄に数値を入力してください。');
+        return;
+    }
+
+    const prefix = kizai.split(/[-_ /]/)[0] || kizai.slice(0, 5);
+
+    const payload = {
+        kizai: kizai,
+        kizaiPrefix: prefix,
+        supplier: '',
+        sampleRawQR: rawQR,
+        patternType: 'delimited',
+        delimiter: delimiter,
+        fieldsPresent: {
+            hasSocho: sochoIndex !== null,
+            hasShiki: shikiIndex !== null,
+            hasBicho: bichoIndex !== null,
+            hasHinban: hinbanIndex !== null,
+            hasLot: lotIndex !== null
+        },
+        mapping: {
+            hinbanIndex,
+            lotIndex,
+            sochoIndex,
+            shikiIndex,
+            bichoIndex
+        },
+        hasQR: true,
+        learnedBy: state.workerName || '作業者',
+        updatedAt: new Date().toISOString()
+    };
+
+    try {
+        const res = await fetch(`${serverURL}/api/firstkojo/learned-qr`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (result && result.success) {
+            const pData = result.pattern || payload;
+            const existingIdx = state.learnedQRPatterns.findIndex(p => p.kizai && p.kizai.toUpperCase() === kizai.toUpperCase());
+            if (existingIdx >= 0) {
+                state.learnedQRPatterns[existingIdx] = pData;
+            } else {
+                state.learnedQRPatterns.unshift(pData);
+            }
+            localStorage.setItem('firstkojo_learned_qr_patterns', JSON.stringify(state.learnedQRPatterns));
+
+            const banner = document.getElementById('feedLearnQRBanner');
+            if (banner) banner.style.display = 'none';
+
+            showToast(`🎉 「${kizai}」のQR形式を学習しました！全端末に即時共有されました。`, 'success', 3500);
+        } else {
+            alert('学習の保存に失敗しました: ' + (result?.message || 'Server error'));
+        }
+    } catch (err) {
+        console.error('Failed to post learned QR pattern:', err);
+        alert('サーバー通信エラー: 学習の保存に失敗しました。');
+    }
+}
+
+async function markCurrentMaterialAsNoQR() {
+    const kizai = (state.currentModalHinban ||
+                   state.currentModalRollContext?.item?.kizai ||
+                   state.currentModalRollContext?.group?.kizai ||
+                   state.currentModalRollContext?.item?.hinban ||
+                   '').trim();
+
+    if (!kizai) {
+        alert('基材コードが見つかりません。');
+        return;
+    }
+
+    const ok = confirm(`「${kizai}」はQRコード無しとして登録しますか？\n登録すると、次回から全端末で手動入力画面が直接開きます。`);
+    if (!ok) return;
+
+    const prefix = kizai.split(/[-_ /]/)[0] || kizai.slice(0, 5);
+    const payload = {
+        kizai: kizai,
+        kizaiPrefix: prefix,
+        hasQR: false,
+        sampleRawQR: '',
+        fieldsPresent: { hasSocho: false, hasShiki: false, hasBicho: true, hasHinban: true, hasLot: true },
+        mapping: {},
+        learnedBy: state.workerName || '作業者',
+        updatedAt: new Date().toISOString()
+    };
+
+    try {
+        const res = await fetch(`${serverURL}/api/firstkojo/learned-qr`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (result && result.success) {
+            const pData = result.pattern || payload;
+            const existingIdx = state.learnedQRPatterns.findIndex(p => p.kizai && p.kizai.toUpperCase() === kizai.toUpperCase());
+            if (existingIdx >= 0) {
+                state.learnedQRPatterns[existingIdx] = pData;
+            } else {
+                state.learnedQRPatterns.unshift(pData);
+            }
+            localStorage.setItem('firstkojo_learned_qr_patterns', JSON.stringify(state.learnedQRPatterns));
+            showToast(`✓ 「${kizai}」をQRなし基材として登録しました（全端末共有）`, 'success', 3000);
+        } else {
+            alert('登録に失敗しました: ' + (result?.message || 'Server error'));
+        }
+    } catch (err) {
+        console.error('Failed to register no-QR material:', err);
+        alert('サーバー通信エラー: 登録に失敗しました。');
+    }
+}
+
 function handleUSBBarcodeScanned(barcode) {
     console.log('⚡ USB Barcode Burst Detected:', barcode);
 
@@ -2719,55 +3321,35 @@ function handleUSBBarcodeScanned(barcode) {
     const isFeedOpen = feedModal && (feedModal.classList.contains('open') || feedModal.style.display === 'flex');
 
     if (isFeedOpen && state.currentModalRollContext) {
+        state.currentModalRawQR = barcode;
         const qrInput = document.getElementById('feedRawQRInput');
         if (qrInput) qrInput.value = barcode;
 
-        let sochoVal = '';
-        let shikiVal = '0';
-        let bichoVal = null;
-        let matched = false;
+        const currentKizai = (state.currentModalRollContext?.item?.kizai ||
+                              state.currentModalRollContext?.group?.kizai ||
+                              state.currentModalRollContext?.item?.hinban ||
+                              state.currentModalRollContext?.group?.hinban ||
+                              state.currentModalHinban || '').trim();
 
-        // Pattern 1: Labels with Japanese headers (e.g. 総長: 42.1 / S引: 0.35 / 実長/純長/美長: 41.5)
-        const sochoMatch = barcode.match(/総長\s*[:：=]?\s*([0-9.]+)/i);
-        const shikiMatch = barcode.match(/S引[長]?\s*[:：=]?\s*([0-9.]+)/i);
-        const bichoMatch = barcode.match(/(?:実長|純長|美長)\s*[:：=]?\s*([0-9.]+)/i);
-
-        if (sochoMatch) { sochoVal = sochoMatch[1]; matched = true; }
-        if (shikiMatch) { shikiVal = shikiMatch[1]; matched = true; }
-        if (bichoMatch) { bichoVal = parseFloat(bichoMatch[1]); matched = true; }
-
-        if (sochoMatch && shikiMatch && bichoVal === null) {
-            bichoVal = Math.max(0, parseFloat((parseFloat(sochoMatch[1]) - parseFloat(shikiMatch[1])).toFixed(2)));
+        // 1. Try learned pattern matching first
+        const learnedPattern = findLearnedPatternForKizai(currentKizai, barcode);
+        let parsed = null;
+        if (learnedPattern) {
+            parsed = parseBarcodeWithLearnedPattern(learnedPattern, barcode);
         }
 
-        // Pattern 2: Comma or tab separated format (e.g. "42.1,0.35,41.5")
-        if (!matched && (barcode.includes(',') || barcode.includes('\t'))) {
-            const parts = barcode.split(/,|\t/).map(s => s.trim());
-            const numbers = parts.map(p => parseFloat(p)).filter(n => !isNaN(n));
-            if (numbers.length >= 3) {
-                sochoVal = String(numbers[0]);
-                shikiVal = String(numbers[1]);
-                bichoVal = numbers[2];
-                matched = true;
-            } else if (numbers.length === 2) {
-                sochoVal = String(numbers[0]);
-                shikiVal = String(numbers[1]);
-                bichoVal = Math.max(0, parseFloat((numbers[0] - numbers[1]).toFixed(2)));
-                matched = true;
-            } else if (numbers.length === 1) {
-                bichoVal = numbers[0];
-                matched = true;
-            }
+        const isKnownLearnedPattern = (parsed && parsed.isLearned === true);
+
+        // 2. If no learned pattern or parsing returned null, use heuristics to pre-populate candidate fields
+        if (!parsed) {
+            parsed = parseBarcodeHeuristics(barcode);
         }
 
-        // Pattern 3: Standalone single number
-        if (!matched) {
-            const singleNum = parseFloat(barcode.trim());
-            if (!isNaN(singleNum) && singleNum > 0) {
-                bichoVal = singleNum;
-                matched = true;
-            }
-        }
+        let sochoVal = parsed.socho || '';
+        let shikiVal = parsed.shiki || '0';
+        let bichoVal = parsed.bicho;
+        let hinbanVal = parsed.hinban || '';
+        let lotVal = parsed.lotNo || '';
 
         if (bichoVal === null || isNaN(bichoVal)) {
             bichoVal = Number(state.currentModalRollContext.item?.meters) || 100;
@@ -2776,21 +3358,30 @@ function handleUSBBarcodeScanned(barcode) {
         state.currentModalSocho = sochoVal;
         state.currentModalShiki = shikiVal;
         state.currentModalBicho = bichoVal;
+        if (hinbanVal) state.currentModalHinban = hinbanVal;
+        if (lotVal) state.currentModalLotNo = lotVal;
 
         saveCurrentModalManualEdits();
+        updateManualDisplays();
 
         const badge = document.getElementById('feedScannerLiveBadge');
         if (badge) {
-            badge.textContent = `✓ 読取成功: ${bichoVal} m`;
+            badge.textContent = `✓ 読取: ${bichoVal} m`;
             badge.className = 'feed-scanner-badge is-scanned';
         }
 
-        showToast(`⚡ QR読取成功 (${bichoVal}m) → カメラを起動します`, 'success', 1800);
-
-        // Auto trigger native camera after short confirmation
-        setTimeout(() => {
-            triggerNativeCameraForModal();
-        }, 350);
+        if (isKnownLearnedPattern) {
+            // Already learned format confirmed in MongoDB: proceed directly to camera!
+            showToast(`⚡ 学習済QR読取成功 (${bichoVal}m) → カメラを起動します`, 'success', 1800);
+            setTimeout(() => {
+                triggerNativeCameraForModal();
+            }, 350);
+        } else {
+            // UNKNOWN QR FORMAT: Always switch to manual teaching screen so user can review/edit and teach it!
+            switchFeedModalView('manual');
+            checkLearnQRBannerEligibility();
+            showToast(`💡 未知のQR形式です。各項目を確認・追加し、「この形式を学習」してください。`, 'info', 3500);
+        }
     } else {
         showToast(`⚡ バーコード読取: ${barcode}`, 'info', 2500);
     }
@@ -2827,6 +3418,7 @@ function switchFeedModalView(view) {
         if (scanView) scanView.style.display = 'none';
         if (manualView) manualView.style.display = 'flex';
         updateManualDisplays();
+        checkLearnQRBannerEligibility();
     } else {
         if (scanView) scanView.style.display = 'flex';
         if (manualView) manualView.style.display = 'none';
@@ -2837,6 +3429,8 @@ function updateManualDisplays() {
     const sochoEl = document.getElementById('manualSochoDisplay');
     const shikiEl = document.getElementById('manualShikiDisplay');
     const bichoEl = document.getElementById('manualBichoDisplay');
+    const hinbanEl = document.getElementById('manualHinbanDisplay');
+    const lotEl = document.getElementById('manualLotDisplay');
 
     if (sochoEl) {
         sochoEl.textContent = (state.currentModalSocho !== '' && state.currentModalSocho !== undefined) ? `${state.currentModalSocho} m` : '未入力';
@@ -2846,6 +3440,12 @@ function updateManualDisplays() {
     }
     if (bichoEl) {
         bichoEl.textContent = (state.currentModalBicho !== '' && state.currentModalBicho !== undefined) ? `${state.currentModalBicho} m` : '0 m';
+    }
+    if (hinbanEl) {
+        hinbanEl.textContent = state.currentModalHinban || '-';
+    }
+    if (lotEl) {
+        lotEl.textContent = state.currentModalLotNo || '-';
     }
 }
 
@@ -2860,7 +3460,10 @@ function saveCurrentModalManualEdits() {
         socho: state.currentModalSocho,
         shiki: state.currentModalShiki,
         bicho: !isNaN(bichoVal) ? bichoVal : '',
-        meters: metersVal
+        meters: metersVal,
+        hinban: state.currentModalHinban,
+        lotNo: state.currentModalLotNo,
+        rawQR: state.currentModalRawQR
     });
 
     const row = document.querySelector(`.batch-roll-row[data-item-id="${ctx.itemId}"]`);
@@ -2994,13 +3597,22 @@ function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
         titleEl.textContent = `${kizai} - roll#${rollIdx}`;
     }
 
-    // 2. Initialize length values
+    // 2. Initialize length and metadata values
     state.currentModalSocho = edit.socho || '';
     state.currentModalShiki = edit.shiki || '0';
     state.currentModalBicho = edit.bicho || (edit.meters !== undefined ? edit.meters : (item.meters || ''));
+    state.currentModalHinban = edit.hinban || item.kizai || item.hinban || group?.kizai || group?.hinban || '';
+    state.currentModalLotNo = edit.lotNo || '';
+    state.currentModalRawQR = edit.rawQR || '';
 
-    // 3. Reset to Scan UI (Default - ONLY SCAN UI)
-    switchFeedModalView('scan');
+    // Check if this material is registered as NO QR
+    const learnedPattern = findLearnedPatternForKizai(kizai);
+    if (learnedPattern && learnedPattern.hasQR === false) {
+        switchFeedModalView('manual');
+        showToast(`ℹ️ 「${kizai}」はQRなし登録基材です（手動入力モード）`, 'info', 2200);
+    } else {
+        switchFeedModalView('scan');
+    }
 
     const badge = document.getElementById('feedScannerLiveBadge');
     if (badge) {
@@ -3564,10 +4176,10 @@ async function submitModalRollToQueue() {
 
     try {
         let photoUrl = edit.photoUrl || dbPhoto?.photoUrl || '';
-        const lotNoVal = edit.lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
+        const lotNoVal = state.currentModalLotNo || edit.lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
 
-        const rawQRVal = document.getElementById('feedRawQRInput')?.value?.trim() || edit.qrScanned || '';
-        const kizaiCode = item.kizai || group?.kizai || item.hinban || '';
+        const rawQRVal = state.currentModalRawQR || document.getElementById('feedRawQRInput')?.value?.trim() || edit.qrScanned || '';
+        const kizaiCode = state.currentModalHinban || item.kizai || group?.kizai || item.hinban || '';
         const rollIdx = item.rollIndex || (rIdx + 1);
 
         const enqueuePayload = {
@@ -3577,7 +4189,7 @@ async function submitModalRollToQueue() {
             groupId: group?.groupId || item.groupId || item.id,
             itemId: itemId,
             orderIndex: item.orderIndex || (rIdx + 1),
-            hinban: item.hinban || '',
+            hinban: state.currentModalHinban || item.hinban || '',
             hinmei: item.hinmei || '',
             kizai: kizaiCode,
             color: item.color || group?.color || '',
@@ -3589,13 +4201,15 @@ async function submitModalRollToQueue() {
             totalMeters: Number(group?.totalMeters) || bichoVal,
             rollMeters: bichoVal,
             meters: bichoVal,
+            socho: state.currentModalSocho || '',
+            shiki: state.currentModalShiki || '0',
+            bicho: bichoVal,
             rollIndex: rollIdx,
             lotNo: lotNoVal,
             rawMaterialQR: rawQRVal,
             rawMaterialLength: String(bichoVal),
             manufacturerUid: '',
-            photoUrl: photoUrl || '',
-            status: 'queue'
+            photoUrl: photoUrl || ''
         };
 
         console.log('Enqueueing single roll to queue:', enqueuePayload);
@@ -3617,19 +4231,24 @@ async function submitModalRollToQueue() {
         }
 
         const mongoId = data._id || data.item?._id || '';
+        const assignedStatus = data.item?.status || 'in-progress';
         const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
         setItemEdit(itemId, {
             enqueued: true,
             enqueuedAt: timeNow,
             mongoProductionId: mongoId,
+            status: assignedStatus,
             lotNo: lotNoVal,
-            hinban: item.hinban || '',
+            hinban: state.currentModalHinban || item.hinban || '',
             kizai: kizaiCode,
             orderIndex: item.orderIndex || (rIdx + 1),
             rollIndex: rollIdx,
+            socho: state.currentModalSocho || '',
+            shiki: state.currentModalShiki || '0',
             bicho: bichoVal,
             meters: bichoVal,
             rawMaterialQR: rawQRVal,
+            rawQR: rawQRVal,
             photoUrl: photoUrl || ''
         });
 
@@ -4115,6 +4734,9 @@ function handleProductionSSEEvent(data) {
             renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
         }
         fetchProductionQueue();
+    } else if (data.type === 'qr_patterns_updated') {
+        console.log('⚡ SSE qr_patterns_updated received, refreshing learned patterns...');
+        fetchLearnedQRPatterns();
     }
 }
 
@@ -4197,6 +4819,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize USB Barcode Scanner Listener
     setupUSBScannerListener();
     setupFeedRawQRInput();
+
+    // Sync learned QR patterns from MongoDB on reload (regardless of active tab)
+    fetchLearnedQRPatterns();
 
     // Restore queue collapsed state if previously saved
     if (state.isQueueCollapsed) {
