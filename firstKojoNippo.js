@@ -3,9 +3,9 @@
  * Logic for First Factory Nippo (第一工場 日報) Tablet UI
  */
 
-const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.48:3000";
+const serverURL = "http://192.168.0.39:3000";
 
 function getTodayDateString() {
     const now = new Date();
@@ -20,7 +20,7 @@ const state = {
     machineName: null,
     filterName: "第一工場",
 
-    currentMainTab: 0, // 0: User, 1: List, 2: Queue, 3: Info, 4: Production, 5: Submit
+    currentMainTab: 0, // 0: User, 1: List, 2: Queue, 3: Info, 4: History, 5: Production, 6: Submit
 
     selectedDate: sessionStorage.getItem('firstkojo_nippo_date') || getTodayDateString(),
     dailySchedule: null,
@@ -39,6 +39,8 @@ const state = {
     stagingQueue: [],
     isQueueCollapsed: localStorage.getItem('firstkojo_queue_collapsed') === 'true',
     expandedGroups: new Set(),
+    activeRollPhotoTarget: null, // { itemId, gIdx, rIdx }
+    historyFilter: 'all', // 'all', 'enqueued', 'excluded'
     currentFeedItem: null,
     currentFeedGroup: null,
     capturedPhotoBase64: null,
@@ -309,9 +311,9 @@ function switchMainTab(index) {
     tabs.forEach(t => t.classList.remove('active'));
     if (tabs[index]) tabs[index].classList.add('active');
 
-    // 6 tabs => 100 / 6 = 16.666667% shift per tab
+    // 7 tabs => 100 / 7 = 14.285714% shift per tab
     if (container) {
-        container.style.transform = `translateX(-${index * (100 / 6)}%)`;
+        container.style.transform = `translateX(-${index * (100 / 7)}%)`;
     }
     state.currentMainTab = index;
     sessionStorage.setItem('firstkojo_nippo_main_tab', index);
@@ -324,6 +326,9 @@ function switchMainTab(index) {
     }
     if (index === 3) {
         loadItemDetail(state.selectedItem);
+    }
+    if (index === 4) {
+        renderHistoryList();
     }
 }
 
@@ -342,8 +347,11 @@ function computeTimeSchedule(items, startTimeStr) {
         current = new Date(current.getTime() + duration * 60000);
         const end = current.toTimeString().substring(0, 5);
 
+        const dateKey = state.selectedDate || 'day';
+        const itemId = item.id || item._id || `${dateKey}_${item.hinban || 'item'}_${idx + 1}`;
         return {
             ...item,
+            id: itemId,
             orderIndex: idx + 1,
             startTime: start,
             endTime: end,
@@ -1000,6 +1008,344 @@ function setGroupLifecycle(groupId, patch) {
 }
 
 // -----------------------------------------------------
+// Item State & Persistence Helpers (LocalStorage)
+// -----------------------------------------------------
+function getItemStateStorageKey() {
+    const date = state.selectedDate || (state.dailySchedule && state.dailySchedule.date) || new Date().toISOString().split('T')[0];
+    return `firstkojo_item_state_${date}`;
+}
+
+function getItemEdits() {
+    try {
+        return JSON.parse(localStorage.getItem(getItemStateStorageKey()) || '{}');
+    } catch (e) {
+        return {};
+    }
+}
+
+function getItemKey(item, gIdx, rIdx) {
+    if (item && item.id) return item.id;
+    const date = state.selectedDate || 'day';
+    const hinban = (item && (item.hinban || item.kizai)) || `g${gIdx !== undefined ? gIdx : 0}`;
+    const order = (item && item.orderIndex) || (rIdx !== undefined ? rIdx + 1 : 1);
+    return `${date}_${hinban}_${order}`;
+}
+
+function getItemEdit(itemId, defaultItem = {}) {
+    if (!itemId) return { meters: 100, isExcluded: false, photoUrl: '', photoBase64: '', enqueued: false };
+    const edits = getItemEdits();
+    const existing = edits[itemId] || {};
+    return {
+        meters: existing.meters !== undefined ? existing.meters : (Number(defaultItem.meters) || 100),
+        isExcluded: existing.isExcluded === true,
+        photoUrl: existing.photoUrl || '',
+        photoBase64: existing.photoBase64 || '',
+        enqueued: existing.enqueued === true,
+        enqueuedAt: existing.enqueuedAt || null,
+        lotNo: existing.lotNo || defaultItem.lotNo || '',
+        hinban: existing.hinban || defaultItem.hinban || '',
+        kizai: existing.kizai || defaultItem.kizai || '',
+        orderIndex: existing.orderIndex || defaultItem.orderIndex || 1,
+        rollIndex: existing.rollIndex || defaultItem.rollIndex || 1,
+        totalRolls: existing.totalRolls || defaultItem.totalRolls || 1,
+        shippingDest: existing.shippingDest || defaultItem.shippingDest || '',
+        color: existing.color || defaultItem.color || '',
+        zuban: existing.zuban || defaultItem.zuban || ''
+    };
+}
+
+function setItemEdit(itemId, patch) {
+    if (!itemId) return;
+    try {
+        const key = getItemStateStorageKey();
+        const edits = getItemEdits();
+        edits[itemId] = { ...(edits[itemId] || {}), ...patch };
+        localStorage.setItem(key, JSON.stringify(edits));
+    } catch (e) {
+        console.error('Error saving item edit:', e);
+    }
+}
+
+function updateRollMeters(itemId, newMeters, gIdx, rIdx) {
+    const metersVal = Math.max(1, Number(newMeters) || 0);
+    setItemEdit(itemId, { meters: metersVal });
+    updateCardSummaryChip(gIdx);
+}
+
+function toggleRollItemExclude(itemId, gIdx, rIdx, event) {
+    if (event) event.stopPropagation();
+    const edit = getItemEdit(itemId);
+    const newExcluded = !edit.isExcluded;
+    setItemEdit(itemId, { isExcluded: newExcluded });
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+    updateHistoryBadges();
+}
+
+function updateCardSummaryChip(gIdx) {
+    if (!state.currentGroups || !state.currentGroups[gIdx]) return;
+    const group = state.currentGroups[gIdx];
+    const card = document.querySelector(`.batch-group-card[data-group-idx="${gIdx}"]`);
+    if (!card) return;
+
+    const remainingItems = group.items.filter((rollItem, rIdx) => {
+        const k = getItemKey(rollItem, gIdx, rIdx);
+        return !getItemEdit(k, rollItem).enqueued;
+    });
+
+    const activeItems = remainingItems.filter((rollItem, rIdx) => {
+        const k = getItemKey(rollItem, gIdx, rIdx);
+        return !getItemEdit(k, rollItem).isExcluded;
+    });
+
+    const activeMeters = activeItems.reduce((acc, rollItem, rIdx) => {
+        const k = getItemKey(rollItem, gIdx, rIdx);
+        return acc + (Number(getItemEdit(k, rollItem).meters) || Number(rollItem.meters) || 0);
+    }, 0);
+
+    const rollTag = card.querySelector('.batch-chips-row .roll-tag');
+    if (rollTag) {
+        rollTag.textContent = `残り ${activeItems.length} 巻き (${activeMeters} m)`;
+    }
+}
+
+async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
+    if (event) event.stopPropagation();
+    const group = state.currentGroups?.[gIdx];
+    const item = group?.items?.[rIdx] || (group && group.items.find(it => getItemKey(it, gIdx) === itemId));
+    if (!item) {
+        alert('対象の巻きが見つかりませんでした');
+        return;
+    }
+
+    const edit = getItemEdit(itemId, item);
+    if (edit.isExcluded) {
+        alert('この巻きは「除外中」です。キューに追加する場合は先に「復帰」ボタンを押してください。');
+        return;
+    }
+
+    // MANDATORY PHOTO VALIDATION
+    if (!edit.photoUrl && !edit.photoBase64) {
+        alert(`投入できません：Roll #${item.rollIndex || (rIdx + 1)} の材料ラベル写真が未撮影です。\n\n「写真撮影」ボタンを押してラベル写真を撮影してください。`);
+        return;
+    }
+
+    const btn = event?.currentTarget;
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '投入中...';
+    }
+
+    try {
+        const lotNoVal = edit.lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
+        let photoUrl = edit.photoUrl || '';
+
+        // Upload to storage if base64 and not uploaded yet
+        if (edit.photoBase64 && (!photoUrl || !photoUrl.startsWith('http'))) {
+            try {
+                photoUrl = await uploadLabelPhotoToServer(edit.photoBase64, lotNoVal, item.hinban);
+                setItemEdit(itemId, { photoUrl: photoUrl });
+            } catch (err) {
+                console.warn('Photo upload failed, using base64:', err);
+                photoUrl = edit.photoBase64;
+            }
+        }
+
+        const enqueuePayload = {
+            date: state.selectedDate,
+            machine: state.machineName || 'PSA2',
+            worker: state.workerName || '作業者',
+            groupId: group?.groupId || item.groupId || item.id,
+            hinban: item.hinban || '',
+            hinmei: item.hinmei || '',
+            kizai: item.kizai || group?.kizai || '',
+            color: item.color || group?.color || '',
+            zuban: item.zuban || group?.zuban || '',
+            okyakuHinban: item.okyakuHinban || '',
+            labelHinban: item.labelHinban || '',
+            shippingDest: item.shippingDest || group?.shippingDest || '',
+            totalRolls: Number(item.totalRolls) || Number(group?.items?.length) || 1,
+            totalMeters: Number(group?.totalMeters) || Number(edit.meters) || 0,
+            rollMeters: Number(edit.meters) || Number(item.meters) || 0,
+            rollIndex: Number(item.rollIndex) || (rIdx + 1),
+            lotNo: lotNoVal,
+            rawMaterialQR: '',
+            rawMaterialLength: String(edit.meters || item.meters || ''),
+            manufacturerUid: '',
+            photoUrl: photoUrl || ''
+        };
+
+        const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(enqueuePayload)
+        });
+
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        if (!data.success) {
+            throw new Error(data.error || 'キュー追加に失敗しました');
+        }
+
+        const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+        setItemEdit(itemId, {
+            enqueued: true,
+            enqueuedAt: timeNow,
+            lotNo: lotNoVal,
+            hinban: item.hinban || '',
+            kizai: item.kizai || group?.kizai || '',
+            orderIndex: item.orderIndex || (rIdx + 1),
+            rollIndex: item.rollIndex || (rIdx + 1),
+            meters: edit.meters
+        });
+
+        notifyPdfDisplayer(item, item.zuban);
+        showToast(`Roll #${item.rollIndex || (rIdx + 1)} を投入キューに追加しました`, 'success', 3000);
+
+        await fetchProductionQueue();
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        updateHistoryBadges();
+
+    } catch (err) {
+        console.error('Error in enqueueSingleRollItem:', err);
+        alert(`投入エラー: ${err.message}`);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '投入';
+        }
+    }
+}
+
+async function enqueueBatchGroup(gIdx, event) {
+    if (event) event.stopPropagation();
+    const group = state.currentGroups?.[gIdx];
+    if (!group) return;
+
+    // Filter remaining non-enqueued items
+    const remainingItems = group.items.map((rollItem, rIdx) => ({
+        item: rollItem,
+        rIdx,
+        itemId: getItemKey(rollItem, gIdx, rIdx),
+        edit: getItemEdit(getItemKey(rollItem, gIdx, rIdx), rollItem)
+    })).filter(entry => !entry.edit.enqueued);
+
+    if (remainingItems.length === 0) {
+        alert('このカードの全巻きは既に投入済です。');
+        return;
+    }
+
+    // Filter active items (not excluded)
+    const activeEntries = remainingItems.filter(entry => !entry.edit.isExcluded);
+    if (activeEntries.length === 0) {
+        alert('投入可能な巻きがありません（すべて除外中です。「除外解除」を行ってください）。');
+        return;
+    }
+
+    // MANDATORY PHOTO VALIDATION FOR ALL ACTIVE ITEMS
+    const missingPhotos = activeEntries.filter(entry => !entry.edit.photoUrl && !entry.edit.photoBase64);
+    if (missingPhotos.length > 0) {
+        const rollList = missingPhotos.map(e => `・Roll #${e.item.rollIndex || (e.rIdx + 1)}`).join('\n');
+        alert(`投入できません：以下の巻きの材料ラベル写真が未撮影です。\n${rollList}\n\n対象の巻きの写真撮影を行ってから再度投入してください。`);
+        return;
+    }
+
+    const btn = event?.currentTarget;
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '投入中...';
+    }
+
+    try {
+        let enqueuedCount = 0;
+
+        for (const entry of activeEntries) {
+            const { item, rIdx, itemId, edit } = entry;
+            const lotNoVal = edit.lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
+            let photoUrl = edit.photoUrl || '';
+
+            if (edit.photoBase64 && (!photoUrl || !photoUrl.startsWith('http'))) {
+                try {
+                    photoUrl = await uploadLabelPhotoToServer(edit.photoBase64, lotNoVal, item.hinban);
+                    setItemEdit(itemId, { photoUrl: photoUrl });
+                } catch (err) {
+                    photoUrl = edit.photoBase64;
+                }
+            }
+
+            const enqueuePayload = {
+                date: state.selectedDate,
+                machine: state.machineName || 'PSA2',
+                worker: state.workerName || '作業者',
+                groupId: group.groupId,
+                hinban: item.hinban || '',
+                hinmei: item.hinmei || '',
+                kizai: item.kizai || group.kizai || '',
+                color: item.color || group.color || '',
+                zuban: item.zuban || group.zuban || '',
+                okyakuHinban: item.okyakuHinban || '',
+                labelHinban: item.labelHinban || '',
+                shippingDest: item.shippingDest || group.shippingDest || '',
+                totalRolls: Number(item.totalRolls) || Number(group.items.length) || 1,
+                totalMeters: Number(group.totalMeters) || Number(edit.meters) || 0,
+                rollMeters: Number(edit.meters) || Number(item.meters) || 0,
+                rollIndex: Number(item.rollIndex) || (rIdx + 1),
+                lotNo: lotNoVal,
+                rawMaterialQR: '',
+                rawMaterialLength: String(edit.meters || item.meters || ''),
+                manufacturerUid: '',
+                photoUrl: photoUrl || ''
+            };
+
+            const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(enqueuePayload)
+            });
+
+            if (res.ok) {
+                const data = await res.json().catch(() => ({}));
+                if (data.success) {
+                    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                    setItemEdit(itemId, {
+                        enqueued: true,
+                        enqueuedAt: timeNow,
+                        lotNo: lotNoVal,
+                        hinban: item.hinban || '',
+                        kizai: item.kizai || group.kizai || '',
+                        orderIndex: item.orderIndex || (rIdx + 1),
+                        rollIndex: item.rollIndex || (rIdx + 1),
+                        meters: edit.meters
+                    });
+                    enqueuedCount++;
+                }
+            }
+        }
+
+        if (activeEntries[0]) {
+            notifyPdfDisplayer(activeEntries[0].item, activeEntries[0].item.zuban);
+        }
+
+        showToast(`「${group.kizai || group.hinban}」${enqueuedCount} 巻を投入キューに追加しました`, 'success', 3500);
+
+        await fetchProductionQueue();
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        updateHistoryBadges();
+
+    } catch (err) {
+        console.error('Error in enqueueBatchGroup:', err);
+        alert(`一括投入エラー: ${err.message}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '投入';
+        }
+    }
+}
+
+// -----------------------------------------------------
 // Modal & Batch Action Popup Helpers
 // -----------------------------------------------------
 function showBatchModal(title, bodyHTML, actionsHTML) {
@@ -1073,10 +1419,25 @@ function renderScheduleTableView(groups, items) {
             return;
         }
 
-        const firstItem = group.items[0];
-        const lastItem = group.items[group.items.length - 1];
-        const orderRangeText = group.items.length > 1 ? `#${firstItem.orderIndex}〜#${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
+        const remainingItems = group.items.filter((rollItem, rIdx) => {
+            const itemId = getItemKey(rollItem, gIdx, rIdx);
+            return !getItemEdit(itemId, rollItem).enqueued;
+        });
+        if (remainingItems.length === 0) return;
+
+        const firstItem = remainingItems[0];
+        const lastItem = remainingItems[remainingItems.length - 1];
+        const orderRangeText = remainingItems.length > 1 ? `#${firstItem.orderIndex}〜#${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
         const kizaiCode = group.kizai || group.hinban || '基材未設定';
+
+        const activeItems = remainingItems.filter((rollItem, rIdx) => {
+            const itemId = getItemKey(rollItem, gIdx, rIdx);
+            return !getItemEdit(itemId, rollItem).isExcluded;
+        });
+        const activeMeters = activeItems.reduce((acc, rollItem, rIdx) => {
+            const itemId = getItemKey(rollItem, gIdx, rIdx);
+            return acc + (Number(getItemEdit(itemId, rollItem).meters) || Number(rollItem.meters) || 0);
+        }, 0);
 
         const queuedItem = state.stagingQueue.find(q =>
             (q.groupId === group.groupId || q.hinban === group.hinban || q.kizai === group.kizai) &&
@@ -1105,11 +1466,11 @@ function renderScheduleTableView(groups, items) {
                 </td>
                 <td style="font-weight: 600;">${group.shippingDest || '—'}</td>
                 <td style="font-weight: 600;">${group.color || '—'}</td>
-                <td style="font-weight: 600;">全 ${group.items.length} 巻き (${group.totalMeters}m)</td>
+                <td style="font-weight: 600;">残り ${activeItems.length} 巻き (${activeMeters}m)</td>
                 <td>${statusBadge}</td>
                 <td onclick="event.stopPropagation()" style="text-align: center;">
                     <div style="display: flex; gap: 6px; justify-content: center; align-items: center;">
-                        <button type="button" class="btn-feed-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="openMaterialFeedModalForGroup(${gIdx}, event)">投入</button>
+                        <button type="button" class="btn-feed-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="enqueueBatchGroup(${gIdx}, event)">投入</button>
                         <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event)">詳細</button>
                     </div>
                 </td>
@@ -1173,14 +1534,37 @@ function renderScheduleList(items, startTimeStr) {
                 </div>
             `;
         } else {
-            const firstItem = group.items[0];
-            const lastItem = group.items[group.items.length - 1];
-            const orderRangeText = group.items.length > 1 ? `#${firstItem.orderIndex} — #${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
+            // Check remaining items that have not been enqueued yet
+            const remainingItems = group.items.filter((rollItem, rIdx) => {
+                const itemId = getItemKey(rollItem, gIdx, rIdx);
+                const edit = getItemEdit(itemId, rollItem);
+                return !edit.enqueued;
+            });
 
-            // Use Kizai Code ONLY (no 品番)
+            // When all items in a card are enqueued, the card disappears from the List tab!
+            if (remainingItems.length === 0) {
+                return;
+            }
+
+            const firstItem = remainingItems[0];
+            const lastItem = remainingItems[remainingItems.length - 1];
+            const orderRangeText = remainingItems.length > 1 ? `#${firstItem.orderIndex} — #${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
+
             const kizaiCode = group.kizai || group.hinban || '基材未設定';
 
-            // Check if this lot is in staging queue
+            // Check active items (not excluded)
+            const activeItems = remainingItems.filter((rollItem, rIdx) => {
+                const itemId = getItemKey(rollItem, gIdx, rIdx);
+                return !getItemEdit(itemId, rollItem).isExcluded;
+            });
+
+            const activeMeters = activeItems.reduce((acc, rollItem, rIdx) => {
+                const itemId = getItemKey(rollItem, gIdx, rIdx);
+                return acc + (Number(getItemEdit(itemId, rollItem).meters) || Number(rollItem.meters) || 0);
+            }, 0);
+
+            const excludedCount = remainingItems.length - activeItems.length;
+
             const queuedItem = state.stagingQueue.find(q =>
                 (q.groupId === group.groupId || q.hinban === group.hinban || q.kizai === group.kizai) &&
                 (q.status === 'active' || q.status === 'queued')
@@ -1203,14 +1587,18 @@ function renderScheduleList(items, startTimeStr) {
 
             const destText = group.shippingDest ? `<span class="tag-pill dest-tag">出荷先: ${group.shippingDest}</span>` : '';
             const colorText = group.color ? `<span class="tag-pill color-tag">色: ${group.color}</span>` : '';
-            const rollSummaryText = `<span class="tag-pill roll-tag">全 ${group.items.length} 巻き (${group.totalMeters} m)</span>`;
+            let rollSummaryText = `<span class="tag-pill roll-tag">残り ${activeItems.length} 巻き (${activeMeters} m)</span>`;
+            if (excludedCount > 0) {
+                rollSummaryText += `<span class="tag-pill tag-excluded" style="font-size: 0.8rem; padding: 2px 8px;">除外: ${excludedCount} 巻</span>`;
+            }
+
             const isExpanded = state.expandedGroups && state.expandedGroups.has(group.groupId);
 
             html += `
                 <div class="batch-group-card ${isGroupTinted ? 'group-tinted' : ''} ${isExpanded ? 'is-expanded' : ''}" 
                      data-group-id="${group.groupId}" 
                      data-group-idx="${gIdx}"
-                     data-total-rolls="${group.items.length}">
+                     data-total-rolls="${remainingItems.length}">
                     
                     <div class="batch-header" onclick="toggleBatchGroupExpand(${gIdx}, event)" title="タップして内訳を展開/折りたたみ">
                         <div class="batch-header-top-row">
@@ -1233,10 +1621,10 @@ function renderScheduleList(items, startTimeStr) {
                         <div class="batch-actions-row" onclick="event.stopPropagation()">
                             <div class="batch-btn-group">
                                 <button type="button" class="btn-card-expand-toggle" onclick="toggleBatchGroupExpand(${gIdx}, event)" title="${isExpanded ? '内訳を閉じる' : '内訳を展開'}">
-                                    <span class="toggle-label">${isExpanded ? '閉じる' : `内訳 (${group.items.length}巻)`}</span>
+                                    <span class="toggle-label">${isExpanded ? '閉じる' : `内訳 (${remainingItems.length}巻)`}</span>
                                     <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
                                 </button>
-                                <button type="button" class="btn-feed-primary" onclick="openMaterialFeedModalForGroup(${gIdx}, event)">
+                                <button type="button" class="btn-feed-primary" onclick="enqueueBatchGroup(${gIdx}, event)" title="このロットの未投入巻きを一括投入（写真必須）">
                                     投入
                                 </button>
                                 <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event)">
@@ -1247,29 +1635,79 @@ function renderScheduleList(items, startTimeStr) {
                     </div>
 
                     <div class="batch-rolls-list">
-                        ${group.items.map((rollItem, rIdx) => {
-                            const isRunning = (lifecycle.status === 'in-progress' || lifecycle.status === 'running');
-                            const isCompleted = (lifecycle.status === 'completed');
-                            const actualRollIndex = rollItem.rollIndex || (rIdx + 1);
-                            let rollStatusTag = '<span class="batch-status-tag status-pending" style="font-size: 0.725rem; padding: 2px 7px;">待機</span>';
-                            if (isCompleted) {
-                                rollStatusTag = '<span class="batch-status-tag status-completed" style="font-size: 0.725rem; padding: 2px 7px;">完了</span>';
-                            } else if (isRunning) {
-                                rollStatusTag = '<span class="batch-status-tag status-active" style="font-size: 0.725rem; padding: 2px 7px;">生産中</span>';
-                            }
+                        ${remainingItems.map((rollItem, rIdx) => {
+                const itemId = getItemKey(rollItem, gIdx, rIdx);
+                const edit = getItemEdit(itemId, rollItem);
+                const isExcluded = edit.isExcluded === true;
+                const currentMeters = edit.meters !== undefined ? edit.meters : (Number(rollItem.meters) || 100);
+                const hasPhoto = !!(edit.photoUrl || edit.photoBase64);
+                const photoSrc = edit.photoUrl || edit.photoBase64;
+                const actualRollIndex = rollItem.rollIndex || (rIdx + 1);
 
-                            return `
-                                <div class="batch-roll-row ${isRunning ? 'active-roll' : ''}" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})">
+                if (isExcluded) {
+                    return `
+                                    <div class="batch-roll-row is-excluded-row" data-item-id="${itemId}">
+                                        <div class="roll-row-left">
+                                            <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
+                                            <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
+                                            <span class="tag-pill roll-tag" style="font-size: 0.8rem; padding: 2px 8px;">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} 巻き</span>
+                                            <span class="tag-pill meter-tag" style="font-size: 0.8rem; padding: 2px 8px;">${currentMeters} m</span>
+                                            <span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">除外中</span>
+                                        </div>
+                                        <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
+                                            <button type="button" class="btn-roll-exclude is-excluded" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きを復帰（キュー投入対象に戻す）">
+                                                復帰
+                                            </button>
+                                            <button type="button" class="btn-feed-primary" disabled style="opacity: 0.4; cursor: not-allowed; padding: 5px 12px; font-size: 0.8rem;" title="除外中のため投入不可">
+                                                投入
+                                            </button>
+                                            <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
+                                                詳細
+                                            </button>
+                                        </div>
+                                    </div>
+                                `;
+                }
+
+                return `
+                                <div class="batch-roll-row" data-item-id="${itemId}">
                                     <div class="roll-row-left">
                                         <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
                                         <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
                                         <span class="tag-pill roll-tag" style="font-size: 0.8rem; padding: 2px 8px;">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} 巻き</span>
-                                        <span class="tag-pill meter-tag" style="font-size: 0.8rem; padding: 2px 8px;">${rollItem.meters || 100} m</span>
-                                        ${rollItem.zuban ? `<span class="tag-pill" style="font-size: 0.8rem; padding: 2px 8px;">図番: ${rollItem.zuban}</span>` : ''}
-                                        ${rollStatusTag}
+
+                                        <!-- Editable Roll Meters -->
+                                        <div class="roll-meter-edit-wrap" onclick="event.stopPropagation()" title="タップして長さを変更">
+                                            <input type="number" class="roll-meter-input" value="${currentMeters}" min="1" step="1" onchange="updateRollMeters('${itemId}', this.value, ${gIdx}, ${rIdx})" aria-label="巻き長さ(m)">
+                                            <span class="roll-meter-unit">m</span>
+                                        </div>
+
+                                        <!-- Per-Item Photo Button -->
+                                        <div class="roll-photo-container" onclick="event.stopPropagation()">
+                                            ${hasPhoto ? `
+                                                <div class="roll-photo-wrap">
+                                                    <img src="${photoSrc}" class="roll-photo-thumb" onclick="openPhotoEnlarged('${photoSrc}')" title="クリックで拡大">
+                                                    <button type="button" class="btn-roll-photo has-photo" onclick="openRollPhotoCapture('${itemId}', ${gIdx}, ${rIdx}, event)" title="ラベル写真を再撮影">
+                                                        再撮影
+                                                    </button>
+                                                </div>
+                                            ` : `
+                                                <div class="roll-photo-wrap">
+                                                    <button type="button" class="btn-roll-photo" onclick="openRollPhotoCapture('${itemId}', ${gIdx}, ${rIdx}, event)" title="材料ラベルの写真を撮影">
+                                                        <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                                        写真撮影
+                                                    </button>
+                                                    <span class="badge-unshot">必須</span>
+                                                </div>
+                                            `}
+                                        </div>
                                     </div>
+
                                     <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
-                                        <button type="button" class="btn-feed-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="openMaterialFeedModalForRoll(${gIdx}, ${rIdx}, event)" title="この巻きの材料を投入">
+                                        <button type="button" class="btn-roll-exclude" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きを一時的に除外（キュー投入対象から外す）">
+                                            除外
+                                        </button>
+                                        <button type="button" class="btn-feed-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="enqueueSingleRollItem('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きを投入キューに追加">
                                             投入
                                         </button>
                                         <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
@@ -1278,7 +1716,7 @@ function renderScheduleList(items, startTimeStr) {
                                     </div>
                                 </div>
                             `;
-                        }).join('')}
+            }).join('')}
                     </div>
                 </div>
             `;
@@ -2418,7 +2856,7 @@ async function startCameraCapture() {
     modal.classList.add('open');
 
     if (state.cameraStream) {
-        try { state.cameraStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+        try { state.cameraStream.getTracks().forEach(t => t.stop()); } catch (e) { }
         state.cameraStream = null;
     }
 
@@ -2471,19 +2909,45 @@ function closeWebcamModal() {
     if (state.cameraStream) {
         try {
             state.cameraStream.getTracks().forEach(t => t.stop());
-        } catch (e) {}
+        } catch (e) { }
         state.cameraStream = null;
     }
 }
 
 function fallbackFromCameraToFile() {
     closeWebcamModal();
-    triggerFileInputFallback();
+    if (state.activeRollPhotoTarget) {
+        const fileInput = document.getElementById('rollPhotoFileInput');
+        if (fileInput) fileInput.click();
+    } else {
+        triggerFileInputFallback();
+    }
 }
 
 function triggerFileInputFallback() {
     const fileInput = document.getElementById('materialPhotoFileInput');
     if (fileInput) fileInput.click();
+}
+
+function openRollPhotoCapture(itemId, gIdx, rIdx, event) {
+    if (event) event.stopPropagation();
+    state.activeRollPhotoTarget = { itemId, gIdx, rIdx };
+    startCameraCapture();
+}
+
+function handleRollFileChosen(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const base64 = e.target?.result;
+        if (base64) {
+            setCapturedPhoto(base64);
+            showToast('ラベル写真を読み込みました', 'success', 2000);
+        }
+    };
+    reader.readAsDataURL(file);
 }
 
 function handleFileChosen(event) {
@@ -2495,7 +2959,7 @@ function handleFileChosen(event) {
         const base64 = e.target?.result;
         if (base64) {
             setCapturedPhoto(base64);
-            showToast('📁 写真を読み込みました', 'success', 2000);
+            showToast('写真を読み込みました', 'success', 2000);
         }
     };
     reader.readAsDataURL(file);
@@ -2505,6 +2969,38 @@ function setCapturedPhoto(base64) {
     state.capturedPhotoBase64 = base64;
     state.uploadedPhotoUrl = null;
 
+    // 1. If photo was taken for a specific roll item in list
+    if (state.activeRollPhotoTarget) {
+        const { itemId, gIdx, rIdx } = state.activeRollPhotoTarget;
+        setItemEdit(itemId, { photoBase64: base64, photoUrl: base64 });
+
+        // Background upload
+        const group = state.currentGroups?.[gIdx];
+        const item = group?.items?.[rIdx];
+        const lotNoVal = `${state.selectedDate.replace(/-/g, '').slice(2)}-${item?.rollIndex || rIdx + 1}`;
+        uploadLabelPhotoToServer(base64, lotNoVal, item?.hinban || 'material').then(url => {
+            if (url) setItemEdit(itemId, { photoUrl: url });
+        }).catch(err => console.warn('Background label photo upload error:', err));
+
+        // Update thumbnail on the roll row
+        const row = document.querySelector(`.batch-roll-row[data-item-id="${itemId}"]`);
+        if (row) {
+            const photoWrap = row.querySelector('.roll-photo-container');
+            if (photoWrap) {
+                photoWrap.innerHTML = `
+                    <div class="roll-photo-wrap">
+                        <img src="${base64}" class="roll-photo-thumb" onclick="openPhotoEnlarged('${base64}')" title="クリックで拡大">
+                        <button type="button" class="btn-roll-photo has-photo" onclick="openRollPhotoCapture('${itemId}', ${gIdx}, ${rIdx}, event)">再撮影</button>
+                    </div>
+                `;
+            }
+        }
+
+        state.activeRollPhotoTarget = null;
+        return;
+    }
+
+    // 2. Feed modal fallback
     const thumb = document.getElementById('feedPhotoThumb');
     const wrap = document.getElementById('feedPhotoPreviewWrap');
     const badge = document.getElementById('feedPhotoStatusBadge');
@@ -2512,7 +3008,7 @@ function setCapturedPhoto(base64) {
     if (thumb) thumb.src = base64;
     if (wrap) wrap.style.display = 'flex';
     if (badge) {
-        badge.textContent = '✓ 撮影済み';
+        badge.textContent = '撮影済み';
         badge.style.color = 'var(--brand)';
     }
 }
@@ -2717,12 +3213,9 @@ async function fetchProductionQueue() {
 }
 
 function renderStagingQueue() {
-    const activeContainer = document.getElementById('queueActiveContainer');
-    const stagedContainer = document.getElementById('queueStagedContainer');
+    const queueContainer = document.getElementById('queueItemListContainer');
     const tabBadge = document.getElementById('tabQueueBadge');
-    const stagedCountTag = document.getElementById('queueStagedCountTag');
-    const legacyContainer = document.getElementById('stagingQueueList');
-    const legacyBadge = document.getElementById('stagingQueueCountBadge');
+    const totalCountBadge = document.getElementById('queueTotalCountBadge');
 
     const activeAndQueued = state.stagingQueue.filter(item => item.status === 'active' || item.status === 'queued');
 
@@ -2735,137 +3228,98 @@ function renderStagingQueue() {
         }
     }
 
-    if (legacyBadge) {
-        legacyBadge.textContent = `${activeAndQueued.length} 件`;
+    if (totalCountBadge) {
+        totalCountBadge.textContent = `${activeAndQueued.length} 件`;
+    }
+
+    if (!queueContainer) return;
+
+    if (activeAndQueued.length === 0) {
+        queueContainer.innerHTML = `
+            <div class="staging-queue-empty">
+                現在投入されている材料はありません。生産一覧 (List) タブから材料を投入してください。
+            </div>
+        `;
+        return;
     }
 
     const activeItem = activeAndQueued.find(it => it.status === 'active');
     const queuedItems = activeAndQueued.filter(it => it.status === 'queued');
 
-    if (stagedCountTag) {
-        stagedCountTag.textContent = `${queuedItems.length} 件`;
-    }
+    let rowsHTML = '';
 
-    // 1. Render Active Container
-    if (activeContainer) {
-        if (!activeItem) {
-            activeContainer.innerHTML = `
-                <div class="staging-queue-empty">
-                    現在貼合中の材料はありません。生産一覧または待機キューから材料を投入してください。
-                </div>
-            `;
-        } else {
-            const currentRoll = activeItem.currentRollIndex || activeItem.rollIndex || 1;
-            const totalRolls = activeItem.totalRolls || 1;
-            const rollPercent = Math.round((currentRoll / totalRolls) * 100);
-            const photoThumb = activeItem.photoUrl
-                ? `<img class="staging-thumb-preview" src="${activeItem.photoUrl}" alt="ラベル写真" onclick="openPhotoEnlarged('${activeItem.photoUrl}')" title="クリックで拡大">`
-                : `<div class="staging-thumb-placeholder" title="写真なし">写真なし</div>`;
-            const kizaiCode = activeItem.kizai || activeItem.hinban || '基材未設定';
+    // 1. Active item (#1 貼合中)
+    if (activeItem) {
+        const kizaiCode = activeItem.kizai || activeItem.hinban || '基材未設定';
+        const photoThumb = activeItem.photoUrl
+            ? `<img class="queue-flat-thumb" src="${activeItem.photoUrl}" alt="写真" onclick="openPhotoEnlarged('${activeItem.photoUrl}')" title="クリックで拡大">`
+            : `<div class="queue-flat-thumb-placeholder">写真なし</div>`;
+        const currentRoll = activeItem.currentRollIndex || activeItem.rollIndex || 1;
+        const totalRolls = activeItem.totalRolls || 1;
 
-            activeContainer.innerHTML = `
-                <div class="staging-card is-active" data-queue-id="${activeItem._id}">
-                    <div class="staging-card-left">
-                        <div class="staging-card-badge-col">
-                            <span class="staging-status-tag tag-active">貼合中</span>
-                            <span class="staging-pos-badge">現在処理中</span>
-                        </div>
-
-                        ${photoThumb}
-
-                        <div class="staging-card-info">
-                            <div class="staging-card-title-row">
-                                <span class="staging-card-hinban">${kizaiCode}</span>
-                                ${activeItem.color ? `<span class="staging-meta-pill">${activeItem.color}</span>` : ''}
-                                ${activeItem.zuban ? `<span class="staging-meta-pill">${activeItem.zuban}</span>` : ''}
-                            </div>
-                            <div class="staging-card-sub">
-                                <span>担当: <strong>${activeItem.worker || '作業者'}</strong></span>
-                                <span>•</span>
-                                <span>ロット: <strong>${activeItem.lotNo || '-'}</strong></span>
-                                ${activeItem.shippingDest ? `<span>• 行先: ${activeItem.shippingDest}</span>` : ''}
-                            </div>
-                            <div class="staging-card-chips">
-                                <span class="staging-meta-pill pill-rolls">Roll ${currentRoll} / ${totalRolls} 巻き (${rollPercent}%)</span>
-                                <span class="staging-meta-pill pill-lot">${activeItem.rollMeters || activeItem.totalMeters || 0} m</span>
-                                ${activeItem.manufacturerUid ? `<span class="staging-meta-pill">ID: ${activeItem.manufacturerUid}</span>` : ''}
-                            </div>
+        rowsHTML += `
+            <div class="queue-flat-row is-active" data-queue-id="${activeItem._id}">
+                <div class="queue-flat-left">
+                    <span class="queue-pos-tag pos-active">#1 貼合中</span>
+                    ${photoThumb}
+                    <div>
+                        <div class="queue-flat-title">${kizaiCode}</div>
+                        <div style="font-size: 0.825rem; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px;">
+                            <span>Roll: <strong>#${currentRoll} / ${totalRolls}</strong></span>
+                            <span>•</span>
+                            <span><strong>${activeItem.rollMeters || activeItem.totalMeters || 0} m</strong></span>
+                            <span>•</span>
+                            <span>ロット: <strong>${activeItem.lotNo || '-'}</strong></span>
+                            <span>•</span>
+                            <span>担当: <strong>${activeItem.worker || '作業者'}</strong></span>
+                            ${activeItem.shippingDest ? `<span>• 行先: <strong>${activeItem.shippingDest}</strong></span>` : ''}
                         </div>
                     </div>
-
-                    <div class="staging-card-actions" onclick="event.stopPropagation()">
-                        <button type="button" class="btn-staging-action btn-staging-advance" onclick="advanceQueueItemPrompt('${activeItem._id}')" title="現在の巻きを完了し次へ進める">
-                            完了 / 次へ
-                        </button>
-                    </div>
                 </div>
-            `;
-        }
+                <div class="queue-flat-right" onclick="event.stopPropagation()">
+                    <button type="button" class="btn-staging-action btn-staging-advance" onclick="advanceQueueItemPrompt('${activeItem._id}')" title="現在の巻きを完了し次へ進める">
+                        完了 / 次へ
+                    </button>
+                </div>
+            </div>
+        `;
     }
 
-    // 2. Render Staged Container
-    if (stagedContainer) {
-        if (queuedItems.length === 0) {
-            stagedContainer.innerHTML = `
-                <div class="staging-queue-empty">
-                    待機中の材料はありません。生産一覧タブから「投入」ボタンを押して追加してください。
-                </div>
-            `;
-        } else {
-            let queuedHtml = '';
-            queuedItems.forEach((item, qIdx) => {
-                const photoThumb = item.photoUrl
-                    ? `<img class="staging-thumb-preview" src="${item.photoUrl}" alt="ラベル写真" onclick="openPhotoEnlarged('${item.photoUrl}')" title="クリックで拡大">`
-                    : `<div class="staging-thumb-placeholder" title="写真なし">写真なし</div>`;
+    // 2. Queued items (#2 待機中, #3 待機中...)
+    queuedItems.forEach((item, qIdx) => {
+        const kizaiCode = item.kizai || item.hinban || '基材未設定';
+        const photoThumb = item.photoUrl
+            ? `<img class="queue-flat-thumb" src="${item.photoUrl}" alt="写真" onclick="openPhotoEnlarged('${item.photoUrl}')" title="クリックで拡大">`
+            : `<div class="queue-flat-thumb-placeholder">写真なし</div>`;
+        const posNum = activeItem ? (qIdx + 2) : (qIdx + 1);
 
-                const canMoveUp = qIdx > 0;
-                const canMoveDown = qIdx < queuedItems.length - 1;
-                const kizaiCode = item.kizai || item.hinban || '基材未設定';
-
-                queuedHtml += `
-                    <div class="staging-card is-queued" data-queue-id="${item._id}">
-                        <div class="staging-card-left">
-                            <div class="staging-card-badge-col">
-                                <span class="staging-status-tag tag-queued">待機中</span>
-                                <span class="staging-pos-badge">#${qIdx + 1} 番目</span>
-                            </div>
-
-                            ${photoThumb}
-
-                            <div class="staging-card-info">
-                                <div class="staging-card-title-row">
-                                    <span class="staging-card-hinban">${kizaiCode}</span>
-                                    ${item.color ? `<span class="staging-meta-pill">${item.color}</span>` : ''}
-                                    ${item.zuban ? `<span class="staging-meta-pill">${item.zuban}</span>` : ''}
-                                </div>
-                                <div class="staging-card-sub">
-                                    <span>ロット: <strong>${item.lotNo || '-'}</strong></span>
-                                    <span>•</span>
-                                    <span>全 ${item.totalRolls || 1} 巻き (${item.totalMeters || item.rollMeters || 0}m)</span>
-                                </div>
-                                <div class="staging-card-chips">
-                                    <span class="staging-meta-pill">Roll #${item.rollIndex || 1}</span>
-                                    ${item.manufacturerUid ? `<span class="staging-meta-pill">製造元: ${item.manufacturerUid}</span>` : ''}
-                                    ${item.rawMaterialLength ? `<span class="staging-meta-pill">材料長: ${item.rawMaterialLength}m</span>` : ''}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="staging-card-actions" onclick="event.stopPropagation()">
-                            <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'up')" ${!canMoveUp ? 'disabled' : ''} title="順序を繰り上げ">上へ</button>
-                            <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'down')" ${!canMoveDown ? 'disabled' : ''} title="順序を繰り下げ">下へ</button>
-                            <button type="button" class="btn-staging-action btn-staging-cancel" onclick="cancelQueueItem('${item._id}', '${kizaiCode}')" title="この材料投入を取り消す">取消</button>
+        rowsHTML += `
+            <div class="queue-flat-row is-staged" data-queue-id="${item._id}">
+                <div class="queue-flat-left">
+                    <span class="queue-pos-tag pos-queued">#${posNum} 待機中</span>
+                    ${photoThumb}
+                    <div>
+                        <div class="queue-flat-title">${kizaiCode}</div>
+                        <div style="font-size: 0.825rem; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px;">
+                            <span>Roll: <strong>#${item.rollIndex || 1} / ${item.totalRolls || 1}</strong></span>
+                            <span>•</span>
+                            <span><strong>${item.rollMeters || item.totalMeters || 0} m</strong></span>
+                            <span>•</span>
+                            <span>ロット: <strong>${item.lotNo || '-'}</strong></span>
+                            ${item.shippingDest ? `<span>• 行先: <strong>${item.shippingDest}</strong></span>` : ''}
                         </div>
                     </div>
-                `;
-            });
-            stagedContainer.innerHTML = queuedHtml;
-        }
-    }
+                </div>
+                <div class="queue-flat-right" onclick="event.stopPropagation()">
+                    <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'up')" ${qIdx === 0 ? 'disabled' : ''} title="順序を繰り上げ">上へ</button>
+                    <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'down')" ${qIdx === queuedItems.length - 1 ? 'disabled' : ''} title="順序を繰り下げ">下へ</button>
+                    <button type="button" class="btn-staging-action btn-staging-cancel" onclick="cancelQueueItem('${item._id}', '${kizaiCode}')" title="この材料投入を取り消す">取消</button>
+                </div>
+            </div>
+        `;
+    });
 
-    if (legacyContainer) {
-        legacyContainer.innerHTML = (activeContainer ? activeContainer.innerHTML : '') + (stagedContainer ? stagedContainer.innerHTML : '');
-    }
+    queueContainer.innerHTML = rowsHTML;
 }
 
 async function cancelQueueItem(queueId, hinban) {
@@ -2886,8 +3340,24 @@ async function cancelQueueItem(queueId, hinban) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.success) {
+            // Restore item state in localStorage so it returns to schedule list
+            const targetQueueItem = state.stagingQueue.find(q => String(q._id) === String(queueId));
+            if (targetQueueItem) {
+                const edits = getItemEdits();
+                Object.keys(edits).forEach(k => {
+                    const e = edits[k];
+                    if (e.lotNo && targetQueueItem.lotNo && e.lotNo === targetQueueItem.lotNo) {
+                        setItemEdit(k, { enqueued: false });
+                    } else if (e.hinban === targetQueueItem.hinban && Number(e.rollIndex) === Number(targetQueueItem.rollIndex)) {
+                        setItemEdit(k, { enqueued: false });
+                    }
+                });
+            }
+
             showToast(`ロット「${hinban}」のキューを取り消しました`, 'info');
             await fetchProductionQueue();
+            renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+            updateHistoryBadges();
         }
     } catch (err) {
         console.error('Error cancelling queue item:', err);
@@ -2972,12 +3442,145 @@ async function advanceQueueItemPrompt(queueId) {
     }
 }
 
+// -----------------------------------------------------
+// History Tab Logic (Panel 4)
+// -----------------------------------------------------
+function setHistoryFilter(filter) {
+    state.historyFilter = filter || 'all';
+    const buttons = document.querySelectorAll('.history-filter-btn');
+    buttons.forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-filter') === state.historyFilter);
+    });
+    renderHistoryList();
+}
+
+function updateHistoryBadges() {
+    const enqueuedBadge = document.getElementById('historyEnqueuedCountBadge');
+    const excludedBadge = document.getElementById('historyExcludedCountBadge');
+    const edits = getItemEdits();
+
+    let enqueuedCount = 0;
+    let excludedCount = 0;
+
+    Object.values(edits).forEach(e => {
+        if (e.enqueued) enqueuedCount++;
+        else if (e.isExcluded) excludedCount++;
+    });
+
+    if (enqueuedBadge) enqueuedBadge.textContent = `投入済: ${enqueuedCount} 件`;
+    if (excludedBadge) excludedBadge.textContent = `除外: ${excludedCount} 件`;
+}
+
+function renderHistoryList() {
+    const container = document.getElementById('historyListContainer');
+    if (!container) return;
+
+    updateHistoryBadges();
+
+    const edits = getItemEdits();
+    const items = [];
+
+    Object.keys(edits).forEach(itemId => {
+        const e = edits[itemId];
+        if (e.enqueued) {
+            items.push({
+                itemId,
+                type: 'enqueued',
+                kizai: e.kizai || e.hinban || '材料',
+                rollIndex: e.rollIndex || 1,
+                totalRolls: e.totalRolls || 1,
+                meters: e.meters || 0,
+                lotNo: e.lotNo || '-',
+                timestamp: e.enqueuedAt || '投入済',
+                photoUrl: e.photoUrl || e.photoBase64 || ''
+            });
+        } else if (e.isExcluded) {
+            items.push({
+                itemId,
+                type: 'excluded',
+                kizai: e.kizai || e.hinban || '材料',
+                rollIndex: e.rollIndex || 1,
+                totalRolls: e.totalRolls || 1,
+                meters: e.meters || 0,
+                lotNo: e.lotNo || '-',
+                timestamp: '除外中',
+                photoUrl: e.photoUrl || e.photoBase64 || ''
+            });
+        }
+    });
+
+    const filter = state.historyFilter || 'all';
+    const filtered = items.filter(it => {
+        if (filter === 'enqueued') return it.type === 'enqueued';
+        if (filter === 'excluded') return it.type === 'excluded';
+        return true;
+    });
+
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="staging-queue-empty">
+                ${filter === 'enqueued' ? '投入済の履歴はありません' : filter === 'excluded' ? '除外中の項目はありません' : '履歴はありません'}
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+    filtered.forEach(it => {
+        const isEnqueued = (it.type === 'enqueued');
+        const badgeClass = isEnqueued ? 'history-type-enqueued' : 'history-type-excluded';
+        const badgeLabel = isEnqueued ? '投入済' : '除外中';
+        const photoThumb = it.photoUrl
+            ? `<img class="history-thumb" src="${it.photoUrl}" alt="写真" onclick="openPhotoEnlarged('${it.photoUrl}')" title="クリックで拡大">`
+            : `<div class="history-thumb-placeholder">写真なし</div>`;
+
+        html += `
+            <div class="history-row ${isEnqueued ? 'is-enqueued' : 'is-excluded'}" data-item-id="${it.itemId}">
+                <div class="history-left">
+                    <span class="history-type-badge ${badgeClass}">${badgeLabel}</span>
+                    ${photoThumb}
+                    <div>
+                        <div class="history-title">${it.kizai}</div>
+                        <div class="history-meta">
+                            <span>Roll #${it.rollIndex} / ${it.totalRolls}</span>
+                            <span>•</span>
+                            <span><strong>${it.meters} m</strong></span>
+                            <span>•</span>
+                            <span>ロット: <strong>${it.lotNo}</strong></span>
+                            <span>•</span>
+                            <span>${it.timestamp}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="history-right" onclick="event.stopPropagation()">
+                    ${!isEnqueued ? `
+                        <button type="button" class="history-restore-btn" onclick="restoreExcludedItem('${it.itemId}')" title="生産一覧タブに復帰させる">
+                            一覧に戻す
+                        </button>
+                    ` : `
+                        <span style="font-size: 0.8rem; color: var(--brand); font-weight: 700;">キュー連携中</span>
+                    `}
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+function restoreExcludedItem(itemId) {
+    setItemEdit(itemId, { isExcluded: false });
+    renderHistoryList();
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+    showToast('項目を生産一覧に復帰させました', 'success', 2500);
+}
+
 // --- SSE Realtime Synchronization ---
 let productionEventSource = null;
 
 function setupProductionSSE() {
     if (productionEventSource) {
-        try { productionEventSource.close(); } catch (e) {}
+        try { productionEventSource.close(); } catch (e) { }
         productionEventSource = null;
     }
 
