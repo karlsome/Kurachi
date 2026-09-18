@@ -245,6 +245,7 @@
             align-items: center;
             justify-content: center;
             height: 24px;
+            position: relative;
         }
 
         .tab-btn .tab-icon svg {
@@ -255,6 +256,24 @@
             fill: none;
             stroke-linecap: round;
             stroke-linejoin: round;
+        }
+
+        .tab-btn .tab-label-wrap {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .tab-badge {
+            background: var(--brand);
+            color: #FFFFFF;
+            font-size: 0.7rem;
+            font-weight: 800;
+            padding: 1px 6px;
+            border-radius: 999px;
+            min-width: 16px;
+            text-align: center;
+            line-height: 1.3;
         }
 
         /* ---------------- Viewport & Panels ---------------- */
@@ -268,7 +287,7 @@
 
         .tab-panels-container {
             display: flex;
-            width: 500%; /* 5 tabs: User, List, Info, Production, Submit */
+            width: 600%; /* 6 tabs: User, List, Queue, Info, Production, Submit */
             height: 100%;
             transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
             transform: translate3d(0, 0, 0);
@@ -278,7 +297,7 @@
         }
 
         .tab-panel {
-            width: 20%; /* 100% / 5 tabs */
+            width: 16.666667%; /* 100% / 6 tabs */
             height: 100%;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
@@ -1164,10 +1183,17 @@
             flex-direction: column;
             gap: 12px;
             padding: 16px 20px;
-            border-bottom: 1px solid var(--border);
             cursor: pointer;
             background: var(--bg-surface);
             transition: var(--transition-smooth);
+        }
+
+        .batch-group-card.is-expanded .batch-header {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .batch-group-card:not(.is-expanded) .batch-header {
+            border-bottom: none;
         }
 
         .batch-group-card.group-tinted .batch-header {
@@ -1248,6 +1274,47 @@
             width: 100%;
         }
 
+        .btn-card-expand-toggle {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            color: var(--text-soft);
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all var(--transition-smooth);
+            user-select: none;
+        }
+
+        .btn-card-expand-toggle:hover {
+            border-color: var(--brand);
+            color: var(--text-main);
+            background: var(--bg-subtle);
+        }
+
+        .btn-card-expand-toggle svg {
+            width: 14px;
+            height: 14px;
+            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            stroke: currentColor;
+            stroke-width: 2.2;
+            fill: none;
+        }
+
+        .batch-group-card.is-expanded .btn-card-expand-toggle svg {
+            transform: rotate(180deg);
+        }
+
+        .batch-group-card.is-expanded .btn-card-expand-toggle {
+            background: var(--bg-inset);
+            border-color: var(--border-strong);
+            color: var(--text-main);
+        }
+
         .batch-summary-pill {
             font-weight: 800;
             color: var(--text-main);
@@ -1290,9 +1357,14 @@
 
         /* Batch Roll Sub-Rows */
         .batch-rolls-list {
-            display: flex;
+            display: none;
             flex-direction: column;
-            background: var(--bg-surface);
+            background: #F8FAFC;
+            border-top: 1px solid var(--border);
+        }
+
+        .batch-group-card.is-expanded .batch-rolls-list {
+            display: flex;
         }
 
         .batch-roll-row {
@@ -1300,10 +1372,11 @@
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            padding: 10px 20px 10px 76px;
+            padding: 10px 20px;
             border-top: 1px solid var(--border);
             transition: var(--transition-smooth);
             cursor: pointer;
+            background: transparent;
         }
 
         .batch-roll-row:first-child {
@@ -1908,75 +1981,70 @@
         /* ============================================================
            STAGING QUEUE DOCK & MATERIAL FEEDING FLOW (Tablet 1)
            ============================================================ */
-        .staging-queue-dock {
-            background: var(--bg-surface);
-            border: 1.5px solid var(--border);
-            border-radius: var(--card-radius);
-            box-shadow: var(--shadow-card);
+        /* ---------------- Queue Tab (Panel 2) ---------------- */
+        .queue-panel-header {
             margin-bottom: 16px;
-            overflow: hidden;
-            transition: all var(--transition-smooth);
         }
 
-        .staging-queue-header {
+        .queue-header-title-wrap {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 12px 16px;
-            background: linear-gradient(180deg, #FFFFFF 0%, var(--bg-subtle) 100%);
-            border-bottom: 1px solid var(--border);
-            cursor: pointer;
-            user-select: none;
-            gap: 10px;
+            gap: 12px;
             flex-wrap: wrap;
         }
 
-        .staging-queue-header:hover {
-            background: var(--bg-subtle);
+        .queue-header-title-wrap h2 {
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: var(--text-main);
+            letter-spacing: -0.01em;
+            margin: 0;
         }
 
-        .staging-queue-title-wrap {
+        .queue-section-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 16px 20px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow-card);
+        }
+
+        .queue-section-title-row {
             display: flex;
             align-items: center;
+            justify-content: space-between;
             gap: 10px;
-            flex-wrap: wrap;
+            margin-bottom: 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
         }
 
-        .staging-queue-icon {
-            font-size: 1.25rem;
-            line-height: 1;
-        }
-
-        .staging-queue-title {
+        .queue-section-heading {
             font-size: 0.95rem;
             font-weight: 800;
             color: var(--text-main);
             letter-spacing: -0.01em;
         }
 
-        .staging-queue-count-badge {
-            background: var(--brand-soft);
-            color: var(--brand);
-            border: 1px solid rgba(31, 157, 107, 0.3);
+        .queue-count-tag {
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
             font-size: 0.75rem;
             font-weight: 800;
             padding: 2px 8px;
-            border-radius: 999px;
-        }
-
-        .staging-queue-header-actions {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            border-radius: var(--r-pill);
         }
 
         .scanner-header-pill {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            font-size: 0.75rem;
+            font-size: 0.775rem;
             font-weight: 700;
-            padding: 4px 10px;
+            padding: 5px 12px;
             border-radius: 999px;
             background: #ECFDF5;
             color: #065F46;
@@ -1984,63 +2052,7 @@
             white-space: nowrap;
         }
 
-        .scanner-header-pill.pulsing::before {
-            content: '';
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: #10B981;
-            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-            animation: scannerPulse 1.8s infinite;
-        }
-
-        @keyframes scannerPulse {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
-
-        .staging-queue-toggle-btn {
-            background: var(--bg-inset);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            width: 28px;
-            height: 28px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            transition: var(--transition-smooth);
-        }
-
-        .staging-queue-toggle-btn:hover {
-            border-color: var(--brand);
-            color: var(--brand);
-        }
-
-        .staging-queue-body {
-            padding: 14px 16px;
-            transition: max-height 0.25s ease, opacity 0.25s ease;
-            max-height: 520px;
-            overflow-y: auto;
-            opacity: 1;
-        }
-
-        .staging-queue-dock.collapsed .staging-queue-body {
-            max-height: 0;
-            padding-top: 0;
-            padding-bottom: 0;
-            opacity: 0;
-            overflow: hidden;
-        }
-
-        .staging-queue-dock.collapsed .staging-queue-header {
-            border-bottom: none;
-        }
-
-        .staging-queue-list {
+        .queue-items-list {
             display: flex;
             flex-direction: column;
             gap: 10px;
@@ -2049,12 +2061,84 @@
         /* Queue Empty State */
         .staging-queue-empty {
             text-align: center;
-            padding: 16px 12px;
+            padding: 20px 16px;
             color: var(--text-soft);
             font-size: 0.875rem;
             background: var(--bg-subtle);
             border-radius: 8px;
             border: 1px dashed var(--border-strong);
+        }
+
+        /* Flat Schedule List Action Buttons */
+        .btn-feed-primary {
+            background: var(--brand);
+            color: #FFFFFF;
+            border: none;
+            padding: 8px 18px;
+            font-size: 0.875rem;
+            font-weight: 800;
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            transition: background var(--transition-smooth);
+            white-space: nowrap;
+        }
+
+        .btn-feed-primary:hover {
+            background: var(--brand-hover);
+        }
+
+        .btn-detail-secondary {
+            background: var(--bg-surface);
+            color: var(--text-main);
+            border: 1.5px solid var(--border-strong);
+            padding: 7px 14px;
+            font-size: 0.875rem;
+            font-weight: 700;
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            white-space: nowrap;
+        }
+
+        .btn-detail-secondary:hover {
+            border-color: var(--blue);
+            color: var(--blue);
+        }
+
+        .batch-status-tag {
+            font-size: 0.775rem;
+            font-weight: 800;
+            padding: 4px 10px;
+            border-radius: var(--r-pill);
+            white-space: nowrap;
+            letter-spacing: -0.01em;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .batch-status-tag.status-pending {
+            background: var(--bg-inset);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+
+        .batch-status-tag.status-queued {
+            background: #EFF6FF;
+            color: #1D4ED8;
+            border: 1px solid #BFDBFE;
+        }
+
+        .batch-status-tag.status-active {
+            background: #ECFDF5;
+            color: #065F46;
+            border: 1px solid #A7F3D0;
+        }
+
+        .batch-status-tag.status-completed {
+            background: var(--bg-inset);
+            color: var(--text-soft);
+            border: 1px solid var(--border);
         }
 
         /* Queue Item Cards */
@@ -2707,38 +2791,48 @@
         </div>
     </header>
 
-    <!-- Main Tab Bar (5 Tabs) -->
+    <!-- Main Tab Bar (6 Tabs) -->
     <div class="tab-bar" id="mainTabBar">
-        <!-- 1. User -->
+        <!-- 0. User -->
         <button type="button" class="tab-btn active" data-tab="0">
             <span class="tab-icon">
                 <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             </span>
             <span class="tab-label">User</span>
         </button>
-        <!-- 2. List -->
+        <!-- 1. List -->
         <button type="button" class="tab-btn" data-tab="1">
             <span class="tab-icon">
                 <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             </span>
             <span class="tab-label">List</span>
         </button>
-        <!-- 3. Info -->
+        <!-- 2. Queue -->
         <button type="button" class="tab-btn" data-tab="2">
+            <span class="tab-icon">
+                <svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            </span>
+            <span class="tab-label-wrap">
+                <span class="tab-label">Queue</span>
+                <span class="tab-badge" id="tabQueueBadge" style="display: none;">0</span>
+            </span>
+        </button>
+        <!-- 3. Info -->
+        <button type="button" class="tab-btn" data-tab="3">
             <span class="tab-icon">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
             </span>
             <span class="tab-label">Info</span>
         </button>
         <!-- 4. Production -->
-        <button type="button" class="tab-btn" data-tab="3">
+        <button type="button" class="tab-btn" data-tab="4">
             <span class="tab-icon">
                 <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
             </span>
             <span class="tab-label">Production</span>
         </button>
         <!-- 5. Submit -->
-        <button type="button" class="tab-btn" data-tab="4">
+        <button type="button" class="tab-btn" data-tab="5">
             <span class="tab-icon">
                 <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             </span>
@@ -2792,15 +2886,15 @@
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                             <button type="button" class="date-nav-btn today-btn" id="btnToday">今日 (Today)</button>
-                            <button type="button" class="date-nav-btn" id="btnRefreshSchedule" title="再読み込み (Refresh)">↻</button>
+                            <button type="button" class="date-nav-btn" id="btnRefreshSchedule" title="再読み込み (Refresh)">再読込</button>
 
                             <!-- View Mode Switcher (Card vs Table) -->
                             <div class="view-mode-switcher" id="viewModeSwitcher">
                                 <button type="button" class="view-mode-btn active" id="btnViewCard" onclick="switchListViewMode('card')" title="カード表示 (Card View)">
-                                    📇 カード
+                                    カード
                                 </button>
                                 <button type="button" class="view-mode-btn" id="btnViewTable" onclick="switchListViewMode('table')" title="リスト・テーブル表示 (Table / List View)">
-                                    📋 リスト
+                                    リスト
                                 </button>
                             </div>
                         </div>
@@ -2813,38 +2907,16 @@
                             <strong id="statTotalItemsVal">0 件</strong>
                         </div>
                         <div class="stat-chip" id="chipStartTime">
-                            <span>🕒 始業:</span>
+                            <span>始業:</span>
                             <strong id="statStartTimeVal">08:00</strong>
                         </div>
                         <div class="stat-chip" id="chipTotalDuration">
-                            <span>⏱️ 予定時間:</span>
+                            <span>予定時間:</span>
                             <strong id="statTotalDurationVal">0 分</strong>
                         </div>
                         <div class="stat-chip" id="chipEndTime">
-                            <span>🏁 終了目安:</span>
+                            <span>終了目安:</span>
                             <strong id="statEndTimeVal">--:--</strong>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Staging Queue Dock / Bar -->
-                <div class="staging-queue-dock" id="stagingQueueDock">
-                    <div class="staging-queue-header" onclick="toggleStagingQueueCollapse()">
-                        <div class="staging-queue-title-wrap">
-                            <span class="staging-queue-icon">⚡</span>
-                            <span class="staging-queue-title">投入中・準備キュー (In-Feed & Staged Queue)</span>
-                            <span class="staging-queue-count-badge" id="stagingQueueCountBadge">0 件</span>
-                        </div>
-                        <div class="staging-queue-header-actions">
-                            <span class="scanner-header-pill pulsing" id="scannerHeaderStatus">🟢 スキャナー待機中</span>
-                            <button type="button" class="staging-queue-toggle-btn" id="btnStagingQueueToggle" aria-label="キュー開閉">▲</button>
-                        </div>
-                    </div>
-                    <div class="staging-queue-body" id="stagingQueueBody">
-                        <div class="staging-queue-list" id="stagingQueueList">
-                            <div class="staging-queue-empty">
-                                📥 現在キューに入っている材料はありません。下のリストから「📦 材料投入・準備」を押して投入してください。
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -2855,7 +2927,38 @@
                 </div>
             </div>
 
-            <!-- Panel 2: Info -->
+            <!-- Panel 2: Queue -->
+            <div class="tab-panel" id="panelQueue">
+                <div class="queue-panel-header">
+                    <div class="queue-header-title-wrap">
+                        <h2>投入キュー (Feed Queue)</h2>
+                        <span class="scanner-header-pill" id="queueScannerStatus">スキャナー待機中</span>
+                    </div>
+                </div>
+
+                <!-- Active Roll Section -->
+                <div class="queue-section-card" id="queueActiveCard">
+                    <div class="queue-section-title-row">
+                        <span class="queue-section-heading">現在貼合中 (Active)</span>
+                    </div>
+                    <div id="queueActiveContainer">
+                        <!-- Rendered dynamically -->
+                    </div>
+                </div>
+
+                <!-- Staged Queue Section -->
+                <div class="queue-section-card" id="queueStagedCard">
+                    <div class="queue-section-title-row">
+                        <span class="queue-section-heading">待機キュー (Staged Queue)</span>
+                        <span class="queue-count-tag" id="queueStagedCountTag">0 件</span>
+                    </div>
+                    <div id="queueStagedContainer">
+                        <!-- Rendered dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel 3: Info -->
             <div class="tab-panel" id="panelInfo">
                 <div class="info-layout-container" id="infoTabContainer">
                     <div class="card">
@@ -2870,7 +2973,7 @@
                 </div>
             </div>
 
-            <!-- Panel 3: Production -->
+            <!-- Panel 4: Production -->
             <div class="tab-panel" id="panelProduction">
                 <div class="card">
                     <h2>生産実績入力 (Production Entry)</h2>
@@ -2882,7 +2985,7 @@
                 </div>
             </div>
 
-            <!-- Panel 4: Submit -->
+            <!-- Panel 5: Submit -->
             <div class="tab-panel" id="panelSubmit">
                 <div class="card">
                     <h2>データ送信 (Data Submit)</h2>
@@ -2957,8 +3060,7 @@
         <div>
             <div class="feed-modal-header">
                 <div class="feed-modal-title">
-                    <span>📦</span>
-                    <span>材料投入・準備 (Feed Material & Enqueue)</span>
+                    <span>材料投入・キュー追加 (Feed Material & Enqueue)</span>
                 </div>
                 <button type="button" class="feed-modal-close-btn" onclick="closeMaterialFeedModal()" title="閉じる">✕</button>
             </div>
@@ -2966,11 +3068,10 @@
             <!-- Lot Summary -->
             <div class="feed-lot-summary-card">
                 <div class="feed-lot-title-row">
-                    <span class="feed-lot-hinban" id="feedModalHinban">-</span>
+                    <span class="feed-lot-hinban" id="feedModalKizaiTitle">-</span>
                     <span id="feedModalOrderRange" style="font-weight: 800; font-size: 0.85rem; color: var(--text-soft);">#1</span>
                 </div>
                 <div class="feed-lot-pills-row">
-                    <span class="tag-pill" id="feedModalKizai">基材: -</span>
                     <span class="tag-pill color-tag" id="feedModalColor">色: -</span>
                     <span class="tag-pill" id="feedModalZuban">図番: -</span>
                     <span class="tag-pill dest-tag" id="feedModalDest">出荷先: -</span>
@@ -2982,16 +3083,16 @@
             <!-- Material Label Photo Capture -->
             <div class="feed-section-block">
                 <div class="feed-section-title">
-                    <span>📷 原材料ラベル写真 (Material Label Photo)</span>
+                    <span>原材料ラベル写真 (Material Label Photo)</span>
                     <span id="feedPhotoStatusBadge" style="font-size: 0.75rem; font-weight: 700; color: var(--text-soft);">未撮影</span>
                 </div>
                 
                 <div class="feed-photo-actions-row" id="feedPhotoActionsRow">
                     <button type="button" class="btn btn-photo-capture" onclick="startCameraCapture()">
-                        📷 ラベル撮影 (Take Photo)
+                        ラベル撮影 (Take Photo)
                     </button>
                     <button type="button" class="btn btn-secondary" onclick="triggerFileInputFallback()" style="font-size: 0.825rem; padding: 0 12px;">
-                        📁 ファイル選択 (File Fallback)
+                        ファイル選択 (File Fallback)
                     </button>
                     <input type="file" id="materialPhotoFileInput" accept="image/*" capture="environment" style="display: none;" onchange="handleFileChosen(event)">
                 </div>
@@ -3000,10 +3101,10 @@
                 <div class="feed-photo-preview-wrap" id="feedPhotoPreviewWrap" style="display: none;">
                     <img id="feedPhotoThumb" class="feed-photo-preview-img" src="" alt="材料ラベル" onclick="openPhotoEnlarged()">
                     <div style="display: flex; flex-direction: column; gap: 6px; flex: 1;">
-                        <span style="font-size: 0.825rem; font-weight: 800; color: var(--brand);">✓ ラベル写真撮影済み</span>
+                        <span style="font-size: 0.825rem; font-weight: 800; color: var(--brand);">ラベル写真撮影済み</span>
                         <div style="display: flex; gap: 8px;">
-                            <button type="button" class="btn btn-secondary" onclick="startCameraCapture()" style="min-height: 32px; padding: 0 10px; font-size: 0.775rem;">🔄 再撮影</button>
-                            <button type="button" class="btn btn-secondary" onclick="removeCapturedPhoto()" style="min-height: 32px; padding: 0 10px; font-size: 0.775rem; color: var(--red);">🗑️ 削除</button>
+                            <button type="button" class="btn btn-secondary" onclick="startCameraCapture()" style="min-height: 32px; padding: 0 10px; font-size: 0.775rem;">再撮影</button>
+                            <button type="button" class="btn btn-secondary" onclick="removeCapturedPhoto()" style="min-height: 32px; padding: 0 10px; font-size: 0.775rem; color: var(--red);">削除</button>
                         </div>
                     </div>
                 </div>
@@ -3012,11 +3113,10 @@
             <!-- USB QR Scanner Listener & Manual Inputs -->
             <div class="feed-section-block">
                 <div class="feed-section-title">
-                    <span>⚡ 原材料情報入力・スキャナー</span>
+                    <span>原材料情報入力・スキャナー</span>
                 </div>
 
                 <div class="scanner-status-indicator" id="feedModalScannerIndicator">
-                    <span>🟢</span>
                     <span id="feedModalScannerText">USBスキャナー待機中 (バーコードまたはQRコードをスキャン)</span>
                 </div>
 
@@ -3048,7 +3148,7 @@
             <!-- Modal Action Footer -->
             <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
                 <button type="button" class="btn-feed-submit" id="btnFeedEnqueue" onclick="submitFeedAndEnqueue()">
-                    🚀 投入・キューに追加 (Feed & Add to Queue)
+                    投入・キューに追加 (Feed & Add to Queue)
                 </button>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <span style="font-size: 0.75rem; color: var(--text-soft);">※キュー追加後、TV画面へ自動反映され直ちに次の材料を準備できます</span>
@@ -3062,7 +3162,7 @@
     <div id="nativeCameraModal">
         <div class="camera-dialog-box">
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h3 style="font-size: 1.15rem; font-weight: 800; margin: 0;">📷 材料ラベル撮影 (Label Photo Camera)</h3>
+                <h3 style="font-size: 1.15rem; font-weight: 800; margin: 0;">材料ラベル撮影 (Label Photo Camera)</h3>
                 <button type="button" onclick="closeWebcamModal()" style="background: transparent; border: none; color: #94A3B8; font-size: 1.5rem; cursor: pointer;">✕</button>
             </div>
             
@@ -3075,7 +3175,7 @@
 
             <div class="camera-actions-row">
                 <button type="button" class="btn-cam-snap" id="btnWebcamSnap" onclick="captureWebcamSnapshot()">
-                    📸 撮影する (Capture)
+                    撮影する (Capture)
                 </button>
                 <button type="button" class="btn-cam-cancel" onclick="closeWebcamModal()">
                     ✕ キャンセル
@@ -3084,7 +3184,7 @@
 
             <div>
                 <button type="button" onclick="fallbackFromCameraToFile()" style="background: transparent; border: none; color: #93C5FD; font-size: 0.8rem; text-decoration: underline; cursor: pointer; padding: 4px;">
-                    📁 カメラが使えない場合はファイル選択へ切り替え
+                    カメラが使えない場合はファイル選択へ切り替え
                 </button>
             </div>
         </div>

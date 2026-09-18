@@ -4,9 +4,9 @@
  */
 
 // Determine backend server URL
-const serverURL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
-    ? window.location.origin
-    : "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
+//const serverURL = "http://192.168.0.48:3000";
 
 // -----------------------------------------------------
 // Date & Time Helpers
@@ -1430,9 +1430,9 @@ function setupEventListeners() {
     if (btnFull) {
         btnFull.addEventListener('click', () => {
             if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen?.().catch(() => {});
+                document.documentElement.requestFullscreen?.().catch(() => { });
             } else {
-                document.exitFullscreen?.().catch(() => {});
+                document.exitFullscreen?.().catch(() => { });
             }
         });
     }

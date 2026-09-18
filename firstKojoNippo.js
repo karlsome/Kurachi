@@ -20,7 +20,7 @@ const state = {
     machineName: null,
     filterName: "第一工場",
 
-    currentMainTab: 0, // 0: User, 1: List, 2: Info, 3: Production, 4: Submit
+    currentMainTab: 0, // 0: User, 1: List, 2: Queue, 3: Info, 4: Production, 5: Submit
 
     selectedDate: sessionStorage.getItem('firstkojo_nippo_date') || getTodayDateString(),
     dailySchedule: null,
@@ -38,6 +38,7 @@ const state = {
     // Staging Queue & Feed Modal State
     stagingQueue: [],
     isQueueCollapsed: localStorage.getItem('firstkojo_queue_collapsed') === 'true',
+    expandedGroups: new Set(),
     currentFeedItem: null,
     currentFeedGroup: null,
     capturedPhotoBase64: null,
@@ -308,9 +309,9 @@ function switchMainTab(index) {
     tabs.forEach(t => t.classList.remove('active'));
     if (tabs[index]) tabs[index].classList.add('active');
 
-    // 5 tabs => 100 / 5 = 20% shift per tab
+    // 6 tabs => 100 / 6 = 16.666667% shift per tab
     if (container) {
-        container.style.transform = `translateX(-${index * 20}%)`;
+        container.style.transform = `translateX(-${index * (100 / 6)}%)`;
     }
     state.currentMainTab = index;
     sessionStorage.setItem('firstkojo_nippo_main_tab', index);
@@ -319,6 +320,9 @@ function switchMainTab(index) {
         fetchDailySchedule(state.selectedDate);
     }
     if (index === 2) {
+        fetchProductionQueue();
+    }
+    if (index === 3) {
         loadItemDetail(state.selectedItem);
     }
 }
@@ -1044,9 +1048,8 @@ function renderScheduleTableView(groups, items) {
     if (!groups || groups.length === 0) {
         return `
             <div class="schedule-empty-state">
-                <div class="empty-icon">📅</div>
                 <h3>この日の生産予定はありません</h3>
-                <p>上部の日付選択から他の日付を選択するか、更新ボタンを押してください。</p>
+                <p>上部の日付選択から他の日付を選択するか、再読込ボタンを押してください。</p>
             </div>
         `;
     }
@@ -1055,7 +1058,6 @@ function renderScheduleTableView(groups, items) {
 
     groups.forEach((group, gIdx) => {
         const lifecycle = getGroupLifecycle(group.groupId);
-        const isGroupSelected = (lifecycle.status !== 'completed') && state.selectedItem && group.items.some(it => it.id === state.selectedItem.id);
 
         if (group.type === 'setup') {
             const setupItem = group.items[0];
@@ -1063,9 +1065,9 @@ function renderScheduleTableView(groups, items) {
                 <tr class="table-setup-row" data-id="${setupItem.id}">
                     <td style="text-align: center; font-weight: 800;">#${setupItem.orderIndex}</td>
                     <td style="font-weight: 700;">${setupItem.startTime} - ${setupItem.endTime}</td>
-                    <td colspan="6" style="font-weight: 800;">⚙️ ${setupItem.name || '段取り / 段替'} (${setupItem.duration} 分)</td>
-                    <td style="text-align: center;"><span style="color: #B45309; font-weight: 700; font-size: 0.8rem;">段替</span></td>
-                    <td colspan="2" style="text-align: center; color: var(--text-muted); font-size: 0.8rem;">—</td>
+                    <td colspan="4" style="font-weight: 800;">段取り / 段替 (${setupItem.duration}分)</td>
+                    <td style="text-align: center;"><span class="batch-status-tag status-pending">段替</span></td>
+                    <td style="text-align: center; color: var(--text-muted); font-size: 0.8rem;">—</td>
                 </tr>
             `;
             return;
@@ -1074,90 +1076,45 @@ function renderScheduleTableView(groups, items) {
         const firstItem = group.items[0];
         const lastItem = group.items[group.items.length - 1];
         const orderRangeText = group.items.length > 1 ? `#${firstItem.orderIndex}〜#${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
-        const mainTitle = group.kizai || group.hinban;
+        const kizaiCode = group.kizai || group.hinban || '基材未設定';
 
-        let statusBadge = '<span style="color: #64748B; font-weight: 700;">待機中</span>';
-        let statusClass = '';
-        if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
-            statusBadge = `<span style="color: #7E22CE; font-weight: 800;">🟣 生産中 (${lifecycle.actualStartTime || ''}〜)</span>`;
-            statusClass = 'table-row-in-progress';
-        } else if (lifecycle.status === 'completed') {
-            statusBadge = `<span style="color: #15803D; font-weight: 800;">✅ 完了 (${lifecycle.actualDurationMins || ''}分)</span>`;
-            statusClass = 'table-row-completed';
+        const queuedItem = state.stagingQueue.find(q =>
+            (q.groupId === group.groupId || q.hinban === group.hinban || q.kizai === group.kizai) &&
+            (q.status === 'active' || q.status === 'queued')
+        );
+        const isQueueActive = queuedItem && queuedItem.status === 'active';
+        const isQueued = queuedItem && queuedItem.status === 'queued';
+
+        let statusBadge = '<span class="batch-status-tag status-pending">待機中</span>';
+        if (lifecycle.status === 'completed') {
+            statusBadge = `<span class="batch-status-tag status-completed">完了 (${lifecycle.actualDurationMins || ''}分)</span>`;
+        } else if (isQueueActive) {
+            statusBadge = '<span class="batch-status-tag status-active">貼合中</span>';
+        } else if (isQueued) {
+            statusBadge = '<span class="batch-status-tag status-queued">キュー投入済</span>';
+        } else if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
+            statusBadge = '<span class="batch-status-tag status-active">生産中</span>';
         }
 
-        const printedCount = Array.isArray(lifecycle.printHistory)
-            ? new Set(lifecycle.printHistory.map(p => Number(p.rollIndex))).size
-            : 0;
-        const isAllPrinted = printedCount >= group.items.length && group.items.length > 0;
-
         rowsHTML += `
-            <tr class="table-group-header ${statusClass} ${isGroupSelected ? 'table-row-selected' : ''}" onclick="previewBatchGroup(${gIdx}, event)">
-                <td style="text-align: center; font-weight: 900; color: var(--brand); font-size: 0.95rem;">${orderRangeText}</td>
-                <td style="font-weight: 800; font-variant-numeric: tabular-nums;">${group.startTime} - ${group.endTime}</td>
-                <td style="font-weight: 900; font-size: 0.95rem; color: #0F172A; cursor: pointer;">
-                    <div>${mainTitle}</div>
-                    ${group.hinban && group.kizai ? `<div style="font-size: 0.75rem; color: #64748B; font-weight: 600;">${group.hinban}</div>` : ''}
+            <tr class="table-group-header" onclick="previewBatchGroup(${gIdx}, event)">
+                <td style="text-align: center; font-weight: 800; color: var(--brand); font-size: 0.95rem;">${orderRangeText}</td>
+                <td style="font-weight: 700; font-variant-numeric: tabular-nums;">${group.startTime} - ${group.endTime}</td>
+                <td style="font-weight: 800; font-size: 0.95rem; color: #0F172A; cursor: pointer;">
+                    <div>${kizaiCode}</div>
                 </td>
-                <td style="font-weight: 700;">${group.shippingDest || '—'}</td>
-                <td style="font-weight: 700;">${group.color || '—'}</td>
-                <td style="font-weight: 700;">${group.shori || '—'}</td>
-                <td style="font-weight: 700;">${group.habanaga || '—'}</td>
-                <td style="font-weight: 800;">全 ${group.items.length} 巻き (${group.totalMeters}m)</td>
+                <td style="font-weight: 600;">${group.shippingDest || '—'}</td>
+                <td style="font-weight: 600;">${group.color || '—'}</td>
+                <td style="font-weight: 600;">全 ${group.items.length} 巻き (${group.totalMeters}m)</td>
                 <td>${statusBadge}</td>
                 <td onclick="event.stopPropagation()" style="text-align: center;">
-                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800; white-space: nowrap; ${isAllPrinted ? 'background: #DCFCE7; color: #15803D; border-color: #86EFAC;' : ''}" onclick="printBatchGroup(${gIdx}, event)">
-                        ${isAllPrinted ? `✓ 印刷済 (${printedCount}/${group.items.length})` : '🖨️ 一括印刷'}
-                    </button>
-                </td>
-                <td onclick="event.stopPropagation()" style="text-align: center;">
-                    <div style="display: flex; gap: 4px; justify-content: center; align-items: center;">
-                        <button type="button" class="btn btn-primary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800; background: #10B981;" onclick="openMaterialFeedModalForGroup(${gIdx}, event)" title="材料投入・準備">📦 投入</button>
-                        <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800;" onclick="previewBatchGroup(${gIdx}, event)" title="詳細">ℹ️ 詳細</button>
-                        ${(lifecycle.status === 'in-progress' || lifecycle.status === 'running') ? `
-                            <button type="button" class="btn btn-primary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800; background: #059669;" onclick="showDoneConfirmation(${gIdx}, event)">⏹ 完了</button>
-                        ` : lifecycle.status === 'completed' ? `
-                            <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800; color: #D97706;" onclick="showReopenModal(${gIdx}, event)">🔄 再開</button>
-                        ` : `
-                            <button type="button" class="btn btn-primary" style="padding: 4px 8px; font-size: 0.75rem; font-weight: 800;" onclick="startBatchGroup(${gIdx}, event)">▶ 開始</button>
-                        `}
+                    <div style="display: flex; gap: 6px; justify-content: center; align-items: center;">
+                        <button type="button" class="btn-feed-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="openMaterialFeedModalForGroup(${gIdx}, event)">投入</button>
+                        <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event)">詳細</button>
                     </div>
                 </td>
             </tr>
         `;
-
-        group.items.forEach((rollItem, rIdx) => {
-            const actualRollIndex = rollItem.rollIndex || (rIdx + 1);
-            const isRollPrinted = Array.isArray(lifecycle.printHistory) && lifecycle.printHistory.some(p => Number(p.rollIndex) === Number(actualRollIndex));
-            const lastPrint = isRollPrinted ? lifecycle.printHistory.filter(p => Number(p.rollIndex) === Number(actualRollIndex)).slice(-1)[0] : null;
-
-            rowsHTML += `
-                <tr class="table-roll-row ${statusClass}" onclick="previewBatchGroup(${gIdx}, event)">
-                    <td style="text-align: center; color: #64748B; font-weight: 700; padding-left: 20px;">#${rollItem.orderIndex}</td>
-                    <td style="color: #64748B; font-variant-numeric: tabular-nums;">${rollItem.startTime || '—'} - ${rollItem.endTime || '—'}</td>
-                    <td style="color: #475569; padding-left: 18px; font-weight: 700;">↳ ${actualRollIndex} / ${group.items.length} 巻き目</td>
-                    <td style="color: #64748B;">—</td>
-                    <td style="color: #64748B;">—</td>
-                    <td style="color: #64748B;">—</td>
-                    <td style="color: #64748B;">—</td>
-                    <td style="color: #334155; font-weight: 700;">${rollItem.meters || '—'} m (${rollItem.duration || '—'}分)</td>
-                    <td>
-                        ${isRollPrinted ? `<span style="color: #16A34A; font-weight: 800; font-size: 0.75rem;">✓ 印刷済 (${lastPrint?.timeStr || ''})</span>` : `<span style="color: #94A3B8; font-size: 0.75rem;">未印刷</span>`}
-                    </td>
-                    <td onclick="event.stopPropagation()" style="text-align: center;">
-                        <div style="display: flex; gap: 4px; justify-content: center; align-items: center;">
-                            <button type="button" class="btn btn-secondary" style="padding: 2px 6px; font-size: 0.75rem; font-weight: 800; color: #059669; border-color: #86EFAC; background: #ECFDF5;" onclick="openMaterialFeedModalForRoll(${gIdx}, ${rIdx}, event)" title="この巻きの材料投入">
-                                📦 投入
-                            </button>
-                            <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 0.75rem; font-weight: 700; ${isRollPrinted ? 'background: #DCFCE7; color: #15803D; border-color: #86EFAC;' : ''}" onclick="printSingleRoll(${gIdx}, ${rIdx}, event)">
-                                ${isRollPrinted ? '✓ 再印刷' : '🖨️ 印刷'}
-                            </button>
-                        </div>
-                    </td>
-                    <td style="text-align: center; color: #CBD5E1;">—</td>
-                </tr>
-            `;
-        });
     });
 
     return `
@@ -1165,16 +1122,13 @@ function renderScheduleTableView(groups, items) {
             <table class="schedule-table">
                 <thead>
                     <tr>
-                        <th style="width: 75px; text-align: center;">順 (No)</th>
+                        <th style="width: 80px; text-align: center;">順 (No)</th>
                         <th style="width: 120px;">時間 (Time)</th>
-                        <th>基材・品番 (Material / Hinban)</th>
-                        <th style="width: 100px;">出荷先</th>
-                        <th style="width: 60px;">色</th>
-                        <th style="width: 70px;">処理</th>
-                        <th style="width: 70px;">幅長</th>
+                        <th>基材コード (Material Code)</th>
+                        <th style="width: 110px;">出荷先</th>
+                        <th style="width: 70px;">色</th>
                         <th style="width: 130px;">巻数・数量</th>
-                        <th style="width: 130px;">状態</th>
-                        <th style="width: 110px; text-align: center;">ラベル印刷</th>
+                        <th style="width: 120px;">状態</th>
                         <th style="width: 130px; text-align: center;">操作</th>
                     </tr>
                 </thead>
@@ -1206,17 +1160,16 @@ function renderScheduleList(items, startTimeStr) {
     groups.forEach((group, gIdx) => {
         const isGroupTinted = (gIdx % 2 === 0);
         const lifecycle = getGroupLifecycle(group.groupId);
-        const isGroupSelected = (lifecycle.status !== 'completed') && state.selectedItem && group.items.some(it => it.id === state.selectedItem.id);
 
         if (group.type === 'setup') {
             const setupItem = group.items[0];
             html += `
                 <div class="schedule-setup-row" data-id="${setupItem.id}">
                     <div class="schedule-setup-left">
-                        <span class="setup-tag-pill">#${setupItem.orderIndex} 段替・段取</span>
-                        <span class="setup-title-text">${setupItem.name || '段替え (Setup)'}</span>
+                        <span class="setup-tag-pill">#${setupItem.orderIndex} 段替</span>
+                        <span class="setup-title-text">${setupItem.name || '段替え'}</span>
                     </div>
-                    <div class="setup-time-text">🕒 ${setupItem.startTime} - ${setupItem.endTime} (${setupItem.duration} 分)</div>
+                    <div class="setup-time-text">${setupItem.startTime} - ${setupItem.endTime} (${setupItem.duration} 分)</div>
                 </div>
             `;
         } else {
@@ -1224,116 +1177,108 @@ function renderScheduleList(items, startTimeStr) {
             const lastItem = group.items[group.items.length - 1];
             const orderRangeText = group.items.length > 1 ? `#${firstItem.orderIndex} — #${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
 
-            const destBadge = group.shippingDest ? `<span class="tag-pill dest-tag" title="出荷先名: ${group.shippingDest}">出荷先: ${group.shippingDest}</span>` : '';
-            const colorBadge = group.color ? `<span class="tag-pill color-tag" title="色コード: ${group.color}">色: ${group.color}</span>` : '';
-            const shoriBadge = group.shori ? `<span class="tag-pill shori-tag" title="処理コード: ${group.shori}">処理: ${group.shori}</span>` : '';
-            const habanagaBadge = group.habanaga ? `<span class="tag-pill habanaga-tag" title="幅長コード: ${group.habanaga}">幅長: ${group.habanaga}</span>` : '';
+            // Use Kizai Code ONLY (no 品番)
+            const kizaiCode = group.kizai || group.hinban || '基材未設定';
 
-            let statusBadgeHTML = '';
-            let actionButtonsHTML = '';
+            // Check if this lot is in staging queue
+            const queuedItem = state.stagingQueue.find(q =>
+                (q.groupId === group.groupId || q.hinban === group.hinban || q.kizai === group.kizai) &&
+                (q.status === 'active' || q.status === 'queued')
+            );
+            const isQueueActive = queuedItem && queuedItem.status === 'active';
+            const isQueued = queuedItem && queuedItem.status === 'queued';
 
-            const printedCount = Array.isArray(lifecycle.printHistory)
-                ? new Set(lifecycle.printHistory.map(p => Number(p.rollIndex))).size
-                : 0;
-            const isAllPrinted = printedCount >= group.items.length && group.items.length > 0;
-            const printAllBtnHTML = `<button type="button" class="btn-batch-action btn-batch-print ${isAllPrinted ? 'is-all-printed' : ''}" onclick="printBatchGroup(${gIdx}, event)" title="${isAllPrinted ? '全巻き印刷済み - 再印刷' : 'このロットの全巻きラベルを一括印刷'}">${isAllPrinted ? `✓ 印刷済 (${printedCount}/${group.items.length})` : '🖨️ 一括印刷'}</button>`;
-            const feedBtnHTML = `<button type="button" class="btn-batch-action btn-feed-staging" onclick="openMaterialFeedModalForGroup(${gIdx}, event)" title="材料投入・キューに追加">📦 材料投入・準備</button>`;
-
-            if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
-                statusBadgeHTML = `<span class="batch-status-badge status-in-progress">🟣 生産中 (${lifecycle.actualStartTime || ''}〜)</span>`;
-                actionButtonsHTML = `
-                    ${feedBtnHTML}
-                    ${printAllBtnHTML}
-                    <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認">ℹ️ 詳細</button>
-                    <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${gIdx}, event)" title="生産完了">⏹ 完了</button>
-                    <button type="button" class="btn-batch-action btn-batch-cancel" onclick="cancelBatchGroup(${gIdx}, event)" title="中断・取消">✕ 取消</button>
-                `;
-            } else if (lifecycle.status === 'completed') {
-                statusBadgeHTML = `<span class="batch-status-badge status-completed">✅ 完了 (${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} • ${lifecycle.actualDurationMins}分)</span>`;
-                actionButtonsHTML = `
-                    ${feedBtnHTML}
-                    ${printAllBtnHTML}
-                    <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認">ℹ️ 詳細</button>
-                    <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${gIdx}, event)" title="再開・リセット">🔄 再開</button>
-                `;
+            let statusTagHTML = '';
+            if (lifecycle.status === 'completed') {
+                statusTagHTML = `<span class="batch-status-tag status-completed">完了 (${lifecycle.actualDurationMins || ''}分)</span>`;
+            } else if (isQueueActive) {
+                statusTagHTML = `<span class="batch-status-tag status-active">貼合中</span>`;
+            } else if (isQueued) {
+                statusTagHTML = `<span class="batch-status-tag status-queued">キュー投入済</span>`;
+            } else if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
+                statusTagHTML = `<span class="batch-status-tag status-active">生産中</span>`;
             } else {
-                statusBadgeHTML = `<span class="batch-status-badge status-pending">待機中</span>`;
-                actionButtonsHTML = `
-                    ${feedBtnHTML}
-                    ${printAllBtnHTML}
-                    <button type="button" class="btn-batch-action btn-batch-preview" onclick="previewBatchGroup(${gIdx}, event)" title="詳細確認 (モニター非表示)">ℹ️ 詳細</button>
-                    <button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${gIdx}, event)" title="生産開始 (モニター表示)">▶ 開始</button>
-                `;
+                statusTagHTML = `<span class="batch-status-tag status-pending">待機中</span>`;
             }
 
-            const mainTitle = group.kizai || group.hinban;
+            const destText = group.shippingDest ? `<span class="tag-pill dest-tag">出荷先: ${group.shippingDest}</span>` : '';
+            const colorText = group.color ? `<span class="tag-pill color-tag">色: ${group.color}</span>` : '';
+            const rollSummaryText = `<span class="tag-pill roll-tag">全 ${group.items.length} 巻き (${group.totalMeters} m)</span>`;
+            const isExpanded = state.expandedGroups && state.expandedGroups.has(group.groupId);
 
             html += `
-                <div class="batch-group-card state-${lifecycle.status} ${isGroupTinted ? 'group-tinted' : ''}" 
-                     data-group-id="${group.groupId}">
+                <div class="batch-group-card ${isGroupTinted ? 'group-tinted' : ''} ${isExpanded ? 'is-expanded' : ''}" 
+                     data-group-id="${group.groupId}" 
+                     data-group-idx="${gIdx}"
+                     data-total-rolls="${group.items.length}">
                     
-                    <div class="batch-header" onclick="previewBatchGroup(${gIdx}, event)">
+                    <div class="batch-header" onclick="toggleBatchGroupExpand(${gIdx}, event)" title="タップして内訳を展開/折りたたみ">
                         <div class="batch-header-top-row">
                             <div class="batch-order-and-title">
-                                <div class="batch-order-range">${orderRangeText}</div>
-                                <span class="batch-hinban-title">${mainTitle}</span>
+                                <span class="batch-order-range">${orderRangeText}</span>
+                                <span class="roll-time" style="color: var(--text-soft);">${group.startTime} - ${group.endTime}</span>
+                                <span class="batch-hinban-title" style="font-size: 1.15rem; font-weight: 800;">${kizaiCode}</span>
                             </div>
                             <div class="batch-top-status">
-                                ${statusBadgeHTML}
+                                ${statusTagHTML}
                             </div>
                         </div>
 
                         <div class="batch-chips-row">
-                            ${destBadge}
-                            ${colorBadge}
-                            ${shoriBadge}
-                            ${habanagaBadge}
-                            <span class="batch-summary-pill">全 ${group.items.length} 巻き (${group.totalMeters} m)</span>
-                            <span class="batch-summary-pill">🕒 予定: ${group.startTime} - ${group.endTime} (計 ${group.totalDuration} 分)</span>
+                            ${destText}
+                            ${colorText}
+                            ${rollSummaryText}
                         </div>
 
                         <div class="batch-actions-row" onclick="event.stopPropagation()">
                             <div class="batch-btn-group">
-                                ${actionButtonsHTML}
+                                <button type="button" class="btn-card-expand-toggle" onclick="toggleBatchGroupExpand(${gIdx}, event)" title="${isExpanded ? '内訳を閉じる' : '内訳を展開'}">
+                                    <span class="toggle-label">${isExpanded ? '閉じる' : `内訳 (${group.items.length}巻)`}</span>
+                                    <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+                                </button>
+                                <button type="button" class="btn-feed-primary" onclick="openMaterialFeedModalForGroup(${gIdx}, event)">
+                                    投入
+                                </button>
+                                <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event)">
+                                    詳細
+                                </button>
                             </div>
                         </div>
                     </div>
 
                     <div class="batch-rolls-list">
                         ${group.items.map((rollItem, rIdx) => {
-                const isRunning = (lifecycle.status === 'in-progress' || lifecycle.status === 'running');
-                const isCompleted = (lifecycle.status === 'completed');
-                const actualRollIndex = rollItem.rollIndex || (rIdx + 1);
-                const isRollPrinted = Array.isArray(lifecycle.printHistory) && lifecycle.printHistory.some(p => Number(p.rollIndex) === Number(actualRollIndex));
-                const lastPrintEntry = isRollPrinted ? lifecycle.printHistory.filter(p => Number(p.rollIndex) === Number(actualRollIndex)).slice(-1)[0] : null;
+                            const isRunning = (lifecycle.status === 'in-progress' || lifecycle.status === 'running');
+                            const isCompleted = (lifecycle.status === 'completed');
+                            const actualRollIndex = rollItem.rollIndex || (rIdx + 1);
+                            let rollStatusTag = '<span class="batch-status-tag status-pending" style="font-size: 0.725rem; padding: 2px 7px;">待機</span>';
+                            if (isCompleted) {
+                                rollStatusTag = '<span class="batch-status-tag status-completed" style="font-size: 0.725rem; padding: 2px 7px;">完了</span>';
+                            } else if (isRunning) {
+                                rollStatusTag = '<span class="batch-status-tag status-active" style="font-size: 0.725rem; padding: 2px 7px;">生産中</span>';
+                            }
 
-                return `
-                    <div class="batch-roll-row ${isRunning ? 'active-roll' : ''}" 
-                         onclick="previewBatchGroup(${gIdx}, event)">
-                        <div class="roll-row-left">
-                            <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
-                            <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
-                            <span class="roll-count-pill">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} 巻き</span>
-                            <span class="roll-meter-pill">${rollItem.meters || 100} m</span>
-                        </div>
-                        <div class="roll-row-right" style="display: flex; align-items: center; gap: 8px;" onclick="event.stopPropagation()">
-                            <button type="button" class="btn-roll-feed" 
-                                    onclick="openMaterialFeedModalForRoll(${gIdx}, ${rIdx}, event)" 
-                                    title="この巻きの材料投入">
-                                📦 投入
-                            </button>
-                            <button type="button" class="btn-roll-print ${isRollPrinted ? 'is-printed' : ''}" 
-                                    onclick="printSingleRoll(${gIdx}, ${rIdx}, event)" 
-                                    title="${isRollPrinted ? `印刷済み (${lastPrintEntry?.timeStr || ''}) - 再印刷` : `この巻き（#${rollItem.orderIndex}）のラベルを印刷`}">
-                                ${isRollPrinted ? `✓ 済 (${lastPrintEntry?.timeStr || ''})` : '🖨️ 印刷'}
-                            </button>
-                            <span class="roll-status-pill ${isRunning ? 'current-active' : ''}">
-                                ${isCompleted ? '完了' : (isRunning ? '生産中' : '待機')}
-                            </span>
-                        </div>
-                    </div>
-                `;
-            }).join('')}
+                            return `
+                                <div class="batch-roll-row ${isRunning ? 'active-roll' : ''}" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})">
+                                    <div class="roll-row-left">
+                                        <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
+                                        <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
+                                        <span class="tag-pill roll-tag" style="font-size: 0.8rem; padding: 2px 8px;">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} 巻き</span>
+                                        <span class="tag-pill meter-tag" style="font-size: 0.8rem; padding: 2px 8px;">${rollItem.meters || 100} m</span>
+                                        ${rollItem.zuban ? `<span class="tag-pill" style="font-size: 0.8rem; padding: 2px 8px;">図番: ${rollItem.zuban}</span>` : ''}
+                                        ${rollStatusTag}
+                                    </div>
+                                    <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
+                                        <button type="button" class="btn-feed-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="openMaterialFeedModalForRoll(${gIdx}, ${rIdx}, event)" title="この巻きの材料を投入">
+                                            投入
+                                        </button>
+                                        <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
+                                            詳細
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
                     </div>
                 </div>
             `;
@@ -1343,12 +1288,35 @@ function renderScheduleList(items, startTimeStr) {
     container.innerHTML = html;
 }
 
+function toggleBatchGroupExpand(groupIndex, event) {
+    if (event) event.stopPropagation();
+    const card = document.querySelector(`.batch-group-card[data-group-idx="${groupIndex}"]`);
+    if (!card) return;
+
+    if (!state.expandedGroups) state.expandedGroups = new Set();
+    const groupId = card.getAttribute('data-group-id') || String(groupIndex);
+
+    const isExpanded = card.classList.toggle('is-expanded');
+    if (isExpanded) {
+        state.expandedGroups.add(groupId);
+    } else {
+        state.expandedGroups.delete(groupId);
+    }
+
+    const toggleBtn = card.querySelector('.btn-card-expand-toggle');
+    if (toggleBtn) {
+        const totalRolls = card.getAttribute('data-total-rolls') || '1';
+        const label = toggleBtn.querySelector('.toggle-label');
+        if (label) label.textContent = isExpanded ? '閉じる' : `内訳 (${totalRolls}巻)`;
+    }
+}
+
 // -----------------------------------------------------
 // Batch Lifecycle Action Handlers
 // -----------------------------------------------------
 
 // 1. Preview Specs (Tablet Only - DOES NOT touch overhead monitor)
-function previewBatchGroup(groupIndex, event) {
+function previewBatchGroup(groupIndex, event, rollIndex = 0) {
     if (event) event.stopPropagation();
     if (!state.currentGroups || !state.currentGroups[groupIndex]) return;
     const group = state.currentGroups[groupIndex];
@@ -1357,13 +1325,13 @@ function previewBatchGroup(groupIndex, event) {
         return;
     }
 
-    const targetItem = group.items[0];
+    const targetItem = group.items[rollIndex] || group.items[0];
     state.selectedItem = targetItem;
     state.selectedGroup = group;
     sessionStorage.setItem('firstkojo_nippo_selected_item', JSON.stringify(targetItem));
 
     // Jump to Info tab without broadcasting to pdfDisplayer
-    switchMainTab(2);
+    switchMainTab(3);
     loadItemDetail(targetItem);
 }
 
@@ -1439,7 +1407,7 @@ function startBatchGroup(groupIndex, event) {
 
     // Refresh UI & switch to Info tab
     renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
-    switchMainTab(2);
+    switchMainTab(3);
     loadItemDetail(group.items[0]);
 }
 
@@ -1760,8 +1728,8 @@ function selectScheduleItem(index) {
     // Re-render schedule list to highlight the unified batch card and roll sub-row
     renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
 
-    // Jump to Info tab (tab index 2) and load full details
-    switchMainTab(2);
+    // Jump to Info tab (tab index 3) and load full details
+    switchMainTab(3);
 
     // Broadcast to pdfDisplayer monitor
     if (item.zuban) {
@@ -2061,8 +2029,8 @@ async function renderInfoTab(data, item) {
                     </div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-primary" style="background: #10B981; font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">📦 材料投入・準備</button>
-                    <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${groupIdx}, event)">⏹ 生産完了</button>
+                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">材料投入・キュー追加</button>
+                    <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${groupIdx}, event)">生産完了</button>
                 </div>
             </div>
         `;
@@ -2070,15 +2038,14 @@ async function renderInfoTab(data, item) {
         bannerHTML = `
             <div class="info-preview-banner" style="background: #DEF7EC; border-color: #A7F3D0;">
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 1.3rem;">✅</span>
                     <div>
                         <strong style="color: #03543F; font-size: 0.95rem;">生産完了済み (Completed)</strong>
                         <div style="font-size: 0.8rem; color: #047857;">実績: ${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} (${lifecycle.actualDurationMins}分)</div>
                     </div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-primary" style="background: #10B981; font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">📦 材料投入・準備</button>
-                    <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${groupIdx}, event)">🔄 再開・リセット</button>
+                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">材料投入・キュー追加</button>
+                    <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${groupIdx}, event)">再開・リセット</button>
                 </div>
             </div>
         `;
@@ -2087,15 +2054,14 @@ async function renderInfoTab(data, item) {
         bannerHTML = `
             <div class="info-preview-banner">
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 1.3rem;">👀</span>
                     <div>
                         <strong style="color: #1E40AF; font-size: 0.95rem;">事前確認中 (Preview Mode)</strong>
                         <div style="font-size: 0.8rem; color: #3B82F6;">※タブレット上での事前確認です。モニター表示には影響しません。</div>
                     </div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-primary" style="background: #10B981; font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">📦 材料投入・準備</button>
-                    ${groupIdx >= 0 ? `<button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${groupIdx}, event)">▶ このロットを開始</button>` : ''}
+                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">材料投入・キュー追加</button>
+                    ${groupIdx >= 0 ? `<button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${groupIdx}, event)">このロットを開始</button>` : ''}
                 </div>
             </div>
         `;
@@ -2114,11 +2080,11 @@ async function renderInfoTab(data, item) {
                     <div class="info-sub-title">${productMaster['品名'] || item.hinmei || ''} ${productMaster['仕様'] ? `— ${productMaster['仕様']}` : ''}</div>
                 </div>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                    <button type="button" class="btn btn-primary" style="background: #10B981; font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">📦 材料投入・準備</button>
+                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">材料投入・キュー追加</button>
                     <span class="tag-pill roll-tag" style="font-size: 0.9rem; padding: 6px 12px;">Roll ${item.rollIndex || 1} / ${item.totalRolls || 1}</span>
                     <span class="tag-pill meter-tag" style="font-size: 0.9rem; padding: 6px 12px;">${item.meters || 0} m</span>
                     <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800;">${item.startTime || '--:--'} - ${item.endTime || '--:--'}</span>
-                    <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800; background: #ECFDF5; color: #059669; border-color: rgba(5, 150, 105, 0.3);">⏱️ ${durationMins} 分</span>
+                    <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800; background: #ECFDF5; color: #059669; border-color: rgba(5, 150, 105, 0.3);">${durationMins} 分</span>
                 </div>
             </div>
 
@@ -2375,14 +2341,24 @@ function openMaterialFeedModal(item, group) {
     const meters = item.meters || group?.totalMeters || 100;
     const orderIndex = item.orderIndex || 1;
 
-    document.getElementById('feedModalHinban').textContent = hinban;
-    document.getElementById('feedModalOrderRange').textContent = `#${orderIndex}`;
-    document.getElementById('feedModalKizai').textContent = `基材: ${kizai}`;
-    document.getElementById('feedModalColor').textContent = `色: ${color}`;
-    document.getElementById('feedModalZuban').textContent = `図番: ${zuban}`;
-    document.getElementById('feedModalDest').textContent = `出荷先: ${dest}`;
-    document.getElementById('feedModalRolls').textContent = `Roll ${rollIdx} / ${totalRolls} 巻き`;
-    document.getElementById('feedModalMeters').textContent = `${meters} m`;
+    const kizaiTitleEl = document.getElementById('feedModalKizaiTitle');
+    if (kizaiTitleEl) kizaiTitleEl.textContent = kizai !== '-' ? kizai : hinban;
+    const hinbanEl = document.getElementById('feedModalHinban');
+    if (hinbanEl) hinbanEl.textContent = kizai !== '-' ? kizai : hinban;
+    const orderRangeEl = document.getElementById('feedModalOrderRange');
+    if (orderRangeEl) orderRangeEl.textContent = `#${orderIndex}`;
+    const kizaiEl = document.getElementById('feedModalKizai');
+    if (kizaiEl) kizaiEl.textContent = `基材: ${kizai}`;
+    const colorEl = document.getElementById('feedModalColor');
+    if (colorEl) colorEl.textContent = `色: ${color}`;
+    const zubanEl = document.getElementById('feedModalZuban');
+    if (zubanEl) zubanEl.textContent = `図番: ${zuban}`;
+    const destEl = document.getElementById('feedModalDest');
+    if (destEl) destEl.textContent = `出荷先: ${dest}`;
+    const rollsEl = document.getElementById('feedModalRolls');
+    if (rollsEl) rollsEl.textContent = `Roll ${rollIdx} / ${totalRolls} 巻き`;
+    const metersEl = document.getElementById('feedModalMeters');
+    if (metersEl) metersEl.textContent = `${meters} m`;
 
     // Compute default lot number: YYMMDD-rollIndex
     let yymmdd = '';
@@ -2632,7 +2608,7 @@ async function submitFeedAndEnqueue() {
     const btnSubmit = document.getElementById('btnFeedEnqueue');
     if (btnSubmit) {
         btnSubmit.disabled = true;
-        btnSubmit.textContent = '⏳ キュー追加中...';
+        btnSubmit.textContent = 'キュー追加中...';
     }
 
     try {
@@ -2671,7 +2647,7 @@ async function submitFeedAndEnqueue() {
             photoUrl: photoUrl || ''
         };
 
-        console.log('🚀 Enqueueing material to production queue:', enqueuePayload);
+        console.log('Enqueueing material to production queue:', enqueuePayload);
 
         const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
             method: 'POST',
@@ -2695,18 +2671,18 @@ async function submitFeedAndEnqueue() {
         // Close feed modal immediately so worker can continue fast-paced flow
         closeMaterialFeedModal();
 
-        showToast(`✅ ロット [${item.hinban}] を投入キューに追加しました`, 'success', 3500);
+        showToast(`材料 [${item.kizai || item.hinban}] を投入キューに追加しました`, 'success', 3500);
 
         // Refresh staging queue immediately
         await fetchProductionQueue();
 
     } catch (err) {
-        console.error('❌ Error enqueuing item:', err);
+        console.error('Error enqueuing item:', err);
         alert(`投入エラー: ${err.message}`);
     } finally {
         if (btnSubmit) {
             btnSubmit.disabled = false;
-            btnSubmit.textContent = '🚀 投入・キューに追加 (Feed & Add to Queue)';
+            btnSubmit.textContent = '投入・キューに追加 (Feed & Add to Queue)';
         }
     }
 }
@@ -2741,127 +2717,155 @@ async function fetchProductionQueue() {
 }
 
 function renderStagingQueue() {
-    const container = document.getElementById('stagingQueueList');
-    const badge = document.getElementById('stagingQueueCountBadge');
-    if (!container) return;
+    const activeContainer = document.getElementById('queueActiveContainer');
+    const stagedContainer = document.getElementById('queueStagedContainer');
+    const tabBadge = document.getElementById('tabQueueBadge');
+    const stagedCountTag = document.getElementById('queueStagedCountTag');
+    const legacyContainer = document.getElementById('stagingQueueList');
+    const legacyBadge = document.getElementById('stagingQueueCountBadge');
 
     const activeAndQueued = state.stagingQueue.filter(item => item.status === 'active' || item.status === 'queued');
 
-    if (badge) {
-        badge.textContent = `${activeAndQueued.length} 件`;
+    if (tabBadge) {
+        if (activeAndQueued.length > 0) {
+            tabBadge.textContent = activeAndQueued.length;
+            tabBadge.style.display = 'inline-block';
+        } else {
+            tabBadge.style.display = 'none';
+        }
     }
 
-    if (activeAndQueued.length === 0) {
-        container.innerHTML = `
-            <div class="staging-queue-empty">
-                📥 現在キューに入っている材料はありません。下のリストから「📦 材料投入・準備」を押して投入してください。
-            </div>
-        `;
-        return;
+    if (legacyBadge) {
+        legacyBadge.textContent = `${activeAndQueued.length} 件`;
     }
 
     const activeItem = activeAndQueued.find(it => it.status === 'active');
     const queuedItems = activeAndQueued.filter(it => it.status === 'queued');
 
-    let html = '';
-
-    // 1. Active Item
-    if (activeItem) {
-        const currentRoll = activeItem.currentRollIndex || activeItem.rollIndex || 1;
-        const totalRolls = activeItem.totalRolls || 1;
-        const rollPercent = Math.round((currentRoll / totalRolls) * 100);
-        const photoThumb = activeItem.photoUrl
-            ? `<img class="staging-thumb-preview" src="${activeItem.photoUrl}" alt="ラベル写真" onclick="openPhotoEnlarged('${activeItem.photoUrl}')" title="クリックで拡大">`
-            : `<div class="staging-thumb-placeholder" title="写真なし">📷</div>`;
-
-        html += `
-            <div class="staging-card is-active" data-queue-id="${activeItem._id}">
-                <div class="staging-card-left">
-                    <div class="staging-card-badge-col">
-                        <span class="staging-status-tag tag-active">🟢 貼合中 (Active)</span>
-                        <span class="staging-pos-badge">現在処理中</span>
-                    </div>
-
-                    ${photoThumb}
-
-                    <div class="staging-card-info">
-                        <div class="staging-card-title-row">
-                            <span class="staging-card-hinban">${activeItem.hinban}</span>
-                            ${activeItem.kizai ? `<span class="staging-meta-pill">${activeItem.kizai}</span>` : ''}
-                            ${activeItem.color ? `<span class="staging-meta-pill">${activeItem.color}</span>` : ''}
-                            ${activeItem.zuban ? `<span class="staging-meta-pill">${activeItem.zuban}</span>` : ''}
-                        </div>
-                        <div class="staging-card-sub">
-                            <span>担当: <strong>${activeItem.worker || '作業者'}</strong></span>
-                            <span>•</span>
-                            <span>ロット: <strong>${activeItem.lotNo || '-'}</strong></span>
-                            ${activeItem.shippingDest ? `<span>• 行先: ${activeItem.shippingDest}</span>` : ''}
-                        </div>
-                        <div class="staging-card-chips">
-                            <span class="staging-meta-pill pill-rolls">Roll ${currentRoll} / ${totalRolls} 巻き (${rollPercent}%)</span>
-                            <span class="staging-meta-pill pill-lot">${activeItem.rollMeters || activeItem.totalMeters || 0} m</span>
-                            ${activeItem.manufacturerUid ? `<span class="staging-meta-pill">ID: ${activeItem.manufacturerUid}</span>` : ''}
-                        </div>
-                    </div>
-                </div>
-
-                <div class="staging-card-actions" onclick="event.stopPropagation()">
-                    <button type="button" class="btn-staging-action btn-staging-advance" onclick="advanceQueueItemPrompt('${activeItem._id}')" title="現在の巻きを完了し次へ進める">
-                        ⏹ 完了 / 次へ
-                    </button>
-                </div>
-            </div>
-        `;
+    if (stagedCountTag) {
+        stagedCountTag.textContent = `${queuedItems.length} 件`;
     }
 
-    // 2. Queued / Staged Items
-    queuedItems.forEach((item, qIdx) => {
-        const photoThumb = item.photoUrl
-            ? `<img class="staging-thumb-preview" src="${item.photoUrl}" alt="ラベル写真" onclick="openPhotoEnlarged('${item.photoUrl}')" title="クリックで拡大">`
-            : `<div class="staging-thumb-placeholder" title="写真なし">📷</div>`;
+    // 1. Render Active Container
+    if (activeContainer) {
+        if (!activeItem) {
+            activeContainer.innerHTML = `
+                <div class="staging-queue-empty">
+                    現在貼合中の材料はありません。生産一覧または待機キューから材料を投入してください。
+                </div>
+            `;
+        } else {
+            const currentRoll = activeItem.currentRollIndex || activeItem.rollIndex || 1;
+            const totalRolls = activeItem.totalRolls || 1;
+            const rollPercent = Math.round((currentRoll / totalRolls) * 100);
+            const photoThumb = activeItem.photoUrl
+                ? `<img class="staging-thumb-preview" src="${activeItem.photoUrl}" alt="ラベル写真" onclick="openPhotoEnlarged('${activeItem.photoUrl}')" title="クリックで拡大">`
+                : `<div class="staging-thumb-placeholder" title="写真なし">写真なし</div>`;
+            const kizaiCode = activeItem.kizai || activeItem.hinban || '基材未設定';
 
-        const canMoveUp = qIdx > 0;
-        const canMoveDown = qIdx < queuedItems.length - 1;
+            activeContainer.innerHTML = `
+                <div class="staging-card is-active" data-queue-id="${activeItem._id}">
+                    <div class="staging-card-left">
+                        <div class="staging-card-badge-col">
+                            <span class="staging-status-tag tag-active">貼合中</span>
+                            <span class="staging-pos-badge">現在処理中</span>
+                        </div>
 
-        html += `
-            <div class="staging-card is-queued" data-queue-id="${item._id}">
-                <div class="staging-card-left">
-                    <div class="staging-card-badge-col">
-                        <span class="staging-status-tag tag-queued">待機中</span>
-                        <span class="staging-pos-badge">#${qIdx + 1} 番目</span>
+                        ${photoThumb}
+
+                        <div class="staging-card-info">
+                            <div class="staging-card-title-row">
+                                <span class="staging-card-hinban">${kizaiCode}</span>
+                                ${activeItem.color ? `<span class="staging-meta-pill">${activeItem.color}</span>` : ''}
+                                ${activeItem.zuban ? `<span class="staging-meta-pill">${activeItem.zuban}</span>` : ''}
+                            </div>
+                            <div class="staging-card-sub">
+                                <span>担当: <strong>${activeItem.worker || '作業者'}</strong></span>
+                                <span>•</span>
+                                <span>ロット: <strong>${activeItem.lotNo || '-'}</strong></span>
+                                ${activeItem.shippingDest ? `<span>• 行先: ${activeItem.shippingDest}</span>` : ''}
+                            </div>
+                            <div class="staging-card-chips">
+                                <span class="staging-meta-pill pill-rolls">Roll ${currentRoll} / ${totalRolls} 巻き (${rollPercent}%)</span>
+                                <span class="staging-meta-pill pill-lot">${activeItem.rollMeters || activeItem.totalMeters || 0} m</span>
+                                ${activeItem.manufacturerUid ? `<span class="staging-meta-pill">ID: ${activeItem.manufacturerUid}</span>` : ''}
+                            </div>
+                        </div>
                     </div>
 
-                    ${photoThumb}
-
-                    <div class="staging-card-info">
-                        <div class="staging-card-title-row">
-                            <span class="staging-card-hinban">${item.hinban}</span>
-                            ${item.kizai ? `<span class="staging-meta-pill">${item.kizai}</span>` : ''}
-                            ${item.color ? `<span class="staging-meta-pill">${item.color}</span>` : ''}
-                        </div>
-                        <div class="staging-card-sub">
-                            <span>ロット: <strong>${item.lotNo || '-'}</strong></span>
-                            <span>•</span>
-                            <span>全 ${item.totalRolls || 1} 巻き (${item.totalMeters || item.rollMeters || 0}m)</span>
-                        </div>
-                        <div class="staging-card-chips">
-                            <span class="staging-meta-pill">Roll #${item.rollIndex || 1}</span>
-                            ${item.manufacturerUid ? `<span class="staging-meta-pill">製造元: ${item.manufacturerUid}</span>` : ''}
-                            ${item.rawMaterialLength ? `<span class="staging-meta-pill">材料長: ${item.rawMaterialLength}m</span>` : ''}
-                        </div>
+                    <div class="staging-card-actions" onclick="event.stopPropagation()">
+                        <button type="button" class="btn-staging-action btn-staging-advance" onclick="advanceQueueItemPrompt('${activeItem._id}')" title="現在の巻きを完了し次へ進める">
+                            完了 / 次へ
+                        </button>
                     </div>
                 </div>
+            `;
+        }
+    }
 
-                <div class="staging-card-actions" onclick="event.stopPropagation()">
-                    <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'up')" ${!canMoveUp ? 'disabled' : ''} title="順序を繰り上げ">▲</button>
-                    <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'down')" ${!canMoveDown ? 'disabled' : ''} title="順序を繰り下げ">▼</button>
-                    <button type="button" class="btn-staging-action btn-staging-cancel" onclick="cancelQueueItem('${item._id}', '${item.hinban}')" title="この材料投入を取り消す">✕ 取消</button>
+    // 2. Render Staged Container
+    if (stagedContainer) {
+        if (queuedItems.length === 0) {
+            stagedContainer.innerHTML = `
+                <div class="staging-queue-empty">
+                    待機中の材料はありません。生産一覧タブから「投入」ボタンを押して追加してください。
                 </div>
-            </div>
-        `;
-    });
+            `;
+        } else {
+            let queuedHtml = '';
+            queuedItems.forEach((item, qIdx) => {
+                const photoThumb = item.photoUrl
+                    ? `<img class="staging-thumb-preview" src="${item.photoUrl}" alt="ラベル写真" onclick="openPhotoEnlarged('${item.photoUrl}')" title="クリックで拡大">`
+                    : `<div class="staging-thumb-placeholder" title="写真なし">写真なし</div>`;
 
-    container.innerHTML = html;
+                const canMoveUp = qIdx > 0;
+                const canMoveDown = qIdx < queuedItems.length - 1;
+                const kizaiCode = item.kizai || item.hinban || '基材未設定';
+
+                queuedHtml += `
+                    <div class="staging-card is-queued" data-queue-id="${item._id}">
+                        <div class="staging-card-left">
+                            <div class="staging-card-badge-col">
+                                <span class="staging-status-tag tag-queued">待機中</span>
+                                <span class="staging-pos-badge">#${qIdx + 1} 番目</span>
+                            </div>
+
+                            ${photoThumb}
+
+                            <div class="staging-card-info">
+                                <div class="staging-card-title-row">
+                                    <span class="staging-card-hinban">${kizaiCode}</span>
+                                    ${item.color ? `<span class="staging-meta-pill">${item.color}</span>` : ''}
+                                    ${item.zuban ? `<span class="staging-meta-pill">${item.zuban}</span>` : ''}
+                                </div>
+                                <div class="staging-card-sub">
+                                    <span>ロット: <strong>${item.lotNo || '-'}</strong></span>
+                                    <span>•</span>
+                                    <span>全 ${item.totalRolls || 1} 巻き (${item.totalMeters || item.rollMeters || 0}m)</span>
+                                </div>
+                                <div class="staging-card-chips">
+                                    <span class="staging-meta-pill">Roll #${item.rollIndex || 1}</span>
+                                    ${item.manufacturerUid ? `<span class="staging-meta-pill">製造元: ${item.manufacturerUid}</span>` : ''}
+                                    ${item.rawMaterialLength ? `<span class="staging-meta-pill">材料長: ${item.rawMaterialLength}m</span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="staging-card-actions" onclick="event.stopPropagation()">
+                            <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'up')" ${!canMoveUp ? 'disabled' : ''} title="順序を繰り上げ">上へ</button>
+                            <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'down')" ${!canMoveDown ? 'disabled' : ''} title="順序を繰り下げ">下へ</button>
+                            <button type="button" class="btn-staging-action btn-staging-cancel" onclick="cancelQueueItem('${item._id}', '${kizaiCode}')" title="この材料投入を取り消す">取消</button>
+                        </div>
+                    </div>
+                `;
+            });
+            stagedContainer.innerHTML = queuedHtml;
+        }
+    }
+
+    if (legacyContainer) {
+        legacyContainer.innerHTML = (activeContainer ? activeContainer.innerHTML : '') + (stagedContainer ? stagedContainer.innerHTML : '');
+    }
 }
 
 async function cancelQueueItem(queueId, hinban) {
