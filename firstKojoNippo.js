@@ -15,12 +15,17 @@ function getTodayDateString() {
     return `${y}-${m}-${d}`;
 }
 
+const savedInitialTab = localStorage.getItem('firstkojo_nippo_main_tab');
+const initialTabIndex = (savedInitialTab !== null && !isNaN(parseInt(savedInitialTab, 10)))
+    ? parseInt(savedInitialTab, 10)
+    : 0;
+
 const state = {
     workerName: localStorage.getItem('firstkojo_nippo_worker_name') || null,
     machineName: null,
     filterName: "第一工場",
 
-    currentMainTab: 0, // 0: User, 1: List, 2: Queue, 3: Info, 4: History, 5: Production, 6: Submit
+    currentMainTab: initialTabIndex, // 0: User, 1: List, 2: Queue, 3: Info, 4: History, 5: Production, 6: Submit
 
     selectedDate: sessionStorage.getItem('firstkojo_nippo_date') || getTodayDateString(),
     dailySchedule: null,
@@ -274,9 +279,11 @@ function confirmWorkerName() {
 function changeWorkerName() {
     state.workerName = null;
     localStorage.removeItem('firstkojo_nippo_worker_name');
+    localStorage.setItem('firstkojo_nippo_main_tab', '0');
     const input = document.getElementById("workerInput");
     if (input) input.value = '';
     initWorker();
+    switchMainTab(0);
 }
 
 // -----------------------------------------------------
@@ -302,9 +309,28 @@ function setupMainTabs() {
             switchMainTab(index);
         });
     });
+
+    updateTabLocks();
+
+    // Restore previously active tab from localStorage on reload
+    const savedTabStr = localStorage.getItem('firstkojo_nippo_main_tab');
+    if (state.workerName && savedTabStr !== null) {
+        const tabIndex = parseInt(savedTabStr, 10);
+        if (!isNaN(tabIndex) && tabIndex >= 0 && tabIndex < tabs.length) {
+            switchMainTab(tabIndex, true);
+            return;
+        }
+    }
+
+    // Default to List tab (tab 1) if worker is already logged in, otherwise User tab (tab 0)
+    if (state.workerName) {
+        switchMainTab(1, true);
+    } else {
+        switchMainTab(0, true);
+    }
 }
 
-function switchMainTab(index) {
+function switchMainTab(index, skipAnimation = false) {
     const tabs = document.querySelectorAll('#mainTabBar .tab-btn');
     const container = document.getElementById('tabPanelsContainer');
 
@@ -313,10 +339,19 @@ function switchMainTab(index) {
 
     // 7 tabs => 100 / 7 = 14.285714% shift per tab
     if (container) {
-        container.style.transform = `translateX(-${index * (100 / 7)}%)`;
+        if (skipAnimation) {
+            const origTransition = container.style.transition;
+            container.style.transition = 'none';
+            container.style.transform = `translateX(-${index * (100 / 7)}%)`;
+            void container.offsetHeight; // Force reflow
+            container.style.transition = origTransition;
+        } else {
+            container.style.transform = `translateX(-${index * (100 / 7)}%)`;
+        }
     }
     state.currentMainTab = index;
-    sessionStorage.setItem('firstkojo_nippo_main_tab', index);
+    localStorage.setItem('firstkojo_nippo_main_tab', String(index));
+    sessionStorage.setItem('firstkojo_nippo_main_tab', String(index));
 
     if (index === 1) {
         fetchDailySchedule(state.selectedDate);
@@ -3816,10 +3851,10 @@ function setupSidebar() {
 // -----------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
     parseParams();
+    initWorker();
     setupMainTabs();
     setupSidebar();
     setupDateControls();
-    initWorker();
     fetchWorkersFromMongoDB();
 
     // Initial schedule fetch for the selected date
