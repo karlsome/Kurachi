@@ -1668,32 +1668,28 @@ function renderScheduleList(items, startTimeStr) {
                      data-total-rolls="${remainingItems.length}">
                     
                     <div class="batch-header" onclick="toggleBatchGroupExpand(${gIdx}, event)" title="タップして内訳を展開/折りたたみ">
-                        <div class="batch-header-top-row">
-                            <div class="batch-order-and-title">
-                                <span class="batch-order-range">${orderRangeText}</span>
-                                <span class="roll-time" style="color: var(--text-soft);">${group.startTime} - ${group.endTime}</span>
-                                <span class="batch-hinban-title" style="font-size: 1.15rem; font-weight: 800;">${kizaiCode}</span>
+                        <div class="batch-header-left">
+                            <span class="batch-order-range">${orderRangeText}</span>
+                            <div class="batch-title-and-meta">
+                                <div class="batch-hinban-title">${kizaiCode}</div>
+                                <div class="batch-chips-row">
+                                    <span class="batch-time-text">${group.startTime} - ${group.endTime}</span>
+                                    ${destText}
+                                    ${colorText}
+                                    ${rollSummaryText}
+                                </div>
                             </div>
+                        </div>
+
+                        <div class="batch-header-right">
                             <div class="batch-top-status">
                                 ${statusTagHTML}
                             </div>
-                        </div>
-
-                        <div class="batch-chips-row">
-                            ${destText}
-                            ${colorText}
-                            ${rollSummaryText}
-                        </div>
-
-                        <div class="batch-actions-row" onclick="event.stopPropagation()">
-                            <div class="batch-btn-group">
-                                <button type="button" class="btn-card-expand-toggle" onclick="toggleBatchGroupExpand(${gIdx}, event)" title="${isExpanded ? '内訳を閉じる' : '内訳を展開'}">
-                                    <span class="toggle-label">${isExpanded ? '閉じる' : `内訳 (${remainingItems.length}巻)`}</span>
-                                    <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
-                                </button>
-                                <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event)">
-                                    詳細
-                                </button>
+                            <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event)" title="詳細プレビュー">
+                                詳細
+                            </button>
+                            <div class="batch-expand-icon" title="${isExpanded ? '内訳を閉じる' : '内訳を展開'}">
+                                <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
                             </div>
                         </div>
                     </div>
@@ -1721,7 +1717,7 @@ function renderScheduleList(items, startTimeStr) {
                                             <button type="button" class="btn-roll-exclude is-excluded" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きを復帰（キュー投入対象に戻す）">
                                                 復帰
                                             </button>
-                                            <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
+                                            <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
                                                 詳細
                                             </button>
                                         </div>
@@ -1741,7 +1737,7 @@ function renderScheduleList(items, startTimeStr) {
 
                                         <!-- Flat Camera Status Pill (Flat Red if unshot, Flat Green if shot) -->
                                         <span class="flat-camera-pill ${hasPhoto ? 'is-shot' : 'is-unshot'}" title="${hasPhoto ? 'ラベル写真撮影済' : 'ラベル写真未撮影 (必須)'}">
-                                            <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                            <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
                                             ${hasPhoto ? '撮影済' : '未撮影'}
                                         </span>
                                     </div>
@@ -1753,7 +1749,7 @@ function renderScheduleList(items, startTimeStr) {
                                         <button type="button" class="btn-feed-row-flat" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きのQRスキャン・撮影・投入">
                                             投入
                                         </button>
-                                        <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
+                                        <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
                                             詳細
                                         </button>
                                     </div>
@@ -1782,6 +1778,11 @@ function toggleBatchGroupExpand(groupIndex, event) {
         state.expandedGroups.add(groupId);
     } else {
         state.expandedGroups.delete(groupId);
+    }
+
+    const expandIcon = card.querySelector('.batch-expand-icon');
+    if (expandIcon) {
+        expandIcon.title = isExpanded ? '内訳を閉じる' : '内訳を展開';
     }
 
     const toggleBtn = card.querySelector('.btn-card-expand-toggle');
