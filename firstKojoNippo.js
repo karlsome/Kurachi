@@ -1525,6 +1525,16 @@ function isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx) {
             });
         }
         return true;
+    } else {
+        // If stagingQueue is loaded and item is NOT in the queue (e.g. was deleted or cancelled),
+        // clear any stale enqueued flag in local edits so it doesn't linger as processed
+        if (edit.enqueued) {
+            setItemEdit(itemId, {
+                enqueued: false,
+                status: 'pending',
+                mongoProductionId: null
+            });
+        }
     }
 
     return false;
@@ -1604,6 +1614,41 @@ function getScheduleMasterInfo(hinban) {
         hinmei,
         labelHinban
     };
+}
+
+function isScheduleRowProcessed(item, idx, groups) {
+    if (!item) return false;
+    if (item.type === 'setup') return false;
+
+    // 1. Try finding matching group and roll in current groups
+    let matchedGroup = null;
+    let matchedGIdx = -1;
+    let matchedRIdx = -1;
+
+    if (groups && Array.isArray(groups)) {
+        for (let gi = 0; gi < groups.length; gi++) {
+            const grp = groups[gi];
+            if (grp && grp.items) {
+                const ri = grp.items.findIndex(it => 
+                    it === item || 
+                    (it.id && item.id && it.id === item.id) ||
+                    (it.orderIndex !== undefined && item.orderIndex !== undefined && Number(it.orderIndex) === Number(item.orderIndex))
+                );
+                if (ri !== -1) {
+                    matchedGroup = grp;
+                    matchedGIdx = gi;
+                    matchedRIdx = ri;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (matchedGroup && matchedGIdx !== -1 && matchedRIdx !== -1) {
+        return isRollEnqueuedOrProcessed(item, matchedGroup, matchedGIdx, matchedRIdx);
+    }
+
+    return isRollEnqueuedOrProcessed(item, null, undefined, idx);
 }
 
 function renderScheduleTableView(groups, items) {
@@ -1692,8 +1737,10 @@ function renderScheduleTableView(groups, items) {
             ? `${qtyVal.toLocaleString()} 枚`
             : `${cmVal.toLocaleString()} cm (${qtyVal}m)`;
 
+        const isProcessed = isScheduleRowProcessed(item, idx, groups);
+
         rows.push(`
-            <tr class="item-row" data-item-id="${escapeHtml(item.id || '')}" onclick="previewHistoryItem('${escapeHtml(item.id || '')}', event)" style="cursor: pointer;" title="${_t('fk_btn_detail')}">
+            <tr class="item-row ${isProcessed ? 'is-processed' : ''}" data-item-id="${escapeHtml(item.id || '')}" onclick="previewHistoryItem('${escapeHtml(item.id || '')}', event)" style="cursor: pointer;" title="${isProcessed ? '処理済み (クリックで詳細)' : _t('fk_btn_detail')}">
                 <td class="center font-bold">${idx + 1}</td>
                 <td class="center time-cell">
                     <strong>${escapeHtml(item.startTime || '—')}</strong><br>
