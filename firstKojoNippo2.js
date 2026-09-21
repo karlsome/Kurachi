@@ -622,7 +622,7 @@ function renderHeroCard() {
     const rawQr = item.rawMaterialQR || item.rawQr || '-';
     const rawLen = item.rawMaterialLength || item.materialLength || `${totalMeters}m`;
     const mfgUid = item.manufacturerUid || item.lotNo || '-';
-    const photoUrl = item.photoUrl || '';
+    const photoUrl = item.imageUrl || item.photoUrl || '';
 
     // Determine lbx label format name for operator visibility
     const isSpecial = isSpecialKinuuraHinban(hinban);
@@ -802,7 +802,7 @@ function renderQueueSection() {
         const hinmei = item.hinmei || '-';
         const okyakuHinban = item.okyakuHinban || '';
         const rolls = item.totalRolls || 1;
-        const photoUrl = item.photoUrl || '';
+        const photoUrl = item.imageUrl || item.photoUrl || '';
         const qId = item._id || item.queueId || '';
 
         return `

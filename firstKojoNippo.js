@@ -5089,7 +5089,6 @@ async function submitModalRollToQueue() {
             rawMaterialQR: rawQRVal,
             rawMaterialLength: String(bichoVal),
             manufacturerUid: '',
-            photoUrl: photoUrl || '',
             imageUrl: photoUrl || ''
         };
 
@@ -5312,8 +5311,9 @@ function renderStagingQueue() {
     // 1. Active item (#1 貼合中)
     if (activeItem) {
         const kizaiCode = activeItem.kizai || activeItem.hinban || '基材未設定';
-        const photoThumb = activeItem.photoUrl
-            ? `<img class="queue-flat-thumb" src="${activeItem.photoUrl}" alt="" loading="lazy" decoding="async" data-item-id="${activeItem.itemId || activeItem._id}" data-src="${activeItem.photoUrl}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${activeItem.photoUrl}', '${activeItem.itemId || activeItem._id}')" onclick="openPhotoEnlarged('${activeItem.photoUrl}')" title="クリックで拡大">`
+        const activeImg = activeItem.imageUrl || activeItem.photoUrl;
+        const photoThumb = activeImg
+            ? `<img class="queue-flat-thumb" src="${activeImg}" alt="" loading="lazy" decoding="async" data-item-id="${activeItem.itemId || activeItem._id}" data-src="${activeImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${activeImg}', '${activeItem.itemId || activeItem._id}')" onclick="openPhotoEnlarged('${activeImg}')" title="クリックで拡大">`
             : `<div class="queue-flat-thumb-placeholder">写真なし</div>`;
         const currentRoll = activeItem.currentRollIndex || activeItem.rollIndex || 1;
         const totalRolls = activeItem.totalRolls || 1;
@@ -5360,8 +5360,9 @@ function renderStagingQueue() {
     // 2. Queued items (#2 待機中, #3 待機中...)
     queuedItems.forEach((item, qIdx) => {
         const kizaiCode = item.kizai || item.hinban || '基材未設定';
-        const photoThumb = item.photoUrl
-            ? `<img class="queue-flat-thumb" src="${item.photoUrl}" alt="" loading="lazy" decoding="async" data-item-id="${item.itemId || item._id}" data-src="${item.photoUrl}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${item.photoUrl}', '${item.itemId || item._id}')" onclick="openPhotoEnlarged('${item.photoUrl}')" title="クリックで拡大">`
+        const queuedImg = item.imageUrl || item.photoUrl;
+        const photoThumb = queuedImg
+            ? `<img class="queue-flat-thumb" src="${queuedImg}" alt="" loading="lazy" decoding="async" data-item-id="${item.itemId || item._id}" data-src="${queuedImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${queuedImg}', '${item.itemId || item._id}')" onclick="openPhotoEnlarged('${queuedImg}')" title="クリックで拡大">`
             : `<div class="queue-flat-thumb-placeholder">写真なし</div>`;
         const posNum = activeItem ? (qIdx + 2) : (qIdx + 1);
 
@@ -5631,7 +5632,7 @@ function openQueueCancelModal(queueId, hinban) {
     const rollIdx = targetQueueItem?.rollIndex || 1;
     const meters = targetQueueItem?.rollMeters || targetQueueItem?.meters || 0;
     const lotNo = targetQueueItem?.lotNo || '-';
-    const photoUrl = targetQueueItem?.photoUrl || targetQueueItem?.imageUrl || '';
+    const photoUrl = targetQueueItem?.imageUrl || targetQueueItem?.photoUrl || '';
 
     if (nameEl) nameEl.textContent = kizai;
     if (metaEl) metaEl.textContent = `#${orderIdx} (Roll #${rollIdx}) · ${meters} m · ロット: ${lotNo}`;
@@ -5977,7 +5978,7 @@ function renderHistoryList() {
             kizai: doc.kizai || doc.hinban || doc.hinmei || '材料',
             meters: doc.bicho || doc.rollMeters || doc.meters || 0,
             lotNo: doc.lotNo || '',
-            photoUrl: doc.photoUrl || doc.imageUrl || '',
+            photoUrl: doc.imageUrl || doc.photoUrl || '',
             rawDoc: doc
         });
     });

@@ -36852,7 +36852,7 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
       }
 
       if (updateFilter) {
-        const updateDoc = { $set: { photoUrl: publicUrl, imageUrl: publicUrl, updatedAt: new Date() } };
+        const updateDoc = { $set: { imageUrl: publicUrl, updatedAt: new Date() } };
         const updateResult = await queueCol.updateMany(updateFilter, updateDoc);
         let prodModified = 0;
         try {
@@ -36863,8 +36863,8 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
           console.warn('⚠️ Could not link photo to firstFactoryProduction:', prodErr.message);
         }
         if (updateResult.modifiedCount > 0 || prodModified > 0) {
-          console.log(`🔗 Linked photoUrl to firstFactoryQueue & firstFactoryProduction:`, updateFilter);
-          broadcastProductionEvent({ type: 'queue_updated', date: targetDate, photoUrl: publicUrl });
+          console.log(`🔗 Linked imageUrl to firstFactoryQueue & firstFactoryProduction:`, updateFilter);
+          broadcastProductionEvent({ type: 'queue_updated', date: targetDate, imageUrl: publicUrl });
         }
       }
     } catch (dbErr) {
@@ -36875,7 +36875,6 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
       success: true,
       url: publicUrl,
       imageUrl: publicUrl,
-      photoUrl: publicUrl,
       filePath
     });
   } catch (error) {
@@ -36955,11 +36954,14 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       rawMaterialLength,
       manufacturerUid,
       photoUrl,
+      imageUrl,
       status,
       socho,
       shiki,
       bicho
     } = req.body;
+
+    const finalImageUrl = imageUrl || photoUrl || '';
 
     if (!date) {
       return res.status(400).json({ error: 'date is required' });
@@ -36989,9 +36991,9 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       const existingItem = await productionCol.findOne(duplicateQuery) || await queueCol.findOne(duplicateQuery);
       if (existingItem) {
         console.log(`⚠️ Item already enqueued [${existingItem.hinban || existingItem.groupId}] (Roll #${existingItem.rollIndex}, Order #${existingItem.orderIndex}) -> returning existing _id: ${existingItem._id}`);
-        // If photoUrl was missing and is now provided, update it
-        if (photoUrl && (!existingItem.photoUrl || !existingItem.imageUrl)) {
-          const photoPatch = { photoUrl: photoUrl, imageUrl: photoUrl, updatedAt: new Date() };
+        // If imageUrl was missing and is now provided, update it
+        if (finalImageUrl && (!existingItem.imageUrl && !existingItem.photoUrl)) {
+          const photoPatch = { imageUrl: finalImageUrl, updatedAt: new Date() };
           await productionCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
           await queueCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
         }
@@ -37067,8 +37069,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       rawMaterialQR: rawMaterialQR || '',
       rawMaterialLength: rawMaterialLength || '',
       manufacturerUid: manufacturerUid || '',
-      photoUrl: photoUrl || '',
-      imageUrl: photoUrl || '',
+      imageUrl: finalImageUrl,
       queuePosition,
       status: finalStatus,
       createdAt: new Date(),
