@@ -477,6 +477,71 @@ const translations = {
         'fk_status_skipped': 'スキップ',
         'fk_status_laminating': '貼合中',
         'fk_min_unit': '分',
+
+        // First Factory Tablet 2 (Wrapping)
+        'fk2_app_title': '第一工場 包装工程ステーション',
+        'fk2_currently_wrapping': '現在包装中',
+        'fk2_next_in_line': '次工程キュー',
+        'fk2_queue_instruction': '※ 先行して包装を行う場合はカードを選択してください',
+        'fk2_no_active_title': '待機中: 投入工程からの登録を待っています',
+        'fk2_no_active_desc': '投入工程（Tablet 1）で原反QRまたは現品票写真が登録されると、自動的にここに表示されます。',
+        'fk2_refresh_queue': '🔄 キューを再確認',
+        'fk2_no_waiting': '次工程キューに待機中のロットはありません',
+        'fk2_btn_print_advance': '🖨️ ラベル印刷 & 次へ進む',
+        'fk2_btn_skip_print': '印刷不可・次へ',
+        'fk2_btn_scrap': '不良破棄 / スキップ',
+        'fk2_btn_finish_early': '中途完了',
+        'fk2_btn_reprint': '直前再印刷',
+        'fk2_print_progress_title': 'ラベル印刷中...',
+        'fk2_print_progress_sub': 'プリンターにラベル印刷データを送信しています。<br>しばらくお待ちください。',
+        'fk2_print_success_title': '印刷完了！',
+        'fk2_print_success_detail': 'を発行しました',
+        'fk2_print_error_title': 'プリンターエラー (印刷未完了)',
+        'fk2_last_printed': '最終印刷',
+        'fk2_scrap_modal_title': '1巻破棄 / スキップの確認',
+        'fk2_scrap_modal_sub': '現在の巻を不良として破棄し、次の巻へ進めますか？',
+        'fk2_scrap_reason_prompt': '破棄理由を選択:',
+        'fk2_scrap_all_remaining': 'このロット全体（残りの巻すべて）を破棄する',
+        'fk2_btn_confirm_scrap': '破棄して次へ進む',
+        'fk2_finish_early_title': 'ロット中途完了の確認',
+        'fk2_finish_early_sub': '材料の短尺や不足により、予定巻数に満たない状態でロットを完了します。',
+        'fk2_planned_rolls': '予定巻き数',
+        'fk2_actual_rolls': '実仕上がり巻き数:',
+        'fk2_finish_reason': '中途終了の理由:',
+        'fk2_btn_confirm_finish': '完了を確定する',
+        'fk2_customer_hinban': '客品番',
+        'fk2_planned_tag': '予定',
+        'fk2_no_photo': '写真なし',
+        'fk2_tap_to_enlarge': 'タップで拡大',
+        'fk2_photo_modal_caption': '現品票写真',
+        'fk2_meters_per_roll': 'm / 巻',
+        'fk2_reason_scratch': 'キズ・汚れ',
+        'fk2_reason_wrinkle': 'シワ・折り目',
+        'fk2_reason_tear': '破断・切れ',
+        'fk2_reason_dimension': '寸法・長さ不良',
+        'fk2_reason_print': 'ラベル印字不良',
+        'fk2_reason_short': '材料短尺・原反不足',
+        'fk2_reason_plan_change': '計画数変更・指示',
+        'fk2_main_print_label': 'ラベル印刷 (Print Roll Label)',
+        'fk2_sub_print_label': 'のラベルを発行して次へ',
+        'fk2_btn_cant_print': '印刷不可・次へ',
+        'fk2_title_reprint': '直前に印刷したラベルをそのまま再発行します',
+        'fk2_title_cant_print': 'プリンター障害等で印刷できない場合に手動で完了して次へ進めます',
+        'fk2_title_scrap': 'キズ・シワなどの不良で1巻破棄して次へ',
+        'fk2_title_finish_early': '材料不足などで予定巻き数より早く終了',
+        'fk2_no_machine_specified': '未指定 (No Machine in URL)',
+        'fk2_no_machine_title': '設備（machine）パラメータが指定されていません',
+        'fk2_no_machine_desc': 'URLに設備パラメータが付与されていません。<br>例: <code>?machine=PSA2&filter=第一工場</code> のように設備名を指定して開いてください。',
+        'fk2_print_issued_toast': 'のラベルを発行しました',
+        'fk2_print_failed_toast': '❌ 印刷に失敗しました。プリンターを確認してください。（障害時は「印刷不可・次へ」ボタンで進めます）',
+        'fk2_no_active_lot_toast': '包装対象のロットがありません',
+        'count_unit': '件',
+        'today': '今日',
+        'fullscreen': '全画面表示',
+        'prev_day': '前日',
+        'next_day': '翌日',
+        'sse_connected': '接続中',
+        'sse_disconnected': '切断中',
     },
 
     en: {
@@ -950,10 +1015,75 @@ const translations = {
         'fk_no_photo': 'No Photo',
         'fk_filter_all_label': 'All',
         'fk_filter_enqueued_label': 'Enqueued',
-        'fk_filter_excluded_label': 'Excluded',
         'fk_status_skipped': 'Skipped',
         'fk_status_laminating': 'Laminating',
         'fk_min_unit': ' min',
+
+        // First Factory Tablet 2 (Wrapping)
+        'fk2_app_title': '1st Factory Wrapping Station',
+        'fk2_currently_wrapping': 'Currently Wrapping',
+        'fk2_next_in_line': 'Next in Line',
+        'fk2_queue_instruction': '※ Tap a card to select it for wrapping ahead of sequence',
+        'fk2_no_active_title': 'Waiting for Feeder Station to register materials',
+        'fk2_no_active_desc': 'Materials registered at Feeder Station (Tablet 1) will appear here automatically.',
+        'fk2_refresh_queue': '🔄 Refresh Queue',
+        'fk2_no_waiting': 'No waiting lots in line',
+        'fk2_btn_print_advance': '🖨️ Print Label & Advance',
+        'fk2_btn_skip_print': 'Skip Print / Next',
+        'fk2_btn_scrap': 'Scrap / Skip',
+        'fk2_btn_finish_early': 'Finish Early',
+        'fk2_btn_reprint': 'Reprint Last',
+        'fk2_print_progress_title': 'Printing Label...',
+        'fk2_print_progress_sub': 'Sending print data to printer.<br>Please wait a moment.',
+        'fk2_print_success_title': 'Print Complete!',
+        'fk2_print_success_detail': 'issued successfully',
+        'fk2_print_error_title': 'Printer Error (Print incomplete)',
+        'fk2_last_printed': 'Last Printed',
+        'fk2_scrap_modal_title': 'Confirm Scrap / Skip Roll',
+        'fk2_scrap_modal_sub': 'Scrap current roll as defective and proceed to next?',
+        'fk2_scrap_reason_prompt': 'Select defect reason:',
+        'fk2_scrap_all_remaining': 'Scrap entire lot (all remaining rolls)',
+        'fk2_btn_confirm_scrap': 'Scrap & Proceed',
+        'fk2_finish_early_title': 'Confirm Early Lot Completion',
+        'fk2_finish_early_sub': 'Finish lot early with fewer rolls due to short material or shortage.',
+        'fk2_planned_rolls': 'Planned Rolls',
+        'fk2_actual_rolls': 'Actual Completed Rolls:',
+        'fk2_finish_reason': 'Reason for finishing early:',
+        'fk2_btn_confirm_finish': 'Confirm Completion',
+        'fk2_customer_hinban': 'Customer Part #',
+        'fk2_planned_tag': 'Planned',
+        'fk2_no_photo': 'No photo',
+        'fk2_tap_to_enlarge': 'Tap to enlarge',
+        'fk2_photo_modal_caption': 'Warehouse Label Photo',
+        'fk2_meters_per_roll': 'm / roll',
+        'fk2_reason_scratch': 'Scratch / Stain',
+        'fk2_reason_wrinkle': 'Wrinkle / Crease',
+        'fk2_reason_tear': 'Tear / Cut',
+        'fk2_reason_dimension': 'Dimension / Length Defect',
+        'fk2_reason_print': 'Label Print Defect',
+        'fk2_reason_short': 'Material Shortage / Short Length',
+        'fk2_reason_plan_change': 'Plan Change / Instruction',
+        'fk2_reason_yield': 'Yield Difference',
+        'fk2_main_print_label': 'Print Roll Label',
+        'fk2_sub_print_label': 'issue label & advance to next',
+        'fk2_btn_cant_print': 'Skip Print & Next',
+        'fk2_title_reprint': 'Reprint the last issued label as-is',
+        'fk2_title_cant_print': 'Advance manually if printer is malfunctioning',
+        'fk2_title_scrap': 'Scrap 1 defective roll and advance',
+        'fk2_title_finish_early': 'Finish lot early due to material shortage',
+        'fk2_no_machine_specified': 'Unspecified (No Machine in URL)',
+        'fk2_no_machine_title': 'Machine parameter not specified',
+        'fk2_no_machine_desc': 'No machine parameter found in URL.<br>Please open with machine parameter, e.g. <code>?machine=PSA2&filter=第一工場</code>.',
+        'fk2_print_issued_toast': 'Label issued successfully',
+        'fk2_print_failed_toast': '❌ Print failed. Please check the printer. (Use "Skip Print & Next" during outage)',
+        'fk2_no_active_lot_toast': 'No active lot to wrap',
+        'count_unit': '',
+        'today': 'Today',
+        'fullscreen': 'Fullscreen',
+        'prev_day': 'Prev Day',
+        'next_day': 'Next Day',
+        'sse_connected': 'Connected',
+        'sse_disconnected': 'Disconnected',
     },
 
     pt: {
@@ -1550,22 +1680,22 @@ function _t(key) {
     return (t && key in t) ? t[key] : ((translations['ja'] && key in translations['ja']) ? translations['ja'][key] : key);
 }
 
-// Get current language from localStorage or default to Japanese
+// Get current language from localStorage or default to Japanese (only ja and en supported)
 function getCurrentLanguage() {
-    return localStorage.getItem('appLanguage') || 'ja';
+    const lang = localStorage.getItem('appLanguage') || 'ja';
+    return (lang === 'en' || lang === 'ja') ? lang : 'ja';
 }
 
 // Set current language and save to localStorage
 function setLanguage(lang) {
-    if (translations[lang]) {
-        localStorage.setItem('appLanguage', lang);
-        applyTranslations(lang);
+    const validLang = (lang === 'en' || lang === 'ja') ? lang : 'ja';
+    localStorage.setItem('appLanguage', validLang);
+    applyTranslations(validLang);
 
-        // Update the language selector dropdown
-        const languageSelector = document.getElementById('languageSelector');
-        if (languageSelector) {
-            languageSelector.value = lang;
-        }
+    // Update the language selector dropdown
+    const languageSelector = document.getElementById('languageSelector');
+    if (languageSelector) {
+        languageSelector.value = validLang;
     }
 }
 
@@ -1628,6 +1758,13 @@ function initLanguage() {
     const languageSelector = document.getElementById('languageSelector');
 
     if (languageSelector) {
+        // Strictly restrict language options to Japanese and English only
+        Array.from(languageSelector.options).forEach(opt => {
+            if (opt.value !== 'ja' && opt.value !== 'en') {
+                opt.remove();
+            }
+        });
+
         languageSelector.value = currentLang;
 
         // Add event listener for language changes
