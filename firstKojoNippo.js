@@ -4453,12 +4453,19 @@ function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
     const modal = document.getElementById('materialFeedModal');
     if (!modal) return;
 
-    // 1. Set Title: 基材コード - roll#1
+    // 1. Set Title: 基材コード - #8 (Show overall schedule order number)
     const kizai = item.kizai || group?.kizai || item.hinban || group?.hinban || '基材コード';
-    const rollIdx = item.rollIndex || (rIdx + 1);
+    let orderNum = item.orderIndex;
+    if (!orderNum && state.scheduledItems) {
+        const sItem = state.scheduledItems.find(s => (s.id && s.id === item.id) || (s.itemId && s.itemId === item.id));
+        if (sItem && sItem.orderIndex) orderNum = sItem.orderIndex;
+    }
+    if (!orderNum) {
+        orderNum = item.orderIndex || (item.rollIndex || (rIdx + 1));
+    }
     const titleEl = document.getElementById('feedModalHeaderTitle');
     if (titleEl) {
-        titleEl.textContent = `${kizai} - roll#${rollIdx}`;
+        titleEl.textContent = `${kizai}  - #${orderNum}`;
     }
 
     // 2. Initialize length and metadata values
@@ -4481,7 +4488,7 @@ function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
 
     const badge = document.getElementById('feedScannerLiveBadge');
     if (badge) {
-        badge.textContent = '🟢 スキャナー待機中';
+        badge.textContent = '🟢 ' + _t('fk_scanner_ready');
         badge.className = 'feed-scanner-badge';
     }
 
@@ -4495,10 +4502,10 @@ function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
         document.activeElement.blur();
     }
 
-    // 4. Update Exclude button text
+    // 4. Update Exclude button text with proper localization
     const excludeBtn = document.querySelector('.feed-link-exclude');
     if (excludeBtn) {
-        excludeBtn.textContent = edit.isExcluded ? 'この巻きを復帰' : 'この巻きを除外';
+        excludeBtn.textContent = edit.isExcluded ? _t('fk_btn_restore_roll') : _t('fk_btn_exclude_roll');
         excludeBtn.style.color = edit.isExcluded ? 'var(--brand)' : 'var(--text-muted)';
     }
 
