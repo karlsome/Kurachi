@@ -2654,6 +2654,53 @@
             cursor: not-allowed;
         }
 
+        .btn-queue-drag-handle {
+            width: 38px;
+            height: 38px;
+            min-width: 38px;
+            border-radius: 50%;
+            border: 1px solid #E2E8F0;
+            background: #F8FAFC;
+            color: #64748B;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: grab;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            transition: all 0.15s ease;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        .btn-queue-drag-handle:hover {
+            background: #EDF2F7;
+            color: #334155;
+            border-color: #CBD5E1;
+            transform: scale(1.06);
+        }
+
+        .btn-queue-drag-handle:active {
+            cursor: grabbing;
+            background: #E2E8F0;
+            color: #1E293B;
+            transform: scale(0.95);
+        }
+
+        .queue-flat-row.is-dragging {
+            opacity: 0.45;
+            border: 2px dashed #6366F1 !important;
+            background: #EEF2FF !important;
+        }
+
+        .queue-flat-row.drag-over-top {
+            border-top: 3px solid #4F46E5 !important;
+        }
+
+        .queue-flat-row.drag-over-bottom {
+            border-bottom: 3px solid #4F46E5 !important;
+        }
+
         .btn-staging-cancel {
             color: #DC2626;
             border-color: #FECACA;

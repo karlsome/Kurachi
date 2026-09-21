@@ -5396,8 +5396,13 @@ function renderStagingQueue() {
                     </div>
                 </div>
                 <div class="queue-flat-right" onclick="event.stopPropagation()">
-                    <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'up')" ${qIdx === 0 ? 'disabled' : ''} title="順序を繰り上げ">上へ</button>
-                    <button type="button" class="btn-staging-action btn-staging-reorder" onclick="reorderQueueItem('${item._id}', 'down')" ${qIdx === queuedItems.length - 1 ? 'disabled' : ''} title="順序を繰り下げ">下へ</button>
+                    <button type="button" class="btn-queue-drag-handle" title="長押しまたはドラッグして順序変更" aria-label="ドラッグして順序変更">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <circle cx="12" cy="5" r="2.2"/>
+                            <circle cx="12" cy="12" r="2.2"/>
+                            <circle cx="12" cy="19" r="2.2"/>
+                        </svg>
+                    </button>
                     <button type="button" class="btn-staging-action btn-staging-cancel" onclick="cancelQueueItem('${item._id}', '${kizaiCode}')" title="この材料投入を取り消す">取消</button>
                 </div>
             </div>
@@ -5405,6 +5410,208 @@ function renderStagingQueue() {
     });
 
     queueContainer.innerHTML = rowsHTML;
+    initQueueDragAndDrop();
+}
+
+// -----------------------------------------------------
+// Drag-and-Drop Queue Reordering (Handle-only Dragging)
+// -----------------------------------------------------
+function initQueueDragAndDrop() {
+    const container = document.getElementById('queueItemListContainer');
+    if (!container) return;
+
+    const stagedRows = Array.from(container.querySelectorAll('.queue-flat-row.is-staged'));
+    if (stagedRows.length < 2) return;
+
+    let draggedRow = null;
+    let dragHandleActive = false;
+
+    stagedRows.forEach(row => {
+        row.setAttribute('draggable', 'false');
+        const handle = row.querySelector('.btn-queue-drag-handle');
+        if (!handle) return;
+
+        // Desktop mouse: only enable dragging when mouse is down on handle
+        handle.addEventListener('mousedown', () => {
+            dragHandleActive = true;
+            row.setAttribute('draggable', 'true');
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (!draggedRow) {
+                dragHandleActive = false;
+                row.setAttribute('draggable', 'false');
+            }
+        });
+
+        // Desktop HTML5 drag events
+        row.addEventListener('dragstart', (e) => {
+            if (!dragHandleActive) {
+                e.preventDefault();
+                return;
+            }
+            draggedRow = row;
+            row.classList.add('is-dragging');
+            if (e.dataTransfer) {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', row.dataset.queueId || '');
+            }
+        });
+
+        row.addEventListener('dragend', () => {
+            dragHandleActive = false;
+            if (draggedRow) {
+                draggedRow.classList.remove('is-dragging');
+                draggedRow.setAttribute('draggable', 'false');
+                draggedRow = null;
+            }
+            container.querySelectorAll('.queue-flat-row').forEach(r => {
+                r.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+        });
+
+        row.addEventListener('dragover', (e) => {
+            if (!draggedRow || draggedRow === row) return;
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+
+            const rect = row.getBoundingClientRect();
+            const relY = e.clientY - rect.top;
+            if (relY < rect.height / 2) {
+                row.classList.add('drag-over-top');
+                row.classList.remove('drag-over-bottom');
+            } else {
+                row.classList.add('drag-over-bottom');
+                row.classList.remove('drag-over-top');
+            }
+        });
+
+        row.addEventListener('dragleave', () => {
+            row.classList.remove('drag-over-top', 'drag-over-bottom');
+        });
+
+        row.addEventListener('drop', (e) => {
+            if (!draggedRow || draggedRow === row) return;
+            e.preventDefault();
+
+            const rect = row.getBoundingClientRect();
+            const relY = e.clientY - rect.top;
+
+            if (relY < rect.height / 2) {
+                row.parentNode.insertBefore(draggedRow, row);
+            } else {
+                row.parentNode.insertBefore(draggedRow, row.nextSibling);
+            }
+
+            row.classList.remove('drag-over-top', 'drag-over-bottom');
+            onQueueOrderChanged(container);
+        });
+
+        // Touch events for tablets
+        let isTouching = false;
+        let currentOverRow = null;
+        let dropPosition = 'top';
+
+        handle.addEventListener('touchstart', (e) => {
+            if (e.touches.length !== 1) return;
+            isTouching = true;
+            draggedRow = row;
+            row.classList.add('is-dragging');
+        }, { passive: true });
+
+        handle.addEventListener('touchmove', (e) => {
+            if (!isTouching || !draggedRow) return;
+            const touch = e.touches[0];
+            const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+            const targetRow = targetEl ? targetEl.closest('.queue-flat-row.is-staged') : null;
+
+            container.querySelectorAll('.queue-flat-row').forEach(r => {
+                r.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+
+            if (targetRow && targetRow !== draggedRow) {
+                currentOverRow = targetRow;
+                const rect = targetRow.getBoundingClientRect();
+                if (touch.clientY < rect.top + rect.height / 2) {
+                    targetRow.classList.add('drag-over-top');
+                    dropPosition = 'top';
+                } else {
+                    targetRow.classList.add('drag-over-bottom');
+                    dropPosition = 'bottom';
+                }
+            } else {
+                currentOverRow = null;
+            }
+            e.preventDefault();
+        }, { passive: false });
+
+        handle.addEventListener('touchend', () => {
+            if (!isTouching) return;
+            isTouching = false;
+
+            if (draggedRow && currentOverRow && draggedRow !== currentOverRow) {
+                if (dropPosition === 'top') {
+                    currentOverRow.parentNode.insertBefore(draggedRow, currentOverRow);
+                } else {
+                    currentOverRow.parentNode.insertBefore(draggedRow, currentOverRow.nextSibling);
+                }
+                onQueueOrderChanged(container);
+            }
+
+            if (draggedRow) {
+                draggedRow.classList.remove('is-dragging');
+                draggedRow = null;
+            }
+            container.querySelectorAll('.queue-flat-row').forEach(r => {
+                r.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+        });
+
+        handle.addEventListener('touchcancel', () => {
+            isTouching = false;
+            if (draggedRow) {
+                draggedRow.classList.remove('is-dragging');
+                draggedRow = null;
+            }
+            container.querySelectorAll('.queue-flat-row').forEach(r => {
+                r.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+        });
+    });
+}
+
+async function onQueueOrderChanged(container) {
+    const updatedStagedRows = Array.from(container.querySelectorAll('.queue-flat-row.is-staged'));
+    const orderedQueueIds = updatedStagedRows.map(r => r.dataset.queueId).filter(Boolean);
+    if (orderedQueueIds.length === 0) return;
+
+    // Immediately update order badge text in DOM (#2, #3, etc.) for instant feedback
+    const activeExists = Boolean(container.querySelector('.queue-flat-row.is-active'));
+    updatedStagedRows.forEach((r, idx) => {
+        const tag = r.querySelector('.queue-pos-tag');
+        if (tag) {
+            const pos = activeExists ? idx + 2 : idx + 1;
+            tag.textContent = `#${pos} 待機中`;
+        }
+    });
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/reorder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: state.selectedDate,
+                machine: state.machineName || 'PSA2',
+                orderedQueueIds
+            })
+        });
+        if (res.ok) {
+            showToast('✓ キュー順序を更新しました', 'success', 1500);
+            await fetchProductionQueue();
+        }
+    } catch (err) {
+        console.warn('Reorder failed:', err);
+    }
 }
 
 async function cancelQueueItem(queueId, hinban) {
