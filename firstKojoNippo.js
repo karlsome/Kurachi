@@ -46,6 +46,8 @@ const state = {
     expandedGroups: new Set(),
     activeRollPhotoTarget: null, // { itemId, gIdx, rIdx }
     historyFilter: 'all', // 'all', 'enqueued', 'excluded'
+    historyView: 'card', // 'card' | 'list'
+    masterData: [],
     currentFeedItem: null,
     currentFeedGroup: null,
     capturedPhotoBase64: null,
@@ -462,10 +464,15 @@ async function fetchDailySchedule(dateStr) {
             const res = await fetch(`${serverURL}/api/production/schedule?month=${encodeURIComponent(month)}`);
             if (res.ok) {
                 const json = await res.json();
+                if (json.data && Array.isArray(json.data)) {
+                    state.masterData = json.data;
+                }
                 if (json.success && Array.isArray(json.schedules)) {
                     scheduleDoc = json.schedules.find(s => s.month === month && Number(s.date) === date) || null;
                 }
             }
+        } else {
+            ensureMasterData(month);
         }
 
         state.dailySchedule = scheduleDoc;
@@ -1523,8 +1530,94 @@ function isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx) {
     return false;
 }
 
+// -----------------------------------------------------
+// Print-style Schedule & History Table Shared Helpers
+// -----------------------------------------------------
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+async function ensureMasterData(month) {
+    if (state.masterData && state.masterData.length > 0) return state.masterData;
+    try {
+        const m = month || (state.selectedDate ? state.selectedDate.substring(0, 7) : new Date().toISOString().substring(0, 7));
+        const res = await fetch(`${serverURL}/api/production/schedule?month=${encodeURIComponent(m)}`);
+        if (res.ok) {
+            const json = await res.json();
+            if (json.success && Array.isArray(json.data)) {
+                state.masterData = json.data;
+                return state.masterData;
+            }
+        }
+    } catch (e) {
+        console.warn('Could not load masterData:', e);
+    }
+    return [];
+}
+
+function getScheduleMasterInfo(hinban) {
+    const found = (state.masterData || []).find(d => d.hinban === hinban);
+    const rawMaster = found?.materialInfo?.rawMaster || {};
+    const hinmoku = rawMaster['品目マスタ'] || {};
+    const segments = rawMaster['品番構造']?.segments || [];
+
+    const kizaiSeg = segments.find(s => s.segment === '基材コード');
+    const kizai = kizaiSeg?.name || kizaiSeg?.['得意先'] || kizaiSeg?.['入出荷先'] || rawMaster['基材コード'] || found?.kizai || '—';
+
+    const shoriSeg = segments.find(s => s.segment === '処理コード');
+    const shori = shoriSeg?.name || shoriSeg?.['得意先'] || shoriSeg?.['入出荷先'] || rawMaster['処理コード'] || found?.shori || '—';
+
+    const colorSeg = segments.find(s => s.segment === '色コード');
+    const color = colorSeg?.name || colorSeg?.['得意先'] || colorSeg?.['入出荷先'] || rawMaster['色コード'] || found?.color || '—';
+
+    const habanagaSeg = segments.find(s => s.segment === '幅長コード');
+    const habanaga = habanagaSeg?.name || habanagaSeg?.['得意先'] || habanagaSeg?.['入出荷先'] || rawMaster['幅長コード'] || found?.habanaga || '—';
+
+    const shippingDest = hinmoku['出荷先名'] || hinmoku['入出荷先名'] || hinmoku['得意先名'] || found?.shippingDest || '—';
+    const kataban = hinmoku['型番'] || found?.materialInfo?.kataban || '—';
+    const zuban = hinmoku['図番'] || '—';
+    const hinmei = hinmoku['品名'] || found?.hinmei || '—';
+    const labelHinban = hinmoku['ラベル品番'] || found?.labelHinban || '—';
+
+    const bom = Array.isArray(rawMaster.BOM) ? rawMaster.BOM : [];
+    const p2010 = bom.find(b => Number(b['工程コード']) === 2010 || b['工程名'] === '粘着工程');
+    const timeOption = p2010?.['時間オプション'] || found?.materialInfo?.timeOption || '';
+    const rawUnit = p2010?.['生産単位'] || found?.materialInfo?.rawUnit || null;
+    const unitName = typeof rawUnit === 'object' ? rawUnit?.name : String(rawUnit || '');
+    const unit = (unitName === '枚' || found?.materialInfo?.unit === '枚') ? '枚' : 'm';
+
+    return {
+        kizai,
+        shori,
+        color,
+        habanaga,
+        shippingDest,
+        kataban,
+        timeOption,
+        unit,
+        zuban,
+        hinmei,
+        labelHinban
+    };
+}
+
 function renderScheduleTableView(groups, items) {
-    if (!groups || groups.length === 0) {
+    let scheduleItems = state.scheduledItems;
+    if (!scheduleItems || scheduleItems.length === 0) {
+        if (state.dailySchedule && Array.isArray(state.dailySchedule.scheduleOrder) && state.dailySchedule.scheduleOrder.length > 0) {
+            scheduleItems = computeTimeSchedule(state.dailySchedule.scheduleOrder, state.dailySchedule.startTime || '08:00');
+            state.scheduledItems = scheduleItems;
+        } else if (items && items.length > 0) {
+            scheduleItems = items;
+        }
+    }
+
+    if (!scheduleItems || scheduleItems.length === 0) {
         return `
             <div class="schedule-empty-state">
                 <h3>この日の生産予定はありません</h3>
@@ -1533,100 +1626,126 @@ function renderScheduleTableView(groups, items) {
         `;
     }
 
-    let rowsHTML = '';
+    let totalMeters = 0;
+    let totalPieces = 0;
+    let totalMins = 0;
+    let rollCount = 0;
+    let lastKizai = null;
+    const rows = [];
 
-    groups.forEach((group, gIdx) => {
-        const lifecycle = getGroupLifecycle(group.groupId);
+    scheduleItems.forEach((item, idx) => {
+        totalMins += Number(item.duration) || 0;
 
-        if (group.type === 'setup') {
-            const setupItem = group.items[0];
-            rowsHTML += `
-                <tr class="table-setup-row" data-id="${setupItem.id}">
-                    <td style="text-align: center; font-weight: 800;">#${setupItem.orderIndex}</td>
-                    <td style="font-weight: 700;">${setupItem.startTime} - ${setupItem.endTime}</td>
-                    <td colspan="4" style="font-weight: 800;">段取り / 段替 (${setupItem.duration}分)</td>
-                    <td style="text-align: center;"><span class="batch-status-tag status-pending">段替</span></td>
-                    <td style="text-align: center; color: var(--text-muted); font-size: 0.8rem;">—</td>
+        if (item.type === 'setup') {
+            const displayName = item.comment ? `${item.name} ${item.comment}` : (item.name || '段取');
+            rows.push(`
+                <tr class="setup-row">
+                    <td class="center font-bold">${idx + 1}</td>
+                    <td class="center font-bold time-cell">${escapeHtml(item.startTime)}<br><span class="text-sub">～ ${escapeHtml(item.endTime)}</span></td>
+                    <td colspan="7" class="left font-bold setup-name">⚙️ 段取り / 段替: ${escapeHtml(displayName)} (${item.duration}分)</td>
+                    <td class="center font-bold">—</td>
                 </tr>
-            `;
+            `);
+            lastKizai = null;
             return;
         }
 
-        const remainingItems = group.items.filter((rollItem, rIdx) => {
-            return !isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx);
-        });
-        if (remainingItems.length === 0) return;
+        rollCount++;
+        const qtyVal = Number(item.meters) || 0;
+        const info = getScheduleMasterInfo(item.hinban);
+        const itemUnit = item.unit || info.unit || 'm';
 
-        const firstItem = remainingItems[0];
-        const lastItem = remainingItems[remainingItems.length - 1];
-        const orderRangeText = remainingItems.length > 1 ? `#${firstItem.orderIndex}〜#${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
-        const kizaiCode = group.kizai || group.hinban || '基材未設定';
-
-        const activeItems = remainingItems.filter((rollItem, rIdx) => {
-            const itemId = getItemKey(rollItem, gIdx, rIdx);
-            return !getItemEdit(itemId, rollItem).isExcluded;
-        });
-        const activeMeters = activeItems.reduce((acc, rollItem, rIdx) => {
-            const itemId = getItemKey(rollItem, gIdx, rIdx);
-            return acc + (Number(getItemEdit(itemId, rollItem).meters) || Number(rollItem.meters) || 0);
-        }, 0);
-
-        const queuedItem = state.stagingQueue.find(q =>
-            (q.groupId === group.groupId || q.hinban === group.hinban || q.kizai === group.kizai) &&
-            (q.status === 'active' || q.status === 'in-progress' || q.status === 'queued' || q.status === 'queue')
-        );
-        const isQueueActive = queuedItem && (queuedItem.status === 'active' || queuedItem.status === 'in-progress');
-        const isQueued = queuedItem && (queuedItem.status === 'queued' || queuedItem.status === 'queue');
-
-        let statusBadge = '<span class="batch-status-tag status-pending">待機中</span>';
-        if (lifecycle.status === 'completed') {
-            statusBadge = `<span class="batch-status-tag status-completed">完了 (${lifecycle.actualDurationMins || ''}分)</span>`;
-        } else if (isQueueActive) {
-            statusBadge = '<span class="batch-status-tag status-active">貼合中</span>';
-        } else if (isQueued) {
-            statusBadge = '<span class="batch-status-tag status-queued">キュー投入済</span>';
-        } else if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
-            statusBadge = '<span class="batch-status-tag status-active">生産中</span>';
+        if (itemUnit === '枚') {
+            totalPieces += qtyVal;
+        } else {
+            totalMeters += qtyVal;
         }
 
-        rowsHTML += `
-            <tr class="table-group-header" onclick="previewBatchGroup(${gIdx}, event)">
-                <td style="text-align: center; font-weight: 800; color: var(--brand); font-size: 0.95rem;">${orderRangeText}</td>
-                <td style="font-weight: 700; font-variant-numeric: tabular-nums;">${group.startTime} - ${group.endTime}</td>
-                <td style="font-weight: 800; font-size: 0.95rem; color: #0F172A; cursor: pointer;">
-                    <div>${kizaiCode}</div>
+        const cmVal = qtyVal * 100;
+        const kizaiDisplay = (info.kizai && info.kizai !== '—') ? info.kizai : (item.kizai || '—');
+        const currentKizai = kizaiDisplay;
+
+        // If 基材コード changes to a different one, insert a blank black separator row
+        if (lastKizai !== null && lastKizai !== currentKizai) {
+            rows.push(`
+                <tr class="separator-black-row">
+                    <td colspan="10"></td>
+                </tr>
+            `);
+        }
+        lastKizai = currentKizai;
+
+        const rawDest = (info.shippingDest && info.shippingDest !== '—') ? info.shippingDest : (item.shippingDest || '—');
+        const formattedDest = escapeHtml(rawDest).replace(/\n/g, '<br>');
+
+        const shoriDisplay = (info.shori && info.shori !== '—') ? info.shori : (item.shori || '—');
+        const colorDisplay = (info.color && info.color !== '—') ? info.color : (item.color || '—');
+        const habanagaDisplay = (info.habanaga && info.habanaga !== '—') ? info.habanaga : (item.habanaga || '—');
+
+        const katabanVal = (info.kataban && info.kataban !== '—') ? info.kataban : (item.kataban || '—');
+        const timeOptionVal = info.timeOption || item.timeOption || '';
+        const katabanDisplay = (katabanVal !== '—')
+            ? `${escapeHtml(katabanVal)}${timeOptionVal ? `<br><span class="text-sub">(${escapeHtml(timeOptionVal)})</span>` : ''}`
+            : '—';
+
+        const qtyDisplay = itemUnit === '枚'
+            ? `${qtyVal.toLocaleString()} 枚`
+            : `${cmVal.toLocaleString()} cm (${qtyVal}m)`;
+
+        rows.push(`
+            <tr class="item-row" data-item-id="${escapeHtml(item.id || '')}" onclick="previewHistoryItem('${escapeHtml(item.id || '')}', event)" style="cursor: pointer;" title="${_t('fk_btn_detail')}">
+                <td class="center font-bold">${idx + 1}</td>
+                <td class="center time-cell">
+                    <strong>${escapeHtml(item.startTime || '—')}</strong><br>
+                    <span class="text-sub">～ ${escapeHtml(item.endTime || '—')}</span>
                 </td>
-                <td style="font-weight: 600;">${group.shippingDest || '—'}</td>
-                <td style="font-weight: 600;">${group.color || '—'}</td>
-                <td style="font-weight: 600;">${activeItems.length} 巻き (${activeMeters}m)</td>
-                <td>${statusBadge}</td>
-                <td onclick="event.stopPropagation()" style="text-align: center;">
-                    <div style="display: flex; gap: 6px; justify-content: center; align-items: center;">
-                        <button type="button" class="btn-feed-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="openMaterialFeedModalForGroup(${gIdx}, event)">投入</button>
-                        <button type="button" class="btn-detail-secondary" style="padding: 4px 10px; font-size: 0.8rem;" onclick="previewBatchGroup(${gIdx}, event)">詳細</button>
-                    </div>
-                </td>
+                <td class="center dest-cell">${formattedDest}</td>
+                <td class="left kizai-cell">${escapeHtml(kizaiDisplay)}</td>
+                <td class="center shori-cell">${escapeHtml(shoriDisplay)}</td>
+                <td class="center color-cell">${escapeHtml(colorDisplay)}</td>
+                <td class="center habanaga-cell">${escapeHtml(habanagaDisplay)}</td>
+                <td class="center kataban-cell">${katabanDisplay}</td>
+                <td class="center roll-cell font-bold">${item.rollIndex || 1}/${item.totalRolls || 1}</td>
+                <td class="right qty-cell font-bold">${qtyDisplay}</td>
             </tr>
-        `;
+        `);
     });
 
+    const hours = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    const timeFormatted = `${hours}時間 ${mins}分 (${totalMins}分)`;
+
+    const overallStartTime = scheduleItems.length > 0 ? (scheduleItems[0].startTime || '09:00') : '09:00';
+    const overallEndTime = scheduleItems.length > 0 ? (scheduleItems[scheduleItems.length - 1].endTime || '—') : '—';
+    const plannedTimeSpan = `${overallStartTime} ～ ${overallEndTime}`;
+
+    const totalProdFormatted = `${totalMeters > 0 ? `${totalMeters.toLocaleString()} m` : ''}${totalMeters > 0 && totalPieces > 0 ? ' / ' : ''}${totalPieces > 0 ? `${totalPieces.toLocaleString()} 枚` : ''}${totalMeters > 0 ? ` (${(totalMeters * 100).toLocaleString()} cm)` : ''}`;
+
     return `
-        <div class="schedule-table-wrap">
-            <table class="schedule-table">
+        <div class="history-sheet">
+            <div class="history-summary-strip">
+                <span>予定時: <strong>${escapeHtml(plannedTimeSpan)}</strong> (${escapeHtml(timeFormatted)})</span>
+                <span>予定総数: <strong>${rollCount} 巻/束</strong> (${scheduleItems.length} 工程)</span>
+                <span>予定総生産量: <strong>${totalProdFormatted}</strong></span>
+            </div>
+
+            <table class="history-schedule-table">
                 <thead>
                     <tr>
-                        <th style="width: 80px; text-align: center;">順 (No)</th>
-                        <th style="width: 120px;">時間 (Time)</th>
-                        <th>基材コード (Material Code)</th>
-                        <th style="width: 110px;">出荷先</th>
-                        <th style="width: 70px;">色</th>
-                        <th style="width: 130px;">巻数・数量</th>
-                        <th style="width: 120px;">状態</th>
-                        <th style="width: 130px; text-align: center;">操作</th>
+                        <th style="width: 4%;">No.</th>
+                        <th style="width: 8%;">時間</th>
+                        <th style="width: 14%;">出荷先名</th>
+                        <th style="width: 22%;">基材コード</th>
+                        <th style="width: 8%;">処理コード</th>
+                        <th style="width: 9%;">色コード</th>
+                        <th style="width: 9%;">幅長コード</th>
+                        <th style="width: 9%;">型番</th>
+                        <th style="width: 6%;">巻数</th>
+                        <th style="width: 11%;">生産数量</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${rowsHTML}
+                    ${rows.join('')}
                 </tbody>
             </table>
         </div>
@@ -5902,6 +6021,22 @@ async function advanceQueueItemPrompt(queueId) {
 // -----------------------------------------------------
 // History Tab Logic (Panel 4)
 // -----------------------------------------------------
+function setHistoryView(view) {
+    state.historyView = view || 'card';
+    const buttons = document.querySelectorAll('.history-view-btn');
+    buttons.forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-view') === state.historyView);
+    });
+    if (state.historyView === 'list') {
+        if (!state.masterData || state.masterData.length === 0) {
+            ensureMasterData().then(() => {
+                if (state.historyView === 'list') renderHistoryList();
+            });
+        }
+    }
+    renderHistoryList();
+}
+
 function setHistoryFilter(filter) {
     state.historyFilter = filter || 'all';
     const buttons = document.querySelectorAll('.history-filter-btn');
@@ -5909,6 +6044,168 @@ function setHistoryFilter(filter) {
         btn.classList.toggle('active', btn.getAttribute('data-filter') === state.historyFilter);
     });
     renderHistoryList();
+}
+
+function renderHistoryTableView() {
+    const queueDocs = state.stagingQueue || [];
+    // Only completed items after queue belong in the History List table!
+    const completedDocs = queueDocs.filter(doc => doc && doc.status === 'completed');
+
+    if (completedDocs.length === 0) {
+        return `
+            <div class="staging-queue-empty">
+                ${_t('fk_history_empty') || '完了した履歴項目がありません (No completed history)'}
+            </div>
+        `;
+    }
+
+    const historyItems = [];
+    completedDocs.forEach((doc, qIdx) => {
+        let matchedSched = null;
+        if (state.scheduledItems) {
+            matchedSched = state.scheduledItems.find(s => 
+                (doc.itemId && s.id === doc.itemId) || 
+                (doc._id && s.id === doc._id) ||
+                (s.hinban === doc.hinban && (Number(s.rollIndex) === Number(doc.rollIndex) || Number(s.orderIndex) === Number(doc.orderIndex))) ||
+                (s.kizai === doc.kizai && Number(s.orderIndex) === Number(doc.orderIndex))
+            );
+        }
+
+        let orderIndex = doc.orderIndex;
+        if (!orderIndex || isNaN(Number(orderIndex))) {
+            if (matchedSched && matchedSched.orderIndex) {
+                orderIndex = matchedSched.orderIndex;
+            } else if (state.scheduledItems) {
+                const foundIdx = state.scheduledItems.findIndex(s => s.hinban === doc.hinban || s.kizai === doc.kizai);
+                if (foundIdx !== -1) orderIndex = foundIdx + 1;
+            }
+        }
+        if (!orderIndex) orderIndex = doc.queuePosition || (qIdx + 1);
+
+        const info = getScheduleMasterInfo(doc.hinban || matchedSched?.hinban);
+
+        historyItems.push({
+            itemId: doc.itemId || doc._id || doc.id,
+            mongoId: doc._id,
+            orderIndex: Number(orderIndex) || (qIdx + 1),
+            startTime: doc.actualStartTime || matchedSched?.startTime || '',
+            endTime: doc.actualEndTime || matchedSched?.endTime || '',
+            completedAt: doc.completedAt || doc.createdAt || '',
+            shippingDest: (matchedSched && matchedSched.shippingDest) || info.shippingDest || doc.shippingDest || '—',
+            kizai: (matchedSched && matchedSched.kizai) || info.kizai || doc.kizai || doc.hinban || '材料',
+            shori: (matchedSched && matchedSched.shori) || info.shori || doc.shori || '—',
+            color: (matchedSched && matchedSched.color) || info.color || doc.color || '—',
+            habanaga: (matchedSched && matchedSched.habanaga) || info.habanaga || doc.habanaga || '—',
+            kataban: (matchedSched && matchedSched.kataban) || info.kataban || doc.kataban || '—',
+            timeOption: matchedSched?.timeOption || info.timeOption || doc.timeOption || '',
+            rollIndex: doc.rollIndex || matchedSched?.rollIndex || 1,
+            totalRolls: doc.totalRolls || matchedSched?.totalRolls || 1,
+            meters: doc.bicho || doc.rollMeters || doc.meters || matchedSched?.meters || 0,
+            unit: doc.unit || matchedSched?.unit || info.unit || 'm',
+            rawDoc: doc
+        });
+    });
+
+    // Sort by orderIndex ascending
+    historyItems.sort((a, b) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
+
+    let totalMeters = 0;
+    let totalPieces = 0;
+    let lastKizai = null;
+    const rows = [];
+
+    historyItems.forEach((item, idx) => {
+        const qtyVal = Number(item.meters) || 0;
+        if (item.unit === '枚') {
+            totalPieces += qtyVal;
+        } else {
+            totalMeters += qtyVal;
+        }
+
+        const cmVal = qtyVal * 100;
+        const currentKizai = item.kizai;
+
+        // If 基材コード changes, insert black separator row
+        if (lastKizai !== null && lastKizai !== currentKizai) {
+            rows.push(`
+                <tr class="separator-black-row">
+                    <td colspan="10"></td>
+                </tr>
+            `);
+        }
+        lastKizai = currentKizai;
+
+        const formattedDest = escapeHtml(item.shippingDest).replace(/\n/g, '<br>');
+
+        const katabanDisplay = (item.kataban && item.kataban !== '—')
+            ? `${escapeHtml(item.kataban)}${item.timeOption ? `<br><span class="text-sub">(${escapeHtml(item.timeOption)})</span>` : ''}`
+            : '—';
+
+        const qtyDisplay = item.unit === '枚'
+            ? `${qtyVal.toLocaleString()} 枚`
+            : `${cmVal.toLocaleString()} cm (${qtyVal}m)`;
+
+        let timeDisplay = '—';
+        if (item.startTime && item.endTime) {
+            timeDisplay = `<strong>${escapeHtml(item.startTime)}</strong><br><span class="text-sub">～ ${escapeHtml(item.endTime)}</span>`;
+        } else if (item.completedAt) {
+            const d = new Date(item.completedAt);
+            if (!isNaN(d.getTime())) {
+                timeDisplay = `<strong>${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</strong>`;
+            }
+        }
+
+        rows.push(`
+            <tr class="item-row" data-item-id="${escapeHtml(item.itemId || '')}" onclick="previewHistoryItem('${escapeHtml(item.itemId || '')}', event)" style="cursor: pointer;" title="${_t('fk_btn_detail')}">
+                <td class="center font-bold">${item.orderIndex}</td>
+                <td class="center time-cell">${timeDisplay}</td>
+                <td class="center dest-cell">${formattedDest}</td>
+                <td class="left kizai-cell">${escapeHtml(item.kizai)}</td>
+                <td class="center shori-cell">${escapeHtml(item.shori)}</td>
+                <td class="center color-cell">${escapeHtml(item.color)}</td>
+                <td class="center habanaga-cell">${escapeHtml(item.habanaga)}</td>
+                <td class="center kataban-cell">${katabanDisplay}</td>
+                <td class="center roll-cell font-bold">${item.rollIndex}/${item.totalRolls}</td>
+                <td class="right qty-cell font-bold">${qtyDisplay}</td>
+            </tr>
+        `);
+    });
+
+    const firstTime = historyItems.find(it => it.startTime)?.startTime || '';
+    const lastTime = [...historyItems].reverse().find(it => it.endTime)?.endTime || '';
+    const timeSpan = (firstTime && lastTime) ? `${firstTime} ～ ${lastTime}` : (historyItems[0]?.completedAt ? new Date(historyItems[0].completedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '本日');
+
+    const totalProdFormatted = `${totalMeters > 0 ? `${totalMeters.toLocaleString()} m` : ''}${totalMeters > 0 && totalPieces > 0 ? ' / ' : ''}${totalPieces > 0 ? `${totalPieces.toLocaleString()} 枚` : ''}${totalMeters > 0 ? ` (${(totalMeters * 100).toLocaleString()} cm)` : ''}`;
+
+    return `
+        <div class="history-sheet">
+            <div class="history-summary-strip">
+                <span>実績時: <strong>${escapeHtml(timeSpan)}</strong></span>
+                <span>完了総数: <strong>${historyItems.length} 巻/束</strong></span>
+                <span>完了総生産量: <strong>${totalProdFormatted}</strong></span>
+            </div>
+
+            <table class="history-schedule-table">
+                <thead>
+                    <tr>
+                        <th style="width: 4%;">No.</th>
+                        <th style="width: 8%;">時間</th>
+                        <th style="width: 14%;">出荷先名</th>
+                        <th style="width: 22%;">基材コード</th>
+                        <th style="width: 8%;">処理コード</th>
+                        <th style="width: 9%;">色コード</th>
+                        <th style="width: 9%;">幅長コード</th>
+                        <th style="width: 9%;">型番</th>
+                        <th style="width: 6%;">巻数</th>
+                        <th style="width: 11%;">生産数量</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
 }
 
 function updateHistoryBadges() {
@@ -5984,6 +6281,14 @@ function renderHistoryList() {
     if (!container) return;
 
     updateHistoryBadges();
+
+    if (state.historyView === 'list') {
+        container.classList.remove('history-flat-list');
+        container.innerHTML = renderHistoryTableView();
+        return;
+    }
+
+    container.classList.add('history-flat-list');
 
     const items = [];
     const queueDocs = state.stagingQueue || [];

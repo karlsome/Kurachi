@@ -2183,6 +2183,7 @@
             color: #4B5563;
         }
 
+        .history-view-row,
         .history-filter-row {
             display: inline-flex;
             background: #E5E7EB;
@@ -2192,27 +2193,121 @@
             gap: 2px;
         }
 
+        .history-view-btn,
         .history-filter-btn {
             background: transparent;
             border: none;
-            padding: 5px 14px;
+            padding: 5px 16px;
             border-radius: 16px;
-            font-size: 0.8rem;
+            font-size: 0.825rem;
             font-weight: 600;
             color: #6B7280;
             cursor: pointer;
             transition: all var(--transition-smooth);
         }
 
+        .history-view-btn:hover,
         .history-filter-btn:hover {
             color: #111827;
         }
 
+        .history-view-btn.active,
         .history-filter-btn.active {
             background: #FFFFFF;
             color: #111827;
             font-weight: 700;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* History Table View (Matching FreyaAdmin2 Print Layout) */
+        .history-sheet {
+            width: 100%;
+            background: #FFFFFF;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+            overflow-x: auto;
+            box-sizing: border-box;
+        }
+
+        .history-summary-strip {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f8fafc;
+            border: 1.5px solid #000;
+            border-bottom: none;
+            padding: 8px 14px;
+            font-size: 10pt;
+            font-weight: 700;
+            color: #000000;
+        }
+
+        .history-schedule-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 10pt;
+            background: #ffffff;
+            color: #000000;
+        }
+
+        .history-schedule-table th,
+        .history-schedule-table td {
+            border: 1.5px solid #000;
+            padding: 6px 5px;
+            vertical-align: middle;
+            word-break: break-word;
+        }
+
+        .history-schedule-table th {
+            background-color: #e2e8f0;
+            font-weight: 900;
+            text-align: center;
+            font-size: 10.5pt;
+            padding: 8px 4px;
+            color: #000000;
+        }
+
+        .history-schedule-table tr.setup-row {
+            background-color: #fffbeb !important;
+        }
+
+        .history-schedule-table tr.separator-black-row td {
+            background-color: #000000 !important;
+            height: 6px !important;
+            line-height: 6px !important;
+            padding: 0 !important;
+            border: 1.5px solid #000000 !important;
+            box-shadow: inset 0 0 0 1000px #000000 !important;
+        }
+
+        .history-schedule-table .setup-name {
+            color: #92400e;
+            font-size: 10.5pt;
+            padding-left: 14px;
+        }
+
+        .history-schedule-table .center { text-align: center; }
+        .history-schedule-table .left { text-align: left; }
+        .history-schedule-table .right { text-align: right; }
+        .history-schedule-table .font-bold { font-weight: 700; }
+        .history-schedule-table .text-sub {
+            font-size: 8.5pt;
+            color: #475569;
+            font-weight: normal;
+        }
+        .history-schedule-table .time-cell { width: 8%; }
+        .history-schedule-table .dest-cell { width: 14%; font-size: 9.5pt; }
+        .history-schedule-table .kizai-cell { width: 22%; font-size: 10pt; font-weight: 700; }
+        .history-schedule-table .shori-cell { width: 8%; font-size: 9.5pt; font-weight: 700; }
+        .history-schedule-table .color-cell { width: 9%; font-size: 9.5pt; font-weight: 700; }
+        .history-schedule-table .habanaga-cell { width: 9%; font-weight: 700; }
+        .history-schedule-table .kataban-cell { width: 9%; font-weight: 700; }
+        .history-schedule-table .roll-cell { width: 6%; font-weight: 700; font-size: 9.5pt; }
+        .history-schedule-table .qty-cell { width: 11%; font-weight: 700; }
+        .history-schedule-table tr.item-row:hover {
+            background-color: #f8fafc;
         }
 
         .history-flat-list {
@@ -4052,10 +4147,9 @@
                                 <span class="history-stat-pill" id="historyEnqueuedCountBadge">投入済: 0 件</span>
                                 <span class="history-stat-pill" id="historyExcludedCountBadge">除外: 0 件</span>
                             </div>
-                            <div class="history-filter-row">
-                                <button type="button" class="history-filter-btn active" data-filter="all" onclick="setHistoryFilter('all')" data-i18n="fk_filter_all_label">すべて</button>
-                                <button type="button" class="history-filter-btn" data-filter="enqueued" onclick="setHistoryFilter('enqueued')" data-i18n="fk_filter_enqueued_label">投入済</button>
-                                <button type="button" class="history-filter-btn" data-filter="excluded" onclick="setHistoryFilter('excluded')" data-i18n="fk_filter_excluded_label">除外</button>
+                            <div class="history-view-row">
+                                <button type="button" class="history-view-btn active" data-view="card" onclick="setHistoryView('card')" data-i18n="fk_view_card">カード</button>
+                                <button type="button" class="history-view-btn" data-view="list" onclick="setHistoryView('list')" data-i18n="fk_view_list">リスト</button>
                             </div>
                         </div>
                     </div>
