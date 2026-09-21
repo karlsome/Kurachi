@@ -36403,6 +36403,51 @@ function broadcastProductionEvent(eventData) {
   });
 }
 
+// Auto-broadcast scan data to pdfDisplayer when roll becomes in-progress
+async function broadcastScanForProductionItem(item) {
+  if (!item) return;
+  const hinban = item.hinban || item.kizai || '';
+  const zuban = item.zuban ? String(item.zuban).trim() : '';
+  if (!hinban && !zuban) return;
+
+  const targetMachine = item.machine || 'PSA2';
+  let peers = [];
+  try {
+    peers = await getRelatedMachineIds(targetMachine);
+  } catch (e) {
+    peers = [];
+  }
+  const allTargetMachines = Array.from(new Set([targetMachine, ...peers]));
+
+  const scanData = {
+    type: 'scan',
+    action: 'scan',
+    machineId: targetMachine,
+    sebanggo: '',
+    zuban: zuban,
+    hinban: hinban,
+    language: 'ja',
+    timestamp: new Date().toISOString(),
+    additionalData: {
+      factory: '第一工場',
+      工場: '第一工場',
+      Worker_Name: item.worker || item.feederWorker || '',
+      lotIndex: item.rollIndex || 1,
+      totalRolls: item.totalRolls || 1,
+      meters: item.rollMeters || item.meters || 0,
+      action: 'scan',
+      language: 'ja'
+    }
+  };
+
+  allTargetMachines.forEach(mid => {
+    const normalized = normalizeMachineSessionKey(mid);
+    machineLastScan.set(normalized, scanData);
+    broadcastToMachine(normalized, scanData);
+  });
+  console.log(`📄 Auto-broadcasted scan to pdfDisplayer for in-progress roll: [${hinban}] zuban: ${zuban} on ${targetMachine}`);
+}
+
 app.get('/api/production/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -37044,6 +37089,10 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       status: finalStatus
     });
 
+    if (finalStatus === 'in-progress' || finalStatus === 'active') {
+      broadcastScanForProductionItem(newItem).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
+    }
+
     console.log(`📋 Enqueued roll item to firstFactoryProduction [${newItem.hinban || newItem.groupId}] (Roll #${newItem.rollIndex}/${newItem.totalRolls}) -> pos: ${queuePosition}, status: ${finalStatus}, _id: ${newItem._id}`);
     res.json({
       success: true,
@@ -37182,6 +37231,7 @@ app.post('/api/production/queue/advance', async (req, res) => {
       await productionCol.updateOne({ _id: nextItem._id }, { $set: nextUpdate });
       await queueCol.updateOne({ _id: nextItem._id }, { $set: nextUpdate });
       console.log(`▶️ Activated next roll in queue [${nextItem.hinban || nextItem.groupId}] Roll #${nextItem.rollIndex}/${nextItem.totalRolls} (_id: ${nextItem._id})`);
+      broadcastScanForProductionItem({ ...nextItem, status: 'in-progress' }).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
     }
 
     broadcastProductionEvent({
@@ -37604,6 +37654,8 @@ app.post('/api/production/queue/select', async (req, res) => {
       date: targetDate,
       machine: targetMachine
     });
+
+    broadcastScanForProductionItem({ ...item, machine: targetMachine, status: 'in-progress' }).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
 
     console.log(`🎯 Active wrapping item switched to: [${item.hinban || item._id}] (${targetDate} / ${targetMachine})`);
     res.json({ success: true, item });

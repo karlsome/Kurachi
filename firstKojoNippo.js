@@ -5129,6 +5129,46 @@ function toggleStagingQueueCollapse() {
     if (btn) btn.textContent = isCollapsed ? '▼' : '▲';
 }
 
+function checkAndSyncActiveInProgress(queue) {
+    if (!Array.isArray(queue) || queue.length === 0) return;
+    const activeItem = queue.find(it => it && (it.status === 'active' || it.status === 'in-progress'));
+    if (!activeItem) return;
+
+    const activeUniqueKey = String(activeItem._id || activeItem.itemId || `${activeItem.hinban}_${activeItem.rollIndex}`);
+    if (state.lastActiveRollKey !== activeUniqueKey) {
+        state.lastActiveRollKey = activeUniqueKey;
+        console.log(`📡 In-progress roll active/changed: [${activeItem.hinban || activeItem.kizai}] (Roll #${activeItem.rollIndex}, Order #${activeItem.orderIndex}) -> Triggering pdfDisplayer`);
+
+        // Resolve zuban if not on the item directly
+        let zuban = activeItem.zuban;
+        if (!zuban && state.scheduledItems) {
+            const matched = state.scheduledItems.find(s =>
+                (activeItem.itemId && s.id === activeItem.itemId) ||
+                (s.hinban === activeItem.hinban && (Number(s.rollIndex) === Number(activeItem.rollIndex) || Number(s.orderIndex) === Number(activeItem.orderIndex))) ||
+                (s.kizai === activeItem.kizai && Number(s.orderIndex) === Number(activeItem.orderIndex))
+            );
+            if (matched && matched.zuban) zuban = matched.zuban;
+        }
+
+        const itemForDisplayer = {
+            ...activeItem,
+            type: activeItem.type || 'hinban',
+            hinban: activeItem.hinban || activeItem.kizai,
+            zuban: zuban || activeItem.zuban || ''
+        };
+
+        // Notify pdfDisplayer to display blueprint / drawings
+        notifyPdfDisplayer(itemForDisplayer, zuban);
+
+        // Pre-load Info tab so clicking Info immediately displays current active in-progress item
+        state.selectedItem = itemForDisplayer;
+        sessionStorage.setItem('firstkojo_nippo_selected_item', JSON.stringify(itemForDisplayer));
+        if (state.currentMainTab === 3) {
+            loadItemDetail(itemForDisplayer);
+        }
+    }
+}
+
 async function fetchProductionQueue() {
     try {
         const machine = state.machineName || 'PSA2';
@@ -5143,6 +5183,9 @@ async function fetchProductionQueue() {
             }
             renderHistoryList();
             updateHistoryBadges();
+
+            // Auto-trigger pdfDisplayer when an item transitions to in-progress or a new in-progress is detected
+            checkAndSyncActiveInProgress(data.queue);
         }
     } catch (err) {
         console.warn('⚠️ Could not fetch production queue:', err);
