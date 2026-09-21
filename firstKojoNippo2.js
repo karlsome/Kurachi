@@ -109,27 +109,22 @@ function parseUrlParams() {
     }
 
     // Update UI elements
-    renderMachineTag();
+    const machineTag = document.getElementById('machineTag');
+    if (machineTag) {
+        if (state.machineName) {
+            machineTag.textContent = `設備: ${state.machineName}${state.filterName ? ` (${state.filterName})` : ''}`;
+            machineTag.style.color = '';
+            machineTag.style.borderColor = '';
+        } else {
+            machineTag.textContent = `設備: 未指定 (No Machine in URL)`;
+            machineTag.style.color = '#E5484D';
+            machineTag.style.borderColor = '#FCA5A5';
+        }
+    }
 
     const datePicker = document.getElementById('datePickerInput');
     if (datePicker) {
         datePicker.value = state.selectedDate;
-    }
-}
-
-function renderMachineTag() {
-    const machineTag = document.getElementById('machineTag');
-    if (!machineTag) return;
-    const prefix = (typeof _t === 'function' && _t('fk_machine_prefix')) || '設備: ';
-    if (state.machineName) {
-        machineTag.textContent = `${prefix}${state.machineName}${state.filterName ? ` (${state.filterName})` : ''}`;
-        machineTag.style.color = '';
-        machineTag.style.borderColor = '';
-    } else {
-        const noMachine = (typeof _t === 'function' && _t('fk2_no_machine_specified')) || '未指定 (No Machine in URL)';
-        machineTag.textContent = `${prefix}${noMachine}`;
-        machineTag.style.color = '#E5484D';
-        machineTag.style.borderColor = '#FCA5A5';
     }
 }
 
@@ -361,13 +356,10 @@ function showPrintProgressModal(title, detailText) {
     const iconEl = document.getElementById('printModalIcon');
     const subEl = document.getElementById('printModalSub');
 
-    const defaultTitle = (typeof _t === 'function' && _t('fk2_print_progress_title')) || 'ラベル印刷中...';
-    const defaultSub = (typeof _t === 'function' && _t('fk2_print_progress_sub')) || 'プリンターにラベル印刷データを送信しています。<br>しばらくお待ちください。';
-
-    if (titleEl) titleEl.textContent = title || defaultTitle;
+    if (titleEl) titleEl.textContent = title || 'ラベル印刷中...';
     if (detailEl) detailEl.textContent = detailText || '';
     if (iconEl) iconEl.textContent = '🖨️';
-    if (subEl) subEl.innerHTML = defaultSub;
+    if (subEl) subEl.innerHTML = 'プリンターにラベル印刷データを送信しています。<br>しばらくお待ちください。';
 
     if (modal) modal.classList.add('open');
 }
@@ -378,13 +370,10 @@ function updatePrintProgressSuccess(title, detailText) {
     const iconEl = document.getElementById('printModalIcon');
     const subEl = document.getElementById('printModalSub');
 
-    const defaultTitle = (typeof _t === 'function' && _t('fk2_print_success_title')) || '印刷完了！';
-    const defaultSub = (typeof _t === 'function' && _t('fk2_print_success_detail')) || '正常にラベルが発行されました。';
-
-    if (titleEl) titleEl.textContent = title || defaultTitle;
+    if (titleEl) titleEl.textContent = title || '印刷完了！';
     if (detailEl) detailEl.textContent = detailText || '';
     if (iconEl) iconEl.textContent = '✅';
-    if (subEl) subEl.innerHTML = defaultSub;
+    if (subEl) subEl.innerHTML = '正常にラベルが発行されました。';
 
     setTimeout(() => {
         closePrintProgressModal();
@@ -396,9 +385,7 @@ function updatePrintProgressError(errorMessage) {
     const iconEl = document.getElementById('printModalIcon');
     const subEl = document.getElementById('printModalSub');
 
-    const defaultTitle = (typeof _t === 'function' && _t('fk2_print_error_title')) || '印刷エラー';
-
-    if (titleEl) titleEl.textContent = defaultTitle;
+    if (titleEl) titleEl.textContent = '印刷エラー';
     if (iconEl) iconEl.textContent = '⚠️';
     if (subEl) subEl.innerHTML = `<span style="color:var(--red);font-weight:800;">${errorMessage}</span><br><br>プリンターの電源・用紙・接続を確認してください。`;
 }
@@ -415,9 +402,8 @@ function openPhotoModal(photoUrl, captionText) {
     const img = document.getElementById('fullWarehousePhoto');
     const caption = document.getElementById('photoModalCaption');
 
-    const defaultCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票写真';
     if (img) img.src = photoUrl;
-    if (caption) caption.textContent = captionText || defaultCaption;
+    if (caption) caption.textContent = captionText || '現品票写真 (Warehouse Label Photo)';
     if (modal) modal.classList.add('open');
 }
 
@@ -429,8 +415,7 @@ function closePhotoModal() {
 // Scrap Modal
 function openScrapModal() {
     if (!state.activeItem) {
-        const noActiveWarn = (typeof _t === 'function' && _t('fk2_no_active_lot_toast')) || '包装中のアイテムがありません';
-        showToast(noActiveWarn, 'warning');
+        showToast('包装中のアイテムがありません', 'warning');
         return;
     }
     const modal = document.getElementById('scrapModal');
@@ -441,8 +426,7 @@ function openScrapModal() {
     const totalRolls = state.activeItem.totalRolls || 1;
 
     if (subtitle) {
-        const promptTemplate = (typeof _t === 'function' && _t('fk2_scrap_modal_sub')) || '現在の巻を不良として破棄し、次の巻へ進めますか？';
-        subtitle.textContent = `【${state.activeItem.hinban}】Roll #${curRoll} / ${totalRolls}: ${promptTemplate}`;
+        subtitle.textContent = `【${state.activeItem.hinban}】の Roll #${curRoll} / ${totalRolls} を不良として破棄し、次へ進めますか？`;
     }
     if (chkEntire) chkEntire.checked = false;
 
@@ -465,8 +449,7 @@ function selectScrapReason(reason) {
 function updateScrapReasonButtons() {
     const btns = document.querySelectorAll('#scrapReasonGrid .reason-btn');
     btns.forEach(btn => {
-        const onclickAttr = btn.getAttribute('onclick') || '';
-        if (onclickAttr.includes(`'${state.selectedScrapReason}'`) || onclickAttr.includes(`"${state.selectedScrapReason}"`)) {
+        if (btn.textContent.trim() === state.selectedScrapReason) {
             btn.classList.add('selected');
         } else {
             btn.classList.remove('selected');
@@ -477,8 +460,7 @@ function updateScrapReasonButtons() {
 // Finish Early Modal
 function openFinishEarlyModal() {
     if (!state.activeItem) {
-        const noActiveWarn = (typeof _t === 'function' && _t('fk2_no_active_lot_toast')) || '包装中のアイテムがありません';
-        showToast(noActiveWarn, 'warning');
+        showToast('包装中のアイテムがありません', 'warning');
         return;
     }
     const modal = document.getElementById('finishEarlyModal');
@@ -488,11 +470,7 @@ function openFinishEarlyModal() {
     const total = state.activeItem.totalRolls || 1;
     const currentRoll = state.activeItem.currentRollIndex || state.activeItem.rollIndex || 1;
 
-    if (plannedDisplay) {
-        const rollCountUnit = (typeof _t === 'function' && _t('fk_roll_count')) || '巻';
-        const plannedTag = (typeof _t === 'function' && _t('fk2_planned_tag')) || '予定';
-        plannedDisplay.textContent = `${total} ${rollCountUnit} (${plannedTag})`;
-    }
+    if (plannedDisplay) plannedDisplay.textContent = `${total} 巻 (Planned)`;
     if (inputActual) {
         inputActual.value = Math.max(0, currentRoll - 1);
         inputActual.max = total;
@@ -732,14 +710,13 @@ function renderHeroCard() {
 
     if (!item) {
         if (!state.machineName) {
-            const noMachineTitle = (typeof _t === 'function' && _t('fk2_no_machine_title')) || '設備（machine）パラメータが指定されていません';
-            const noMachineDesc = (typeof _t === 'function' && _t('fk2_no_machine_desc')) || 'URLに設備パラメータが付与されていません。<br>例: <code>?machine=PSA2&filter=第一工場</code> のように設備名を指定して開いてください。';
             wrapper.innerHTML = `
                 <div class="empty-queue-card" style="border-color: #FCA5A5; background: #FFFBFB;">
                     <div class="empty-icon" style="background: #FEE2E2; color: #DC2626;">⚠️</div>
-                    <h2 class="empty-title" style="color: #DC2626;">${noMachineTitle}</h2>
+                    <h2 class="empty-title" style="color: #DC2626;">設備（machine）パラメータが指定されていません</h2>
                     <p class="empty-subtitle">
-                        ${noMachineDesc}
+                        URLに設備パラメータが付与されていません。<br>
+                        例: <code>?machine=PSA2&filter=第一工場</code> のように設備名を指定して開いてください。
                     </p>
                 </div>
             `;
@@ -747,20 +724,17 @@ function renderHeroCard() {
         }
 
         // Empty State Placeholder
-        const emptyTitle = (typeof _t === 'function' && _t('fk2_no_active_title')) || '待機中: 投入工程からの登録を待っています';
-        const emptyDesc = (typeof _t === 'function' && _t('fk2_no_active_desc')) || '投入工程（Tablet 1）で原反QRまたは現品票写真が登録されると、自動的にここに表示されます。';
-        const refreshQueueText = (typeof _t === 'function' && _t('fk2_refresh_queue')) || '🔄 キューを再確認';
-
         wrapper.innerHTML = `
             <div class="empty-queue-card">
                 <div class="empty-icon">📦</div>
-                <h2 class="empty-title">${emptyTitle}</h2>
+                <h2 class="empty-title">待機中: 投入工程からの登録を待っています</h2>
                 <p class="empty-subtitle">
-                    ${emptyDesc}
+                    Waiting for feeder station to register materials.<br>
+                    投入工程（Tablet 1）で原反QRまたは現品票写真が登録されると、自動的にここに表示されます。
                 </p>
                 <div class="empty-actions">
                     <button type="button" class="btn-edge" onclick="fetchProductionQueue(true)">
-                        ${refreshQueueText}
+                        🔄 キューを再確認 (Refresh)
                     </button>
                 </div>
             </div>
@@ -776,23 +750,6 @@ function renderHeroCard() {
     const metersPerRoll = item.rollMeters || item.metersPerRoll || item.meters || 100;
     const photoUrl = item.imageUrl || item.photoUrl || '';
 
-    const rollUnit = (typeof _t === 'function' && _t('fk_roll_unit')) || '巻き';
-    const metersPerRollText = (typeof _t === 'function' && _t('fk2_meters_per_roll')) || 'm / 巻';
-    const photoCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票写真';
-    const tapToEnlarge = (typeof _t === 'function' && _t('fk2_tap_to_enlarge')) || 'タップで拡大';
-    const noPhotoText = (typeof _t === 'function' && _t('fk2_no_photo')) || '現品票写真なし';
-    const mainPrintLabel = (typeof _t === 'function' && _t('fk2_main_print_label')) || 'ラベル印刷 (Print Roll Label)';
-    const subPrintSuffix = (typeof _t === 'function' && _t('fk2_sub_print_label')) || 'のラベルを発行して次へ';
-    const reprintLabel = (typeof _t === 'function' && _t('fk2_btn_reprint')) || '直前再印刷';
-    const cantPrintLabel = (typeof _t === 'function' && _t('fk2_btn_cant_print')) || '印刷不可・次へ';
-    const scrapLabel = (typeof _t === 'function' && _t('fk2_btn_scrap')) || '1巻破棄';
-    const finishEarlyLabel = (typeof _t === 'function' && _t('fk2_btn_finish_early')) || '中途完了';
-
-    const titleReprint = (typeof _t === 'function' && _t('fk2_title_reprint')) || '直前に印刷したラベルをそのまま再発行します';
-    const titleCantPrint = (typeof _t === 'function' && _t('fk2_title_cant_print')) || 'プリンター障害等で印刷できない場合に手動で完了して次へ進めます';
-    const titleScrap = (typeof _t === 'function' && _t('fk2_title_scrap')) || 'キズ・シワなどの不良で1巻破棄して次へ';
-    const titleFinishEarly = (typeof _t === 'function' && _t('fk2_title_finish_early')) || '材料不足などで予定巻き数より早く終了';
-
     wrapper.innerHTML = `
         <div class="hero-wrapping-card has-active">
             <!-- Hinban Row: Exactly matching Tablet 1 List Tab (Now on top) -->
@@ -800,32 +757,45 @@ function renderHeroCard() {
                 <div class="hinban-display">${escapeHtml(hinban)}</div>
             </div>
 
-            <!-- Header of Hero: Metadata row (Below Name) -->
+            <!-- Header of Hero: Status, Counters & Lot (Below Name) -->
             <div class="hero-card-header">
-                <div class="hero-meta-text">
-                    ${listNum ? `<span class="roll-sub-badge" style="font-size: 0.825rem; font-weight: 800; color: #1E293B; background: #F1F5F9; border: 1px solid #CBD5E1; padding: 2px 8px; border-radius: 6px;">#${listNum}</span><span class="hero-meta-divider">•</span>` : ''}
-                    <span>Roll <strong style="font-size: 1.1rem;">${curRoll}</strong> / ${totalRolls} ${rollUnit}</span>
-                    <span class="hero-meta-divider">•</span>
-                    <span><strong>${metersPerRoll}</strong>${metersPerRollText}</span>
-                    <span class="hero-meta-divider">•</span>
-                    <span><strong>${escapeHtml(color)}</strong></span>
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    ${listNum ? `<div class="queue-pos-badge" style="font-size: 0.825rem; padding: 4px 11px;">#${listNum}</div>` : ''}
+                    <div class="hero-status-pill">
+                        <span>▶</span>
+                        <span>現在包装中 (Wrapping)</span>
+                    </div>
+                    <div class="roll-counter-badge">
+                        <span>Roll</span>
+                        <strong style="font-size: 1.25rem;">${curRoll}</strong>
+                        <span style="font-size: 0.9rem; opacity: 0.85;">/ ${totalRolls} 巻き</span>
+                    </div>
+                    <div class="roll-length-badge">
+                        <span>📏 ${metersPerRoll}m / 巻</span>
+                    </div>
+                    <div class="color-badge" title="色 (Color)">
+                        🎨 ${escapeHtml(color)}
+                    </div>
+                </div>
+                <div class="hero-lot-tag" title="ロット番号 (Auto Lot Number)">
+                    LOT: ${calcLotNumber(curRoll)}
                 </div>
             </div>
 
             <!-- Compact Work Row: Warehouse Photo Thumbnail + Print Actions side-by-side -->
             <div class="hero-work-row">
                 <!-- Thumbnail Preview -->
-                <div class="photo-preview-box" onclick="openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - ${escapeHtml(photoCaption)}')" title="${escapeHtml(tapToEnlarge)}">
+                <div class="photo-preview-box" onclick="openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - 現品票写真')" title="タップして拡大表示 (Tap to Enlarge)">
                     ${photoUrl ? `
-                        <img src="${photoUrl}" alt="${escapeHtml(photoCaption)}">
+                        <img src="${photoUrl}" alt="現品票写真">
                         <div class="photo-badge-overlay">
                             <span>🔍</span>
-                            <span>${escapeHtml(tapToEnlarge)}</span>
+                            <span>タップで拡大</span>
                         </div>
                     ` : `
                         <div class="photo-placeholder">
                             <span class="photo-placeholder-icon">📷</span>
-                            <span class="photo-placeholder-text">${escapeHtml(noPhotoText)}</span>
+                            <span class="photo-placeholder-text">現品票写真なし</span>
                         </div>
                     `}
                 </div>
@@ -835,27 +805,27 @@ function renderHeroCard() {
                     <button type="button" class="btn-massive-print" id="btnPrintRollLabel" onclick="handlePrintRollLabel()">
                         <span class="print-icon">🖨️</span>
                         <div class="print-text-group">
-                            <span class="main-print-label">${escapeHtml(mainPrintLabel)}</span>
-                            <span class="sub-print-label">Roll ${curRoll} / ${totalRolls} ${escapeHtml(subPrintSuffix)}</span>
+                            <span class="main-print-label">ラベル印刷 (Print Roll Label)</span>
+                            <span class="sub-print-label">Roll ${curRoll} / ${totalRolls} のラベルを発行して次へ</span>
                         </div>
                     </button>
 
                     <div class="edge-controls-bar">
-                        <button type="button" class="btn-edge reprint-btn" onclick="handleReprintLastRoll()" title="${escapeHtml(titleReprint)}">
+                        <button type="button" class="btn-edge reprint-btn" onclick="handleReprintLastRoll()" title="直前に印刷したラベルをそのまま再発行します">
                             <span>🔄</span>
-                            <span>${escapeHtml(reprintLabel)}</span>
+                            <span>直前再印刷</span>
                         </button>
-                        <button type="button" class="btn-edge cant-print-btn" onclick="handleCantPrintAdvance()" title="${escapeHtml(titleCantPrint)}">
+                        <button type="button" class="btn-edge cant-print-btn" onclick="handleCantPrintAdvance()" title="プリンター障害等で印刷できない場合に手動で完了して次へ進めます">
                             <span>⚠️</span>
-                            <span>${escapeHtml(cantPrintLabel)}</span>
+                            <span>印刷不可・次へ</span>
                         </button>
-                        <button type="button" class="btn-edge skip-btn" onclick="openScrapModal()" title="${escapeHtml(titleScrap)}">
+                        <button type="button" class="btn-edge skip-btn" onclick="openScrapModal()" title="キズ・シワなどの不良で1巻破棄して次へ">
                             <span>🗑️</span>
-                            <span>${escapeHtml(scrapLabel)}</span>
+                            <span>1巻破棄</span>
                         </button>
-                        <button type="button" class="btn-edge finish-btn" onclick="openFinishEarlyModal()" title="${escapeHtml(titleFinishEarly)}">
+                        <button type="button" class="btn-edge finish-btn" onclick="openFinishEarlyModal()" title="材料不足などで予定巻き数より早く終了">
                             <span>🏁</span>
-                            <span>${escapeHtml(finishEarlyLabel)}</span>
+                            <span>中途完了</span>
                         </button>
                     </div>
                 </div>
@@ -870,23 +840,16 @@ function renderQueueSection() {
     if (!container) return;
 
     const items = state.waitingItems || [];
-    const countUnit = (typeof _t === 'function' && _t('count_unit')) || '件';
-    if (badge) badge.textContent = `${items.length}${countUnit}`;
+    if (badge) badge.textContent = `${items.length}件`;
 
     if (items.length === 0) {
-        const noWaitingText = (typeof _t === 'function' && _t('fk2_no_waiting')) || '次工程キューに待機中のロットはありません';
         container.innerHTML = `
             <div style="grid-column: 1 / -1; background: var(--bg-surface); border: 1px dashed var(--border-strong); border-radius: var(--card-radius); padding: 36px 20px; text-align: center; color: var(--text-soft); font-weight: 700; box-shadow: var(--shadow-card);">
-                ${escapeHtml(noWaitingText)}
+                次工程キューに待機中のロットはありません (No waiting lots in line)
             </div>
         `;
         return;
     }
-
-    const rollCountUnit = (typeof _t === 'function' && _t('fk_roll_count')) || '巻';
-    const plannedTag = (typeof _t === 'function' && _t('fk2_planned_tag')) || '予定';
-    const customerPrefix = (typeof _t === 'function' && _t('fk2_customer_hinban')) || '客品番';
-    const photoCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票';
 
     container.innerHTML = items.map((item, index) => {
         const listNum = getTablet1OrderIndex(item, index + 1);
@@ -902,17 +865,17 @@ function renderQueueSection() {
             <div class="queue-item-card" onclick="handleSelectQueueItem('${qId}', '${escapeHtml(hinban)}')">
                 <div class="queue-card-top">
                     <div class="queue-pos-badge">#${listNum}</div>
-                    <div class="queue-rolls-tag">${rolls} ${rollCountUnit} ${plannedTag}</div>
+                    <div class="queue-rolls-tag">${rolls} 巻 予定</div>
                 </div>
 
                 <div class="queue-item-body">
-                    <div class="queue-thumb" onclick="event.stopPropagation(); openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - ${escapeHtml(photoCaption)}')">
+                    <div class="queue-thumb" onclick="event.stopPropagation(); openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - 現品票')">
                         ${photoUrl ? `<img src="${photoUrl}" alt="Photo">` : '📷'}
                     </div>
                     <div class="queue-info">
                         <div class="queue-hinban">${escapeHtml(hinban)}</div>
-                        <div class="queue-color-hinmei">${escapeHtml(color)} · ${escapeHtml(hinmei)}</div>
-                        ${okyakuHinban ? `<div class="queue-customer">${escapeHtml(customerPrefix)}: ${escapeHtml(okyakuHinban)}</div>` : ''}
+                        <div class="queue-color-hinmei">🎨 ${escapeHtml(color)} · ${escapeHtml(hinmei)}</div>
+                        ${okyakuHinban ? `<div class="queue-customer">客品番: ${escapeHtml(okyakuHinban)}</div>` : ''}
                     </div>
                 </div>
             </div>
@@ -924,9 +887,8 @@ function updateLastPrintedInfo() {
     const el = document.getElementById('lastPrintedInfo');
     if (!el) return;
     if (state.lastPrinted) {
-        const lastPrintedPrefix = (typeof _t === 'function' && _t('fk2_last_printed')) || '最終印刷';
         const timeStr = state.lastPrinted.timeStr || (new Date(state.lastPrinted.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
-        el.textContent = `${lastPrintedPrefix}: [${state.lastPrinted.hinban}] Roll ${state.lastPrinted.rollIndex}/${state.lastPrinted.totalRolls} (${timeStr})`;
+        el.textContent = `最終印刷: [${state.lastPrinted.hinban}] Roll ${state.lastPrinted.rollIndex}/${state.lastPrinted.totalRolls} (${timeStr})`;
     } else {
         el.textContent = '';
     }
@@ -1485,12 +1447,10 @@ function setSseBadgeStatus(connected) {
 
     if (connected) {
         badge.className = 'sse-badge connected';
-        const liveText = (typeof _t === 'function' && _t('sse_connected')) || '接続中';
-        text.textContent = `${liveText} (Live)`;
+        text.textContent = '接続中 (Live)';
     } else {
         badge.className = 'sse-badge disconnected';
-        const offlineText = (typeof _t === 'function' && _t('sse_disconnected')) || '切断中';
-        text.textContent = `${offlineText} (Offline)`;
+        text.textContent = '切断中 (Offline)';
     }
 }
 
@@ -1498,13 +1458,6 @@ function setSseBadgeStatus(connected) {
 // Event Listeners & Initialization
 // -----------------------------------------------------
 function setupEventListeners() {
-    // Listen for language changes from i18n
-    document.addEventListener('languageChanged', () => {
-        renderMachineTag();
-        setSseBadgeStatus(state.sseConnected);
-        renderApp();
-    });
-
     // Date Navigation
     const btnPrev = document.getElementById('btnPrevDay');
     const btnNext = document.getElementById('btnNextDay');
