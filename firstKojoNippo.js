@@ -4402,6 +4402,72 @@ function closeMaterialFeedModal() {
     state.currentFeedGroup = null;
 }
 
+function hideMaterialFeedModal() {
+    const modal = document.getElementById('materialFeedModal');
+    if (modal) {
+        modal.classList.remove('open', 'active');
+        modal.style.display = 'none';
+    }
+    closeMaterialKeypad();
+}
+
+function showQueueAddingModal(item, ctx, photoSrc) {
+    const modal = document.getElementById('queueAddingModal');
+    if (!modal) return;
+
+    const rollIdx = item?.rollIndex || (ctx?.rIdx !== undefined ? ctx.rIdx + 1 : 1);
+    const orderIdx = item?.orderIndex || ctx?.item?.orderIndex || rollIdx;
+    const hinban = item?.kizai || item?.hinban || ctx?.item?.kizai || ctx?.item?.hinban || '材料';
+
+    const rollIdEl = document.getElementById('queueAddingRollId');
+    if (rollIdEl) {
+        rollIdEl.textContent = `#${orderIdx} ${hinban}`;
+    }
+
+    const thumbImg = document.getElementById('queueAddingThumbImg');
+    const placeholder = document.getElementById('queueAddingThumbPlaceholder');
+    const src = photoSrc || state.capturedPhotoBase64 || ctx?.photoUrl;
+    if (src && thumbImg && placeholder) {
+        thumbImg.src = src;
+        thumbImg.style.display = 'block';
+        placeholder.style.display = 'none';
+    } else if (thumbImg && placeholder) {
+        thumbImg.style.display = 'none';
+        placeholder.style.display = 'flex';
+    }
+
+    const spinnerRow = document.getElementById('queueAddingSpinnerRow');
+    const successRow = document.getElementById('queueAddingSuccessRow');
+    const statusText = document.getElementById('queueAddingStatusText');
+    const subText = document.getElementById('queueAddingSubText');
+
+    if (spinnerRow) spinnerRow.style.display = 'flex';
+    if (successRow) successRow.style.display = 'none';
+    if (statusText) statusText.textContent = '投入キューに追加中...';
+    if (subText) subText.textContent = 'サーバーへ登録しています...';
+
+    modal.classList.add('open', 'active');
+    modal.style.display = 'flex';
+}
+
+function setQueueAddingModalSuccess(msg) {
+    const spinnerRow = document.getElementById('queueAddingSpinnerRow');
+    const successRow = document.getElementById('queueAddingSuccessRow');
+    const successText = document.querySelector('.queue-adding-success-text');
+
+    if (spinnerRow) spinnerRow.style.display = 'none';
+    if (successRow) successRow.style.display = 'flex';
+    if (successText) successText.textContent = msg || '投入完了！キュー一覧へ移動します';
+}
+
+function closeQueueAddingModal() {
+    const modal = document.getElementById('queueAddingModal');
+    if (modal) {
+        modal.classList.remove('open', 'active');
+        modal.style.display = 'none';
+    }
+}
+
 // -----------------------------------------------------
 // IndexedDB Local Photo Storage (Zero localStorage Quota Bloat)
 // -----------------------------------------------------
@@ -4793,6 +4859,10 @@ async function savePhotoAndEnqueue(ctx, base64) {
     const { itemId, rIdx, item, group } = ctx;
     const lotNoVal = getItemEdit(itemId, item).lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
 
+    // 0. Instantly close the material input modal and show the dedicated "Adding to Queue" modal
+    hideMaterialFeedModal();
+    showQueueAddingModal(item, ctx, base64);
+
     // 1. Save directly into IndexedDB (zero localStorage bloat)
     await firstKojoPhotoDB.savePhoto(itemId, {
         base64: base64,
@@ -4820,8 +4890,6 @@ async function savePhotoAndEnqueue(ctx, base64) {
             pill.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2 3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> 撮影済`;
         }
     }
-
-    showToast('📸 写真を保存しました。投入処理を実行中...', 'success', 1800);
 
     // 4. Submit and enqueue roll
     await submitModalRollToQueue();
@@ -4973,6 +5041,10 @@ async function submitModalRollToQueue() {
     }
 
     try {
+        // Ensure input modal is hidden and dedicated progress modal is showing
+        hideMaterialFeedModal();
+        showQueueAddingModal(item, ctx, state.capturedPhotoBase64 || edit?.photoBase64 || dbPhoto?.base64 || edit.photoUrl);
+
         let photoUrl = edit.photoUrl || dbPhoto?.photoUrl || '';
         const lotNoVal = state.currentModalLotNo || edit.lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
         const kizaiCode = state.currentModalHinban || item.kizai || group?.kizai || item.hinban || '';
@@ -5051,9 +5123,12 @@ async function submitModalRollToQueue() {
                 status: assignedStatus,
                 photoUrl: data.item?.photoUrl || photoUrl || ''
             });
+            setQueueAddingModalSuccess(`ℹ️ #${item.orderIndex || rollIdx} は既にキューに追加されています`);
+            await new Promise(r => setTimeout(r, 450));
+            closeQueueAddingModal();
             closeMaterialFeedModal();
-            showToast(`ℹ️ ${kizaiCode} - roll#${rollIdx} は既にキューに追加されています`, 'info', 3000);
             await fetchProductionQueue();
+            switchMainTab(2);
             return;
         }
 
@@ -5077,18 +5152,22 @@ async function submitModalRollToQueue() {
         });
 
         notifyPdfDisplayer(item, item.zuban);
-        closeMaterialFeedModal();
 
-        showToast(`✓ ${kizaiCode} - roll#${rollIdx} を投入キューに追加しました`, 'success', 3000);
+        setQueueAddingModalSuccess(`✓ #${item.orderIndex || rollIdx} をキューに追加しました`);
 
         await fetchProductionQueue();
         renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
         updateHistoryBadges();
 
+        await new Promise(r => setTimeout(r, 450));
+        closeQueueAddingModal();
+        closeMaterialFeedModal();
+
         // Switch to Queue tab (index 2) to show the new roll in queue
         switchMainTab(2);
 
     } catch (err) {
+        closeQueueAddingModal();
         console.error('Error submitting modal roll to queue:', err);
         alert(`投入エラー: ${err.message}`);
     }

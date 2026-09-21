@@ -2715,6 +2715,166 @@
             transform: scale(1.04);
         }
 
+        /* ---------------- Adding to Queue Modal ---------------- */
+        #queueAddingModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 99999;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #queueAddingModal.active,
+        #queueAddingModal.open {
+            display: flex !important;
+        }
+
+        .queue-adding-card {
+            background: #FFFFFF;
+            width: 90%;
+            max-width: 400px;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+            padding: 24px 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            text-align: center;
+            animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .queue-adding-header {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .queue-adding-badge {
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: #4338CA;
+            background: #EEF2FF;
+            border: 1px solid #C7D2FE;
+            padding: 3px 10px;
+            border-radius: 9999px;
+            letter-spacing: 0.02em;
+        }
+
+        .queue-adding-roll-id {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: #0F172A;
+            line-height: 1.3;
+        }
+
+        .queue-adding-body {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 14px;
+            padding: 14px 16px;
+        }
+
+        .queue-adding-thumb-wrap {
+            width: 56px;
+            height: 56px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #E2E8F0;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #CBD5E1;
+        }
+
+        .queue-adding-thumb {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .queue-adding-thumb-placeholder {
+            color: #94A3B8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .queue-adding-status-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+            text-align: left;
+            flex: 1;
+        }
+
+        .queue-adding-spinner-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .queue-adding-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2.5px solid #CBD5E1;
+            border-top-color: #4F46E5;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        .queue-adding-status-text {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #1E293B;
+        }
+
+        .queue-adding-subtext {
+            font-size: 0.775rem;
+            color: #64748B;
+            padding-left: 30px;
+        }
+
+        .queue-adding-success-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            background: #ECFDF5;
+            border: 1px solid #A7F3D0;
+            color: #065F46;
+            padding: 12px;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            animation: fadeIn 0.2s ease-in;
+        }
+
+        .queue-adding-success-icon {
+            width: 24px;
+            height: 24px;
+            background: #10B981;
+            color: #FFFFFF;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 0.9rem;
+        }
+
         /* ---------------- Simple Material Feed Modal ---------------- */
         #materialFeedModal > div,
         .feed-modal-card-simple {
@@ -3879,6 +4039,38 @@
 
             <!-- Hidden native camera input -->
             <input type="file" id="modalRollCameraInput" accept="image/*" capture="environment" style="display: none;" onchange="handleModalRollCameraCapture(event)">
+        </div>
+    </div>
+
+    <!-- Adding to Queue Progress Modal -->
+    <div id="queueAddingModal" class="modal">
+        <div class="queue-adding-card">
+            <div class="queue-adding-header">
+                <span class="queue-adding-badge" id="queueAddingBadge">投入キュー登録中</span>
+                <div class="queue-adding-roll-id" id="queueAddingRollId">材料をキューに追加しています</div>
+            </div>
+
+            <div class="queue-adding-body">
+                <div class="queue-adding-thumb-wrap">
+                    <img id="queueAddingThumbImg" class="queue-adding-thumb" src="" alt="" style="display: none;">
+                    <div id="queueAddingThumbPlaceholder" class="queue-adding-thumb-placeholder">
+                        <svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    </div>
+                </div>
+
+                <div class="queue-adding-status-wrap">
+                    <div class="queue-adding-spinner-row" id="queueAddingSpinnerRow">
+                        <div class="queue-adding-spinner"></div>
+                        <span id="queueAddingStatusText" class="queue-adding-status-text">キューに追加中...</span>
+                    </div>
+                    <div id="queueAddingSubText" class="queue-adding-subtext">サーバーへ登録しています</div>
+                </div>
+            </div>
+
+            <div id="queueAddingSuccessRow" class="queue-adding-success-row" style="display: none;">
+                <div class="queue-adding-success-icon">✓</div>
+                <div class="queue-adding-success-text">投入完了！キュー一覧へ移動します</div>
+            </div>
         </div>
     </div>
 
