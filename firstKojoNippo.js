@@ -377,6 +377,7 @@ function switchMainTab(index, skipAnimation = false) {
     }
     if (index === 4) {
         renderHistoryList();
+        fetchProductionQueue();
     }
 }
 
@@ -473,8 +474,9 @@ async function fetchDailySchedule(dateStr) {
             const startTime = scheduleDoc.startTime || '08:00';
             state.scheduledItems = computeTimeSchedule(scheduleDoc.scheduleOrder, startTime);
 
-            // Sync live status from server (submittedDB.firstFactoryProduction)
+            // Sync live status and active queue from server (submittedDB.firstFactoryProduction & firstFactoryQueue)
             await fetchProductionStatus(dateStr);
+            await fetchProductionQueue();
 
             renderScheduleList(state.scheduledItems, startTime);
         } else {
@@ -1457,6 +1459,70 @@ function updateViewModeButtons() {
     if (btnTable) btnTable.classList.toggle('active', state.listViewMode === 'table');
 }
 
+// Check whether a roll is already enqueued, in-progress, completed, or active across any connected tablet
+function isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx) {
+    if (!rollItem) return false;
+    const itemId = getItemKey(rollItem, gIdx, rIdx);
+    const edit = getItemEdit(itemId, rollItem);
+
+    if (!state.stagingQueue || !Array.isArray(state.stagingQueue) || state.stagingQueue.length === 0) {
+        return Boolean(edit.enqueued);
+    }
+
+    const targetRollIdx = Number(rollItem.rollIndex || (rIdx !== undefined ? rIdx + 1 : 1));
+    const targetOrderIdx = Number(rollItem.orderIndex);
+    const targetGroupId = group?.groupId || rollItem.groupId;
+    const targetHinban = rollItem.hinban || group?.hinban;
+    const targetKizai = rollItem.kizai || group?.kizai;
+
+    const found = state.stagingQueue.find(doc => {
+        if (!doc) return false;
+        if (doc.status === 'cancelled' || doc.status === 'deleted') return false;
+
+        // 1. Direct itemId / rollItem.id match
+        if (doc.itemId && (doc.itemId === itemId || doc.itemId === rollItem.id)) {
+            return true;
+        }
+
+        // 2. Direct mongoId match
+        if (edit.mongoProductionId && doc._id && String(doc._id) === String(edit.mongoProductionId)) {
+            return true;
+        }
+
+        // 3. Exact groupId + rollIndex match
+        if (targetGroupId && doc.groupId && doc.groupId === targetGroupId) {
+            if (Number(doc.rollIndex) === targetRollIdx) {
+                return true;
+            }
+        }
+
+        // 4. Exact orderIndex match
+        if (targetOrderIdx && Number(doc.orderIndex) === targetOrderIdx) {
+            return true;
+        }
+
+        return false;
+    });
+
+    if (found) {
+        // Sync to local edits so that future checks and history tab immediately have accurate status
+        if (!edit.enqueued) {
+            setItemEdit(itemId, {
+                enqueued: true,
+                mongoProductionId: found._id,
+                status: found.status || 'in-progress',
+                photoUrl: found.photoUrl || found.imageUrl || edit.photoUrl || '',
+                lotNo: found.lotNo || edit.lotNo || '',
+                bicho: found.bicho || found.meters || edit.bicho,
+                meters: found.meters || found.bicho || edit.meters
+            });
+        }
+        return true;
+    }
+
+    return false;
+}
+
 function renderScheduleTableView(groups, items) {
     if (!groups || groups.length === 0) {
         return `
@@ -1487,8 +1553,7 @@ function renderScheduleTableView(groups, items) {
         }
 
         const remainingItems = group.items.filter((rollItem, rIdx) => {
-            const itemId = getItemKey(rollItem, gIdx, rIdx);
-            return !getItemEdit(itemId, rollItem).enqueued;
+            return !isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx);
         });
         if (remainingItems.length === 0) return;
 
@@ -1508,10 +1573,10 @@ function renderScheduleTableView(groups, items) {
 
         const queuedItem = state.stagingQueue.find(q =>
             (q.groupId === group.groupId || q.hinban === group.hinban || q.kizai === group.kizai) &&
-            (q.status === 'active' || q.status === 'queued')
+            (q.status === 'active' || q.status === 'in-progress' || q.status === 'queued' || q.status === 'queue')
         );
-        const isQueueActive = queuedItem && queuedItem.status === 'active';
-        const isQueued = queuedItem && queuedItem.status === 'queued';
+        const isQueueActive = queuedItem && (queuedItem.status === 'active' || queuedItem.status === 'in-progress');
+        const isQueued = queuedItem && (queuedItem.status === 'queued' || queuedItem.status === 'queue');
 
         let statusBadge = '<span class="batch-status-tag status-pending">待機中</span>';
         if (lifecycle.status === 'completed') {
@@ -1601,11 +1666,9 @@ function renderScheduleList(items, startTimeStr) {
                 </div>
             `;
         } else {
-            // Check remaining items that have not been enqueued yet
+            // Check remaining items that have not been enqueued yet across all tablets
             const remainingItems = group.items.filter((rollItem, rIdx) => {
-                const itemId = getItemKey(rollItem, gIdx, rIdx);
-                const edit = getItemEdit(itemId, rollItem);
-                return !edit.enqueued;
+                return !isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx);
             });
 
             // When all items in a card are enqueued, the card disappears from the List tab!
@@ -1621,12 +1684,16 @@ function renderScheduleList(items, startTimeStr) {
 
             // Check active items (not excluded)
             const activeItems = remainingItems.filter((rollItem, rIdx) => {
-                const itemId = getItemKey(rollItem, gIdx, rIdx);
+                const origRIdx = group.items.indexOf(rollItem);
+                const safeRIdx = origRIdx >= 0 ? origRIdx : rIdx;
+                const itemId = getItemKey(rollItem, gIdx, safeRIdx);
                 return !getItemEdit(itemId, rollItem).isExcluded;
             });
 
             const activeMeters = activeItems.reduce((acc, rollItem, rIdx) => {
-                const itemId = getItemKey(rollItem, gIdx, rIdx);
+                const origRIdx = group.items.indexOf(rollItem);
+                const safeRIdx = origRIdx >= 0 ? origRIdx : rIdx;
+                const itemId = getItemKey(rollItem, gIdx, safeRIdx);
                 return acc + (Number(getItemEdit(itemId, rollItem).meters) || Number(rollItem.meters) || 0);
             }, 0);
 
@@ -1634,10 +1701,10 @@ function renderScheduleList(items, startTimeStr) {
 
             const queuedItem = state.stagingQueue.find(q =>
                 (q.groupId === group.groupId || q.hinban === group.hinban || q.kizai === group.kizai) &&
-                (q.status === 'active' || q.status === 'queued')
+                (q.status === 'active' || q.status === 'in-progress' || q.status === 'queued' || q.status === 'queue')
             );
-            const isQueueActive = queuedItem && queuedItem.status === 'active';
-            const isQueued = queuedItem && queuedItem.status === 'queued';
+            const isQueueActive = queuedItem && (queuedItem.status === 'active' || queuedItem.status === 'in-progress');
+            const isQueued = queuedItem && (queuedItem.status === 'queued' || queuedItem.status === 'queue');
 
             let statusTagHTML = '';
             if (lifecycle.status === 'completed') {
@@ -1696,12 +1763,14 @@ function renderScheduleList(items, startTimeStr) {
 
                     <div class="batch-rolls-list">
                         ${remainingItems.map((rollItem, rIdx) => {
-                const itemId = getItemKey(rollItem, gIdx, rIdx);
+                const origRIdx = group.items.indexOf(rollItem);
+                const safeRIdx = origRIdx >= 0 ? origRIdx : rIdx;
+                const itemId = getItemKey(rollItem, gIdx, safeRIdx);
                 const edit = getItemEdit(itemId, rollItem);
                 const isExcluded = edit.isExcluded === true;
                 const currentMeters = edit.bicho || edit.meters || (Number(rollItem.meters) || 100);
                 const hasPhoto = !!(edit.photoUrl || edit.hasPhoto || edit.photoBase64);
-                const actualRollIndex = rollItem.rollIndex || (rIdx + 1);
+                const actualRollIndex = rollItem.rollIndex || (safeRIdx + 1);
 
                 if (isExcluded) {
                     return `
@@ -1714,10 +1783,10 @@ function renderScheduleList(items, startTimeStr) {
                                             <span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">除外中</span>
                                         </div>
                                         <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
-                                            <button type="button" class="btn-roll-exclude is-excluded" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きを復帰（キュー投入対象に戻す）">
+                                            <button type="button" class="btn-roll-exclude is-excluded" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="この巻きを復帰（キュー投入対象に戻す）">
                                                 復帰
                                             </button>
-                                            <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
+                                            <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event, ${safeRIdx})" title="この巻きの詳細を確認">
                                                 詳細
                                             </button>
                                         </div>
@@ -1726,7 +1795,7 @@ function renderScheduleList(items, startTimeStr) {
                 }
 
                 return `
-                                <div class="batch-roll-row" data-item-id="${itemId}" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${rIdx}, event)" title="タップして材料投入・QRスキャン・ラベル撮影">
+                                <div class="batch-roll-row" data-item-id="${itemId}" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="タップして材料投入・QRスキャン・ラベル撮影">
                                     <div class="roll-row-left">
                                         <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
                                         <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
@@ -1737,19 +1806,19 @@ function renderScheduleList(items, startTimeStr) {
 
                                         <!-- Flat Camera Status Pill (Flat Red if unshot, Flat Green if shot) -->
                                         <span class="flat-camera-pill ${hasPhoto ? 'is-shot' : 'is-unshot'}" title="${hasPhoto ? 'ラベル写真撮影済' : 'ラベル写真未撮影 (必須)'}">
-                                            <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                            <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2 3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
                                             ${hasPhoto ? '撮影済' : '未撮影'}
                                         </span>
                                     </div>
 
                                     <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
-                                        <button type="button" class="btn-roll-exclude" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きを一時的に除外">
+                                        <button type="button" class="btn-roll-exclude" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="この巻きを一時的に除外">
                                             除外
                                         </button>
-                                        <button type="button" class="btn-feed-row-flat" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${rIdx}, event)" title="この巻きのQRスキャン・撮影・投入">
+                                        <button type="button" class="btn-feed-row-flat" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="この巻きのQRスキャン・撮影・投入">
                                             投入
                                         </button>
-                                        <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event, ${rIdx})" title="この巻きの詳細を確認">
+                                        <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event, ${safeRIdx})" title="この巻きの詳細を確認">
                                             詳細
                                         </button>
                                     </div>
@@ -4191,6 +4260,11 @@ function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
     const item = (group.items && group.items[rIdx]) || group.items[0];
     if (!item) return;
 
+    if (isRollEnqueuedOrProcessed(item, group, gIdx, rIdx)) {
+        showToast('ℹ️ この巻きは既にキューに追加または処理されています', 'info', 2500);
+        return;
+    }
+
     const resolvedItemId = itemId || getItemKey(item, gIdx, rIdx);
     state.currentModalRollContext = { itemId: resolvedItemId, gIdx, rIdx, item, group };
     state.currentFeedItem = item;
@@ -4261,14 +4335,17 @@ function openMaterialFeedModalForGroup(groupIndex, event) {
     const group = state.currentGroups[groupIndex];
     if (group.type === 'setup') return;
 
-    let targetIdx = 0;
+    let targetIdx = -1;
     for (let i = 0; i < group.items.length; i++) {
         const it = group.items[i];
-        const k = getItemKey(it, groupIndex, i);
-        if (!getItemEdit(k, it).enqueued) {
+        if (!isRollEnqueuedOrProcessed(it, group, groupIndex, i)) {
             targetIdx = i;
             break;
         }
+    }
+    if (targetIdx === -1) {
+        showToast('ℹ️ このロットの全巻きは既に投入済です', 'info', 2500);
+        return;
     }
     const targetItem = group.items[targetIdx];
     const targetKey = getItemKey(targetItem, groupIndex, targetIdx);
@@ -4282,6 +4359,11 @@ function openMaterialFeedModalForRoll(groupIndex, rollIndex, event) {
     const rollItem = group.items[rollIndex];
     if (!rollItem) return;
 
+    if (isRollEnqueuedOrProcessed(rollItem, group, groupIndex, rollIndex)) {
+        showToast('ℹ️ この巻きは既にキューに追加または処理されています', 'info', 2500);
+        return;
+    }
+
     const itemId = getItemKey(rollItem, groupIndex, rollIndex);
     openMaterialFeedModalForRollItem(itemId, groupIndex, rollIndex, event);
 }
@@ -4291,7 +4373,7 @@ function openMaterialFeedModalForCurrentItem() {
         showToast('対象ロットを選択してください', 'error');
         return;
     }
-    const targetGroup = state.currentGroups ? state.currentGroups.find(g => g.items.some(it => it.id === state.selectedItem.id)) : null;
+    const targetGroup = state.currentGroups ? state.currentGroups.find(g => g.items && g.items.some(it => it.id === state.selectedItem.id)) : null;
     const gIdx = targetGroup ? state.currentGroups.indexOf(targetGroup) : 0;
     const rIdx = targetGroup ? targetGroup.items.findIndex(it => it.id === state.selectedItem.id) : 0;
     const itemId = getItemKey(state.selectedItem, gIdx, rIdx);
@@ -4392,14 +4474,12 @@ const firstKojoPhotoDB = (() => {
                 req.onsuccess = () => {
                     const record = req.result;
                     if (record) {
-                        const updated = { ...record, ...patch };
-                        store.put(updated);
-                        resolve(updated);
-                    } else {
-                        resolve(null);
+                        Object.assign(record, patch);
+                        store.put(record);
                     }
+                    resolve(record);
                 };
-                tx.onerror = (e) => reject(e.target.error);
+                req.onerror = (e) => reject(e.target.error);
             });
         },
 
@@ -4409,8 +4489,8 @@ const firstKojoPhotoDB = (() => {
                 const tx = db.transaction(STORE, 'readonly');
                 const req = tx.objectStore(STORE).getAll();
                 req.onsuccess = () => {
-                    const all = req.result || [];
-                    resolve(all.filter(r => r.status === 'pending' || r.status === 'failed'));
+                    const items = (req.result || []).filter(r => r.status === 'pending' || r.status === 'failed');
+                    resolve(items);
                 };
                 req.onerror = (e) => reject(e.target.error);
             });
@@ -4421,117 +4501,119 @@ const firstKojoPhotoDB = (() => {
             return new Promise((resolve, reject) => {
                 const tx = db.transaction(STORE, 'readwrite');
                 tx.objectStore(STORE).delete(itemId);
-                tx.oncomplete = () => resolve();
+                tx.oncomplete = () => resolve(true);
                 tx.onerror = (e) => reject(e.target.error);
             });
         }
     };
 })();
 
-// -----------------------------------------------------
-// Blur Detection Utilities (Laplacian Variance from DCP interactive)
-// -----------------------------------------------------
-async function detectBlur(base64Image, threshold = 100) {
+// --- Fast Edge/Blur Detection (Variance of Laplacian on downscaled canvas) ---
+async function detectBlur(base64Image, threshold = 60) {
     return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            // Downscale to max 400x400 for speed
-            const scale = Math.min(400 / img.width, 400 / img.height, 1);
-            const w = Math.round(img.width * scale);
-            const h = Math.round(img.height * scale);
-            canvas.width = w;
-            canvas.height = h;
-            ctx.drawImage(img, 0, 0, w, h);
+            try {
+                // Downsample image to 160x120 for instant computation
+                const w = 160;
+                const h = 120;
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, w, h);
+                const imgData = ctx.getImageData(0, 0, w, h);
+                const data = imgData.data;
 
-            const imgData = ctx.getImageData(0, 0, w, h);
-            const pixels = imgData.data;
-            const width = imgData.width;
-            const height = imgData.height;
-
-            // Convert to grayscale
-            const gray = new Uint8Array(width * height);
-            for (let i = 0; i < pixels.length; i += 4) {
-                gray[i / 4] = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
-            }
-
-            // Laplacian kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0]
-            let sum = 0;
-            let sumSq = 0;
-            let count = 0;
-
-            for (let y = 1; y < height - 1; y++) {
-                for (let x = 1; x < width - 1; x++) {
-                    const idx = y * width + x;
-                    const val =
-                        gray[idx - width] +
-                        gray[idx - 1] +
-                        (gray[idx] * -4) +
-                        gray[idx + 1] +
-                        gray[idx + width];
-
-                    sum += val;
-                    sumSq += val * val;
-                    count++;
+                // Grayscale
+                const gray = new Float32Array(w * h);
+                for (let i = 0; i < data.length; i += 4) {
+                    gray[i / 4] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
                 }
-            }
 
-            const mean = sum / count;
-            const variance = (sumSq / count) - (mean * mean);
-            console.log(`🔍 Blur score (Laplacian Variance): ${variance.toFixed(2)} (Threshold: ${threshold})`);
-            resolve({ isBlurry: variance < threshold, score: variance });
+                // Laplacian kernel convolution [-1, -1, -1, -1, 8, -1, -1, -1, -1]
+                let sum = 0;
+                let sumSq = 0;
+                let count = 0;
+
+                for (let y = 1; y < h - 1; y++) {
+                    for (let x = 1; x < w - 1; x++) {
+                        const idx = y * w + x;
+                        const val =
+                            -gray[idx - w - 1] - gray[idx - w] - gray[idx - w + 1]
+                            - gray[idx - 1] + 8 * gray[idx] - gray[idx + 1]
+                            - gray[idx + w - 1] - gray[idx + w] - gray[idx + w + 1];
+
+                        sum += val;
+                        sumSq += val * val;
+                        count++;
+                    }
+                }
+
+                const mean = sum / count;
+                const variance = (sumSq / count) - (mean * mean);
+                const isBlurry = variance < threshold;
+                resolve({ isBlurry, score: Math.round(variance) });
+            } catch (err) {
+                console.warn('Blur detection error:', err);
+                resolve({ isBlurry: false, score: 999 });
+            }
         };
         img.onerror = () => resolve({ isBlurry: false, score: 999 });
-        img.src = base64Image.startsWith('data:') ? base64Image : 'data:image/jpeg;base64,' + base64Image;
+        img.src = base64Image;
     });
 }
 
-function showBlurWarning(score, onRetake, onOk) {
+function showBlurWarning(score, onRetake, onProceed) {
     const existing = document.getElementById('blurWarningModal');
-    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    if (existing) existing.remove();
 
-    const modal = document.createElement('div');
-    modal.id = 'blurWarningModal';
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:100500;display:flex;justify-content:center;align-items:center;padding:20px;';
+    const overlay = document.createElement('div');
+    overlay.id = 'blurWarningModal';
+    overlay.style.cssText = `
+        position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 99999; backdrop-filter: blur(4px);
+    `;
 
-    modal.innerHTML = `
-        <div style="background:var(--bg-surface, #fff);border-radius:16px;padding:24px;max-width:360px;width:100%;text-align:center;box-shadow:var(--shadow-pop, 0 10px 40px rgba(0,0,0,0.3));font-family:inherit;">
-            <div style="font-size:3rem;margin-bottom:10px;">⚠️</div>
-            <h3 style="margin:0 0 8px;color:#b3261e;font-size:1.25rem;font-weight:800;">写真が少しぼやけています<br><span style="font-size:0.95rem;font-weight:600;color:var(--text-muted, #475569);">Photo appears blurry</span></h3>
-            <p style="margin:0 0 18px;color:var(--text-soft, #64748B);font-size:0.875rem;line-height:1.4;">
-                文字やQRコードが読みにくい可能性があります。<br>このまま使用しますか？
+    overlay.innerHTML = `
+        <div style="background: #ffffff; border-radius: 16px; padding: 24px; max-width: 380px; width: 90%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.3); border: 2px solid #f59e0b;">
+            <div style="font-size: 40px; margin-bottom: 8px;">⚠️</div>
+            <h3 style="font-size: 18px; font-weight: 800; color: #1e293b; margin: 0 0 8px;">写真が少しブレています</h3>
+            <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0 0 20px;">
+                文字やQRコードがぼやけている可能性があります。<br>
+                このまま登録しますか？
             </p>
-            <div style="display:flex;gap:10px;flex-direction:column;">
-                <button id="blurRetakeBtn" type="button" style="width:100%;padding:13px;background:var(--blue, #2E6FF2);color:#fff;border:none;border-radius:10px;font-size:1rem;font-weight:800;cursor:pointer;">
-                    📸 再撮影する / Retake
+            <div style="display: flex; gap: 10px;">
+                <button id="blurRetakeBtn" style="flex: 1; padding: 12px; border: 1.5px solid #cbd5e1; border-radius: 10px; background: #f8fafc; font-weight: 700; color: #334155; font-size: 14px; cursor: pointer;">
+                    📷 撮り直す
                 </button>
-                <button id="blurOkBtn" type="button" style="width:100%;padding:13px;background:var(--bg-inset, #F1F5F9);color:var(--text-main, #0F172A);border:1px solid var(--border, #E2E8F0);border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer;">
-                    このまま使用する / OK (Ignore)
+                <button id="blurProceedBtn" style="flex: 1; padding: 12px; border: none; border-radius: 10px; background: #2563eb; font-weight: 700; color: #ffffff; font-size: 14px; cursor: pointer;">
+                    このまま使用
                 </button>
             </div>
         </div>
     `;
-    document.body.appendChild(modal);
 
-    modal.querySelector('#blurRetakeBtn').onclick = () => {
-        if (modal.parentNode) modal.parentNode.removeChild(modal);
-        if (onRetake) onRetake();
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('#blurRetakeBtn').onclick = () => {
+        overlay.remove();
+        if (typeof onRetake === 'function') onRetake();
     };
 
-    modal.querySelector('#blurOkBtn').onclick = () => {
-        if (modal.parentNode) modal.parentNode.removeChild(modal);
-        if (onOk) onOk();
+    overlay.querySelector('#blurProceedBtn').onclick = () => {
+        overlay.remove();
+        if (typeof onProceed === 'function') onProceed();
     };
 }
 
-// -----------------------------------------------------
-// Background Photo Upload Queue with Auto-Retry
-// -----------------------------------------------------
+// --- Background Photo Upload Queue ---
 const photoUploadQueue = [];
-let isProcessingPhotoQueue = false;
+let isUploadingPhotos = false;
 
 function enqueueBackgroundPhotoUpload(itemId) {
+    if (!itemId) return;
     if (!photoUploadQueue.includes(itemId)) {
         photoUploadQueue.push(itemId);
     }
@@ -4539,19 +4621,58 @@ function enqueueBackgroundPhotoUpload(itemId) {
 }
 
 async function processBackgroundPhotoQueue() {
-    if (isProcessingPhotoQueue) return;
-    isProcessingPhotoQueue = true;
+    if (isUploadingPhotos || photoUploadQueue.length === 0) return;
+    isUploadingPhotos = true;
 
     while (photoUploadQueue.length > 0) {
         const itemId = photoUploadQueue.shift();
         try {
-            await uploadSinglePhotoWithRetry(itemId);
+            await uploadSinglePhotoWithRetry(itemId, 3);
         } catch (err) {
-            console.warn(`⚠️ Background upload failed for ${itemId} after retries:`, err);
+            console.warn(`Background photo upload failed for ${itemId}:`, err);
         }
     }
 
-    isProcessingPhotoQueue = false;
+    isUploadingPhotos = false;
+}
+
+async function uploadLabelPhotoToServer(base64, lotNo, hinban, itemId) {
+    if (!base64) return '';
+    const targetDate = state.selectedDate || new Date().toISOString().slice(0, 10);
+    const targetMachine = state.machineName || 'PSA2';
+    const targetWorker = state.workerName || 'worker';
+    const targetLotNo = lotNo || 'nolot';
+    const timestamp = Date.now();
+
+    const filePath = `firstKojo/${targetDate}/${targetMachine}/${targetWorker}_${targetLotNo}_${timestamp}_materialLabel.jpg`;
+
+    const payload = {
+        base64: base64,
+        filePath: filePath,
+        date: targetDate,
+        machine: targetMachine,
+        worker: targetWorker,
+        lotNo: targetLotNo,
+        hinban: hinban || '',
+        itemId: itemId || ''
+    };
+
+    const res = await fetch(`${serverURL}/api/firstkojo/upload-label-photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error(`Upload failed HTTP ${res.status}`);
+    const data = await res.json();
+    const publicUrl = data.url || data.photoUrl || data.imageUrl || '';
+    if (publicUrl && itemId) {
+        setItemEdit(itemId, { photoUrl: publicUrl, hasPhoto: true });
+        try {
+            await firstKojoPhotoDB.updatePhoto(itemId, { photoUrl: publicUrl, status: 'uploaded' });
+        } catch (e) { }
+    }
+    return publicUrl;
 }
 
 async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
@@ -4572,7 +4693,6 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
             const targetWorker = record.worker || state.workerName || 'worker';
             const targetLotNo = record.lotNo || 'nolot';
 
-            // Directory structure: firstKojo/${date}/${machine}/${worker}_${lotNo}_${timestamp}_materialLabel.jpg
             const filePath = `firstKojo/${targetDate}/${targetMachine}/${targetWorker}_${targetLotNo}_${timestamp}_materialLabel.jpg`;
 
             const payload = {
@@ -4582,7 +4702,8 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
                 machine: targetMachine,
                 worker: targetWorker,
                 lotNo: targetLotNo,
-                hinban: record.hinban || ''
+                hinban: record.hinban || '',
+                itemId: itemId
             };
 
             const res = await fetch(`${serverURL}/api/firstkojo/upload-label-photo`, {
@@ -4607,7 +4728,6 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
             await firstKojoPhotoDB.updatePhoto(itemId, { uploadAttempts: attempts });
             console.warn(`⚠️ Upload attempt ${attempts}/${maxRetries} failed for ${itemId}:`, err.message);
             if (i < maxRetries - 1) {
-                // Exponential backoff: 1s, 2.5s, 5s
                 const delay = Math.pow(2, i) * 1000 + Math.random() * 500;
                 await new Promise(r => setTimeout(r, delay));
             }
@@ -4619,7 +4739,7 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
             status: 'uploaded',
             photoUrl: uploadedUrl
         });
-        setItemEdit(itemId, { photoUrl: uploadedUrl });
+        setItemEdit(itemId, { photoUrl: uploadedUrl, hasPhoto: true });
         console.log(`✅ Background upload finished for ${itemId}: ${uploadedUrl}`);
     } else {
         await firstKojoPhotoDB.updatePhoto(itemId, { status: 'failed' });
@@ -4647,7 +4767,7 @@ function handleModalRollCameraCapture(event) {
         if (!ctx) return;
 
         // 1. Run blur detection
-        const blurResult = await detectBlur(base64, 100);
+        const blurResult = await detectBlur(base64, 60);
         if (blurResult.isBlurry) {
             showBlurWarning(blurResult.score,
                 () => {
@@ -4686,6 +4806,8 @@ async function savePhotoAndEnqueue(ctx, base64) {
         status: 'pending'
     });
 
+    state.capturedPhotoBase64 = base64;
+
     // 2. Mark lightweight photo indicator in item edit (NO base64 in localStorage!)
     setItemEdit(itemId, { hasPhoto: true });
 
@@ -4699,13 +4821,13 @@ async function savePhotoAndEnqueue(ctx, base64) {
         }
     }
 
-    showToast('📸 写真を保存しました。バックグラウンドで同期します...', 'success', 1800);
+    showToast('📸 写真を保存しました。投入処理を実行中...', 'success', 1800);
 
-    // 4. Enqueue background upload to Firebase Storage with auto-retry
-    enqueueBackgroundPhotoUpload(itemId);
-
-    // 5. Automatically proceed to enqueue roll
+    // 4. Submit and enqueue roll
     await submitModalRollToQueue();
+
+    // 5. Enqueue background upload to Firebase Storage with auto-retry
+    enqueueBackgroundPhotoUpload(itemId);
 }
 
 // Fallbacks for camera modal if referenced
@@ -4771,6 +4893,15 @@ async function submitModalRollToQueue() {
     }
 
     const { itemId, gIdx, rIdx, item, group } = ctx;
+
+    // Duplicate check: verify if already enqueued or in progress across any tablet
+    if (isRollEnqueuedOrProcessed(item, group, gIdx, rIdx)) {
+        alert('この巻きは既にキューに追加または処理されています。');
+        closeMaterialFeedModal();
+        await fetchProductionQueue();
+        return;
+    }
+
     const edit = getItemEdit(itemId, item);
 
     // 1. Validate length: bicho must be > 0
@@ -4790,10 +4921,20 @@ async function submitModalRollToQueue() {
     try {
         let photoUrl = edit.photoUrl || dbPhoto?.photoUrl || '';
         const lotNoVal = state.currentModalLotNo || edit.lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
-
-        const rawQRVal = state.currentModalRawQR || document.getElementById('feedRawQRInput')?.value?.trim() || edit.qrScanned || '';
         const kizaiCode = state.currentModalHinban || item.kizai || group?.kizai || item.hinban || '';
         const rollIdx = item.rollIndex || (rIdx + 1);
+
+        // Upload photo to Firebase immediately if not yet uploaded, ensuring MongoDB gets the URL
+        if ((!photoUrl || !photoUrl.startsWith('http')) && (dbPhoto?.base64 || edit?.photoBase64 || state.capturedPhotoBase64)) {
+            const rawBase64 = dbPhoto?.base64 || edit?.photoBase64 || state.capturedPhotoBase64;
+            try {
+                photoUrl = await uploadLabelPhotoToServer(rawBase64, lotNoVal, kizaiCode, itemId);
+            } catch (upErr) {
+                console.warn('⚠️ Direct photo upload before enqueue failed, will retry in background:', upErr);
+            }
+        }
+
+        const rawQRVal = state.currentModalRawQR || document.getElementById('feedRawQRInput')?.value?.trim() || edit.qrScanned || '';
 
         const enqueuePayload = {
             date: state.selectedDate,
@@ -4822,7 +4963,8 @@ async function submitModalRollToQueue() {
             rawMaterialQR: rawQRVal,
             rawMaterialLength: String(bichoVal),
             manufacturerUid: '',
-            photoUrl: photoUrl || ''
+            photoUrl: photoUrl || '',
+            imageUrl: photoUrl || ''
         };
 
         console.log('Enqueueing single roll to queue:', enqueuePayload);
@@ -4846,6 +4988,21 @@ async function submitModalRollToQueue() {
         const mongoId = data._id || data.item?._id || '';
         const assignedStatus = data.item?.status || 'in-progress';
         const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+
+        if (data.alreadyEnqueued) {
+            setItemEdit(itemId, {
+                enqueued: true,
+                enqueuedAt: timeNow,
+                mongoProductionId: mongoId,
+                status: assignedStatus,
+                photoUrl: data.item?.photoUrl || photoUrl || ''
+            });
+            closeMaterialFeedModal();
+            showToast(`ℹ️ ${kizaiCode} - roll#${rollIdx} は既にキューに追加されています`, 'info', 3000);
+            await fetchProductionQueue();
+            return;
+        }
+
         setItemEdit(itemId, {
             enqueued: true,
             enqueuedAt: timeNow,
@@ -4873,6 +5030,9 @@ async function submitModalRollToQueue() {
         await fetchProductionQueue();
         renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
         updateHistoryBadges();
+
+        // Switch to Queue tab (index 2) to show the new roll in queue
+        switchMainTab(2);
 
     } catch (err) {
         console.error('Error submitting modal roll to queue:', err);
@@ -4924,6 +5084,11 @@ async function fetchProductionQueue() {
         if (data.success && Array.isArray(data.queue)) {
             state.stagingQueue = data.queue;
             renderStagingQueue();
+            if (state.scheduledItems && state.scheduledItems.length > 0) {
+                renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+            }
+            renderHistoryList();
+            updateHistoryBadges();
         }
     } catch (err) {
         console.warn('⚠️ Could not fetch production queue:', err);
@@ -4935,7 +5100,9 @@ function renderStagingQueue() {
     const tabBadge = document.getElementById('tabQueueBadge');
     const totalCountBadge = document.getElementById('queueTotalCountBadge');
 
-    const activeAndQueued = state.stagingQueue.filter(item => item.status === 'active' || item.status === 'queued');
+    const activeAndQueued = state.stagingQueue.filter(item => 
+        item && (item.status === 'active' || item.status === 'in-progress' || item.status === 'queued' || item.status === 'queue')
+    );
 
     if (tabBadge) {
         if (activeAndQueued.length > 0) {
@@ -4961,8 +5128,8 @@ function renderStagingQueue() {
         return;
     }
 
-    const activeItem = activeAndQueued.find(it => it.status === 'active');
-    const queuedItems = activeAndQueued.filter(it => it.status === 'queued');
+    const activeItem = activeAndQueued.find(it => it.status === 'active' || it.status === 'in-progress');
+    const queuedItems = activeAndQueued.filter(it => it.status === 'queued' || it.status === 'queue');
 
     let rowsHTML = '';
 
@@ -5084,7 +5251,7 @@ async function cancelQueueItem(queueId, hinban) {
 }
 
 async function reorderQueueItem(queueId, direction) {
-    const queuedItems = state.stagingQueue.filter(it => it.status === 'queued');
+    const queuedItems = state.stagingQueue.filter(it => it.status === 'queued' || it.status === 'queue');
     const idx = queuedItems.findIndex(it => String(it._id) === String(queueId));
     if (idx < 0) return;
 
@@ -5121,7 +5288,7 @@ async function reorderQueueItem(queueId, direction) {
 }
 
 async function advanceQueueItemPrompt(queueId) {
-    const item = state.stagingQueue.find(it => String(it._id) === String(queueId) && it.status === 'active');
+    const item = state.stagingQueue.find(it => String(it._id) === String(queueId) && (it.status === 'active' || it.status === 'in-progress'));
     if (!item) return;
 
     const currentRoll = item.currentRollIndex || item.rollIndex || 1;
@@ -5175,18 +5342,69 @@ function setHistoryFilter(filter) {
 function updateHistoryBadges() {
     const enqueuedBadge = document.getElementById('historyEnqueuedCountBadge');
     const excludedBadge = document.getElementById('historyExcludedCountBadge');
+
+    const queueItems = state.stagingQueue || [];
+    let completedCount = queueItems.filter(it => it && it.status === 'completed').length;
+    let excludedCount = queueItems.filter(it => it && (it.status === 'excluded' || it.status === 'scrapped')).length;
+
+    // Also include any local excluded edits if not yet in MongoDB
     const edits = getItemEdits();
-
-    let enqueuedCount = 0;
-    let excludedCount = 0;
-
-    Object.values(edits).forEach(e => {
-        if (e.enqueued) enqueuedCount++;
-        else if (e.isExcluded) excludedCount++;
+    Object.keys(edits).forEach(k => {
+        const e = edits[k];
+        if (e.isExcluded && !queueItems.some(q => q.itemId === k || q._id === k)) {
+            excludedCount++;
+        }
     });
 
-    if (enqueuedBadge) enqueuedBadge.textContent = `投入済: ${enqueuedCount} 件`;
+    if (enqueuedBadge) enqueuedBadge.textContent = `完了: ${completedCount} 件`;
     if (excludedBadge) excludedBadge.textContent = `除外: ${excludedCount} 件`;
+}
+
+function previewHistoryItem(itemId, event) {
+    if (event) event.stopPropagation();
+    const edits = getItemEdits();
+    const edit = edits[itemId] || {};
+
+    let targetItem = null;
+    if (state.scheduledItems) {
+        targetItem = state.scheduledItems.find((it, idx) => it.id === itemId || it._id === itemId || getItemKey(it, undefined, idx) === itemId);
+    }
+    if (!targetItem && state.stagingQueue) {
+        const qItem = state.stagingQueue.find(q => q.itemId === itemId || q._id === itemId || q.id === itemId);
+        if (qItem) targetItem = qItem;
+    }
+    if (!targetItem && state.currentGroups) {
+        for (const grp of state.currentGroups) {
+            if (grp.items) {
+                const found = grp.items.find((it, ri) => getItemKey(it, undefined, ri) === itemId || it.id === itemId);
+                if (found) {
+                    targetItem = found;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!targetItem) {
+        targetItem = {
+            id: itemId,
+            type: 'hinban',
+            hinban: edit.hinban || edit.kizai || '材料',
+            kizai: edit.kizai || edit.hinban || '',
+            orderIndex: edit.orderIndex || 1,
+            rollIndex: edit.rollIndex || 1,
+            meters: edit.meters || 100,
+            lotNo: edit.lotNo || '',
+            shippingDest: edit.shippingDest || '',
+            color: edit.color || '',
+            zuban: edit.zuban || ''
+        };
+    }
+
+    state.selectedItem = targetItem;
+    sessionStorage.setItem('firstkojo_nippo_selected_item', JSON.stringify(targetItem));
+    switchMainTab(3);
+    loadItemDetail(targetItem);
 }
 
 function renderHistoryList() {
@@ -5195,37 +5413,77 @@ function renderHistoryList() {
 
     updateHistoryBadges();
 
-    const edits = getItemEdits();
     const items = [];
+    const queueDocs = state.stagingQueue || [];
 
+    // 1. Load history items directly from MongoDB queue collection (synced across all tablets)
+    // ONLY completed or excluded items belong in the History tab!
+    const historyDocs = queueDocs.filter(doc => 
+        doc && (doc.status === 'completed' || doc.status === 'excluded' || doc.status === 'scrapped')
+    );
+
+    historyDocs.forEach((doc, qIdx) => {
+        // Find matching item in scheduledItems to resolve exact orderIndex (#1, #2, #3...)
+        let matchedSched = null;
+        if (state.scheduledItems) {
+            matchedSched = state.scheduledItems.find(s => 
+                (doc.itemId && s.id === doc.itemId) || 
+                (s.hinban === doc.hinban && (s.rollIndex == doc.rollIndex || s.orderIndex == doc.orderIndex)) ||
+                (s.kizai === doc.kizai && s.orderIndex == doc.orderIndex)
+            );
+        }
+
+        let orderIndex = doc.orderIndex;
+        if (!orderIndex || isNaN(Number(orderIndex))) {
+            if (matchedSched && matchedSched.orderIndex) {
+                orderIndex = matchedSched.orderIndex;
+            } else if (state.scheduledItems) {
+                const foundIdx = state.scheduledItems.findIndex(s => s.hinban === doc.hinban || s.kizai === doc.kizai);
+                if (foundIdx !== -1) orderIndex = foundIdx + 1;
+            }
+        }
+        if (!orderIndex) orderIndex = doc.queuePosition || (qIdx + 1);
+
+        items.push({
+            itemId: doc.itemId || doc._id || doc.id,
+            mongoId: doc._id,
+            type: (doc.status === 'excluded' || doc.status === 'scrapped') ? 'excluded' : 'enqueued',
+            status: doc.status || 'completed',
+            orderIndex: Number(orderIndex) || (qIdx + 1),
+            kizai: doc.kizai || doc.hinban || doc.hinmei || '材料',
+            meters: doc.bicho || doc.rollMeters || doc.meters || 0,
+            lotNo: doc.lotNo || '',
+            photoUrl: doc.photoUrl || doc.imageUrl || '',
+            rawDoc: doc
+        });
+    });
+
+    // 2. Also merge local excluded edits if they were excluded before enqueuing to MongoDB
+    const edits = getItemEdits();
     Object.keys(edits).forEach(itemId => {
         const e = edits[itemId];
-        if (e.enqueued) {
-            items.push({
-                itemId,
-                type: 'enqueued',
-                kizai: e.kizai || e.hinban || '材料',
-                rollIndex: e.rollIndex || 1,
-                totalRolls: e.totalRolls || 1,
-                meters: e.meters || 0,
-                lotNo: e.lotNo || '-',
-                timestamp: e.enqueuedAt || '投入済',
-                photoUrl: e.photoUrl || e.photoBase64 || ''
-            });
-        } else if (e.isExcluded) {
+        if (e.isExcluded && !items.some(it => it.itemId === itemId)) {
+            let matchedSched = null;
+            if (state.scheduledItems) {
+                matchedSched = state.scheduledItems.find((s, idx) => s.id === itemId || getItemKey(s, undefined, idx) === itemId);
+            }
+            const orderIndex = e.orderIndex || matchedSched?.orderIndex || 1;
             items.push({
                 itemId,
                 type: 'excluded',
-                kizai: e.kizai || e.hinban || '材料',
-                rollIndex: e.rollIndex || 1,
-                totalRolls: e.totalRolls || 1,
-                meters: e.meters || 0,
-                lotNo: e.lotNo || '-',
-                timestamp: '除外中',
-                photoUrl: e.photoUrl || e.photoBase64 || ''
+                status: 'excluded',
+                orderIndex: Number(orderIndex) || 1,
+                kizai: e.kizai || matchedSched?.kizai || e.hinban || matchedSched?.hinban || '材料',
+                meters: e.bicho || e.meters || matchedSched?.meters || 0,
+                lotNo: e.lotNo || '',
+                photoUrl: e.photoUrl || e.photoBase64 || '',
+                rawDoc: e
             });
         }
     });
+
+    // Sort by order index ascending so the order sequence (#1, #2, #3...) is preserved
+    items.sort((a, b) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
 
     const filter = state.historyFilter || 'all';
     const filtered = items.filter(it => {
@@ -5245,39 +5503,47 @@ function renderHistoryList() {
 
     let html = '';
     filtered.forEach(it => {
-        const isEnqueued = (it.type === 'enqueued');
-        const badgeClass = isEnqueued ? 'history-type-enqueued' : 'history-type-excluded';
-        const badgeLabel = isEnqueued ? '投入済' : '除外中';
-        const photoThumb = it.photoUrl
-            ? `<img class="history-thumb" src="${it.photoUrl}" alt="写真" onclick="openPhotoEnlarged('${it.photoUrl}')" title="クリックで拡大">`
-            : `<div class="history-thumb-placeholder">写真なし</div>`;
+        const isExcluded = (it.status === 'excluded' || it.type === 'excluded');
+        
+        let statusTagHTML = '';
+        let actionHTML = '';
+
+        if (it.status === 'completed') {
+            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #EEF2FF; color: #4338CA; border: 1px solid #C7D2FE; font-weight: 700;">完了</span>`;
+            actionHTML = `<span style="font-size: 0.8rem; color: #4338CA; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;">完了済</span>`;
+        } else if (it.status === 'active' || it.status === 'in-progress') {
+            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-weight: 700;">貼合中</span>`;
+            actionHTML = `<span style="font-size: 0.8rem; color: #059669; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;">● 生産中</span>`;
+        } else if (it.status === 'skipped') {
+            statusTagHTML = `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">スキップ</span>`;
+            actionHTML = `<span style="font-size: 0.8rem; color: #6B7280; font-weight: 600; padding-right: 4px;">スキップ</span>`;
+        } else if (isExcluded) {
+            statusTagHTML = `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">除外中</span>`;
+            actionHTML = `<button type="button" class="btn-roll-exclude is-excluded" onclick="restoreExcludedItem('${it.itemId}', event)" title="生産一覧タブに復帰">復帰</button>`;
+        } else {
+            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-weight: 700;">投入済</span>`;
+            actionHTML = `<span style="font-size: 0.8rem; color: #059669; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;"><svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>キュー連携中</span>`;
+        }
 
         html += `
-            <div class="history-row ${isEnqueued ? 'is-enqueued' : 'is-excluded'}" data-item-id="${it.itemId}">
-                <div class="history-left">
-                    <span class="history-type-badge ${badgeClass}">${badgeLabel}</span>
-                    ${photoThumb}
-                    <div>
-                        <div class="history-title">${it.kizai}</div>
-                        <div class="history-meta">
-                            <span>Roll #${it.rollIndex} / ${it.totalRolls}</span>
-                            <span>•</span>
-                            <span><strong>${it.meters} m</strong></span>
-                            <span>•</span>
-                            <span>ロット: <strong>${it.lotNo}</strong></span>
-                            <span>•</span>
-                            <span>${it.timestamp}</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="history-right" onclick="event.stopPropagation()">
-                    ${!isEnqueued ? `
-                        <button type="button" class="history-restore-btn" onclick="restoreExcludedItem('${it.itemId}')" title="生産一覧タブに復帰させる">
-                            一覧に戻す
-                        </button>
+            <div class="batch-roll-row ${isExcluded ? 'is-excluded-row' : ''}" data-item-id="${it.itemId}" onclick="previewHistoryItem('${it.itemId}', event)" title="タップして詳細確認">
+                <div class="roll-row-left" style="display: flex; align-items: center; gap: 10px;">
+                    <span class="roll-sub-badge">#${it.orderIndex}</span>
+                    ${it.photoUrl ? `
+                        <img class="history-thumb-mini" src="${it.photoUrl}" alt="写真" onclick="event.stopPropagation(); openPhotoEnlarged('${it.photoUrl}')" title="タップして拡大" style="width: 34px; height: 34px; border-radius: 6px; object-fit: cover; border: 1px solid #E5E7EB; cursor: pointer; flex-shrink: 0;">
                     ` : `
-                        <span style="font-size: 0.8rem; color: var(--brand); font-weight: 700;">キュー連携中</span>
+                        <div style="width: 34px; height: 34px; border-radius: 6px; background: #F3F4F6; border: 1px dashed #D1D5DB; display: flex; align-items: center; justify-content: center; color: #9CA3AF; font-size: 0.65rem; flex-shrink: 0;">写真無</div>
                     `}
+                    <span class="history-item-hinban" style="font-weight: 700; color: #0F172A; font-size: 0.95rem;">${it.kizai}</span>
+                    <span class="tag-pill meter-tag" style="font-size: 0.8rem; padding: 2px 8px;">${it.meters ? it.meters + ' m' : '0 m'}</span>
+                    ${statusTagHTML}
+                </div>
+
+                <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
+                    ${actionHTML}
+                    <button type="button" class="btn-detail-secondary" onclick="previewHistoryItem('${it.itemId}', event)" title="この巻きの詳細を確認">
+                        詳細
+                    </button>
                 </div>
             </div>
         `;
@@ -5286,7 +5552,8 @@ function renderHistoryList() {
     container.innerHTML = html;
 }
 
-function restoreExcludedItem(itemId) {
+function restoreExcludedItem(itemId, event) {
+    if (event) event.stopPropagation();
     setItemEdit(itemId, { isExcluded: false });
     renderHistoryList();
     renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
@@ -5328,7 +5595,7 @@ function setupProductionSSE() {
 
 function handleProductionSSEEvent(data) {
     console.log('⚡ Received SSE event:', data.type, data);
-    if (data.type === 'queue_updated' || data.type === 'queue_scrapped' || data.type === 'roll_advanced') {
+    if (data.type === 'queue_updated' || data.type === 'queue_scrapped' || data.type === 'roll_advanced' || data.type === 'queue_roll_printed') {
         fetchProductionQueue();
     } else if (data.type === 'print_log') {
         if (data.groupId && data.printEntry) {

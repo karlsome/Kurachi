@@ -36390,9 +36390,11 @@ const productionSseClients = new Set();
 
 function broadcastProductionEvent(eventData) {
   const payload = `data: ${JSON.stringify(eventData)}\n\n`;
+  const eventDateNorm = eventData && eventData.date ? String(eventData.date).replace(/\//g, '-').trim() : '';
   productionSseClients.forEach(client => {
     try {
-      if (!client.date || client.date === eventData.date) {
+      const clientDateNorm = client && client.date ? String(client.date).replace(/\//g, '-').trim() : '';
+      if (!clientDateNorm || !eventDateNorm || clientDateNorm === eventDateNorm) {
         client.res.write(payload);
       }
     } catch (e) {
@@ -36408,7 +36410,8 @@ app.get('/api/production/events', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (res.flushHeaders) res.flushHeaders();
 
-  const clientObj = { res, date: req.query.date };
+  const clientDate = req.query.date ? String(req.query.date).replace(/\//g, '-').trim() : '';
+  const clientObj = { res, date: clientDate };
   productionSseClients.add(clientObj);
 
   res.write(`data: ${JSON.stringify({ type: 'connected', time: new Date().toISOString() })}\n\n`);
@@ -36776,10 +36779,12 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
       const db = client.db('submittedDB');
       const queueCol = db.collection('firstFactoryQueue');
       let updateFilter = null;
-
       if (queueId) {
         const { ObjectId } = require('mongodb');
         try { updateFilter = { _id: new ObjectId(queueId) }; } catch (e) { }
+      }
+      if (!updateFilter && itemId) {
+        updateFilter = { itemId: itemId };
       }
       if (!updateFilter && targetLotNo && targetLotNo !== 'nolot') {
         updateFilter = { date: targetDate, lotNo: targetLotNo };
@@ -36787,14 +36792,16 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
 
       if (updateFilter) {
         const updateDoc = { $set: { photoUrl: publicUrl, imageUrl: publicUrl, updatedAt: new Date() } };
-        const updateResult = await queueCol.updateOne(updateFilter, updateDoc);
+        const updateResult = await queueCol.updateMany(updateFilter, updateDoc);
+        let prodModified = 0;
         try {
           const prodCol = db.collection('firstFactoryProduction');
-          await prodCol.updateOne(updateFilter, updateDoc);
+          const prodRes = await prodCol.updateMany(updateFilter, updateDoc);
+          prodModified = prodRes.modifiedCount || 0;
         } catch (prodErr) {
           console.warn('⚠️ Could not link photo to firstFactoryProduction:', prodErr.message);
         }
-        if (updateResult.modifiedCount > 0) {
+        if (updateResult.modifiedCount > 0 || prodModified > 0) {
           console.log(`🔗 Linked photoUrl to firstFactoryQueue & firstFactoryProduction:`, updateFilter);
           broadcastProductionEvent({ type: 'queue_updated', date: targetDate, photoUrl: publicUrl });
         }
@@ -36903,6 +36910,46 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
     const db = client.db('submittedDB');
     const productionCol = db.collection('firstFactoryProduction');
     const queueCol = db.collection('firstFactoryQueue');
+
+    // Duplicate Protection: check if this exact roll is already enqueued / active / completed across any tablet
+    const duplicateOrConds = [];
+    if (itemId) duplicateOrConds.push({ itemId: itemId });
+    if (groupId && rollIndex) duplicateOrConds.push({ groupId: groupId, rollIndex: Number(rollIndex) });
+    if (orderIndex && Number(orderIndex) > 0) duplicateOrConds.push({ orderIndex: Number(orderIndex) });
+
+    if (duplicateOrConds.length > 0) {
+      const duplicateQuery = {
+        date: targetDate,
+        machine: targetMachine,
+        status: { $nin: ['cancelled', 'deleted'] },
+        $or: duplicateOrConds
+      };
+
+      const existingItem = await productionCol.findOne(duplicateQuery) || await queueCol.findOne(duplicateQuery);
+      if (existingItem) {
+        console.log(`⚠️ Item already enqueued [${existingItem.hinban || existingItem.groupId}] (Roll #${existingItem.rollIndex}, Order #${existingItem.orderIndex}) -> returning existing _id: ${existingItem._id}`);
+        // If photoUrl was missing and is now provided, update it
+        if (photoUrl && (!existingItem.photoUrl || !existingItem.imageUrl)) {
+          const photoPatch = { photoUrl: photoUrl, imageUrl: photoUrl, updatedAt: new Date() };
+          await productionCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
+          await queueCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
+        }
+        broadcastProductionEvent({
+          type: 'queue_updated',
+          date: targetDate,
+          machine: targetMachine,
+          _id: existingItem._id,
+          status: existingItem.status
+        });
+        return res.json({
+          success: true,
+          alreadyEnqueued: true,
+          _id: existingItem._id,
+          id: existingItem._id,
+          item: existingItem
+        });
+      }
+    }
 
     // Find highest queuePosition for (date, machine) across both collections
     const lastItem = await productionCol
