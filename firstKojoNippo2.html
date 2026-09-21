@@ -61,6 +61,7 @@
 
             --transition-smooth: 0.18s cubic-bezier(0.16, 1, 0.3, 1);
             --header-height: 64px;
+            --tab-bar-height: 52px;
         }
 
         /* Resets */
@@ -1185,6 +1186,350 @@
             }
         }
 
+        /* ---------------- Tab Bar Navigation ---------------- */
+        .tab-bar {
+            height: var(--tab-bar-height);
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 10px;
+            position: relative;
+            z-index: 999;
+            flex-shrink: 0;
+        }
+
+        .tab-btn {
+            height: 100%;
+            background: transparent;
+            border: none;
+            color: var(--text-soft);
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 0 16px;
+            transition: color var(--transition-smooth), border-color var(--transition-smooth);
+            position: relative;
+            border-bottom: 3px solid transparent;
+            user-select: none;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+        }
+
+        .tab-btn.active {
+            color: var(--brand);
+            border-bottom-color: var(--brand);
+        }
+
+        .tab-btn .tab-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+        }
+
+        .tab-badge {
+            background: var(--bg-inset);
+            color: var(--text-muted);
+            font-size: 0.725rem;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: var(--r-pill);
+            border: 1px solid var(--border);
+            line-height: 1.2;
+        }
+
+        .tab-btn.active .tab-badge {
+            background: var(--brand-soft);
+            color: var(--brand-hover);
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        .tab-view-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 22px;
+            width: 100%;
+        }
+
+        /* ---------------- History Section & Views ---------------- */
+        .history-panel-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .history-header {
+            margin-bottom: 4px;
+        }
+
+        .history-header-title-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .history-stat-pill {
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            padding: 4px 12px;
+            border-radius: var(--r-pill);
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--text-muted);
+        }
+
+        .history-view-row {
+            display: inline-flex;
+            background: #E5E7EB;
+            border: none;
+            border-radius: 18px;
+            padding: 2px;
+            gap: 2px;
+        }
+
+        .history-view-btn {
+            background: transparent;
+            border: none;
+            padding: 5px 16px;
+            border-radius: 16px;
+            font-size: 0.825rem;
+            font-weight: 600;
+            color: #6B7280;
+            cursor: pointer;
+            transition: all var(--transition-smooth);
+        }
+
+        .history-view-btn:hover {
+            color: #111827;
+        }
+
+        .history-view-btn.active {
+            background: #FFFFFF;
+            color: #111827;
+            font-weight: 700;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* History Table View (Matching FreyaAdmin2 Print Layout) */
+        .history-sheet {
+            width: 100%;
+            background: #FFFFFF;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+            overflow-x: auto;
+            box-sizing: border-box;
+        }
+
+        .history-summary-strip {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f8fafc;
+            border: 1.5px solid #000;
+            border-bottom: none;
+            padding: 8px 14px;
+            font-size: 10pt;
+            font-weight: 700;
+            color: #000000;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .history-schedule-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 10pt;
+            background: #ffffff;
+            color: #000000;
+        }
+
+        .history-schedule-table th,
+        .history-schedule-table td {
+            border: 1.5px solid #000;
+            padding: 6px 5px;
+            vertical-align: middle;
+            word-break: break-word;
+        }
+
+        .history-schedule-table th {
+            background-color: #e2e8f0;
+            font-weight: 900;
+            text-align: center;
+            font-size: 10.5pt;
+            padding: 8px 4px;
+            color: #000000;
+        }
+
+        .history-schedule-table tr.separator-black-row td {
+            background-color: #000000 !important;
+            height: 6px !important;
+            line-height: 6px !important;
+            padding: 0 !important;
+            border: 1.5px solid #000000 !important;
+            box-shadow: inset 0 0 0 1000px #000000 !important;
+        }
+
+        .history-schedule-table tr.scrapped-row {
+            background-color: #fef2f2 !important;
+            color: #991b1b;
+        }
+
+        .history-schedule-table .center { text-align: center; }
+        .history-schedule-table .left { text-align: left; }
+        .history-schedule-table .right { text-align: right; }
+        .history-schedule-table .font-bold { font-weight: 700; }
+        .history-schedule-table .text-sub {
+            font-size: 8.5pt;
+            color: #475569;
+            font-weight: normal;
+        }
+        .history-schedule-table .time-cell { width: 8%; }
+        .history-schedule-table .dest-cell { width: 14%; font-size: 9.5pt; }
+        .history-schedule-table .kizai-cell { width: 22%; font-size: 10pt; font-weight: 700; }
+        .history-schedule-table .shori-cell { width: 8%; font-size: 9.5pt; font-weight: 700; }
+        .history-schedule-table .color-cell { width: 9%; font-size: 9.5pt; font-weight: 700; }
+        .history-schedule-table .habanaga-cell { width: 9%; font-weight: 700; }
+        .history-schedule-table .kataban-cell { width: 9%; font-weight: 700; }
+        .history-schedule-table .roll-cell { width: 6%; font-weight: 700; font-size: 9.5pt; }
+        .history-schedule-table .qty-cell { width: 11%; font-weight: 700; }
+        .history-schedule-table tr.item-row:hover {
+            background-color: #f8fafc;
+        }
+
+        /* History Flat Cards List */
+        .history-flat-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .history-row {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            box-shadow: var(--shadow-card);
+            flex-wrap: wrap;
+            transition: all var(--transition-smooth);
+        }
+
+        .history-row:hover {
+            border-color: var(--border-strong);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .history-row.status-enqueued {
+            border-left: 5px solid var(--brand);
+        }
+
+        .history-row.status-excluded {
+            border-left: 5px solid var(--red);
+            background: #FFFDFD;
+        }
+
+        .history-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex: 1;
+            min-width: 260px;
+        }
+
+        .history-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .history-thumb {
+            width: 48px;
+            height: 48px;
+            object-fit: cover;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            cursor: pointer;
+            flex-shrink: 0;
+            background: var(--bg-inset);
+            transition: transform 0.15s ease;
+        }
+
+        .history-thumb:hover {
+            transform: scale(1.06);
+            border-color: var(--brand);
+        }
+
+        .history-thumb-placeholder {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            border: 1px dashed var(--border-strong);
+            background: var(--bg-inset);
+            color: var(--text-soft);
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .history-type-badge {
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 2px 9px;
+            border-radius: var(--r-pill);
+            white-space: nowrap;
+            border: 1px solid transparent;
+        }
+
+        .history-title {
+            font-size: 1.05rem;
+            font-weight: 800;
+            color: var(--text-main);
+            letter-spacing: -0.01em;
+        }
+
+        .history-meta {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            font-weight: 600;
+        }
+
+        .staging-queue-empty {
+            text-align: center;
+            padding: 36px 20px;
+            color: var(--text-soft);
+            font-size: 0.95rem;
+            font-weight: 700;
+            background: var(--bg-surface);
+            border-radius: var(--card-radius);
+            border: 1px dashed var(--border-strong);
+            box-shadow: var(--shadow-card);
+        }
+
         /* ---------------- Tablet & Mobile Responsiveness ---------------- */
         @media (max-width: 1024px) {
             .header-titles .subtitle {
@@ -1308,6 +1653,28 @@
         </div>
     </header>
 
+    <!-- Tab Navigation (Matching Tablet 1) -->
+    <div class="tab-bar" id="mainTabBar">
+        <button type="button" class="tab-btn active" id="tabBtnWork" onclick="switchTablet2Tab('work')">
+            <span class="tab-icon">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            </span>
+            <span class="tab-label-wrap" style="display:inline-flex; align-items:center; gap:6px;">
+                <span class="tab-label" data-i18n="fk2_tab_work">包装・キュー</span>
+                <span class="tab-badge" id="navQueueBadge" style="display:none;">0</span>
+            </span>
+        </button>
+        <button type="button" class="tab-btn" id="tabBtnHistory" onclick="switchTablet2Tab('history')">
+            <span class="tab-icon">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 15 15"/></svg>
+            </span>
+            <span class="tab-label-wrap" style="display:inline-flex; align-items:center; gap:6px;">
+                <span class="tab-label" data-i18n="fk_tab_history">履歴</span>
+                <span class="tab-badge" id="navHistoryBadge" style="display:none;">0</span>
+            </span>
+        </button>
+    </div>
+
     <!-- Main Content Area -->
     <main>
         <!-- Date Navigator Toolbar (outside title bar) -->
@@ -1327,37 +1694,65 @@
             <div id="lastPrintedInfo" class="last-printed-info"></div>
         </div>
 
-        <!-- Section: Hero Card (Currently Wrapping) -->
-        <section id="activeWrappingSection">
-            <div class="section-header">
-                <div class="section-title">
-                    <span data-i18n="fk2_currently_wrapping">現在包装中</span>
+        <!-- View: Work (Wrapping & Queue) -->
+        <div id="viewWork" class="tab-view-panel">
+            <!-- Section: Hero Card (Currently Wrapping) -->
+            <section id="activeWrappingSection">
+                <div class="section-header">
+                    <div class="section-title">
+                        <span data-i18n="fk2_currently_wrapping">現在包装中</span>
+                    </div>
                 </div>
-            </div>
 
-            <!-- Active Hero Container (Filled via JS) -->
-            <div id="heroCardWrapper">
-                <!-- Dynamically rendered -->
-            </div>
-        </section>
-
-        <!-- Section: Next in Line Queue -->
-        <section class="queue-section" id="queueSection">
-            <div class="section-header">
-                <div class="section-title">
-                    <span data-i18n="fk2_next_in_line">次工程キュー</span>
-                    <span class="badge-count" id="queueCountBadge">0件</span>
+                <!-- Active Hero Container (Filled via JS) -->
+                <div id="heroCardWrapper">
+                    <!-- Dynamically rendered -->
                 </div>
-                <div style="font-size: 0.8rem; color: var(--text-soft); font-weight: 700;" data-i18n="fk2_queue_instruction">
-                    ※ 先行して包装を行う場合はカードを選択してください
-                </div>
-            </div>
+            </section>
 
-            <!-- Queue Cards Grid -->
-            <div class="queue-grid" id="queueGridContainer">
-                <!-- Dynamically rendered -->
-            </div>
-        </section>
+            <!-- Section: Next in Line Queue -->
+            <section class="queue-section" id="queueSection">
+                <div class="section-header">
+                    <div class="section-title">
+                        <span data-i18n="fk2_next_in_line">次工程キュー</span>
+                        <span class="badge-count" id="queueCountBadge">0件</span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: var(--text-soft); font-weight: 700;" data-i18n="fk2_queue_instruction">
+                        ※ 先行して包装を行う場合はカードを選択してください
+                    </div>
+                </div>
+
+                <!-- Queue Cards Grid -->
+                <div class="queue-grid" id="queueGridContainer">
+                    <!-- Dynamically rendered -->
+                </div>
+            </section>
+        </div>
+
+        <!-- View: History (Completed Work Review) -->
+        <div id="viewHistory" class="tab-view-panel" style="display: none;">
+            <section id="historySection">
+                <div class="history-panel-wrap">
+                    <div class="history-header">
+                        <div class="history-header-title-wrap">
+                            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <h2 data-i18n="fk2_history_title" style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); margin: 0;">包装・発行履歴</h2>
+                                <span class="history-stat-pill" id="historyCompletedCountBadge">完了: 0 巻</span>
+                                <span class="history-stat-pill" id="historyScrappedCountBadge">破棄/スキップ: 0 巻</span>
+                            </div>
+                            <div class="history-view-row">
+                                <button type="button" class="history-view-btn active" id="btnHistViewCard" onclick="setHistoryView('card')" data-i18n="fk_view_card">カード</button>
+                                <button type="button" class="history-view-btn" id="btnHistViewList" onclick="setHistoryView('list')" data-i18n="fk_view_list">リスト</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="historyListContainer" class="history-flat-list">
+                        <!-- Dynamically rendered -->
+                    </div>
+                </div>
+            </section>
+        </div>
     </main>
 
     <!-- ---------------- Fullscreen Warehouse Label Photo Modal ---------------- -->
@@ -1464,6 +1859,31 @@
                 <button type="button" class="btn-edge finish-btn" onclick="submitFinishEarly()"
                     style="background: var(--brand); color: #fff;" data-i18n="fk2_btn_confirm_finish">
                     完了を確定する
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ---------------- History Item Detail Modal ---------------- -->
+    <div id="historyDetailModal" class="modal">
+        <div class="modal-card" style="max-width: 520px;">
+            <button type="button" class="modal-close-btn" onclick="closeHistoryDetailModal()">✕</button>
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border); padding-bottom: 12px;">
+                <span style="font-size: 2rem;">📦</span>
+                <div>
+                    <h3 class="modal-title" id="histModalTitle" style="margin: 0; font-size: 1.25rem;">ロール履歴詳細</h3>
+                    <div id="histModalSubtitle" style="font-size: 0.825rem; color: var(--text-soft); font-weight: 700;"></div>
+                </div>
+            </div>
+
+            <div id="histModalBody" style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px;">
+                <!-- Filled via JS -->
+            </div>
+
+            <div class="modal-actions" style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" class="btn-edge" onclick="closeHistoryDetailModal()" data-i18n="close">閉じる</button>
+                <button type="button" class="btn-edge reprint-btn" id="btnHistModalReprint" style="background: var(--blue); color: #fff; padding: 0 18px;">
+                    <span>🖨️ ラベル再印刷</span>
                 </button>
             </div>
         </div>

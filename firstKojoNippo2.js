@@ -54,6 +54,10 @@ const state = {
     workerName: localStorage.getItem('firstkojo_nippo_worker_name') || '包装担当',
     soundEnabled: localStorage.getItem('firstkojo2_sound_enabled') !== 'false',
 
+    // Tab & View state
+    currentTab: 'work',   // 'work' | 'history'
+    historyView: 'card',  // 'card' | 'list'
+
     // Queue Data
     queue: [],
     activeItem: null,
@@ -721,7 +725,9 @@ function saveLocalQueue() {
 function renderApp() {
     renderHeroCard();
     renderQueueSection();
+    renderHistory();
     updateLastPrintedInfo();
+    updateHistoryBadges();
 }
 
 function renderHeroCard() {
@@ -955,6 +961,506 @@ function escapeHtml(str) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+// -----------------------------------------------------
+// Tab & History Navigation for Tablet 2
+// -----------------------------------------------------
+function switchTablet2Tab(tabName) {
+    state.currentTab = tabName;
+    const tabBtnWork = document.getElementById('tabBtnWork');
+    const tabBtnHistory = document.getElementById('tabBtnHistory');
+    const viewWork = document.getElementById('viewWork');
+    const viewHistory = document.getElementById('viewHistory');
+
+    if (tabName === 'history') {
+        if (tabBtnWork) tabBtnWork.classList.remove('active');
+        if (tabBtnHistory) tabBtnHistory.classList.add('active');
+        if (viewWork) viewWork.style.display = 'none';
+        if (viewHistory) viewHistory.style.display = 'block';
+        renderHistory();
+    } else {
+        if (tabBtnWork) tabBtnWork.classList.add('active');
+        if (tabBtnHistory) tabBtnHistory.classList.remove('active');
+        if (viewWork) viewWork.style.display = 'block';
+        if (viewHistory) viewHistory.style.display = 'none';
+        renderHeroCard();
+        renderQueueSection();
+    }
+}
+
+function setHistoryView(viewType) {
+    state.historyView = viewType;
+    const btnCard = document.getElementById('btnHistViewCard');
+    const btnList = document.getElementById('btnHistViewList');
+
+    if (btnCard) btnCard.classList.toggle('active', viewType === 'card');
+    if (btnList) btnList.classList.toggle('active', viewType === 'list');
+
+    renderHistory();
+}
+
+function updateHistoryBadges() {
+    const completedBadge = document.getElementById('historyCompletedCountBadge');
+    const scrappedBadge = document.getElementById('historyScrappedCountBadge');
+    const navHistoryBadge = document.getElementById('navHistoryBadge');
+    const navQueueBadge = document.getElementById('navQueueBadge');
+
+    const completedDocs = state.completedItems || [];
+    const completedCount = completedDocs.filter(it => it && it.status !== 'scrapped' && it.status !== 'skipped').length;
+    const scrappedCount = completedDocs.filter(it => it && (it.status === 'scrapped' || it.status === 'skipped')).length;
+
+    const completedText = (typeof _t === 'function' && _t('fk_status_completed')) || '完了';
+    const scrappedText = (typeof _t === 'function' && _t('fk2_btn_scrap')) || '破棄/スキップ';
+    const rollCountUnit = (typeof _t === 'function' && _t('fk_roll_count')) || '巻';
+
+    if (completedBadge) completedBadge.textContent = `${completedText}: ${completedCount} ${rollCountUnit}`;
+    if (scrappedBadge) scrappedBadge.textContent = `${scrappedText}: ${scrappedCount} ${rollCountUnit}`;
+
+    if (navHistoryBadge) {
+        navHistoryBadge.textContent = String(completedDocs.length);
+        navHistoryBadge.style.display = completedDocs.length > 0 ? 'inline-block' : 'none';
+    }
+
+    const waitingCount = (state.waitingItems || []).length + (state.activeItem ? 1 : 0);
+    if (navQueueBadge) {
+        navQueueBadge.textContent = String(waitingCount);
+        navQueueBadge.style.display = waitingCount > 0 ? 'inline-block' : 'none';
+    }
+}
+
+function renderHistory() {
+    const container = document.getElementById('historyListContainer');
+    if (!container) return;
+
+    updateHistoryBadges();
+
+    if (state.historyView === 'list') {
+        container.classList.remove('history-flat-list');
+        container.innerHTML = renderHistoryTableView();
+    } else {
+        container.classList.add('history-flat-list');
+        container.innerHTML = renderHistoryCardView();
+    }
+}
+
+function renderHistoryCardView() {
+    const completedDocs = state.completedItems || [];
+    if (completedDocs.length === 0) {
+        const emptyText = (typeof _t === 'function' && _t('fk_history_empty')) || '完了した履歴項目がありません (No completed history)';
+        return `
+            <div class="staging-queue-empty">
+                ${emptyText}
+            </div>
+        `;
+    }
+
+    const items = completedDocs.map((doc, qIdx) => {
+        let matchedSched = null;
+        if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
+            matchedSched = scheduleCache.scheduleOrder.find(s => 
+                (doc.itemId && s.id === doc.itemId) || 
+                (doc._id && s.id === doc._id) ||
+                (doc.groupId && s.groupId === doc.groupId && Number(s.rollIndex) === Number(doc.rollIndex)) ||
+                (s.hinban === doc.hinban && (Number(s.rollIndex) === Number(doc.rollIndex) || Number(s.orderIndex) === Number(doc.orderIndex))) ||
+                (s.kizai === doc.kizai && Number(s.orderIndex) === Number(doc.orderIndex))
+            );
+        }
+
+        let orderIndex = doc.orderIndex;
+        if (!orderIndex || isNaN(Number(orderIndex))) {
+            if (matchedSched && matchedSched.orderIndex) {
+                orderIndex = matchedSched.orderIndex;
+            } else if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
+                const foundIdx = scheduleCache.scheduleOrder.findIndex(s => s.hinban === doc.hinban || s.kizai === doc.kizai);
+                if (foundIdx !== -1) orderIndex = foundIdx + 1;
+            }
+        }
+        if (!orderIndex) orderIndex = doc.queuePosition || (qIdx + 1);
+
+        const curRoll = Number(doc.currentRollIndex || doc.rollIndex || 1);
+        const totalRolls = Number(doc.totalRolls) || 1;
+        const hinban = (matchedSched && (matchedSched.kizai || matchedSched.hinban)) || getTablet1Hinban(doc) || doc.kizai || doc.hinban || '品番未設定';
+        const color = doc.color || matchedSched?.color || '標準';
+        const meters = doc.metersPerRoll || doc.rollMeters || doc.meters || doc.bicho || matchedSched?.meters || 0;
+        const photoUrl = doc.imageUrl || doc.photoUrl || '';
+        const status = doc.status || 'completed';
+        const completedAt = doc.completedAt || doc.actualEndTime || doc.updatedAt || doc.createdAt;
+        const worker = doc.wrapperWorker || doc.worker || '';
+        const docId = String(doc._id || doc.queueId || doc.itemId || qIdx);
+
+        return {
+            doc,
+            docId,
+            orderIndex: Number(orderIndex) || (qIdx + 1),
+            curRoll,
+            totalRolls,
+            hinban,
+            color,
+            meters,
+            photoUrl,
+            status,
+            completedAt,
+            worker
+        };
+    });
+
+    // Sort by orderIndex ascending
+    items.sort((a, b) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
+
+    const photoCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票写真';
+    const tapToEnlarge = (typeof _t === 'function' && _t('fk2_tap_to_enlarge')) || 'タップで拡大';
+    const reprintText = (typeof _t === 'function' && _t('fk2_btn_reprint')) || '再印刷';
+
+    return items.map(it => {
+        let timeStr = '—';
+        if (it.completedAt) {
+            const d = new Date(it.completedAt);
+            if (!isNaN(d.getTime())) {
+                timeStr = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+            } else if (typeof it.completedAt === 'string') {
+                timeStr = it.completedAt;
+            }
+        }
+
+        const isScrapped = it.status === 'scrapped' || it.status === 'skipped';
+        const statusPill = isScrapped
+            ? `<span class="history-type-badge history-type-excluded" style="background:#FEE2E2; color:#DC2626; border-color:#FCA5A5;">破棄/スキップ</span>`
+            : `<span class="history-type-badge history-type-enqueued" style="background:#ECFDF5; color:#059669; border-color:#A7F3D0;">包装完了・印刷済</span>`;
+
+        return `
+            <div class="history-row ${isScrapped ? 'status-excluded' : 'status-enqueued'}" onclick="handleHistoryItemClick('${escapeHtml(it.docId)}')">
+                <div class="history-left">
+                    <div class="history-pos-badge" style="font-size: 0.95rem; font-weight: 800; color: #1E293B; background: #F1F5F9; border: 1px solid #CBD5E1; padding: 4px 10px; border-radius: 8px; flex-shrink: 0;">#${it.orderIndex}</div>
+
+                    ${it.photoUrl ? `
+                        <img src="${it.photoUrl}" class="history-thumb" alt="Photo" onclick="event.stopPropagation(); openPhotoModal('${it.photoUrl}', '${escapeHtml(it.hinban)} - ${escapeHtml(photoCaption)}')" title="${escapeHtml(tapToEnlarge)}">
+                    ` : `
+                        <div class="history-thumb-placeholder">📷</div>
+                    `}
+
+                    <div style="display: flex; flex-direction: column; gap: 3px;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <span class="history-title">${escapeHtml(it.hinban)}</span>
+                            ${statusPill}
+                        </div>
+                        <div class="history-meta">
+                            <span>Roll <strong>${it.curRoll}</strong> / ${it.totalRolls} 巻</span>
+                            <span>•</span>
+                            <span><strong>${it.meters}</strong> m</span>
+                            <span>•</span>
+                            <span>${escapeHtml(it.color)}</span>
+                            ${timeStr !== '—' ? `<span>•</span><span>完了: <strong>${escapeHtml(timeStr)}</strong></span>` : ''}
+                            ${it.worker ? `<span>•</span><span>担当: <strong>${escapeHtml(it.worker)}</strong></span>` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="history-right" onclick="event.stopPropagation();">
+                    <button type="button" class="btn-edge reprint-btn" onclick="handleHistoryReprint('${escapeHtml(it.docId)}', ${it.curRoll}, ${it.totalRolls})" style="padding: 6px 14px; font-size: 0.825rem; font-weight: 700;" title="このロールのラベルをBrotherプリンターで再印刷">
+                        <span>🔄</span>
+                        <span>${escapeHtml(reprintText)}</span>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderHistoryTableView() {
+    const completedDocs = state.completedItems || [];
+
+    if (completedDocs.length === 0) {
+        const emptyText = (typeof _t === 'function' && _t('fk_history_empty')) || '完了した履歴項目がありません (No completed history)';
+        return `
+            <div class="staging-queue-empty">
+                ${emptyText}
+            </div>
+        `;
+    }
+
+    const historyItems = [];
+    completedDocs.forEach((doc, qIdx) => {
+        let matchedSched = null;
+        if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
+            matchedSched = scheduleCache.scheduleOrder.find(s => 
+                (doc.itemId && s.id === doc.itemId) || 
+                (doc._id && s.id === doc._id) ||
+                (doc.groupId && s.groupId === doc.groupId && Number(s.rollIndex) === Number(doc.rollIndex)) ||
+                (s.hinban === doc.hinban && (Number(s.rollIndex) === Number(doc.rollIndex) || Number(s.orderIndex) === Number(doc.orderIndex))) ||
+                (s.kizai === doc.kizai && Number(s.orderIndex) === Number(doc.orderIndex))
+            );
+        }
+
+        let orderIndex = doc.orderIndex;
+        if (!orderIndex || isNaN(Number(orderIndex))) {
+            if (matchedSched && matchedSched.orderIndex) {
+                orderIndex = matchedSched.orderIndex;
+            } else if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
+                const foundIdx = scheduleCache.scheduleOrder.findIndex(s => s.hinban === doc.hinban || s.kizai === doc.kizai);
+                if (foundIdx !== -1) orderIndex = foundIdx + 1;
+            }
+        }
+        if (!orderIndex) orderIndex = doc.queuePosition || (qIdx + 1);
+
+        const kizaiName = (matchedSched && (matchedSched.kizai || matchedSched.hinban)) || getTablet1Hinban(doc) || doc.kizai || doc.hinban || '材料';
+
+        historyItems.push({
+            itemId: doc.itemId || doc._id || doc.queueId || String(qIdx + 1),
+            mongoId: doc._id,
+            orderIndex: Number(orderIndex) || (qIdx + 1),
+            startTime: doc.actualStartTime || matchedSched?.startTime || '',
+            endTime: doc.actualEndTime || matchedSched?.endTime || '',
+            completedAt: doc.completedAt || doc.updatedAt || doc.createdAt || '',
+            shippingDest: (matchedSched && matchedSched.shippingDest) || doc.shippingDest || '—',
+            kizai: kizaiName,
+            shori: (matchedSched && matchedSched.shori) || doc.shori || '—',
+            color: doc.color || (matchedSched && matchedSched.color) || '—',
+            habanaga: (matchedSched && matchedSched.habanaga) || doc.habanaga || '—',
+            kataban: (matchedSched && matchedSched.kataban) || doc.kataban || '—',
+            timeOption: matchedSched?.timeOption || doc.timeOption || '',
+            rollIndex: doc.currentRollIndex || doc.rollIndex || matchedSched?.rollIndex || 1,
+            totalRolls: doc.totalRolls || matchedSched?.totalRolls || 1,
+            meters: doc.metersPerRoll || doc.rollMeters || doc.meters || doc.bicho || matchedSched?.meters || 0,
+            unit: doc.unit || matchedSched?.unit || 'm',
+            status: doc.status || 'completed',
+            rawDoc: doc
+        });
+    });
+
+    // Sort by orderIndex ascending
+    historyItems.sort((a, b) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
+
+    let totalMeters = 0;
+    let totalPieces = 0;
+    let lastKizai = null;
+    const rows = [];
+
+    historyItems.forEach((item) => {
+        const qtyVal = Number(item.meters) || 0;
+        if (item.unit === '枚') {
+            totalPieces += qtyVal;
+        } else {
+            totalMeters += qtyVal;
+        }
+
+        const cmVal = qtyVal * 100;
+        const currentKizai = item.kizai;
+
+        // If 基材コード changes, insert black separator row
+        if (lastKizai !== null && lastKizai !== currentKizai) {
+            rows.push(`
+                <tr class="separator-black-row">
+                    <td colspan="10"></td>
+                </tr>
+            `);
+        }
+        lastKizai = currentKizai;
+
+        const formattedDest = escapeHtml(item.shippingDest).replace(/\n/g, '<br>');
+
+        const katabanDisplay = (item.kataban && item.kataban !== '—')
+            ? `${escapeHtml(item.kataban)}${item.timeOption ? `<br><span class="text-sub">(${escapeHtml(item.timeOption)})</span>` : ''}`
+            : '—';
+
+        const qtyDisplay = item.unit === '枚'
+            ? `${qtyVal.toLocaleString()} 枚`
+            : `${cmVal.toLocaleString()} cm (${qtyVal}m)`;
+
+        let timeDisplay = '—';
+        if (item.startTime && item.endTime) {
+            timeDisplay = `<strong>${escapeHtml(item.startTime)}</strong><br><span class="text-sub">～ ${escapeHtml(item.endTime)}</span>`;
+        } else if (item.completedAt) {
+            const d = new Date(item.completedAt);
+            if (!isNaN(d.getTime())) {
+                timeDisplay = `<strong>${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</strong>`;
+            }
+        }
+
+        const isScrapped = item.status === 'scrapped' || item.status === 'skipped';
+
+        rows.push(`
+            <tr class="item-row ${isScrapped ? 'scrapped-row' : ''}" style="cursor: pointer;" onclick="handleHistoryItemClick('${escapeHtml(String(item.itemId))}')" title="クリックでロール詳細・再印刷">
+                <td class="center font-bold">${item.orderIndex}</td>
+                <td class="center time-cell">${timeDisplay}</td>
+                <td class="center dest-cell">${formattedDest}</td>
+                <td class="left kizai-cell">${escapeHtml(item.kizai)}${isScrapped ? ' <span style="color:var(--red); font-size:0.75rem;">(破棄)</span>' : ''}</td>
+                <td class="center shori-cell">${escapeHtml(item.shori)}</td>
+                <td class="center color-cell">${escapeHtml(item.color)}</td>
+                <td class="center habanaga-cell">${escapeHtml(item.habanaga)}</td>
+                <td class="center kataban-cell">${katabanDisplay}</td>
+                <td class="center roll-cell font-bold">${item.rollIndex}/${item.totalRolls}</td>
+                <td class="right qty-cell font-bold">${qtyDisplay}</td>
+            </tr>
+        `);
+    });
+
+    const firstTime = historyItems.find(it => it.startTime)?.startTime || '';
+    const lastTime = [...historyItems].reverse().find(it => it.endTime)?.endTime || '';
+    const timeSpan = (firstTime && lastTime) ? `${firstTime} ～ ${lastTime}` : (historyItems[0]?.completedAt ? new Date(historyItems[0].completedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '本日');
+
+    const totalProdFormatted = `${totalMeters > 0 ? `${totalMeters.toLocaleString()} m` : ''}${totalMeters > 0 && totalPieces > 0 ? ' / ' : ''}${totalPieces > 0 ? `${totalPieces.toLocaleString()} 枚` : ''}${totalMeters > 0 ? ` (${(totalMeters * 100).toLocaleString()} cm)` : ''}`;
+
+    return `
+        <div class="history-sheet">
+            <div class="history-summary-strip">
+                <span>実績時: <strong>${escapeHtml(timeSpan)}</strong></span>
+                <span>完了総数: <strong>${historyItems.length} 巻/束</strong></span>
+                <span>完了総生産量: <strong>${totalProdFormatted}</strong></span>
+            </div>
+
+            <table class="history-schedule-table">
+                <thead>
+                    <tr>
+                        <th style="width: 4%;">No.</th>
+                        <th style="width: 8%;">時間</th>
+                        <th style="width: 14%;">出荷先名</th>
+                        <th style="width: 22%;">基材コード</th>
+                        <th style="width: 8%;">処理コード</th>
+                        <th style="width: 9%;">色コード</th>
+                        <th style="width: 9%;">幅長コード</th>
+                        <th style="width: 9%;">型番</th>
+                        <th style="width: 6%;">巻数</th>
+                        <th style="width: 11%;">生産数量</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+async function handleHistoryReprint(itemId, rollIndex, totalRolls) {
+    const item = (state.completedItems || []).find(d => 
+        String(d._id) === String(itemId) || 
+        String(d.queueId) === String(itemId) || 
+        String(d.itemId) === String(itemId)
+    );
+    if (!item) {
+        showToast('履歴データが見つかりません', 'warning');
+        return;
+    }
+
+    const curRoll = Number(rollIndex) || Number(item.currentRollIndex || item.rollIndex || 1);
+    const total = Number(totalRolls) || Number(item.totalRolls || 1);
+    const hinban = getTablet1Hinban(item) || item.hinban || '品番';
+
+    const confirmed = confirm(
+        `【ラベル再印刷の確認】\n\n品番: ${hinban}\nRoll: ${curRoll} / ${total}\n\nこの完了済みロールのラベルをプリンターへ送信しますか？`
+    );
+    if (!confirmed) return;
+
+    const fields = buildBrotherPrintFields(item, curRoll, total);
+    showPrintProgressModal('再印刷中...', `【${hinban}】Roll ${curRoll} / ${total}`);
+
+    try {
+        const result = await executeBrotherPrint(fields);
+        if (!result.success && !result.isConnectionRefused) {
+            updatePrintProgressError(result.error || '再印刷エラー');
+            return;
+        }
+
+        playChime('success');
+        updatePrintProgressSuccess('再印刷完了', `Roll ${curRoll} / ${total}`);
+        showToast(`🔄 [${hinban}] Roll ${curRoll} を再印刷しました`, 'success');
+    } catch (err) {
+        updatePrintProgressError(err.message || '再印刷に失敗しました');
+    }
+}
+
+function handleHistoryItemClick(itemId) {
+    const item = (state.completedItems || []).find(d => 
+        String(d._id) === String(itemId) || 
+        String(d.queueId) === String(itemId) || 
+        String(d.itemId) === String(itemId)
+    );
+    if (!item) return;
+
+    let matchedSched = null;
+    if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
+        matchedSched = scheduleCache.scheduleOrder.find(s => 
+            (item.itemId && s.id === item.itemId) || 
+            (item._id && s.id === item._id) ||
+            (item.groupId && s.groupId === item.groupId && Number(s.rollIndex) === Number(item.rollIndex)) ||
+            (s.hinban === item.hinban && (Number(s.rollIndex) === Number(item.rollIndex) || Number(s.orderIndex) === Number(item.orderIndex))) ||
+            (s.kizai === item.kizai && Number(s.orderIndex) === Number(item.orderIndex))
+        );
+    }
+
+    const orderIndex = item.orderIndex || matchedSched?.orderIndex || item.queuePosition || 1;
+    const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
+    const totalRolls = Number(item.totalRolls || 1);
+    const hinban = (matchedSched && (matchedSched.kizai || matchedSched.hinban)) || getTablet1Hinban(item) || item.kizai || item.hinban || '品番未設定';
+    const color = item.color || matchedSched?.color || '標準';
+    const dest = (matchedSched && matchedSched.shippingDest) || item.shippingDest || '—';
+    const meters = item.metersPerRoll || item.rollMeters || item.meters || item.bicho || matchedSched?.meters || 0;
+    const photoUrl = item.imageUrl || item.photoUrl || '';
+    const completedAt = item.completedAt || item.actualEndTime || item.updatedAt || '';
+    const worker = item.wrapperWorker || item.worker || '包装担当';
+    const status = item.status || 'completed';
+
+    let timeStr = '—';
+    if (completedAt) {
+        const d = new Date(completedAt);
+        if (!isNaN(d.getTime())) {
+            timeStr = `${d.toLocaleDateString('ja-JP')} ${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}`;
+        } else {
+            timeStr = String(completedAt);
+        }
+    }
+
+    const modal = document.getElementById('historyDetailModal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('histModalTitle');
+    const subEl = document.getElementById('histModalSubtitle');
+    const bodyEl = document.getElementById('histModalBody');
+    const reprintBtn = document.getElementById('btnHistModalReprint');
+
+    if (titleEl) titleEl.textContent = `${hinban} (#${orderIndex})`;
+    if (subEl) subEl.textContent = `Roll ${curRoll} / ${totalRolls} 巻 · ${meters}m · ${color}`;
+
+    if (bodyEl) {
+        const photoCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票写真';
+        const tapToEnlarge = (typeof _t === 'function' && _t('fk2_tap_to_enlarge')) || 'タップで拡大';
+
+        bodyEl.innerHTML = `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--btn-radius); padding: 12px 14px; font-size: 0.85rem;">
+                <div><span style="color: var(--text-soft); font-weight: 700;">状態:</span> <strong style="color: ${status === 'scrapped' ? 'var(--red)' : 'var(--brand)'};">${status === 'scrapped' ? '破棄/スキップ' : '包装完了・印刷済'}</strong></div>
+                <div><span style="color: var(--text-soft); font-weight: 700;">出荷先:</span> <strong>${escapeHtml(dest)}</strong></div>
+                <div><span style="color: var(--text-soft); font-weight: 700;">完了日時:</span> <strong>${escapeHtml(timeStr)}</strong></div>
+                <div><span style="color: var(--text-soft); font-weight: 700;">作業担当:</span> <strong>${escapeHtml(worker)}</strong></div>
+            </div>
+
+            ${photoUrl ? `
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <span style="font-size: 0.825rem; font-weight: 700; color: var(--text-soft);">${escapeHtml(photoCaption)}:</span>
+                    <div style="position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); max-height: 180px; cursor: pointer;" onclick="openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - ${escapeHtml(photoCaption)}')">
+                        <img src="${photoUrl}" alt="Photo" style="width: 100%; height: 180px; object-fit: cover;">
+                        <div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: var(--r-pill);">
+                            🔍 ${escapeHtml(tapToEnlarge)}
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+        `;
+    }
+
+    if (reprintBtn) {
+        reprintBtn.onclick = () => {
+            closeHistoryDetailModal();
+            handleHistoryReprint(itemId, curRoll, totalRolls);
+        };
+    }
+
+    modal.classList.add('open');
+}
+
+function closeHistoryDetailModal() {
+    const modal = document.getElementById('historyDetailModal');
+    if (modal) modal.classList.remove('open');
 }
 
 // -----------------------------------------------------
@@ -1580,6 +2086,7 @@ function setupEventListeners() {
             closePrintProgressModal();
             closeScrapModal();
             closeFinishEarlyModal();
+            closeHistoryDetailModal();
         }
     });
 
