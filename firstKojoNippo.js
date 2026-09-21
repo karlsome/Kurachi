@@ -4878,6 +4878,60 @@ function closePhotoEnlarged() {
     }
 }
 
+// Background image loader with exponential retry and IndexedDB fallback
+function handleThumbImgError(imgEl, originalUrl, itemId) {
+    if (!imgEl) return;
+    const maxRetries = 6;
+    const currentRetry = Number(imgEl.dataset.retryCount || 0);
+
+    // Fade out broken state and show loading pulse skeleton
+    imgEl.style.opacity = '0.3';
+    imgEl.classList.add('img-loading-pulse');
+
+    // 1. If local IndexedDB has the photo base64, display it immediately
+    if (itemId && typeof firstKojoPhotoDB !== 'undefined' && currentRetry === 0) {
+        firstKojoPhotoDB.getPhoto(itemId).then(rec => {
+            if (rec && rec.base64) {
+                imgEl.src = rec.base64;
+                imgEl.style.opacity = '1';
+                imgEl.classList.remove('img-loading-pulse');
+                imgEl.dataset.fallbackLoaded = 'true';
+            }
+        }).catch(() => {});
+    }
+
+    if (currentRetry >= maxRetries) {
+        console.warn('⚠️ Thumbnail image load failed after max retries:', originalUrl);
+        if (imgEl.dataset.fallbackLoaded !== 'true') {
+            imgEl.style.opacity = '0.4';
+            imgEl.classList.remove('img-loading-pulse');
+        }
+        return;
+    }
+
+    imgEl.dataset.retryCount = currentRetry + 1;
+    const delay = Math.min(1000 * Math.pow(1.5, currentRetry), 8000);
+
+    setTimeout(() => {
+        const cleanUrl = originalUrl || imgEl.dataset.src || '';
+        if (!cleanUrl) return;
+        const testImg = new Image();
+        const sep = cleanUrl.includes('?') ? '&' : '?';
+        const retryUrl = `${cleanUrl}${sep}_t=${Date.now()}`;
+
+        testImg.onload = () => {
+            imgEl.src = retryUrl;
+            imgEl.style.opacity = '1';
+            imgEl.classList.remove('img-loading-pulse');
+            imgEl.dataset.retryCount = '0';
+        };
+        testImg.onerror = () => {
+            handleThumbImgError(imgEl, cleanUrl, itemId);
+        };
+        testImg.src = retryUrl;
+    }, delay);
+}
+
 // --- Enqueue Roll from Modal ---
 async function submitModalRollToQueue() {
     const ctx = state.currentModalRollContext;
@@ -5137,10 +5191,23 @@ function renderStagingQueue() {
     if (activeItem) {
         const kizaiCode = activeItem.kizai || activeItem.hinban || '基材未設定';
         const photoThumb = activeItem.photoUrl
-            ? `<img class="queue-flat-thumb" src="${activeItem.photoUrl}" alt="写真" onclick="openPhotoEnlarged('${activeItem.photoUrl}')" title="クリックで拡大">`
+            ? `<img class="queue-flat-thumb" src="${activeItem.photoUrl}" alt="" loading="lazy" decoding="async" data-item-id="${activeItem.itemId || activeItem._id}" data-src="${activeItem.photoUrl}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${activeItem.photoUrl}', '${activeItem.itemId || activeItem._id}')" onclick="openPhotoEnlarged('${activeItem.photoUrl}')" title="クリックで拡大">`
             : `<div class="queue-flat-thumb-placeholder">写真なし</div>`;
         const currentRoll = activeItem.currentRollIndex || activeItem.rollIndex || 1;
         const totalRolls = activeItem.totalRolls || 1;
+
+        let orderIdx = activeItem.orderIndex;
+        if (!orderIdx || isNaN(Number(orderIdx))) {
+            if (state.scheduledItems) {
+                const matched = state.scheduledItems.find(s =>
+                    (activeItem.itemId && s.id === activeItem.itemId) ||
+                    (activeItem.groupId && s.groupId === activeItem.groupId && Number(s.rollIndex) === Number(activeItem.rollIndex)) ||
+                    (s.hinban === activeItem.hinban && (Number(s.rollIndex) === Number(activeItem.rollIndex) || Number(s.orderIndex) === Number(activeItem.orderIndex)))
+                );
+                if (matched && matched.orderIndex) orderIdx = matched.orderIndex;
+            }
+        }
+        const orderDisplay = orderIdx ? `#${orderIdx}` : `#${activeItem.rollIndex || 1}`;
 
         rowsHTML += `
             <div class="queue-flat-row is-active" data-queue-id="${activeItem._id}">
@@ -5149,14 +5216,12 @@ function renderStagingQueue() {
                     ${photoThumb}
                     <div>
                         <div class="queue-flat-title">${kizaiCode}</div>
-                        <div style="font-size: 0.825rem; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px;">
-                            <span>Roll: <strong>#${currentRoll} / ${totalRolls}</strong></span>
+                        <div style="font-size: 0.825rem; color: var(--text-muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 2px;">
+                            <span class="roll-sub-badge" style="font-size: 0.775rem; font-weight: 800; color: #1E293B; background: #F1F5F9; border: 1px solid #CBD5E1; padding: 1px 7px; border-radius: 6px;">${orderDisplay}</span>
                             <span>•</span>
                             <span><strong>${activeItem.rollMeters || activeItem.totalMeters || 0} m</strong></span>
                             <span>•</span>
                             <span>ロット: <strong>${activeItem.lotNo || '-'}</strong></span>
-                            <span>•</span>
-                            <span>担当: <strong>${activeItem.worker || '作業者'}</strong></span>
                             ${activeItem.shippingDest ? `<span>• 行先: <strong>${activeItem.shippingDest}</strong></span>` : ''}
                         </div>
                     </div>
@@ -5174,9 +5239,22 @@ function renderStagingQueue() {
     queuedItems.forEach((item, qIdx) => {
         const kizaiCode = item.kizai || item.hinban || '基材未設定';
         const photoThumb = item.photoUrl
-            ? `<img class="queue-flat-thumb" src="${item.photoUrl}" alt="写真" onclick="openPhotoEnlarged('${item.photoUrl}')" title="クリックで拡大">`
+            ? `<img class="queue-flat-thumb" src="${item.photoUrl}" alt="" loading="lazy" decoding="async" data-item-id="${item.itemId || item._id}" data-src="${item.photoUrl}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${item.photoUrl}', '${item.itemId || item._id}')" onclick="openPhotoEnlarged('${item.photoUrl}')" title="クリックで拡大">`
             : `<div class="queue-flat-thumb-placeholder">写真なし</div>`;
         const posNum = activeItem ? (qIdx + 2) : (qIdx + 1);
+
+        let orderIdx = item.orderIndex;
+        if (!orderIdx || isNaN(Number(orderIdx))) {
+            if (state.scheduledItems) {
+                const matched = state.scheduledItems.find(s =>
+                    (item.itemId && s.id === item.itemId) ||
+                    (item.groupId && s.groupId === item.groupId && Number(s.rollIndex) === Number(item.rollIndex)) ||
+                    (s.hinban === item.hinban && (Number(s.rollIndex) === Number(item.rollIndex) || Number(s.orderIndex) === Number(item.orderIndex)))
+                );
+                if (matched && matched.orderIndex) orderIdx = matched.orderIndex;
+            }
+        }
+        const orderDisplay = orderIdx ? `#${orderIdx}` : `#${item.rollIndex || posNum}`;
 
         rowsHTML += `
             <div class="queue-flat-row is-staged" data-queue-id="${item._id}">
@@ -5185,8 +5263,8 @@ function renderStagingQueue() {
                     ${photoThumb}
                     <div>
                         <div class="queue-flat-title">${kizaiCode}</div>
-                        <div style="font-size: 0.825rem; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px;">
-                            <span>Roll: <strong>#${item.rollIndex || 1} / ${item.totalRolls || 1}</strong></span>
+                        <div style="font-size: 0.825rem; color: var(--text-muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 2px;">
+                            <span class="roll-sub-badge" style="font-size: 0.775rem; font-weight: 800; color: #1E293B; background: #F1F5F9; border: 1px solid #CBD5E1; padding: 1px 7px; border-radius: 6px;">${orderDisplay}</span>
                             <span>•</span>
                             <span><strong>${item.rollMeters || item.totalMeters || 0} m</strong></span>
                             <span>•</span>
@@ -5530,7 +5608,7 @@ function renderHistoryList() {
                 <div class="roll-row-left" style="display: flex; align-items: center; gap: 10px;">
                     <span class="roll-sub-badge">#${it.orderIndex}</span>
                     ${it.photoUrl ? `
-                        <img class="history-thumb-mini" src="${it.photoUrl}" alt="写真" onclick="event.stopPropagation(); openPhotoEnlarged('${it.photoUrl}')" title="タップして拡大" style="width: 34px; height: 34px; border-radius: 6px; object-fit: cover; border: 1px solid #E5E7EB; cursor: pointer; flex-shrink: 0;">
+                        <img class="history-thumb-mini" src="${it.photoUrl}" alt="" loading="lazy" decoding="async" data-item-id="${it.itemId || it.mongoId || ''}" data-src="${it.photoUrl}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${it.photoUrl}', '${it.itemId || it.mongoId || ''}')" onclick="event.stopPropagation(); openPhotoEnlarged('${it.photoUrl}')" title="タップして拡大" style="width: 34px; height: 34px; border-radius: 6px; object-fit: cover; border: 1px solid #E5E7EB; cursor: pointer; flex-shrink: 0; background: #F3F4F6; transition: opacity 0.25s ease;">
                     ` : `
                         <div style="width: 34px; height: 34px; border-radius: 6px; background: #F3F4F6; border: 1px dashed #D1D5DB; display: flex; align-items: center; justify-content: center; color: #9CA3AF; font-size: 0.65rem; flex-shrink: 0;">写真無</div>
                     `}

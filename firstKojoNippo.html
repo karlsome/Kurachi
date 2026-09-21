@@ -2247,7 +2247,8 @@
         }
 
         .queue-flat-thumb,
-        .history-thumb {
+        .history-thumb,
+        .history-thumb-mini {
             width: 44px;
             height: 44px;
             object-fit: cover;
@@ -2256,10 +2257,23 @@
             cursor: pointer;
             flex-shrink: 0;
             background: #F3F4F6;
+            transition: transform 0.15s ease, opacity 0.25s ease;
+        }
+
+        .img-loading-pulse {
+            background: linear-gradient(90deg, #F3F4F6 25%, #E2E8F0 50%, #F3F4F6 75%) !important;
+            background-size: 200% 100% !important;
+            animation: imgPulse 1.5s infinite !important;
+        }
+
+        @keyframes imgPulse {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
         }
 
         .queue-flat-thumb:hover,
-        .history-thumb:hover {
+        .history-thumb:hover,
+        .history-thumb-mini:hover {
             transform: scale(1.05);
             border-color: var(--brand);
         }
