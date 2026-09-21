@@ -5059,7 +5059,7 @@ async function submitModalRollToQueue() {
 
         let photoUrl = edit.photoUrl || dbPhoto?.photoUrl || '';
         const lotNoVal = state.currentModalLotNo || edit.lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
-        const kizaiCode = state.currentModalHinban || item.kizai || group?.kizai || item.hinban || '';
+        const kizaiCode = group?.kizai || item.kizai || group?.hinban || item.hinban || state.currentModalHinban || '';
         const rollIdx = item.rollIndex || (rIdx + 1);
 
         // Upload photo to Firebase immediately if not yet uploaded, ensuring MongoDB gets the URL
@@ -5081,7 +5081,7 @@ async function submitModalRollToQueue() {
             groupId: group?.groupId || item.groupId || item.id,
             itemId: itemId,
             orderIndex: item.orderIndex || (rIdx + 1),
-            hinban: state.currentModalHinban || item.hinban || '',
+            hinban: group?.hinban || item.hinban || state.currentModalHinban || '',
             hinmei: item.hinmei || '',
             kizai: kizaiCode,
             color: item.color || group?.color || '',

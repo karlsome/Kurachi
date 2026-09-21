@@ -423,16 +423,16 @@
             box-shadow: 0 4px 20px rgba(16, 185, 129, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
         }
 
-        /* Card Header */
+        /* Card Header Badges Row */
         .hero-card-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding-bottom: 14px;
+            padding-bottom: 12px;
             border-bottom: 1px solid var(--border);
-            margin-bottom: 18px;
+            margin-bottom: 12px;
             flex-wrap: wrap;
-            gap: 12px;
+            gap: 10px;
         }
 
         .hero-status-pill {
@@ -474,32 +474,12 @@
             color: var(--text-muted);
         }
 
-        /* Hero 2-Column Grid */
-        .hero-grid {
-            display: grid;
-            grid-template-columns: 1.25fr 1fr;
-            gap: 22px;
-            margin-bottom: 22px;
-        }
-
-        @media (max-width: 960px) {
-            .hero-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        /* Left Column: Big Product Specs */
-        .product-specs-pane {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
         .hinban-hero-row {
             display: flex;
-            align-items: baseline;
+            align-items: center;
             gap: 12px;
             flex-wrap: wrap;
+            margin: 0 0 4px;
         }
 
         .hinban-label-small {
@@ -532,122 +512,50 @@
             vertical-align: middle;
         }
 
-        .spec-details-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            background: var(--bg-subtle);
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 16px 18px;
-        }
-
-        .spec-item {
-            display: flex;
-            flex-direction: column;
-            gap: 3px;
-        }
-
-        .spec-label {
-            font-size: 0.7rem;
-            font-weight: 600;
-            color: var(--text-soft);
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-        }
-
-        .spec-value {
-            font-size: 1.05rem;
-            font-weight: 700;
-            color: var(--text-main);
-            word-break: break-all;
-        }
-
-        .spec-value.highlight-blue {
-            color: var(--blue);
-        }
-
-        .spec-value.highlight-brand {
-            color: var(--brand-hover);
-        }
-
-        /* Roll Step Progress Dots */
-        .roll-tracker {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 4px;
-            overflow-x: auto;
-            padding-bottom: 4px;
-        }
-
-        .roll-step-dot {
-            flex: 1;
-            min-width: 64px;
-            height: 36px;
-            border-radius: 10px;
-            background: var(--bg-inset);
-            border: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.775rem;
-            font-weight: 700;
-            color: var(--text-soft);
-            transition: all var(--transition-smooth);
-        }
-
-        .roll-step-dot.completed {
+        .roll-length-badge {
             background: var(--brand-soft);
-            border-color: rgba(16, 185, 129, 0.3);
             color: var(--brand-hover);
-            font-weight: 800;
+            border: 1px solid rgba(16, 185, 129, 0.28);
+            padding: 4px 10px;
+            border-radius: var(--r-pill);
+            font-size: 0.8rem;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
         }
 
-        .roll-step-dot.current {
-            background: var(--blue);
-            border-color: var(--blue);
-            color: #FFFFFF;
-            font-weight: 800;
-            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.28);
+        /* ---------------- Compact Work Row (Thumbnail & Print Button side-by-side) ---------------- */
+        .hero-work-row {
+            display: grid;
+            grid-template-columns: 170px 1fr;
+            gap: 14px;
+            align-items: stretch;
+            min-height: 125px;
         }
 
-        .roll-step-dot.scrapped {
-            background: var(--red-soft);
-            border-color: rgba(239, 68, 68, 0.3);
-            color: var(--red);
-            text-decoration: line-through;
-        }
-
-        /* Right Column: Warehouse Photo & Raw QR */
-        .material-verification-pane {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .photo-preview-card {
+        .photo-preview-box {
             background: var(--bg-subtle);
             border: 1px solid var(--border);
-            border-radius: 14px;
+            border-radius: 12px;
             overflow: hidden;
             position: relative;
             cursor: pointer;
             transition: all var(--transition-smooth);
-            min-height: 200px;
-            height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
+            max-height: 145px;
+            min-height: 120px;
         }
 
-        .photo-preview-card:hover {
+        .photo-preview-box:hover {
             border-color: rgba(37, 99, 235, 0.35);
-            transform: translateY(-2px);
+            transform: translateY(-1px);
             box-shadow: var(--shadow-float);
         }
 
-        .photo-preview-card img {
+        .photo-preview-box img {
             width: 100%;
             height: 100%;
             object-fit: cover;
@@ -656,19 +564,19 @@
 
         .photo-badge-overlay {
             position: absolute;
-            bottom: 10px;
-            right: 10px;
-            background: rgba(17, 24, 39, 0.72);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
+            bottom: 6px;
+            right: 6px;
+            background: rgba(17, 24, 39, 0.75);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
             color: #FFFFFF;
-            padding: 4px 10px;
+            padding: 3px 8px;
             border-radius: var(--r-pill);
-            font-size: 0.725rem;
+            font-size: 0.7rem;
             font-weight: 700;
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 4px;
             letter-spacing: 0.01em;
         }
 
@@ -677,72 +585,27 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 26px 16px;
+            padding: 16px 10px;
             color: var(--text-soft);
             text-align: center;
-            gap: 6px;
+            gap: 4px;
         }
 
         .photo-placeholder-icon {
-            font-size: 2.2rem;
-            opacity: 0.7;
+            font-size: 1.8rem;
+            opacity: 0.65;
         }
 
         .photo-placeholder-text {
-            font-size: 0.825rem;
+            font-size: 0.775rem;
             font-weight: 700;
         }
 
-        /* Raw Material Details Box */
-        .raw-material-box {
-            background: var(--bg-subtle);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 12px 14px;
+        .hero-actions-box {
             display: flex;
             flex-direction: column;
-            gap: 7px;
-        }
-
-        .raw-meta-row {
-            display: flex;
-            align-items: center;
             justify-content: space-between;
-            font-size: 0.8rem;
             gap: 8px;
-        }
-
-        .raw-meta-title {
-            color: var(--text-soft);
-            font-weight: 600;
-            white-space: nowrap;
-        }
-
-        .raw-meta-val {
-            font-weight: 700;
-            color: var(--text-main);
-            text-align: right;
-            word-break: break-all;
-        }
-
-        .raw-qr-snippet {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            font-size: 0.725rem;
-            background: var(--bg-surface);
-            border: 1px solid var(--border);
-            padding: 4px 8px;
-            border-radius: 8px;
-            color: var(--text-muted);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        /* ---------------- Massive Print Action Button ---------------- */
-        .hero-action-container {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
         }
 
         .btn-massive-print {

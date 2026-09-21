@@ -485,6 +485,100 @@ function closeFinishEarlyModal() {
 }
 
 // -----------------------------------------------------
+// Schedule Cache for resolving Tablet 1 List Hinban
+// -----------------------------------------------------
+let scheduleCache = {
+    date: null,
+    itemsMap: new Map(),
+    itemsByOrder: new Map()
+};
+
+async function loadDailyScheduleForTablet2(dateStr) {
+    if (!dateStr) return;
+    if (scheduleCache.date === dateStr && scheduleCache.itemsMap.size > 0) return;
+
+    try {
+        const month = dateStr.slice(0, 7);
+        const day = parseInt(dateStr.slice(8, 10), 10);
+        let scheduleDoc = null;
+
+        try {
+            const dailyRes = await fetch(`${serverURL}/api/production/schedule/daily?month=${encodeURIComponent(month)}&date=${day}`);
+            if (dailyRes.ok) {
+                const dailyData = await dailyRes.json();
+                if (dailyData.success && dailyData.schedule) {
+                    scheduleDoc = dailyData.schedule;
+                }
+            }
+        } catch (e) { }
+
+        if (!scheduleDoc) {
+            try {
+                const res = await fetch(`${serverURL}/api/production/schedule?month=${encodeURIComponent(month)}`);
+                if (res.ok) {
+                    const json = await res.json();
+                    if (json.success && Array.isArray(json.schedules)) {
+                        scheduleDoc = json.schedules.find(s => s.month === month && Number(s.date) === day) || null;
+                    }
+                }
+            } catch (e) { }
+        }
+
+        const itemsMap = new Map();
+        const itemsByOrder = new Map();
+
+        if (scheduleDoc && Array.isArray(scheduleDoc.scheduleOrder)) {
+            scheduleDoc.scheduleOrder.forEach((it, idx) => {
+                const displayCode = it.kizai || it.hinban;
+                if (displayCode) {
+                    if (it.hinban) itemsMap.set(it.hinban, displayCode);
+                    if (it.id) itemsMap.set(it.id, displayCode);
+                    if (it.orderIndex !== undefined) itemsByOrder.set(Number(it.orderIndex), displayCode);
+                    itemsMap.set(`group_${it.hinban}_${idx}`, displayCode);
+                }
+            });
+        }
+
+        scheduleCache = {
+            date: dateStr,
+            itemsMap,
+            itemsByOrder
+        };
+    } catch (err) {
+        console.warn('Could not cache schedule for Tablet 2:', err);
+    }
+}
+
+function getTablet1Hinban(item) {
+    if (!item) return '品番未設定';
+
+    // 1. Check schedule lookup
+    if (scheduleCache && scheduleCache.itemsMap) {
+        if (item.groupId && scheduleCache.itemsMap.has(item.groupId)) {
+            return scheduleCache.itemsMap.get(item.groupId);
+        }
+        if (item.itemId && scheduleCache.itemsMap.has(item.itemId)) {
+            return scheduleCache.itemsMap.get(item.itemId);
+        }
+        if (item.orderIndex !== undefined && scheduleCache.itemsByOrder.has(Number(item.orderIndex))) {
+            return scheduleCache.itemsByOrder.get(Number(item.orderIndex));
+        }
+        if (item.hinban && scheduleCache.itemsMap.has(item.hinban)) {
+            return scheduleCache.itemsMap.get(item.hinban);
+        }
+        if (item.groupId && typeof item.groupId === 'string' && item.groupId.startsWith('group_')) {
+            const rawKey = item.groupId.replace(/^group_/, '').replace(/_\d+$/, '');
+            if (scheduleCache.itemsMap.has(rawKey)) {
+                return scheduleCache.itemsMap.get(rawKey);
+            }
+        }
+    }
+
+    // 2. Fallback to item.kizai or item.hinban
+    return item.kizai || item.hinban || '品番未設定';
+}
+
+// -----------------------------------------------------
 // Fetch Production Queue from API
 // -----------------------------------------------------
 async function fetchProductionQueue(showLoading = false) {
@@ -504,29 +598,32 @@ async function fetchProductionQueue(showLoading = false) {
         const url = `${serverURL}/api/production/queue?date=${encodeURIComponent(state.selectedDate)}&machine=${encodeURIComponent(state.machineName)}`;
         console.log(`📥 Fetching production queue: ${url}`);
 
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Queue fetch failed: HTTP ${response.status}`);
-        }
+        await Promise.all([
+            fetch(url).then(async response => {
+                if (!response.ok) {
+                    throw new Error(`Queue fetch failed: HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                const rawQueue = Array.isArray(data.queue) ? data.queue : [];
 
-        const data = await response.json();
-        const rawQueue = Array.isArray(data.queue) ? data.queue : [];
+                // Partition into Active, Queued (Waiting), and Completed
+                const active = rawQueue.find(item => item.status === 'active');
+                const queued = rawQueue.filter(item => item.status === 'queued' || (item.status !== 'active' && item.status !== 'completed' && item.status !== 'scrapped'));
+                const completed = rawQueue.filter(item => item.status === 'completed' || item.status === 'scrapped');
 
-        // Partition into Active, Queued (Waiting), and Completed
-        const active = rawQueue.find(item => item.status === 'active');
-        const queued = rawQueue.filter(item => item.status === 'queued' || (item.status !== 'active' && item.status !== 'completed' && item.status !== 'scrapped'));
-        const completed = rawQueue.filter(item => item.status === 'completed' || item.status === 'scrapped');
+                state.queue = rawQueue;
+                state.activeItem = active || null;
+                state.waitingItems = queued;
+                state.completedItems = completed;
 
-        state.queue = rawQueue;
-        state.activeItem = active || null;
-        state.waitingItems = queued;
-        state.completedItems = completed;
-
-        // If no item is explicitly active, but there are queued items, default the first one as active target
-        if (!state.activeItem && queued.length > 0) {
-            state.activeItem = queued[0];
-            state.waitingItems = queued.slice(1);
-        }
+                // If no item is explicitly active, but there are queued items, default the first one as active target
+                if (!state.activeItem && queued.length > 0) {
+                    state.activeItem = queued[0];
+                    state.waitingItems = queued.slice(1);
+                }
+            }),
+            loadDailyScheduleForTablet2(state.selectedDate)
+        ]);
 
         renderApp();
     } catch (err) {
@@ -612,53 +709,35 @@ function renderHeroCard() {
 
     const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
     const totalRolls = Number(item.totalRolls) || 1;
-    const hinban = item.hinban || '品番未設定';
+    const hinban = getTablet1Hinban(item);
     const color = item.color || '標準';
-    const hinmei = item.hinmei || '-';
-    const okyakuHinban = item.okyakuHinban || '-';
     const metersPerRoll = item.rollMeters || item.metersPerRoll || item.meters || 100;
-    const totalMeters = item.totalMeters || (metersPerRoll * totalRolls);
-    const shippingDest = item.shippingDest || '';
-    const rawQr = item.rawMaterialQR || item.rawQr || '-';
-    const rawLen = item.rawMaterialLength || item.materialLength || `${totalMeters}m`;
-    const mfgUid = item.manufacturerUid || item.lotNo || '-';
     const photoUrl = item.imageUrl || item.photoUrl || '';
-
-    // Determine lbx label format name for operator visibility
-    const isSpecial = isSpecialKinuuraHinban(hinban);
-    let labelFormat = 'firstkojo4.lbx';
-    if (isSpecial) labelFormat = 'kinuuraLabel.lbx (衣浦特殊)';
-    else if (item.labelHinban === 'NC2') labelFormat = 'NC21.lbx (NC2専用)';
-
-    // Step dots
-    let stepDotsHtml = '';
-    for (let r = 1; r <= totalRolls; r++) {
-        let dotClass = 'roll-step-dot';
-        let dotText = `Roll ${r}`;
-
-        if (r < curRoll) {
-            dotClass += ' completed';
-            dotText = `✓ Roll ${r}`;
-        } else if (r === curRoll) {
-            dotClass += ' current';
-            dotText = `▶ Roll ${r}`;
-        }
-        stepDotsHtml += `<div class="${dotClass}">${dotText}</div>`;
-    }
 
     wrapper.innerHTML = `
         <div class="hero-wrapping-card has-active">
-            <!-- Header of Hero -->
+            <!-- Hinban Row: Exactly matching Tablet 1 List Tab (Now on top) -->
+            <div class="hinban-hero-row">
+                <div class="hinban-display">${escapeHtml(hinban)}</div>
+            </div>
+
+            <!-- Header of Hero: Status, Counters & Lot (Below Name) -->
             <div class="hero-card-header">
-                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     <div class="hero-status-pill">
                         <span>▶</span>
-                        <span>現在包装中 (Currently Wrapping)</span>
+                        <span>現在包装中 (Wrapping)</span>
                     </div>
                     <div class="roll-counter-badge">
                         <span>Roll</span>
-                        <strong style="font-size: 1.35rem;">${curRoll}</strong>
-                        <span style="font-size: 0.95rem; opacity: 0.8;">/ ${totalRolls} 巻き</span>
+                        <strong style="font-size: 1.25rem;">${curRoll}</strong>
+                        <span style="font-size: 0.9rem; opacity: 0.85;">/ ${totalRolls} 巻き</span>
+                    </div>
+                    <div class="roll-length-badge">
+                        <span>📏 ${metersPerRoll}m / 巻</span>
+                    </div>
+                    <div class="color-badge" title="色 (Color)">
+                        🎨 ${escapeHtml(color)}
                     </div>
                 </div>
                 <div class="hero-lot-tag" title="ロット番号 (Auto Lot Number)">
@@ -666,97 +745,52 @@ function renderHeroCard() {
                 </div>
             </div>
 
-            <!-- 2-Column Specs & Photo Grid -->
-            <div class="hero-grid">
-                <!-- Left: Huge Product Specs -->
-                <div class="product-specs-pane">
-                    <div class="hinban-hero-row">
-                        <div style="display: flex; flex-direction: column;">
-                            <span class="hinban-label-small">品番 (PART NUMBER)</span>
-                            <div class="hinban-display">${escapeHtml(hinban)}</div>
+            <!-- Compact Work Row: Warehouse Photo Thumbnail + Print Actions side-by-side -->
+            <div class="hero-work-row">
+                <!-- Thumbnail Preview -->
+                <div class="photo-preview-box" onclick="openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - 現品票写真')" title="タップして拡大表示 (Tap to Enlarge)">
+                    ${photoUrl ? `
+                        <img src="${photoUrl}" alt="現品票写真">
+                        <div class="photo-badge-overlay">
+                            <span>🔍</span>
+                            <span>タップで拡大</span>
                         </div>
-                        <div class="color-badge" title="色 (Color)">
-                            🎨 ${escapeHtml(color)}
+                    ` : `
+                        <div class="photo-placeholder">
+                            <span class="photo-placeholder-icon">📷</span>
+                            <span class="photo-placeholder-text">現品票写真なし</span>
                         </div>
-                    </div>
-
-                    <div class="spec-details-grid">
-                        <div class="spec-item">
-                            <span class="spec-label">お客様品番 (Customer Part No.)</span>
-                            <span class="spec-value highlight-blue">${escapeHtml(okyakuHinban)}</span>
-                        </div>
-                        <div class="spec-item">
-                            <span class="spec-label">品名 (Product Name)</span>
-                            <span class="spec-value">${escapeHtml(hinmei)}</span>
-                        </div>
-                        <div class="spec-item">
-                            <span class="spec-label">1巻長さ (Roll Length)</span>
-                            <span class="spec-value highlight-brand">${metersPerRoll} m / 巻</span>
-                        </div>
-                        <div class="spec-item">
-                            <span class="spec-label">納入先・ラベル様式</span>
-                            <span class="spec-value" style="font-size: 0.9rem;">
-                                ${shippingDest ? `${escapeHtml(shippingDest)}へ · ` : ''}${labelFormat}
-                            </span>
-                        </div>
-                    </div>
-
-                    <!-- Visual Step Progress Tracker -->
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <span class="spec-label">巻進捗 (Roll Progress):</span>
-                        <div class="roll-tracker">
-                            ${stepDotsHtml}
-                        </div>
-                    </div>
+                    `}
                 </div>
 
-                <!-- Right: Warehouse Label Photo Preview -->
-                <div class="material-verification-pane">
-                    <div class="photo-preview-card" onclick="openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - 現品票写真')" title="タップして拡大表示 (Tap to Enlarge)">
-                        ${photoUrl ? `
-                            <img src="${photoUrl}" alt="現品票写真">
-                            <div class="photo-badge-overlay">
-                                <span>🔍</span>
-                                <span>タップで写真拡大 (Zoom)</span>
-                            </div>
-                        ` : `
-                            <div class="photo-placeholder">
-                                <span class="photo-placeholder-icon">📷</span>
-                                <span class="photo-placeholder-text">投入工程の現品票写真がありません</span>
-                                <span style="font-size: 0.75rem; color: var(--text-soft);">（Tablet 1で未撮影）</span>
-                            </div>
-                        `}
-                    </div>
-                </div>
-            </div>
+                <!-- Print Action & Edge Controls -->
+                <div class="hero-actions-box">
+                    <button type="button" class="btn-massive-print" id="btnPrintRollLabel" onclick="handlePrintRollLabel()">
+                        <span class="print-icon">🖨️</span>
+                        <div class="print-text-group">
+                            <span class="main-print-label">ラベル印刷 (Print Roll Label)</span>
+                            <span class="sub-print-label">Roll ${curRoll} / ${totalRolls} のラベルを発行して次へ</span>
+                        </div>
+                    </button>
 
-            <!-- Massive Action Button & Edge Case Controls -->
-            <div class="hero-action-container">
-                <button type="button" class="btn-massive-print" id="btnPrintRollLabel" onclick="handlePrintRollLabel()">
-                    <span class="print-icon">🖨️</span>
-                    <div class="print-text-group">
-                        <span class="main-print-label">ラベル印刷 (Print Roll Label)</span>
-                        <span class="sub-print-label">Roll ${curRoll} / ${totalRolls} のラベルを発行して進める</span>
+                    <div class="edge-controls-bar">
+                        <button type="button" class="btn-edge reprint-btn" onclick="handleReprintLastRoll()" title="直前に印刷したラベルをそのまま再発行します">
+                            <span>🔄</span>
+                            <span>直前再印刷</span>
+                        </button>
+                        <button type="button" class="btn-edge cant-print-btn" onclick="handleCantPrintAdvance()" title="プリンター障害等で印刷できない場合に手動で完了して次へ進めます">
+                            <span>⚠️</span>
+                            <span>印刷不可・次へ</span>
+                        </button>
+                        <button type="button" class="btn-edge skip-btn" onclick="openScrapModal()" title="キズ・シワなどの不良で1巻破棄して次へ">
+                            <span>🗑️</span>
+                            <span>1巻破棄</span>
+                        </button>
+                        <button type="button" class="btn-edge finish-btn" onclick="openFinishEarlyModal()" title="材料不足などで予定巻き数より早く終了">
+                            <span>🏁</span>
+                            <span>中途完了</span>
+                        </button>
                     </div>
-                </button>
-
-                <div class="edge-controls-bar">
-                    <button type="button" class="btn-edge reprint-btn" onclick="handleReprintLastRoll()" title="直前に印刷したラベルをそのまま再発行します">
-                        <span>🔄</span>
-                        <span>直前ラベル再印刷 (Re-print)</span>
-                    </button>
-                    <button type="button" class="btn-edge cant-print-btn" onclick="handleCantPrintAdvance()" title="プリンター障害等で印刷できない場合に手動で完了して次へ進めます">
-                        <span>⚠️</span>
-                        <span>印刷不可・次へ (Can't Print)</span>
-                    </button>
-                    <button type="button" class="btn-edge skip-btn" onclick="openScrapModal()" title="キズ・シワなどの不良で1巻破棄して次へ">
-                        <span>🗑️</span>
-                        <span>1巻破棄 / スキップ (Scrap)</span>
-                    </button>
-                    <button type="button" class="btn-edge finish-btn" onclick="openFinishEarlyModal()" title="材料不足などで予定巻き数より早く終了">
-                        <span>🏁</span>
-                        <span>ロット中途完了 (Finish Early)</span>
-                    </button>
                 </div>
             </div>
         </div>
@@ -782,7 +816,7 @@ function renderQueueSection() {
 
     container.innerHTML = items.map((item, index) => {
         const qPos = index + 1;
-        const hinban = item.hinban || '品番未設定';
+        const hinban = getTablet1Hinban(item);
         const color = item.color || '標準';
         const hinmei = item.hinmei || '-';
         const okyakuHinban = item.okyakuHinban || '';
