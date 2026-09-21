@@ -1533,7 +1533,7 @@ function renderScheduleTableView(groups, items) {
                 </td>
                 <td style="font-weight: 600;">${group.shippingDest || '—'}</td>
                 <td style="font-weight: 600;">${group.color || '—'}</td>
-                <td style="font-weight: 600;">残り ${activeItems.length} 巻き (${activeMeters}m)</td>
+                <td style="font-weight: 600;">${activeItems.length} 巻き (${activeMeters}m)</td>
                 <td>${statusBadge}</td>
                 <td onclick="event.stopPropagation()" style="text-align: center;">
                     <div style="display: flex; gap: 6px; justify-content: center; align-items: center;">
@@ -1652,11 +1652,11 @@ function renderScheduleList(items, startTimeStr) {
                 statusTagHTML = `<span class="batch-status-tag status-pending">待機中</span>`;
             }
 
-            const destText = group.shippingDest ? `<span class="tag-pill dest-tag">出荷先: ${group.shippingDest}</span>` : '';
-            const colorText = group.color ? `<span class="tag-pill color-tag">色: ${group.color}</span>` : '';
-            let rollSummaryText = `<span class="tag-pill roll-tag">残り ${activeItems.length} 巻き (${activeMeters} m)</span>`;
+            const destText = group.shippingDest ? `<span class="batch-meta-divider">•</span><span class="batch-meta-item"><span class="batch-meta-label">出荷先:</span> <span class="batch-meta-val">${group.shippingDest}</span></span>` : '';
+            const colorText = group.color ? `<span class="batch-meta-divider">•</span><span class="batch-meta-item"><span class="batch-meta-label">色:</span> <span class="batch-meta-val">${group.color}</span></span>` : '';
+            let rollSummaryText = '';
             if (excludedCount > 0) {
-                rollSummaryText += `<span class="tag-pill tag-excluded" style="font-size: 0.8rem; padding: 2px 8px;">除外: ${excludedCount} 巻</span>`;
+                rollSummaryText = `<span class="batch-meta-divider">•</span><span class="tag-pill tag-excluded" style="font-size: 0.75rem; padding: 2px 7px;">除外: ${excludedCount} 巻</span>`;
             }
 
             const isExpanded = state.expandedGroups && state.expandedGroups.has(group.groupId);

@@ -1253,17 +1253,41 @@
         .batch-chips-row {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
             flex-wrap: wrap;
-            font-size: 0.775rem;
+            font-size: 0.825rem;
+            margin-top: 1px;
         }
 
         .batch-time-text {
             color: #6B7280;
             font-weight: 600;
-            font-size: 0.8rem;
+            font-size: 0.825rem;
             font-variant-numeric: tabular-nums;
-            margin-right: 2px;
+        }
+
+        .batch-meta-divider {
+            color: #9CA3AF;
+            font-size: 0.75rem;
+            user-select: none;
+        }
+
+        .batch-meta-item {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 4px;
+            font-size: 0.825rem;
+            color: #4B5563;
+        }
+
+        .batch-meta-label {
+            color: #6B7280;
+            font-weight: 500;
+        }
+
+        .batch-meta-val {
+            color: #1F2937;
+            font-weight: 600;
         }
 
         .batch-header-right {
@@ -3596,26 +3620,6 @@
                                     リスト
                                 </button>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- Stats / Overview Bar -->
-                    <div class="schedule-stats-bar" id="scheduleStatsBar">
-                        <div class="stat-chip brand-chip" id="chipTotalItems">
-                            <span>全ロット:</span>
-                            <strong id="statTotalItemsVal">0 件</strong>
-                        </div>
-                        <div class="stat-chip" id="chipStartTime">
-                            <span>始業:</span>
-                            <strong id="statStartTimeVal">08:00</strong>
-                        </div>
-                        <div class="stat-chip" id="chipTotalDuration">
-                            <span>予定時間:</span>
-                            <strong id="statTotalDurationVal">0 分</strong>
-                        </div>
-                        <div class="stat-chip" id="chipEndTime">
-                            <span>終了目安:</span>
-                            <strong id="statEndTimeVal">--:--</strong>
                         </div>
                     </div>
                 </div>
