@@ -5,8 +5,8 @@
 
 // Determine backend server URL
 //const serverURL = "https://kurachi.onrender.com";
-const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.48:3000";
+//const serverURL = "http://localhost:3000";
+const serverURL = "http://192.168.0.39:3000";
 
 // -----------------------------------------------------
 // Date & Time Helpers
@@ -710,7 +710,7 @@ function renderHeroCard() {
                     </div>
                 </div>
 
-                <!-- Right: Warehouse Label Photo Preview & Material Info -->
+                <!-- Right: Warehouse Label Photo Preview -->
                 <div class="material-verification-pane">
                     <div class="photo-preview-card" onclick="openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - 現品票写真')" title="タップして拡大表示 (Tap to Enlarge)">
                         ${photoUrl ? `
@@ -726,21 +726,6 @@ function renderHeroCard() {
                                 <span style="font-size: 0.75rem; color: var(--text-soft);">（Tablet 1で未撮影）</span>
                             </div>
                         `}
-                    </div>
-
-                    <div class="raw-material-box">
-                        <div class="raw-meta-row">
-                            <span class="raw-meta-title">原反QR文字列:</span>
-                            <div class="raw-qr-snippet" title="${escapeHtml(rawQr)}">${escapeHtml(rawQr)}</div>
-                        </div>
-                        <div class="raw-meta-row">
-                            <span class="raw-meta-title">原反実測 / 総長さ:</span>
-                            <span class="raw-meta-val">${escapeHtml(String(rawLen))} (総 ${totalMeters}m)</span>
-                        </div>
-                        <div class="raw-meta-row">
-                            <span class="raw-meta-title">メーカー製造ロット / UID:</span>
-                            <span class="raw-meta-val" style="font-family: ui-monospace, monospace;">${escapeHtml(mfgUid)}</span>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -760,7 +745,7 @@ function renderHeroCard() {
                         <span>🔄</span>
                         <span>直前ラベル再印刷 (Re-print)</span>
                     </button>
-                    <button type="button" class="btn-edge cant-print-btn" onclick="handleCantPrintAdvance()" style="border-color: #F59E0B; color: #B45309; background: #FFFBEB;" title="プリンター障害等で印刷できない場合に手動で完了して次へ進めます">
+                    <button type="button" class="btn-edge cant-print-btn" onclick="handleCantPrintAdvance()" title="プリンター障害等で印刷できない場合に手動で完了して次へ進めます">
                         <span>⚠️</span>
                         <span>印刷不可・次へ (Can't Print)</span>
                     </button>
@@ -788,7 +773,7 @@ function renderQueueSection() {
 
     if (items.length === 0) {
         container.innerHTML = `
-            <div style="grid-column: 1 / -1; background: var(--bg-surface); border: 1.5px dashed var(--border-strong); border-radius: var(--card-radius); padding: 32px 20px; text-align: center; color: var(--text-soft); font-weight: 700;">
+            <div style="grid-column: 1 / -1; background: var(--bg-surface); border: 1px dashed var(--border-strong); border-radius: var(--card-radius); padding: 36px 20px; text-align: center; color: var(--text-soft); font-weight: 700; box-shadow: var(--shadow-card);">
                 次工程キューに待機中のロットはありません (No waiting lots in line)
             </div>
         `;
