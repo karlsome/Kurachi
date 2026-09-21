@@ -542,7 +542,8 @@ async function loadDailyScheduleForTablet2(dateStr) {
         scheduleCache = {
             date: dateStr,
             itemsMap,
-            itemsByOrder
+            itemsByOrder,
+            scheduleOrder: scheduleDoc && Array.isArray(scheduleDoc.scheduleOrder) ? scheduleDoc.scheduleOrder : []
         };
     } catch (err) {
         console.warn('Could not cache schedule for Tablet 2:', err);
@@ -579,8 +580,16 @@ function getTablet1Hinban(item) {
 }
 
 function getTablet1OrderIndex(item, fallback) {
-    if (item && item.orderIndex !== undefined && item.orderIndex !== null && item.orderIndex !== '') {
+    if (item && item.orderIndex !== undefined && item.orderIndex !== null && item.orderIndex !== '' && !isNaN(Number(item.orderIndex))) {
         return item.orderIndex;
+    }
+    if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder) && item) {
+        const matched = scheduleCache.scheduleOrder.find(s =>
+            (item.itemId && s.id === item.itemId) ||
+            (item.groupId && s.groupId === item.groupId && Number(s.rollIndex) === Number(item.rollIndex)) ||
+            (s.hinban === item.hinban && (Number(s.rollIndex) === Number(item.rollIndex) || Number(s.orderIndex) === Number(item.orderIndex)))
+        );
+        if (matched && matched.orderIndex) return matched.orderIndex;
     }
     return fallback;
 }
@@ -614,9 +623,27 @@ async function fetchProductionQueue(showLoading = false) {
                 const rawQueue = Array.isArray(data.queue) ? data.queue : [];
 
                 // Partition into Active, Queued (Waiting), and Completed
-                const active = rawQueue.find(item => item.status === 'active');
-                const queued = rawQueue.filter(item => item.status === 'queued' || (item.status !== 'active' && item.status !== 'completed' && item.status !== 'scrapped'));
+                const active = rawQueue.find(item => item.status === 'active') ||
+                               rawQueue.find(item => item.status === 'in-progress');
+                const queued = rawQueue.filter(item => 
+                    item !== active && (
+                        item.status === 'queued' || 
+                        item.status === 'queue' || 
+                        (item.status !== 'active' && item.status !== 'in-progress' && item.status !== 'completed' && item.status !== 'scrapped')
+                    )
+                );
                 const completed = rawQueue.filter(item => item.status === 'completed' || item.status === 'scrapped');
+
+                // Sort queued items by orderIndex if available, then queuePosition/createdAt
+                queued.sort((a, b) => {
+                    const oA = (a.orderIndex !== undefined && a.orderIndex !== null && !isNaN(Number(a.orderIndex))) ? Number(a.orderIndex) : null;
+                    const oB = (b.orderIndex !== undefined && b.orderIndex !== null && !isNaN(Number(b.orderIndex))) ? Number(b.orderIndex) : null;
+                    if (oA !== null && oB !== null && oA !== oB) return oA - oB;
+                    const qA = Number(a.queuePosition) || 0;
+                    const qB = Number(b.queuePosition) || 0;
+                    if (qA !== qB) return qA - qB;
+                    return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+                });
 
                 state.queue = rawQueue;
                 state.activeItem = active || null;
@@ -628,6 +655,7 @@ async function fetchProductionQueue(showLoading = false) {
                     state.activeItem = queued[0];
                     state.waitingItems = queued.slice(1);
                 }
+                saveLocalQueue();
             }),
             loadDailyScheduleForTablet2(state.selectedDate)
         ]);
@@ -649,8 +677,8 @@ function fallbackToLocalQueue() {
         try {
             const list = JSON.parse(cached);
             state.queue = list;
-            state.activeItem = list.find(i => i.status === 'active') || list[0] || null;
-            state.waitingItems = list.filter(i => i !== state.activeItem && i.status !== 'completed');
+            state.activeItem = list.find(i => i.status === 'active') || list.find(i => i.status === 'in-progress') || list[0] || null;
+            state.waitingItems = list.filter(i => i !== state.activeItem && i.status !== 'completed' && i.status !== 'scrapped');
             renderApp();
             return;
         } catch {
@@ -1229,11 +1257,11 @@ async function handleSelectQueueItem(queueId, hinban) {
         const found = state.queue.find(i => (i._id === queueId || i.queueId === queueId));
         if (found) {
             state.queue.forEach(i => {
-                if (i.status === 'active') i.status = 'queued';
+                if (i.status === 'active' || i.status === 'in-progress') i.status = 'queued';
             });
             found.status = 'active';
             state.activeItem = found;
-            state.waitingItems = state.queue.filter(i => i !== found && i.status !== 'completed');
+            state.waitingItems = state.queue.filter(i => i !== found && i.status !== 'completed' && i.status !== 'scrapped');
             saveLocalQueue();
             renderApp();
         }
