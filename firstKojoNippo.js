@@ -5282,6 +5282,38 @@ async function fetchProductionQueue() {
     }
 }
 
+function getScheduleDisplayName(queueItem) {
+    if (!queueItem) return '基材未設定';
+
+    // 1. Match against state.scheduledItems (Schedule List items)
+    if (state.scheduledItems && Array.isArray(state.scheduledItems)) {
+        const matched = state.scheduledItems.find(s =>
+            (queueItem.itemId && s.id === queueItem.itemId) ||
+            (queueItem.orderIndex !== undefined && queueItem.orderIndex !== null && Number(s.orderIndex) === Number(queueItem.orderIndex)) ||
+            (queueItem.groupId && s.groupId === queueItem.groupId && Number(s.rollIndex) === Number(queueItem.rollIndex)) ||
+            (s.hinban === queueItem.hinban && (Number(s.rollIndex) === Number(queueItem.rollIndex) || Number(s.orderIndex) === Number(queueItem.orderIndex))) ||
+            (queueItem.groupId && typeof queueItem.groupId === 'string' && queueItem.groupId.includes(s.hinban))
+        );
+        if (matched && (matched.kizai || matched.hinban)) {
+            return matched.kizai || matched.hinban;
+        }
+    }
+
+    // 2. Match against state.currentGroups
+    if (state.currentGroups && Array.isArray(state.currentGroups)) {
+        const group = state.currentGroups.find(g =>
+            (queueItem.groupId && g.groupId === queueItem.groupId) ||
+            (g.items && g.items.some(it => (queueItem.itemId && it.id === queueItem.itemId) || (queueItem.orderIndex !== undefined && Number(it.orderIndex) === Number(queueItem.orderIndex))))
+        );
+        if (group && (group.kizai || group.hinban)) {
+            return group.kizai || group.hinban;
+        }
+    }
+
+    // 3. Fallback to queueItem.kizai or queueItem.hinban
+    return queueItem.kizai || queueItem.hinban || '基材未設定';
+}
+
 function renderStagingQueue() {
     const queueContainer = document.getElementById('queueItemListContainer');
     const tabBadge = document.getElementById('tabQueueBadge');
@@ -5322,7 +5354,7 @@ function renderStagingQueue() {
 
     // 1. Active item (#1 貼合中)
     if (activeItem) {
-        const kizaiCode = activeItem.kizai || activeItem.hinban || '基材未設定';
+        const kizaiCode = getScheduleDisplayName(activeItem);
         const activeImg = activeItem.imageUrl || activeItem.photoUrl;
         const photoThumb = activeImg
             ? `<img class="queue-flat-thumb" src="${activeImg}" alt="" loading="lazy" decoding="async" data-item-id="${activeItem.itemId || activeItem._id}" data-src="${activeImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${activeImg}', '${activeItem.itemId || activeItem._id}')" onclick="openPhotoEnlarged('${activeImg}')" title="クリックで拡大">`
@@ -5335,6 +5367,7 @@ function renderStagingQueue() {
             if (state.scheduledItems) {
                 const matched = state.scheduledItems.find(s =>
                     (activeItem.itemId && s.id === activeItem.itemId) ||
+                    (activeItem.orderIndex && Number(s.orderIndex) === Number(activeItem.orderIndex)) ||
                     (activeItem.groupId && s.groupId === activeItem.groupId && Number(s.rollIndex) === Number(activeItem.rollIndex)) ||
                     (s.hinban === activeItem.hinban && (Number(s.rollIndex) === Number(activeItem.rollIndex) || Number(s.orderIndex) === Number(activeItem.orderIndex)))
                 );
@@ -5371,7 +5404,7 @@ function renderStagingQueue() {
 
     // 2. Queued items (#2 待機中, #3 待機中...)
     queuedItems.forEach((item, qIdx) => {
-        const kizaiCode = item.kizai || item.hinban || '基材未設定';
+        const kizaiCode = getScheduleDisplayName(item);
         const queuedImg = item.imageUrl || item.photoUrl;
         const photoThumb = queuedImg
             ? `<img class="queue-flat-thumb" src="${queuedImg}" alt="" loading="lazy" decoding="async" data-item-id="${item.itemId || item._id}" data-src="${queuedImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${queuedImg}', '${item.itemId || item._id}')" onclick="openPhotoEnlarged('${queuedImg}')" title="クリックで拡大">`
@@ -5383,6 +5416,7 @@ function renderStagingQueue() {
             if (state.scheduledItems) {
                 const matched = state.scheduledItems.find(s =>
                     (item.itemId && s.id === item.itemId) ||
+                    (item.orderIndex && Number(s.orderIndex) === Number(item.orderIndex)) ||
                     (item.groupId && s.groupId === item.groupId && Number(s.rollIndex) === Number(item.rollIndex)) ||
                     (s.hinban === item.hinban && (Number(s.rollIndex) === Number(item.rollIndex) || Number(s.orderIndex) === Number(item.orderIndex)))
                 );
@@ -5988,7 +6022,7 @@ function renderHistoryList() {
             type: (doc.status === 'excluded' || doc.status === 'scrapped') ? 'excluded' : 'enqueued',
             status: doc.status || 'completed',
             orderIndex: Number(orderIndex) || (qIdx + 1),
-            kizai: doc.kizai || doc.hinban || doc.hinmei || '材料',
+            kizai: (matchedSched && (matchedSched.kizai || matchedSched.hinban)) || getScheduleDisplayName(doc) || '材料',
             meters: doc.bicho || doc.rollMeters || doc.meters || 0,
             lotNo: doc.lotNo || '',
             photoUrl: doc.imageUrl || doc.photoUrl || '',
