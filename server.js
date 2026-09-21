@@ -36448,6 +36448,22 @@ async function broadcastScanForProductionItem(item) {
   console.log(`📄 Auto-broadcasted scan to pdfDisplayer for in-progress roll: [${hinban}] zuban: ${zuban} on ${targetMachine}`);
 }
 
+async function deleteFirebaseFileByUrl(photoUrl) {
+  if (!photoUrl || typeof photoUrl !== 'string' || !photoUrl.includes('firebasestorage.googleapis.com')) return;
+  try {
+    const urlObj = new URL(photoUrl);
+    const pathMatch = urlObj.pathname.match(/\/o\/(.+)$/);
+    if (pathMatch && pathMatch[1]) {
+      const storagePath = decodeURIComponent(pathMatch[1]);
+      const bucket = admin.storage().bucket();
+      await bucket.file(storagePath).delete({ ignoreNotFound: true });
+      console.log(`🗑️ Deleted Firebase Storage file upon cancel: ${storagePath}`);
+    }
+  } catch (err) {
+    console.warn('⚠️ Could not delete Firebase Storage file:', err.message);
+  }
+}
+
 app.get('/api/production/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -37533,6 +37549,94 @@ app.post('/api/production/queue/finish-early', async (req, res) => {
   }
 });
 
+// Cancel / delete a queued roll item, returning it cleanly to the list tab
+app.post('/api/production/queue/cancel', async (req, res) => {
+  try {
+    const { date, machine, queueId, itemId } = req.body;
+    if (!queueId && !itemId) {
+      return res.status(400).json({ error: 'queueId or itemId is required' });
+    }
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    // 1. Locate the exact item by _id (preferred) or itemId
+    let item = null;
+    if (queueId) {
+      if (ObjectId.isValid(queueId)) {
+        item = await productionCol.findOne({ _id: new ObjectId(queueId) }) || await queueCol.findOne({ _id: new ObjectId(queueId) });
+      }
+      if (!item) {
+        item = await productionCol.findOne({ _id: queueId }) || await queueCol.findOne({ _id: queueId });
+      }
+      if (!item) {
+        item = await productionCol.findOne({ queueId }) || await queueCol.findOne({ queueId });
+      }
+    }
+    if (!item && itemId) {
+      item = await productionCol.findOne({ itemId, status: { $in: ['queue', 'queued'] } }) || await queueCol.findOne({ itemId, status: { $in: ['queue', 'queued'] } });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetId = item._id;
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+    const photoUrl = item.photoUrl || item.imageUrl || '';
+
+    // 2. Strictly delete ONLY this single exact document by its unique _id
+    await productionCol.deleteOne({ _id: targetId });
+    await queueCol.deleteOne({ _id: targetId });
+    if (ObjectId.isValid(targetId)) {
+      await productionCol.deleteOne({ _id: new ObjectId(targetId) });
+      await queueCol.deleteOne({ _id: new ObjectId(targetId) });
+    }
+
+    // 3. Delete photo from Firebase Storage in background
+    if (photoUrl) {
+      deleteFirebaseFileByUrl(photoUrl).catch(() => {});
+    }
+
+    // 3. Re-compact queue positions for remaining items
+    const remainingItems = await productionCol
+      .find({ date: targetDate, machine: targetMachine, status: { $in: ['queue', 'queued'] } })
+      .sort({ queuePosition: 1, createdAt: 1 })
+      .toArray();
+
+    for (let i = 0; i < remainingItems.length; i++) {
+      await productionCol.updateOne({ _id: remainingItems[i]._id }, { $set: { queuePosition: i + 1 } });
+      await queueCol.updateOne({ _id: remainingItems[i]._id }, { $set: { queuePosition: i + 1 } });
+    }
+
+    // 4. Broadcast SSE to all connected clients
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine,
+      cancelledId: item._id,
+      itemId: item.itemId
+    });
+
+    console.log(`🗑️ Cancelled & deleted queue item [${item.hinban || item.kizai}] (Roll #${item.rollIndex}, Order #${item.orderIndex}, itemId: ${item.itemId}) -> Returned to list`);
+    res.json({
+      success: true,
+      deletedItem: {
+        _id: item._id,
+        itemId: item.itemId,
+        orderIndex: item.orderIndex,
+        rollIndex: item.rollIndex,
+        hinban: item.hinban
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/cancel:', error);
+    res.status(500).json({ error: 'Failed to cancel queue item' });
+  }
+});
+
 // Reorder queue positions
 app.post('/api/production/queue/reorder', async (req, res) => {
   try {
@@ -37544,6 +37648,7 @@ app.post('/api/production/queue/reorder', async (req, res) => {
 
     const db = client.db('submittedDB');
     const queueCollection = db.collection('firstFactoryQueue');
+    const productionCol = db.collection('firstFactoryProduction');
 
     for (let i = 0; i < orderedQueueIds.length; i++) {
       const qId = orderedQueueIds[i];
@@ -37552,6 +37657,12 @@ app.post('/api/production/queue/reorder', async (req, res) => {
         : { $or: [{ _id: qId }, { queueId: qId }] };
 
       await queueCollection.updateOne(query, {
+        $set: {
+          queuePosition: i + 1,
+          updatedAt: new Date()
+        }
+      });
+      await productionCol.updateOne(query, {
         $set: {
           queuePosition: i + 1,
           updatedAt: new Date()

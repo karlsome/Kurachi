@@ -5614,41 +5614,121 @@ async function onQueueOrderChanged(container) {
     }
 }
 
-async function cancelQueueItem(queueId, hinban) {
-    if (!confirm(`投入キューからロット「${hinban || ''}」を取り消しますか？`)) return;
+function openQueueCancelModal(queueId, hinban) {
+    const modal = document.getElementById('queueCancelWarningModal');
+    if (!modal) return;
 
+    const targetQueueItem = (state.stagingQueue || []).find(q => String(q._id) === String(queueId) || String(q.itemId) === String(queueId));
+    const itemId = targetQueueItem?.itemId || queueId;
+
+    const nameEl = document.getElementById('queueCancelItemName');
+    const metaEl = document.getElementById('queueCancelItemMeta');
+    const thumbImg = document.getElementById('queueCancelThumbImg');
+    const placeholder = document.getElementById('queueCancelThumbPlaceholder');
+
+    const kizai = targetQueueItem?.kizai || targetQueueItem?.hinban || hinban || '材料';
+    const orderIdx = targetQueueItem?.orderIndex || targetQueueItem?.rollIndex || '1';
+    const rollIdx = targetQueueItem?.rollIndex || 1;
+    const meters = targetQueueItem?.rollMeters || targetQueueItem?.meters || 0;
+    const lotNo = targetQueueItem?.lotNo || '-';
+    const photoUrl = targetQueueItem?.photoUrl || targetQueueItem?.imageUrl || '';
+
+    if (nameEl) nameEl.textContent = kizai;
+    if (metaEl) metaEl.textContent = `#${orderIdx} (Roll #${rollIdx}) · ${meters} m · ロット: ${lotNo}`;
+
+    if (photoUrl && thumbImg && placeholder) {
+        thumbImg.src = photoUrl;
+        thumbImg.style.display = 'block';
+        placeholder.style.display = 'none';
+    } else if (thumbImg && placeholder) {
+        thumbImg.style.display = 'none';
+        placeholder.style.display = 'block';
+    }
+
+    const confirmBtn = document.getElementById('btnConfirmQueueCancel');
+    if (confirmBtn) {
+        confirmBtn.onclick = () => {
+            closeQueueCancelModal();
+            executeCancelQueueItem(queueId, itemId, kizai, targetQueueItem);
+        };
+    }
+
+    modal.classList.add('open', 'active');
+    modal.style.display = 'flex';
+}
+
+function closeQueueCancelModal() {
+    const modal = document.getElementById('queueCancelWarningModal');
+    if (modal) {
+        modal.classList.remove('open', 'active');
+        modal.style.display = 'none';
+    }
+}
+
+// Keep cancelQueueItem calling the modal
+const cancelQueueItem = openQueueCancelModal;
+
+async function executeCancelQueueItem(queueId, itemId, hinban, targetQueueItem) {
     try {
-        const res = await fetch(`${serverURL}/api/production/queue/skip`, {
+        const res = await fetch(`${serverURL}/api/production/queue/cancel`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 date: state.selectedDate,
                 machine: state.machineName || 'PSA2',
                 queueId,
+                itemId,
                 reason: '作業者による取消'
             })
         });
 
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${res.status}`);
+        }
         const data = await res.json();
         if (data.success) {
-            // Restore item state in localStorage so it returns to schedule list
-            const targetQueueItem = state.stagingQueue.find(q => String(q._id) === String(queueId));
+            // 1. Clean up local edits so item is completely restored to list tab as pending
+            if (itemId) {
+                setItemEdit(itemId, {
+                    enqueued: false,
+                    hasPhoto: false,
+                    photoUrl: '',
+                    photoBase64: '',
+                    mongoProductionId: null,
+                    status: 'pending'
+                });
+                try {
+                    await firstKojoPhotoDB.deletePhoto(itemId);
+                } catch (e) {}
+            }
+
+            // 2. Also clean up any matching local edits by lotNo or hinban + rollIndex
             if (targetQueueItem) {
                 const edits = getItemEdits();
                 Object.keys(edits).forEach(k => {
                     const e = edits[k];
-                    if (e.lotNo && targetQueueItem.lotNo && e.lotNo === targetQueueItem.lotNo) {
-                        setItemEdit(k, { enqueued: false });
-                    } else if (e.hinban === targetQueueItem.hinban && Number(e.rollIndex) === Number(targetQueueItem.rollIndex)) {
-                        setItemEdit(k, { enqueued: false });
+                    if ((e.lotNo && targetQueueItem.lotNo && e.lotNo === targetQueueItem.lotNo) ||
+                        (e.hinban === targetQueueItem.hinban && Number(e.rollIndex) === Number(targetQueueItem.rollIndex))) {
+                        setItemEdit(k, {
+                            enqueued: false,
+                            hasPhoto: false,
+                            photoUrl: '',
+                            photoBase64: '',
+                            mongoProductionId: null,
+                            status: 'pending'
+                        });
+                        try { firstKojoPhotoDB.deletePhoto(k); } catch (e) {}
                     }
                 });
             }
 
-            showToast(`ロット「${hinban}」のキューを取り消しました`, 'info');
+            showToast(`✓ 「${hinban || '材料'}」の投入を取り消し、一覧に復帰させました`, 'success', 2500);
             await fetchProductionQueue();
-            renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+            if (state.scheduledItems && state.scheduledItems.length > 0) {
+                renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+            }
+            renderHistoryList();
             updateHistoryBadges();
         }
     } catch (err) {

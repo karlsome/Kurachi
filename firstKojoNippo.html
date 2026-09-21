@@ -2922,6 +2922,158 @@
             font-size: 0.9rem;
         }
 
+        /* ---------------- Queue Cancel Warning Modal ---------------- */
+        #queueCancelWarningModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 99999;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #queueCancelWarningModal.active,
+        #queueCancelWarningModal.open {
+            display: flex !important;
+        }
+
+        .queue-cancel-card {
+            background: #FFFFFF;
+            width: 90%;
+            max-width: 420px;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            animation: modalPop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .queue-cancel-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .queue-cancel-icon-wrap {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: #FEF3C7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            flex-shrink: 0;
+        }
+
+        .queue-cancel-title {
+            font-size: 1.08rem;
+            font-weight: 800;
+            color: #1E293B;
+            margin: 0;
+        }
+
+        .queue-cancel-sub {
+            font-size: 0.775rem;
+            color: #64748B;
+            margin-top: 2px;
+        }
+
+        .queue-cancel-item-box {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 14px;
+            padding: 12px 14px;
+        }
+
+        .queue-cancel-thumb-wrap {
+            width: 52px;
+            height: 52px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #E2E8F0;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #CBD5E1;
+        }
+
+        .queue-cancel-thumb {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .queue-cancel-thumb-placeholder {
+            font-size: 0.72rem;
+            color: #94A3B8;
+        }
+
+        .queue-cancel-item-info {
+            flex: 1;
+            text-align: left;
+        }
+
+        .queue-cancel-item-name {
+            font-size: 1rem;
+            font-weight: 800;
+            color: #0F172A;
+        }
+
+        .queue-cancel-item-meta {
+            font-size: 0.8rem;
+            color: #64748B;
+            margin-top: 3px;
+        }
+
+        .queue-cancel-alert-box {
+            background: #FEF2F2;
+            border: 1px solid #FECACA;
+            border-radius: 12px;
+            padding: 12px 14px;
+            text-align: left;
+        }
+
+        .queue-cancel-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 4px;
+        }
+
+        .btn-danger-confirm {
+            background: #EF4444;
+            color: #FFFFFF;
+            border: none;
+            border-radius: 10px;
+            font-weight: 800;
+            font-size: 0.95rem;
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: background 0.15s ease, transform 0.1s ease;
+        }
+
+        .btn-danger-confirm:hover {
+            background: #DC2626;
+            transform: scale(1.02);
+        }
+
+        .btn-danger-confirm:active {
+            background: #B91C1C;
+            transform: scale(0.98);
+        }
+
         /* ---------------- Simple Material Feed Modal ---------------- */
         #materialFeedModal > div,
         .feed-modal-card-simple {
@@ -4117,6 +4269,44 @@
             <div id="queueAddingSuccessRow" class="queue-adding-success-row" style="display: none;">
                 <div class="queue-adding-success-icon">✓</div>
                 <div class="queue-adding-success-text">投入完了！キュー一覧へ移動します</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Queue Cancel Warning Modal -->
+    <div id="queueCancelWarningModal" class="modal">
+        <div class="queue-cancel-card">
+            <div class="queue-cancel-header">
+                <div class="queue-cancel-icon-wrap">⚠️</div>
+                <div style="flex: 1; text-align: left;">
+                    <h3 class="queue-cancel-title">投入キュー取消の確認</h3>
+                    <div class="queue-cancel-sub">この操作を実行するとキューから取り消されます</div>
+                </div>
+                <button type="button" class="feed-modal-close-btn" onclick="closeQueueCancelModal()" title="閉じる">✕</button>
+            </div>
+
+            <div class="queue-cancel-item-box">
+                <div id="queueCancelThumbWrap" class="queue-cancel-thumb-wrap">
+                    <img id="queueCancelThumbImg" class="queue-cancel-thumb" src="" alt="" style="display: none;">
+                    <div id="queueCancelThumbPlaceholder" class="queue-cancel-thumb-placeholder">写真なし</div>
+                </div>
+                <div class="queue-cancel-item-info">
+                    <div id="queueCancelItemName" class="queue-cancel-item-name">材料コード</div>
+                    <div id="queueCancelItemMeta" class="queue-cancel-item-meta">#1 · 0 m · ロット: -</div>
+                </div>
+            </div>
+
+            <div class="queue-cancel-alert-box">
+                <div style="font-weight: 700; color: #991B1B; font-size: 0.85rem; margin-bottom: 2px;">ご注意</div>
+                <div style="font-size: 0.8rem; color: #B91C1C; line-height: 1.4;">
+                    キューから削除され、撮影した写真データも破棄されます。<br>
+                    対象の材料は<strong>生産一覧 (List) タブ</strong>に未投入として復帰します。
+                </div>
+            </div>
+
+            <div class="queue-cancel-actions">
+                <button type="button" class="btn-cancel-flat" style="flex: 1;" onclick="closeQueueCancelModal()">戻る</button>
+                <button type="button" id="btnConfirmQueueCancel" class="btn-danger-confirm" style="flex: 1.2;">取り消す</button>
             </div>
         </div>
     </div>
