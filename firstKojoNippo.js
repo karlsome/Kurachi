@@ -79,7 +79,7 @@ function parseParams() {
     if (params.has('machine') || params.has('?machine')) {
         state.machineName = params.get('machine') || params.get('?machine');
         const tag = document.getElementById('machineNameTag');
-        if (tag) tag.textContent = `設備: ${state.machineName}`;
+        if (tag) tag.textContent = `${_t('fk_machine_prefix')}${state.machineName}`;
     }
     if (params.has('filter') || params.has('?filter')) {
         state.filterName = params.get('filter') || params.get('?filter');
@@ -1708,22 +1708,22 @@ function renderScheduleList(items, startTimeStr) {
 
             let statusTagHTML = '';
             if (lifecycle.status === 'completed') {
-                statusTagHTML = `<span class="batch-status-tag status-completed">完了 (${lifecycle.actualDurationMins || ''}分)</span>`;
+                statusTagHTML = `<span class="batch-status-tag status-completed">${_t('fk_status_completed')} (${lifecycle.actualDurationMins || ''}${_t('fk_min_unit')})</span>`;
             } else if (isQueueActive) {
-                statusTagHTML = `<span class="batch-status-tag status-active">貼合中</span>`;
+                statusTagHTML = `<span class="batch-status-tag status-active">${_t('fk_status_laminating')}</span>`;
             } else if (isQueued) {
-                statusTagHTML = `<span class="batch-status-tag status-queued">キュー投入済</span>`;
+                statusTagHTML = `<span class="batch-status-tag status-queued">${_t('fk_status_queued')}</span>`;
             } else if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
-                statusTagHTML = `<span class="batch-status-tag status-active">生産中</span>`;
+                statusTagHTML = `<span class="batch-status-tag status-active">${_t('fk_status_in_progress')}</span>`;
             } else {
-                statusTagHTML = `<span class="batch-status-tag status-pending">待機中</span>`;
+                statusTagHTML = `<span class="batch-status-tag status-pending">${_t('fk_waiting_tag')}</span>`;
             }
 
-            const destText = group.shippingDest ? `<span class="batch-meta-divider">•</span><span class="batch-meta-item"><span class="batch-meta-label">出荷先:</span> <span class="batch-meta-val">${group.shippingDest}</span></span>` : '';
-            const colorText = group.color ? `<span class="batch-meta-divider">•</span><span class="batch-meta-item"><span class="batch-meta-label">色:</span> <span class="batch-meta-val">${group.color}</span></span>` : '';
+            const destText = group.shippingDest ? `<span class="batch-meta-divider">•</span><span class="batch-meta-item"><span class="batch-meta-label">${_t('fk_shipping_dest')}</span> <span class="batch-meta-val">${group.shippingDest}</span></span>` : '';
+            const colorText = group.color ? `<span class="batch-meta-divider">•</span><span class="batch-meta-item"><span class="batch-meta-label">${_t('fk_color')}</span> <span class="batch-meta-val">${group.color}</span></span>` : '';
             let rollSummaryText = '';
             if (excludedCount > 0) {
-                rollSummaryText = `<span class="batch-meta-divider">•</span><span class="tag-pill tag-excluded" style="font-size: 0.75rem; padding: 2px 7px;">除外: ${excludedCount} 巻</span>`;
+                rollSummaryText = `<span class="batch-meta-divider">•</span><span class="tag-pill tag-excluded" style="font-size: 0.75rem; padding: 2px 7px;">${_t('fk_btn_exclude')}: ${excludedCount} ${_t('fk_roll_count')}</span>`;
             }
 
             const isExpanded = state.expandedGroups && state.expandedGroups.has(group.groupId);
@@ -1752,8 +1752,8 @@ function renderScheduleList(items, startTimeStr) {
                             <div class="batch-top-status">
                                 ${statusTagHTML}
                             </div>
-                            <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event)" title="詳細プレビュー">
-                                詳細
+                            <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event)" title="${_t('fk_btn_detail')}">
+                                ${_t('fk_btn_detail')}
                             </button>
                             <div class="batch-expand-icon" title="${isExpanded ? '内訳を閉じる' : '内訳を展開'}">
                                 <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
@@ -1778,16 +1778,16 @@ function renderScheduleList(items, startTimeStr) {
                                         <div class="roll-row-left">
                                             <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
                                             <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
-                                            <span class="tag-pill roll-tag" style="font-size: 0.8rem; padding: 2px 8px;">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} 巻き</span>
+                                            <span class="tag-pill roll-tag" style="font-size: 0.8rem; padding: 2px 8px;">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} ${_t('fk_roll_unit')}</span>
                                             <span class="tag-pill meter-tag" style="font-size: 0.8rem; padding: 2px 8px;">${currentMeters} m</span>
-                                            <span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">除外中</span>
+                                            <span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">${_t('fk_status_excluded')}</span>
                                         </div>
                                         <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
-                                            <button type="button" class="btn-roll-exclude is-excluded" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="この巻きを復帰（キュー投入対象に戻す）">
-                                                復帰
+                                            <button type="button" class="btn-roll-exclude is-excluded" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="${_t('fk_btn_restore')}">
+                                                ${_t('fk_btn_restore')}
                                             </button>
-                                            <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event, ${safeRIdx})" title="この巻きの詳細を確認">
-                                                詳細
+                                            <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event, ${safeRIdx})" title="${_t('fk_btn_detail')}">
+                                                ${_t('fk_btn_detail')}
                                             </button>
                                         </div>
                                     </div>
@@ -1795,31 +1795,31 @@ function renderScheduleList(items, startTimeStr) {
                 }
 
                 return `
-                                <div class="batch-roll-row" data-item-id="${itemId}" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="タップして材料投入・QRスキャン・ラベル撮影">
+                                <div class="batch-roll-row" data-item-id="${itemId}" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="${_t('fk_btn_feed')}">
                                     <div class="roll-row-left">
                                         <span class="roll-sub-badge">#${rollItem.orderIndex}</span>
                                         <span class="roll-time">${rollItem.startTime} - ${rollItem.endTime}</span>
-                                        <span class="tag-pill roll-tag" style="font-size: 0.8rem; padding: 2px 8px;">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} 巻き</span>
+                                        <span class="tag-pill roll-tag" style="font-size: 0.8rem; padding: 2px 8px;">${actualRollIndex} / ${rollItem.totalRolls || group.items.length} ${_t('fk_roll_unit')}</span>
 
                                         <!-- Length Display -->
-                                        <span class="tag-pill meter-tag" style="font-size: 0.8rem; padding: 2px 8px;" title="美長 / 純長">${currentMeters ? currentMeters + ' m' : '未入力'}</span>
+                                        <span class="tag-pill meter-tag" style="font-size: 0.8rem; padding: 2px 8px;" title="美長 / 純長">${currentMeters ? currentMeters + ' m' : '-'}</span>
 
-                                        <!-- Flat Camera Status Pill (Flat Red if unshot, Flat Green if shot) -->
-                                        <span class="flat-camera-pill ${hasPhoto ? 'is-shot' : 'is-unshot'}" title="${hasPhoto ? 'ラベル写真撮影済' : 'ラベル写真未撮影 (必須)'}">
+                                        <!-- Flat Camera Status Pill -->
+                                        <span class="flat-camera-pill ${hasPhoto ? 'is-shot' : 'is-unshot'}" title="${hasPhoto ? _t('fk_status_shot') : _t('fk_status_unshot')}">
                                             <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2 3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                                            ${hasPhoto ? '撮影済' : '未撮影'}
+                                            ${hasPhoto ? _t('fk_status_shot') : _t('fk_status_unshot')}
                                         </span>
                                     </div>
 
                                     <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
-                                        <button type="button" class="btn-roll-exclude" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="この巻きを一時的に除外">
-                                            除外
+                                        <button type="button" class="btn-roll-exclude" onclick="toggleRollItemExclude('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="${_t('fk_btn_exclude')}">
+                                            ${_t('fk_btn_exclude')}
                                         </button>
-                                        <button type="button" class="btn-feed-row-flat" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="この巻きのQRスキャン・撮影・投入">
-                                            投入
+                                        <button type="button" class="btn-feed-row-flat" onclick="openMaterialFeedModalForRollItem('${itemId}', ${gIdx}, ${safeRIdx}, event)" title="${_t('fk_btn_feed')}">
+                                            ${_t('fk_btn_feed')}
                                         </button>
-                                        <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event, ${safeRIdx})" title="この巻きの詳細を確認">
-                                            詳細
+                                        <button type="button" class="btn-detail-secondary" onclick="previewBatchGroup(${gIdx}, event, ${safeRIdx})" title="${_t('fk_btn_detail')}">
+                                            ${_t('fk_btn_detail')}
                                         </button>
                                     </div>
                                 </div>
@@ -2337,6 +2337,18 @@ document.addEventListener('languageChanged', (e) => {
             additionalData: { action: 'language_change', language: lang }
         })
     }).catch(err => console.warn('Could not broadcast language change:', err));
+
+    // Update machine name tag
+    const tag = document.getElementById('machineNameTag');
+    if (tag) tag.textContent = `${_t('fk_machine_prefix')}${state.machineName || '-'}`;
+
+    // Dynamically re-render all list, queue, history, and status elements
+    if (state.scheduledItems) {
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+    }
+    renderStagingQueue();
+    renderHistoryList();
+    updateHistoryBadges();
 });
 
 // -----------------------------------------------------
@@ -5289,7 +5301,7 @@ function renderStagingQueue() {
     }
 
     if (totalCountBadge) {
-        totalCountBadge.textContent = `${activeAndQueued.length} 件`;
+        totalCountBadge.textContent = `${activeAndQueued.length} ${_t('fk_unit_items')}`;
     }
 
     if (!queueContainer) return;
@@ -5297,7 +5309,7 @@ function renderStagingQueue() {
     if (activeAndQueued.length === 0) {
         queueContainer.innerHTML = `
             <div class="staging-queue-empty">
-                現在投入されている材料はありません。生産一覧 (List) タブから材料を投入してください。
+                ${_t('fk_empty_queue')}
             </div>
         `;
         return;
@@ -5334,7 +5346,7 @@ function renderStagingQueue() {
         rowsHTML += `
             <div class="queue-flat-row is-active" data-queue-id="${activeItem._id}">
                 <div class="queue-flat-left">
-                    <span class="queue-pos-tag pos-active">#1 貼合中</span>
+                    <span class="queue-pos-tag pos-active">${_t('fk_active_tag')}</span>
                     ${photoThumb}
                     <div>
                         <div class="queue-flat-title">${kizaiCode}</div>
@@ -5343,14 +5355,14 @@ function renderStagingQueue() {
                             <span>•</span>
                             <span><strong>${activeItem.rollMeters || activeItem.totalMeters || 0} m</strong></span>
                             <span>•</span>
-                            <span>ロット: <strong>${activeItem.lotNo || '-'}</strong></span>
-                            ${activeItem.shippingDest ? `<span>• 行先: <strong>${activeItem.shippingDest}</strong></span>` : ''}
+                            <span>${_t('fk_lot_label')}<strong>${activeItem.lotNo || '-'}</strong></span>
+                            ${activeItem.shippingDest ? `<span>• ${_t('fk_shipping_dest')}<strong>${activeItem.shippingDest}</strong></span>` : ''}
                         </div>
                     </div>
                 </div>
                 <div class="queue-flat-right" onclick="event.stopPropagation()">
-                    <button type="button" class="btn-staging-action btn-staging-advance" onclick="advanceQueueItemPrompt('${activeItem._id}')" title="現在の巻きを完了し次へ進める">
-                        完了 / 次へ
+                    <button type="button" class="btn-staging-action btn-staging-advance" onclick="advanceQueueItemPrompt('${activeItem._id}')" title="${_t('fk_btn_advance')}">
+                        ${_t('fk_btn_advance')}
                     </button>
                 </div>
             </div>
@@ -5363,7 +5375,7 @@ function renderStagingQueue() {
         const queuedImg = item.imageUrl || item.photoUrl;
         const photoThumb = queuedImg
             ? `<img class="queue-flat-thumb" src="${queuedImg}" alt="" loading="lazy" decoding="async" data-item-id="${item.itemId || item._id}" data-src="${queuedImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${queuedImg}', '${item.itemId || item._id}')" onclick="openPhotoEnlarged('${queuedImg}')" title="クリックで拡大">`
-            : `<div class="queue-flat-thumb-placeholder">写真なし</div>`;
+            : `<div class="queue-flat-thumb-placeholder">${_t('no_photos_yet')}</div>`;
         const posNum = activeItem ? (qIdx + 2) : (qIdx + 1);
 
         let orderIdx = item.orderIndex;
@@ -5382,7 +5394,7 @@ function renderStagingQueue() {
         rowsHTML += `
             <div class="queue-flat-row is-staged" data-queue-id="${item._id}">
                 <div class="queue-flat-left">
-                    <span class="queue-pos-tag pos-queued">#${posNum} 待機中</span>
+                    <span class="queue-pos-tag pos-queued">#${posNum} ${_t('fk_waiting_tag')}</span>
                     ${photoThumb}
                     <div>
                         <div class="queue-flat-title">${kizaiCode}</div>
@@ -5391,8 +5403,8 @@ function renderStagingQueue() {
                             <span>•</span>
                             <span><strong>${item.rollMeters || item.totalMeters || 0} m</strong></span>
                             <span>•</span>
-                            <span>ロット: <strong>${item.lotNo || '-'}</strong></span>
-                            ${item.shippingDest ? `<span>• 行先: <strong>${item.shippingDest}</strong></span>` : ''}
+                            <span>${_t('fk_lot_label')}<strong>${item.lotNo || '-'}</strong></span>
+                            ${item.shippingDest ? `<span>• ${_t('fk_shipping_dest')}<strong>${item.shippingDest}</strong></span>` : ''}
                         </div>
                     </div>
                 </div>
@@ -5404,7 +5416,7 @@ function renderStagingQueue() {
                             <circle cx="12" cy="19" r="2.2"/>
                         </svg>
                     </button>
-                    <button type="button" class="btn-staging-action btn-staging-cancel" onclick="cancelQueueItem('${item._id}', '${kizaiCode}')" title="この材料投入を取り消す">取消</button>
+                    <button type="button" class="btn-staging-action btn-staging-cancel" onclick="cancelQueueItem('${item._id}', '${kizaiCode}')" title="${_t('fk_btn_cancel')}">${_t('fk_btn_cancel')}</button>
                 </div>
             </div>
         `;
@@ -5635,7 +5647,7 @@ function openQueueCancelModal(queueId, hinban) {
     const photoUrl = targetQueueItem?.imageUrl || targetQueueItem?.photoUrl || '';
 
     if (nameEl) nameEl.textContent = kizai;
-    if (metaEl) metaEl.textContent = `#${orderIdx} (Roll #${rollIdx}) · ${meters} m · ロット: ${lotNo}`;
+    if (metaEl) metaEl.textContent = `#${orderIdx} (Roll #${rollIdx}) · ${meters} m · ${_t('fk_lot_label')}${lotNo}`;
 
     if (photoUrl && thumbImg && placeholder) {
         thumbImg.src = photoUrl;
@@ -5643,6 +5655,7 @@ function openQueueCancelModal(queueId, hinban) {
         placeholder.style.display = 'none';
     } else if (thumbImg && placeholder) {
         thumbImg.style.display = 'none';
+        placeholder.textContent = _t('fk_no_photo');
         placeholder.style.display = 'block';
     }
 
@@ -5881,8 +5894,8 @@ function updateHistoryBadges() {
         }
     });
 
-    if (enqueuedBadge) enqueuedBadge.textContent = `完了: ${completedCount} 件`;
-    if (excludedBadge) excludedBadge.textContent = `除外: ${excludedCount} 件`;
+    if (enqueuedBadge) enqueuedBadge.textContent = `${_t('fk_status_completed')}: ${completedCount} ${_t('fk_unit_items')}`;
+    if (excludedBadge) excludedBadge.textContent = `${_t('fk_status_excluded')}: ${excludedCount} ${_t('fk_unit_items')}`;
 }
 
 function previewHistoryItem(itemId, event) {
@@ -6020,7 +6033,7 @@ function renderHistoryList() {
     if (filtered.length === 0) {
         container.innerHTML = `
             <div class="staging-queue-empty">
-                ${filter === 'enqueued' ? '投入済の履歴はありません' : filter === 'excluded' ? '除外中の項目はありません' : '履歴はありません'}
+                ${_t('fk_history_empty')}
             </div>
         `;
         return;
@@ -6034,30 +6047,30 @@ function renderHistoryList() {
         let actionHTML = '';
 
         if (it.status === 'completed') {
-            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #EEF2FF; color: #4338CA; border: 1px solid #C7D2FE; font-weight: 700;">完了</span>`;
-            actionHTML = `<span style="font-size: 0.8rem; color: #4338CA; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;">完了済</span>`;
+            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #EEF2FF; color: #4338CA; border: 1px solid #C7D2FE; font-weight: 700;">${_t('fk_status_completed')}</span>`;
+            actionHTML = `<span style="font-size: 0.8rem; color: #4338CA; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;">${_t('fk_status_completed')}</span>`;
         } else if (it.status === 'active' || it.status === 'in-progress') {
-            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-weight: 700;">貼合中</span>`;
-            actionHTML = `<span style="font-size: 0.8rem; color: #059669; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;">● 生産中</span>`;
+            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-weight: 700;">${_t('fk_status_in_progress')}</span>`;
+            actionHTML = `<span style="font-size: 0.8rem; color: #059669; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;">● ${_t('fk_status_in_progress')}</span>`;
         } else if (it.status === 'skipped') {
             statusTagHTML = `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">スキップ</span>`;
             actionHTML = `<span style="font-size: 0.8rem; color: #6B7280; font-weight: 600; padding-right: 4px;">スキップ</span>`;
         } else if (isExcluded) {
-            statusTagHTML = `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">除外中</span>`;
-            actionHTML = `<button type="button" class="btn-roll-exclude is-excluded" onclick="restoreExcludedItem('${it.itemId}', event)" title="生産一覧タブに復帰">復帰</button>`;
+            statusTagHTML = `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">${_t('fk_status_excluded')}</span>`;
+            actionHTML = `<button type="button" class="btn-roll-exclude is-excluded" onclick="restoreExcludedItem('${it.itemId}', event)" title="${_t('fk_btn_restore')}">${_t('fk_btn_restore')}</button>`;
         } else {
-            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-weight: 700;">投入済</span>`;
-            actionHTML = `<span style="font-size: 0.8rem; color: #059669; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;"><svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>キュー連携中</span>`;
+            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-weight: 700;">${_t('fk_status_queued')}</span>`;
+            actionHTML = `<span style="font-size: 0.8rem; color: #059669; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;"><svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>${_t('fk_history_tag_linked')}</span>`;
         }
 
         html += `
-            <div class="batch-roll-row ${isExcluded ? 'is-excluded-row' : ''}" data-item-id="${it.itemId}" onclick="previewHistoryItem('${it.itemId}', event)" title="タップして詳細確認">
+            <div class="batch-roll-row ${isExcluded ? 'is-excluded-row' : ''}" data-item-id="${it.itemId}" onclick="previewHistoryItem('${it.itemId}', event)" title="${_t('fk_btn_detail')}">
                 <div class="roll-row-left" style="display: flex; align-items: center; gap: 10px;">
                     <span class="roll-sub-badge">#${it.orderIndex}</span>
                     ${it.photoUrl ? `
                         <img class="history-thumb-mini" src="${it.photoUrl}" alt="" loading="lazy" decoding="async" data-item-id="${it.itemId || it.mongoId || ''}" data-src="${it.photoUrl}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${it.photoUrl}', '${it.itemId || it.mongoId || ''}')" onclick="event.stopPropagation(); openPhotoEnlarged('${it.photoUrl}')" title="タップして拡大" style="width: 34px; height: 34px; border-radius: 6px; object-fit: cover; border: 1px solid #E5E7EB; cursor: pointer; flex-shrink: 0; background: #F3F4F6; transition: opacity 0.25s ease;">
                     ` : `
-                        <div style="width: 34px; height: 34px; border-radius: 6px; background: #F3F4F6; border: 1px dashed #D1D5DB; display: flex; align-items: center; justify-content: center; color: #9CA3AF; font-size: 0.65rem; flex-shrink: 0;">写真無</div>
+                        <div style="width: 34px; height: 34px; border-radius: 6px; background: #F3F4F6; border: 1px dashed #D1D5DB; display: flex; align-items: center; justify-content: center; color: #9CA3AF; font-size: 0.65rem; flex-shrink: 0;">-</div>
                     `}
                     <span class="history-item-hinban" style="font-weight: 700; color: #0F172A; font-size: 0.95rem;">${it.kizai}</span>
                     <span class="tag-pill meter-tag" style="font-size: 0.8rem; padding: 2px 8px;">${it.meters ? it.meters + ' m' : '0 m'}</span>
@@ -6066,8 +6079,8 @@ function renderHistoryList() {
 
                 <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
                     ${actionHTML}
-                    <button type="button" class="btn-detail-secondary" onclick="previewHistoryItem('${it.itemId}', event)" title="この巻きの詳細を確認">
-                        詳細
+                    <button type="button" class="btn-detail-secondary" onclick="previewHistoryItem('${it.itemId}', event)" title="${_t('fk_btn_detail')}">
+                        ${_t('fk_btn_detail')}
                     </button>
                 </div>
             </div>
