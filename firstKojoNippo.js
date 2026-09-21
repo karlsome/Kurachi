@@ -1769,7 +1769,7 @@ function renderScheduleList(items, startTimeStr) {
                 const edit = getItemEdit(itemId, rollItem);
                 const isExcluded = edit.isExcluded === true;
                 const currentMeters = edit.bicho || edit.meters || (Number(rollItem.meters) || 100);
-                const hasPhoto = !!(edit.photoUrl || edit.hasPhoto || edit.photoBase64);
+                const hasPhoto = Boolean(edit.photoUrl);
                 const actualRollIndex = rollItem.rollIndex || (safeRIdx + 1);
 
                 if (isExcluded) {
@@ -5688,40 +5688,77 @@ async function executeCancelQueueItem(queueId, itemId, hinban, targetQueueItem) 
         }
         const data = await res.json();
         if (data.success) {
-            // 1. Clean up local edits so item is completely restored to list tab as pending
-            if (itemId) {
-                setItemEdit(itemId, {
-                    enqueued: false,
-                    hasPhoto: false,
-                    photoUrl: '',
-                    photoBase64: '',
-                    mongoProductionId: null,
-                    status: 'pending'
-                });
-                try {
-                    await firstKojoPhotoDB.deletePhoto(itemId);
-                } catch (e) {}
-            }
+            const orderIdx = targetQueueItem?.orderIndex;
+            const rollIdx = targetQueueItem?.rollIndex;
+            const hinbanCode = targetQueueItem?.hinban || targetQueueItem?.kizai || hinban || '';
+            const edits = getItemEdits();
+            const keysToReset = new Set();
 
-            // 2. Also clean up any matching local edits by lotNo or hinban + rollIndex
-            if (targetQueueItem) {
-                const edits = getItemEdits();
-                Object.keys(edits).forEach(k => {
-                    const e = edits[k];
-                    if ((e.lotNo && targetQueueItem.lotNo && e.lotNo === targetQueueItem.lotNo) ||
-                        (e.hinban === targetQueueItem.hinban && Number(e.rollIndex) === Number(targetQueueItem.rollIndex))) {
-                        setItemEdit(k, {
-                            enqueued: false,
-                            hasPhoto: false,
-                            photoUrl: '',
-                            photoBase64: '',
-                            mongoProductionId: null,
-                            status: 'pending'
-                        });
-                        try { firstKojoPhotoDB.deletePhoto(k); } catch (e) {}
+            if (itemId) keysToReset.add(String(itemId));
+            if (queueId) keysToReset.add(String(queueId));
+
+            // Find all possible keys for this item in state.scheduledItems
+            if (state.scheduledItems) {
+                state.scheduledItems.forEach((s, idx) => {
+                    const match = (itemId && (s.id === itemId || s._id === itemId)) ||
+                                  (orderIdx !== undefined && Number(s.orderIndex) === Number(orderIdx)) ||
+                                  (hinbanCode && s.hinban === hinbanCode && Number(s.rollIndex) === Number(rollIdx));
+                    if (match) {
+                        if (s.id) keysToReset.add(String(s.id));
+                        if (s._id) keysToReset.add(String(s._id));
+                        keysToReset.add(`${state.selectedDate || 'day'}_${s.hinban || hinbanCode}_${s.orderIndex || idx + 1}`);
+                        keysToReset.add(`${state.selectedDate || 'day'}_${s.kizai || hinbanCode}_${s.orderIndex || idx + 1}`);
                     }
                 });
             }
+
+            // Also inspect all existing keys in localStorage edits
+            Object.keys(edits).forEach(k => {
+                const e = edits[k];
+                const keyMatches = (orderIdx !== undefined && k.endsWith(`_${orderIdx}`)) ||
+                                   (itemId && k.includes(String(itemId))) ||
+                                   (queueId && k.includes(String(queueId))) ||
+                                   (e && e.mongoProductionId && String(e.mongoProductionId) === String(queueId)) ||
+                                   (e && orderIdx !== undefined && Number(e.orderIndex) === Number(orderIdx)) ||
+                                   (e && rollIdx !== undefined && Number(e.rollIndex) === Number(rollIdx) && (e.hinban === hinbanCode || e.kizai === hinbanCode));
+                if (keyMatches) {
+                    keysToReset.add(k);
+                }
+            });
+
+            // Perform comprehensive cleanup on all matching keys
+            for (const k of keysToReset) {
+                if (edits[k]) {
+                    edits[k].hasPhoto = false;
+                    edits[k].photoUrl = '';
+                    edits[k].photoBase64 = '';
+                    edits[k].enqueued = false;
+                    edits[k].mongoProductionId = null;
+                    edits[k].status = 'pending';
+                } else {
+                    edits[k] = {
+                        hasPhoto: false,
+                        photoUrl: '',
+                        photoBase64: '',
+                        enqueued: false,
+                        mongoProductionId: null,
+                        status: 'pending'
+                    };
+                }
+                try {
+                    await firstKojoPhotoDB.deletePhoto(k);
+                } catch (e) {}
+            }
+
+            // Save updated edits to localStorage
+            try {
+                localStorage.setItem(getItemStateStorageKey(), JSON.stringify(edits));
+            } catch (e) {
+                console.error('Error saving cleaned edits:', e);
+            }
+
+            state.capturedPhotoBase64 = null;
+            state.uploadedPhotoUrl = null;
 
             showToast(`✓ 「${hinban || '材料'}」の投入を取り消し、一覧に復帰させました`, 'success', 2500);
             await fetchProductionQueue();
