@@ -9,7 +9,9 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800;900&family=Nunito+Sans:ital,opsz,wght@0,6..12,400;0,6..12,600;0,6..12,700;0,6..12,800;0,6..12,900&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800;900&family=Nunito+Sans:ital,opsz,wght@0,6..12,400;0,6..12,600;0,6..12,700;0,6..12,800;0,6..12,900&display=swap"
+        rel="stylesheet">
     <style>
         /* ============================================================
            DESIGN SYSTEM · Apple-Inspired Simple Flat Design
@@ -330,9 +332,11 @@
             0% {
                 box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
             }
+
             70% {
                 box-shadow: 0 0 0 5px rgba(16, 185, 129, 0);
             }
+
             100% {
                 box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
             }
@@ -977,6 +981,7 @@
                 opacity: 0;
                 transform: scale(0.96) translateY(8px);
             }
+
             to {
                 opacity: 1;
                 transform: scale(1) translateY(0);
@@ -1173,6 +1178,7 @@
                 opacity: 0;
                 transform: translateY(12px);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -1181,30 +1187,33 @@
 
         /* ---------------- Tablet & Mobile Responsiveness ---------------- */
         @media (max-width: 1024px) {
-            .freya-center-mark {
-                display: none;
-            }
             .header-titles .subtitle {
                 display: none;
             }
+
             .header-titles h1 {
                 font-size: 1.05rem;
             }
+
             .station-badge {
                 padding: 4px 8px;
                 font-size: 0.725rem;
             }
+
             header {
                 padding: 0 14px;
                 gap: 10px;
             }
+
             .date-display-input {
                 width: 130px;
                 font-size: 0.825rem;
             }
+
             .date-nav-btn {
                 padding: 0 8px;
             }
+
             .date-nav-btn.today-btn {
                 padding: 0 10px;
             }
@@ -1216,45 +1225,60 @@
                 min-height: var(--header-height);
                 padding: 10px 14px;
             }
+
             .header-title-section {
                 gap: 8px;
             }
+
             .header-titles h1 {
                 font-size: 0.95rem;
             }
+
             .machine-tag {
                 padding: 4px 8px;
                 font-size: 0.75rem;
             }
+
             .date-toolbar-card {
                 flex-direction: column;
                 align-items: flex-start;
                 gap: 10px;
             }
+
             .date-picker-wrap {
                 width: 100%;
             }
+
             .date-display-input {
                 flex: 1;
             }
+
             .hero-grid {
                 grid-template-columns: 1fr;
             }
+
             .btn-massive-print .main-print-label {
                 font-size: 1.2rem;
             }
         }
 
         @media (max-width: 480px) {
+            .freya-center-mark {
+                display: none;
+            }
+
             main {
                 padding: 12px 12px 24px;
             }
+
             .hero-wrapping-card {
                 padding: 16px;
             }
+
             .spec-details-grid {
                 grid-template-columns: 1fr;
             }
+
             .hinban-display {
                 font-size: 1.75rem;
             }
@@ -1266,14 +1290,10 @@
     <!-- Top Header -->
     <header>
         <div class="header-title-section">
-            <div class="station-badge">📦 工程2 · 包装</div>
-            <div class="header-titles">
-                <h1>第一工場 包装・ラベル発行</h1>
-            </div>
             <div class="status-tag" id="machineTag">設備: -</div>
         </div>
 
-        <span class="freya-center-mark">Freya System v4 · Wrapping Station</span>
+        <span class="freya-center-mark">Freya System v4</span>
 
         <div class="header-action-section">
             <div class="language-selector">
@@ -1284,18 +1304,6 @@
                     <option value="vi">Tiếng Việt</option>
                 </select>
             </div>
-
-            <!-- Realtime SSE Badge -->
-            <div class="sse-badge disconnected" id="sseBadge" title="SSEリアルタイム接続状態">
-                <span class="sse-dot"></span>
-                <span id="sseStatusText">切断中</span>
-            </div>
-
-            <!-- Manual Refresh -->
-            <button type="button" class="header-icon-btn" id="btnRefresh" title="手動更新">🔄</button>
-
-            <!-- Sound Toggle -->
-            <button type="button" class="header-icon-btn" id="btnSoundToggle" title="効果音">🔊</button>
 
             <!-- Fullscreen Toggle -->
             <button type="button" class="header-icon-btn" id="btnFullscreen" title="全画面表示">⛶</button>
@@ -1311,6 +1319,12 @@
                 <input type="date" class="date-display-input" id="datePickerInput" title="日付選択">
                 <button type="button" class="date-nav-btn" id="btnNextDay" title="翌日">›</button>
                 <button type="button" class="date-nav-btn today-btn" id="btnToday">今日</button>
+
+                <!-- Realtime Live Status Badge (in line with calendar) -->
+                <div class="sse-badge disconnected" id="sseBadge" title="SSEリアルタイム接続状態">
+                    <span class="sse-dot"></span>
+                    <span id="sseStatusText">切断中</span>
+                </div>
             </div>
             <div id="lastPrintedInfo" class="last-printed-info"></div>
         </div>
@@ -1363,12 +1377,14 @@
             <button type="button" class="modal-close-btn" onclick="closePrintProgressModal()">✕</button>
             <div id="printModalIcon" style="font-size: 3rem; margin-bottom: 12px;">🖨️</div>
             <h3 class="modal-title" id="printModalTitle">ラベル印刷中...</h3>
-            <p id="printModalDetail" style="font-size: 1.1rem; font-weight: 900; color: var(--blue); margin-bottom: 10px;">Roll 1 / 3</p>
+            <p id="printModalDetail"
+                style="font-size: 1.1rem; font-weight: 900; color: var(--blue); margin-bottom: 10px;">Roll 1 / 3</p>
             <p class="modal-body" id="printModalSub" style="margin-bottom: 18px;">
                 プリンターにラベル印刷データを送信しています。<br>しばらくお待ちください。
             </p>
             <div id="printModalActions" style="display: flex; gap: 10px; justify-content: center;">
-                <button type="button" class="btn-edge" onclick="closePrintProgressModal()" style="min-width: 120px;">閉じる</button>
+                <button type="button" class="btn-edge" onclick="closePrintProgressModal()"
+                    style="min-width: 120px;">閉じる</button>
             </div>
         </div>
     </div>
@@ -1383,7 +1399,8 @@
                 現在の巻を不良として破棄し、次の巻へ進めますか？
             </p>
 
-            <div style="font-size: 0.85rem; font-weight: 800; color: var(--text-main); margin-bottom: 6px;">破棄理由を選択:</div>
+            <div style="font-size: 0.85rem; font-weight: 800; color: var(--text-main); margin-bottom: 6px;">破棄理由を選択:
+            </div>
             <div class="reason-options-grid" id="scrapReasonGrid">
                 <button type="button" class="reason-btn selected" onclick="selectScrapReason('キズ・汚れ')">キズ・汚れ</button>
                 <button type="button" class="reason-btn" onclick="selectScrapReason('シワ・折り目')">シワ・折り目</button>
@@ -1394,7 +1411,8 @@
             </div>
 
             <div style="margin-top: 14px; margin-bottom: 18px;">
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 800; color: var(--red); cursor: pointer;">
+                <label
+                    style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 800; color: var(--red); cursor: pointer;">
                     <input type="checkbox" id="chkScrapEntireLot" style="width: 18px; height: 18px;">
                     このロット全体（残りの巻すべて）を破棄する
                 </label>
@@ -1402,7 +1420,8 @@
 
             <div class="modal-actions">
                 <button type="button" class="btn-edge" onclick="closeScrapModal()">キャンセル</button>
-                <button type="button" class="btn-edge finish-btn" id="btnConfirmScrap" onclick="submitScrapRoll()" style="background: var(--red); color: #fff;">
+                <button type="button" class="btn-edge finish-btn" id="btnConfirmScrap" onclick="submitScrapRoll()"
+                    style="background: var(--red); color: #fff;">
                     破棄して次へ進む
                 </button>
             </div>
@@ -1419,9 +1438,11 @@
                 材料の短尺や不足により、予定巻数に満たない状態でロットを完了します。
             </p>
 
-            <div style="background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--btn-radius); padding: 12px 16px; margin-bottom: 16px;">
+            <div
+                style="background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--btn-radius); padding: 12px 16px; margin-bottom: 16px;">
                 <div style="font-size: 0.825rem; color: var(--text-soft); font-weight: 700;">予定巻き数</div>
-                <div style="font-size: 1.2rem; font-weight: 900; color: var(--text-main);" id="plannedRollsDisplay">3 巻</div>
+                <div style="font-size: 1.2rem; font-weight: 900; color: var(--text-main);" id="plannedRollsDisplay">3 巻
+                </div>
             </div>
 
             <label style="font-size: 0.85rem; font-weight: 800; color: var(--text-main);">
@@ -1429,7 +1450,8 @@
                 <input type="number" class="modal-input" id="inputActualRolls" min="0" max="99" value="1">
             </label>
 
-            <label style="font-size: 0.85rem; font-weight: 800; color: var(--text-main); margin-top: 12px; display: block;">
+            <label
+                style="font-size: 0.85rem; font-weight: 800; color: var(--text-main); margin-top: 12px; display: block;">
                 中途終了の理由:
                 <select class="modal-input" id="selectFinishReason">
                     <option value="材料短尺・原反不足">材料短尺・原反不足</option>
@@ -1441,7 +1463,8 @@
 
             <div class="modal-actions" style="margin-top: 20px;">
                 <button type="button" class="btn-edge" onclick="closeFinishEarlyModal()">キャンセル</button>
-                <button type="button" class="btn-edge finish-btn" onclick="submitFinishEarly()" style="background: var(--brand); color: #fff;">
+                <button type="button" class="btn-edge finish-btn" onclick="submitFinishEarly()"
+                    style="background: var(--brand); color: #fff;">
                     完了を確定する
                 </button>
             </div>

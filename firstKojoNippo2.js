@@ -578,6 +578,13 @@ function getTablet1Hinban(item) {
     return item.kizai || item.hinban || '品番未設定';
 }
 
+function getTablet1OrderIndex(item, fallback) {
+    if (item && item.orderIndex !== undefined && item.orderIndex !== null && item.orderIndex !== '') {
+        return item.orderIndex;
+    }
+    return fallback;
+}
+
 // -----------------------------------------------------
 // Fetch Production Queue from API
 // -----------------------------------------------------
@@ -710,6 +717,7 @@ function renderHeroCard() {
     const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
     const totalRolls = Number(item.totalRolls) || 1;
     const hinban = getTablet1Hinban(item);
+    const listNum = getTablet1OrderIndex(item, null);
     const color = item.color || '標準';
     const metersPerRoll = item.rollMeters || item.metersPerRoll || item.meters || 100;
     const photoUrl = item.imageUrl || item.photoUrl || '';
@@ -724,6 +732,7 @@ function renderHeroCard() {
             <!-- Header of Hero: Status, Counters & Lot (Below Name) -->
             <div class="hero-card-header">
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    ${listNum ? `<div class="queue-pos-badge" style="font-size: 0.825rem; padding: 4px 11px;">#${listNum}</div>` : ''}
                     <div class="hero-status-pill">
                         <span>▶</span>
                         <span>現在包装中 (Wrapping)</span>
@@ -815,7 +824,7 @@ function renderQueueSection() {
     }
 
     container.innerHTML = items.map((item, index) => {
-        const qPos = index + 1;
+        const listNum = getTablet1OrderIndex(item, index + 1);
         const hinban = getTablet1Hinban(item);
         const color = item.color || '標準';
         const hinmei = item.hinmei || '-';
@@ -827,7 +836,7 @@ function renderQueueSection() {
         return `
             <div class="queue-item-card" onclick="handleSelectQueueItem('${qId}', '${escapeHtml(hinban)}')">
                 <div class="queue-card-top">
-                    <div class="queue-pos-badge">順番 #${qPos}</div>
+                    <div class="queue-pos-badge">#${listNum}</div>
                     <div class="queue-rolls-tag">${rolls} 巻 予定</div>
                 </div>
 
@@ -840,13 +849,6 @@ function renderQueueSection() {
                         <div class="queue-color-hinmei">🎨 ${escapeHtml(color)} · ${escapeHtml(hinmei)}</div>
                         ${okyakuHinban ? `<div class="queue-customer">客品番: ${escapeHtml(okyakuHinban)}</div>` : ''}
                     </div>
-                </div>
-
-                <div class="queue-card-action">
-                    <button type="button" class="queue-switch-btn">
-                        <span>👆</span>
-                        <span>このロットを包装開始 (Start)</span>
-                    </button>
                 </div>
             </div>
         `;
