@@ -1775,6 +1775,76 @@
             flex-wrap: wrap;
         }
 
+        .btn-project-monitor {
+            font-size: 0.85rem;
+            font-weight: 700;
+            padding: 6px 12px;
+            border-radius: 6px;
+            background: var(--blue-soft);
+            color: var(--blue);
+            border: 1px solid rgba(46, 111, 242, 0.25);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            transition: all var(--transition-smooth);
+            user-select: none;
+            box-shadow: none;
+            line-height: 1.25;
+            white-space: nowrap;
+        }
+
+        .btn-project-monitor:hover {
+            background: #DBEAFE;
+            border-color: rgba(46, 111, 242, 0.45);
+            color: #1D4ED8;
+        }
+
+        .btn-project-monitor:active {
+            transform: scale(0.97);
+            background: #BFDBFE;
+        }
+
+        .btn-project-monitor svg {
+            flex-shrink: 0;
+            stroke: currentColor;
+        }
+
+        .btn-reset-monitor {
+            font-size: 0.85rem;
+            font-weight: 700;
+            padding: 6px 12px;
+            border-radius: 6px;
+            background: var(--red-soft);
+            color: var(--red);
+            border: 1px solid rgba(239, 68, 68, 0.25);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            transition: all var(--transition-smooth);
+            user-select: none;
+            box-shadow: none;
+            line-height: 1.25;
+            white-space: nowrap;
+        }
+
+        .btn-reset-monitor:hover {
+            background: #FEE2E2;
+            color: #DC2626;
+            border-color: rgba(220, 38, 38, 0.45);
+        }
+
+        .btn-reset-monitor:active {
+            transform: scale(0.97);
+            background: #FECACA;
+        }
+
+        .btn-reset-monitor svg {
+            flex-shrink: 0;
+            stroke: currentColor;
+        }
+
         .info-badge-title {
             font-size: 0.75rem;
             font-weight: 700;

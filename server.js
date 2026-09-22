@@ -1208,7 +1208,45 @@ app.post("/api/broadcast-scan", async (req, res) => {
   });
   
   // ✅ Insert log to tabletLogDB in parallel with SSE broadcast
-  if ((sebanggo || zuban) && hinban) {
+  if (isClearAction) {
+    try {
+      await client.connect();
+      const database = client.db("submittedDB");
+      const tabletLogDB = database.collection("tabletLogDB");
+      
+      const currentDate = new Date();
+      const dateYYYYMMDD = currentDate.toISOString().split('T')[0]; // yyyy-mm-dd
+      const timeHHMMSS = currentDate.toTimeString().split(' ')[0]; // HH:mm:ss
+      
+      // Extract 工場 and sessionID from additionalData
+      const 工場 = additionalData?.工場 || additionalData?.factory || '';
+      const sessionID = additionalData?.sessionID || '';
+      const Worker_Name = additionalData?.Worker_Name || additionalData?.workerName || additionalData?.worker || '';
+      
+      for (const normalizedMachineId of machineIds) {
+        const logEntry = {
+          sessionID: sessionID,
+          背番号: '',
+          図番: '',
+          品番: '',
+          工場: 工場,
+          設備: normalizedMachineId,
+          設備_原形式: machineId.toUpperCase(),
+          Worker_Name,
+          Action: 'clear',
+          Status: 'Reset',
+          Timestamp: currentDate.toISOString(),
+          Date: dateYYYYMMDD,
+          Time: timeHHMMSS,
+          AdditionalData: { action: 'clear' }
+        };
+        await tabletLogDB.insertOne(logEntry);
+      }
+      console.log(`📝 Tablet clear/reset logs inserted for ${machineIds.length} machine(s) (Action: clear, Status: Reset)`);
+    } catch (error) {
+      console.error('❌ Error inserting tablet clear log:', error);
+    }
+  } else if ((sebanggo || zuban) && hinban) {
     try {
       await client.connect();
       const database = client.db("submittedDB");

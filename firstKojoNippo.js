@@ -2519,7 +2519,11 @@ async function clearPdfDisplayer() {
             machineId: state.machineName || 'PSA2',
             timestamp: new Date().toISOString(),
             action: 'clear',
-            additionalData: { action: 'clear' },
+            additionalData: {
+                action: 'clear',
+                factory: '第一工場',
+                Worker_Name: state.workerName || ''
+            },
             zuban: null,
             hinban: null
         };
@@ -2567,10 +2571,8 @@ function selectScheduleItem(index) {
     // Jump to Info tab (tab index 3) and load full details
     switchMainTab(3);
 
-    // Broadcast to pdfDisplayer monitor
-    if (item.zuban) {
-        notifyPdfDisplayer(item, item.zuban);
-    }
+    // Note: Do not auto-broadcast to pdfDisplayer monitor on simple row selection.
+    // User can click "Project to Monitor" button in Info tab or start a lot to broadcast.
 
     loadItemDetail(item);
 }
@@ -2590,7 +2592,8 @@ async function notifyPdfDisplayer(item, zuban) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 machineId: machineId,
-                zuban: zuban || '',
+                zuban: zuban || item.zuban || item.hinban || '',
+                sebanggo: item.sebanggo || item.hinban || '',
                 hinban: item.hinban || '',
                 timestamp: new Date().toISOString(),
                 additionalData: {
@@ -2608,6 +2611,27 @@ async function notifyPdfDisplayer(item, zuban) {
     } catch (err) {
         console.warn('⚠️ Error notifying pdfDisplayer:', err);
     }
+}
+
+async function projectCurrentItemToMonitor() {
+    const item = state.selectedItem;
+    if (!item || !item.hinban) {
+        showToast(_t('fk_info_no_lot') || 'ロットが選択されていません', 'error');
+        return;
+    }
+
+    const productMaster = state.lastLoadedItemDetailData?.product?.['品目マスタ'] || {};
+    const zuban = productMaster['図番'] || item.zuban || '';
+
+    showToast(_t('fk_projecting_to_monitor') || 'モニターへ投影中...', 'info', 1200);
+    await notifyPdfDisplayer(item, zuban);
+    showToast(_t('fk_projected_to_monitor') || 'モニターに投影しました', 'success', 2500);
+}
+
+async function resetMonitorDisplay() {
+    showToast(_t('fk_resetting_monitor') || 'モニターをリセット中...', 'info', 1200);
+    await clearPdfDisplayer();
+    showToast(_t('fk_monitor_reset') || 'モニターをリセットしました', 'success', 2500);
 }
 
 document.addEventListener('languageChanged', (e) => {
@@ -2947,65 +2971,7 @@ async function renderInfoTab(data, item) {
     // Calculate duration in minutes if not already present on item
     const durationMins = item.duration || (process2010 && process2010['作業時間'] ? Math.round((Number(process2010['作業時間']) * (Number(item.meters) || 100) * 100) / 60) : 0);
 
-    // Group Lifecycle Info & Banner
-    const targetGroup = state.currentGroups ? state.currentGroups.find(g => g.items.some(it => it.id === item.id)) : null;
-    const groupIdx = state.currentGroups && targetGroup ? state.currentGroups.indexOf(targetGroup) : -1;
-    const lifecycle = targetGroup ? getGroupLifecycle(targetGroup.groupId) : { status: 'pending' };
-
-    let bannerHTML = '';
-    if (lifecycle.status === 'in-progress' || lifecycle.status === 'running') {
-        bannerHTML = `
-            <div class="info-preview-banner running-banner" style="background: #FAF5FF; border-color: #C084FC;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 1.3rem;">🟣</span>
-                    <div>
-                        <strong style="color: #6B21A8; font-size: 0.95rem;">${_t('fk_info_running_title') || '現在生産中'}</strong>
-                        <div style="font-size: 0.8rem; color: #7E22CE;">${_t('fk_info_running_start') || '開始時間:'} ${lifecycle.actualStartTime || '--:--'} • ${_t('fk_info_running_monitor') || 'モニター表示中'}</div>
-                    </div>
-                </div>
-                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">${_t('fk_info_btn_feed_queue') || '材料投入・キュー追加'}</button>
-                    <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${groupIdx}, event)">${_t('fk_info_btn_finish_prod') || '生産完了'}</button>
-                </div>
-            </div>
-        `;
-    } else if (lifecycle.status === 'completed') {
-        bannerHTML = `
-            <div class="info-preview-banner" style="background: #DEF7EC; border-color: #A7F3D0;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div>
-                        <strong style="color: #03543F; font-size: 0.95rem;">${_t('fk_info_completed_title') || '生産完了済み'}</strong>
-                        <div style="font-size: 0.8rem; color: #047857;">${_t('fk_info_completed_actual') || '実績:'} ${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} (${lifecycle.actualDurationMins} ${_t('fk_min_unit') || '分'})</div>
-                    </div>
-                </div>
-                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">${_t('fk_info_btn_feed_queue') || '材料投入・キュー追加'}</button>
-                    <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${groupIdx}, event)">${_t('fk_info_btn_reopen') || '再開・リセット'}</button>
-                </div>
-            </div>
-        `;
-    } else {
-        // Pending (Preview Mode)
-        bannerHTML = `
-            <div class="info-preview-banner">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <div>
-                        <strong style="color: #1E40AF; font-size: 0.95rem;">${_t('fk_info_preview_title') || '事前確認中'}</strong>
-                        <div style="font-size: 0.8rem; color: #3B82F6;">${_t('fk_info_preview_desc') || '※タブレット上での事前確認です。モニター表示には影響しません。'}</div>
-                    </div>
-                </div>
-                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">${_t('fk_info_btn_feed_queue') || '材料投入・キュー追加'}</button>
-                    ${groupIdx >= 0 ? `<button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${groupIdx}, event)">${_t('fk_info_btn_start_lot') || 'このロットを開始'}</button>` : ''}
-                </div>
-            </div>
-        `;
-    }
-
     container.innerHTML = `
-        <!-- Contextual Status Banner -->
-        ${bannerHTML}
-
         <!-- PART 1: Top Part - Product Info -->
         <div class="info-card">
             <div class="info-card-header">
@@ -3014,12 +2980,22 @@ async function renderInfoTab(data, item) {
                     <div class="info-main-title">${item.hinban}</div>
                     <div class="info-sub-title">${localizeMasterValue(productMaster['品名'] || item.hinmei || '')} ${productMaster['仕様'] ? `— ${localizeMasterValue(productMaster['仕様'])}` : ''}</div>
                 </div>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">${_t('fk_info_btn_feed_queue') || '材料投入・キュー追加'}</button>
-                    <span class="tag-pill roll-tag" style="font-size: 0.9rem; padding: 6px 12px;">Roll ${item.rollIndex || 1} / ${item.totalRolls || 1}</span>
-                    <span class="tag-pill meter-tag" style="font-size: 0.9rem; padding: 6px 12px;">${item.meters || 0} m</span>
-                    <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800;">${item.startTime || '--:--'} - ${item.endTime || '--:--'}</span>
-                    <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800; background: #ECFDF5; color: #059669; border-color: rgba(5, 150, 105, 0.3);">${durationMins} ${_t('fk_min_unit') || '分'}</span>
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <button type="button" class="btn-project-monitor" onclick="projectCurrentItemToMonitor()">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+                            <line x1="8" y1="21" x2="16" y2="21"></line>
+                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                        </svg>
+                        <span>${_t('fk_info_btn_project_monitor') || 'モニターに投影'}</span>
+                    </button>
+                    <button type="button" class="btn-reset-monitor" onclick="resetMonitorDisplay()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                            <path d="M3 3v5h5"></path>
+                        </svg>
+                        <span>${_t('fk_info_btn_reset_monitor') || 'モニターをリセット'}</span>
+                    </button>
                 </div>
             </div>
 
