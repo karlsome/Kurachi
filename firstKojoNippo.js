@@ -65,7 +65,13 @@ const state = {
     currentModalHinban: '',
     currentModalLotNo: '',
     currentModalRawQR: '',
-    currentModalCustomSlices: {}
+    currentModalCustomSlices: {},
+
+    // Monitor Blank Detection & Projection State
+    isMonitorBlank: null,
+    lastProjectedItem: null,
+    blankMonitorWarningDismissedUntil: 0,
+    pendingBlankMonitorMaterial: null
 };
 
 // -----------------------------------------------------
@@ -373,9 +379,11 @@ function switchMainTab(index, skipAnimation = false) {
     }
     if (index === 2) {
         fetchProductionQueue();
+        checkBlankMonitorWarning();
     }
     if (index === 3) {
         loadItemDetail(state.selectedItem);
+        checkBlankMonitorWarning();
     }
     if (index === 4) {
         renderHistoryList();
@@ -2515,6 +2523,8 @@ function undoLastDoneBatch() {
 // Clear PDF Displayer Monitor
 async function clearPdfDisplayer() {
     try {
+        state.isMonitorBlank = true;
+        state.lastProjectedItem = null;
         const payload = {
             machineId: state.machineName || 'PSA2',
             timestamp: new Date().toISOString(),
@@ -2536,6 +2546,8 @@ async function clearPdfDisplayer() {
     } catch (err) {
         console.warn('Could not send clear broadcast to pdfDisplayer:', err);
     }
+    // Check if remaining queue items exist and need warning
+    checkBlankMonitorWarning();
 }
 
 function renderEmptySchedule(dateStr) {
@@ -2583,6 +2595,10 @@ function selectScheduleItem(index) {
 async function notifyPdfDisplayer(item, zuban) {
     if (!item || (!zuban && !item.hinban)) return;
 
+    state.isMonitorBlank = false;
+    state.lastProjectedItem = item;
+    updateBlankMonitorWarningUI(false);
+
     const machineId = state.machineName || 'FIRST_FACTORY';
     console.log(`📡 Notifying pdfDisplayer -> Machine: ${machineId}, 図番: ${zuban}, 品番: ${item.hinban}`);
 
@@ -2625,13 +2641,265 @@ async function projectCurrentItemToMonitor() {
 
     showToast(_t('fk_projecting_to_monitor') || 'モニターへ投影中...', 'info', 1200);
     await notifyPdfDisplayer(item, zuban);
+    state.isMonitorBlank = false;
+    state.lastProjectedItem = item;
+    updateBlankMonitorWarningUI(false);
     showToast(_t('fk_projected_to_monitor') || 'モニターに投影しました', 'success', 2500);
 }
 
 async function resetMonitorDisplay() {
     showToast(_t('fk_resetting_monitor') || 'モニターをリセット中...', 'info', 1200);
     await clearPdfDisplayer();
+    state.isMonitorBlank = true;
+    state.lastProjectedItem = null;
     showToast(_t('fk_monitor_reset') || 'モニターをリセットしました', 'success', 2500);
+    checkBlankMonitorWarning();
+}
+
+// -----------------------------------------------------
+// Blank Monitor Detection & Current Material Projection
+// -----------------------------------------------------
+function getCurrentQueueMaterial() {
+    const activeAndQueued = (state.stagingQueue || []).filter(item => 
+        item && (item.status === 'active' || item.status === 'in-progress' || item.status === 'queued' || item.status === 'queue')
+    );
+    if (activeAndQueued.length === 0) return null;
+
+    // 1. Prioritize active/in-progress roll currently being worked on
+    const activeItem = activeAndQueued.find(it => it.status === 'active' || it.status === 'in-progress');
+    if (activeItem) return activeItem;
+
+    // 2. If no active roll yet, return the first waiting roll in queue
+    return activeAndQueued[0];
+}
+
+async function checkMonitorBlankStatus() {
+    try {
+        const machine = state.machineName || 'PSA2';
+        const res = await fetch(`${serverURL}/api/machine-current-scan/${encodeURIComponent(machine)}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.success) {
+                const isBlank = Boolean(data.isIdle || !data.currentScan || (!data.currentScan.zuban && !data.currentScan.sebanggo && !data.currentScan.hinban));
+                state.isMonitorBlank = isBlank;
+                if (!isBlank && data.currentScan) {
+                    state.lastProjectedItem = {
+                        hinban: data.currentScan.hinban,
+                        zuban: data.currentScan.zuban,
+                        sebanggo: data.currentScan.sebanggo
+                    };
+                }
+                return isBlank;
+            }
+        }
+    } catch (err) {
+        console.warn('⚠️ Could not check monitor scan status from server:', err);
+    }
+    // Fallback: If server unreachable, use state.isMonitorBlank or assume true if not projected yet
+    if (state.isMonitorBlank !== null && state.isMonitorBlank !== undefined) {
+        return state.isMonitorBlank;
+    }
+    return true;
+}
+
+function updateBlankMonitorWarningUI(show, item) {
+    const banner = document.getElementById('blankMonitorWarningBanner');
+    const projectBtns = document.querySelectorAll('.btn-project-monitor');
+
+    if (!show) {
+        if (banner) banner.style.display = 'none';
+        projectBtns.forEach(btn => btn.classList.remove('is-blank-highlight'));
+        return;
+    }
+
+    if (banner) {
+        const sub = document.getElementById('blankMonitorBannerSubtext');
+        if (sub && item) {
+            const name = getScheduleDisplayName(item) || item.hinban || item.kizai || '';
+            sub.textContent = `${name ? `「${name}」を` : ''}${_t('fk_monitor_blank_banner_sub') || '現在の材料をモニターに投影してください'}`;
+        }
+        banner.style.display = 'flex';
+    }
+
+    projectBtns.forEach(btn => btn.classList.add('is-blank-highlight'));
+}
+
+async function projectQueueMaterialToMonitor(queueItem) {
+    if (!queueItem) {
+        queueItem = getCurrentQueueMaterial() || state.selectedItem;
+    }
+    if (!queueItem || (!queueItem.hinban && !queueItem.kizai)) {
+        showToast(_t('fk_info_no_lot') || '材料が選択されていません', 'error');
+        return false;
+    }
+
+    // 1. Resolve zuban from item or scheduledItems or currentGroups
+    let zuban = queueItem.zuban;
+    if (!zuban && state.scheduledItems) {
+        const matched = state.scheduledItems.find(s =>
+            (queueItem.itemId && s.id === queueItem.itemId) ||
+            (s.hinban === queueItem.hinban && (Number(s.rollIndex) === Number(queueItem.rollIndex) || Number(s.orderIndex) === Number(queueItem.orderIndex))) ||
+            (s.kizai === queueItem.kizai && Number(s.orderIndex) === Number(queueItem.orderIndex))
+        );
+        if (matched && matched.zuban) zuban = matched.zuban;
+    }
+    if (!zuban && state.currentGroups) {
+        const matchedGroup = state.currentGroups.find(g =>
+            (queueItem.groupId && g.groupId === queueItem.groupId) ||
+            (g.hinban === queueItem.hinban)
+        );
+        if (matchedGroup && matchedGroup.zuban) zuban = matchedGroup.zuban;
+    }
+
+    // 2. Fallback to product master if still missing zuban
+    if (!zuban && (queueItem.hinban || queueItem.kizai)) {
+        try {
+            const h = queueItem.hinban || queueItem.kizai;
+            const res = await fetch(`${serverURL}/api/production/material-detail?hinban=${encodeURIComponent(h)}`);
+            if (res.ok) {
+                const data = await res.json();
+                const pm = data?.product?.['品目マスタ'] || {};
+                zuban = pm['図番'] || pm['背番号'] || '';
+            }
+        } catch (e) {
+            console.warn('Could not fetch zuban from product master:', e);
+        }
+    }
+
+    const itemForDisplayer = {
+        ...queueItem,
+        type: queueItem.type || 'hinban',
+        hinban: queueItem.hinban || queueItem.kizai,
+        zuban: zuban || queueItem.zuban || queueItem.hinban || ''
+    };
+
+    showToast(_t('fk_projecting_to_monitor') || 'モニターへ投影中...', 'info', 1200);
+    await notifyPdfDisplayer(itemForDisplayer, zuban || itemForDisplayer.hinban);
+
+    state.selectedItem = itemForDisplayer;
+    state.isMonitorBlank = false;
+    state.lastProjectedItem = itemForDisplayer;
+    sessionStorage.setItem('firstkojo_nippo_selected_item', JSON.stringify(itemForDisplayer));
+
+    updateBlankMonitorWarningUI(false);
+    showToast(_t('fk_projected_to_monitor') || 'モニターに投影しました', 'success', 2500);
+
+    if (state.currentMainTab === 3) {
+        loadItemDetail(itemForDisplayer);
+    }
+    return true;
+}
+
+async function checkBlankMonitorWarning(options = { showModal: true }) {
+    // 1. Check if there is data in the queue tab
+    const activeAndQueued = (state.stagingQueue || []).filter(item => 
+        item && (item.status === 'active' || item.status === 'in-progress' || item.status === 'queued' || item.status === 'queue')
+    );
+
+    // Only blank when nothing is processing: if queue is empty, do not warn
+    if (activeAndQueued.length === 0) {
+        updateBlankMonitorWarningUI(false);
+        return;
+    }
+
+    // 2. Check if monitor is blank
+    const isBlank = await checkMonitorBlankStatus();
+    if (!isBlank) {
+        updateBlankMonitorWarningUI(false);
+        return;
+    }
+
+    const currentMaterial = getCurrentQueueMaterial();
+    if (!currentMaterial) {
+        updateBlankMonitorWarningUI(false);
+        return;
+    }
+
+    // Update banner UI in Queue tab
+    updateBlankMonitorWarningUI(true, currentMaterial);
+
+    if (!options.showModal) return;
+
+    // Throttle / snooze check
+    const now = Date.now();
+    if (state.blankMonitorWarningDismissedUntil && now < state.blankMonitorWarningDismissedUntil) {
+        return;
+    }
+
+    // Do not disrupt user if another critical modal is open
+    const batchModal = document.getElementById('batchActionModal');
+    if (batchModal && (batchModal.classList.contains('open') || batchModal.classList.contains('active') || batchModal.style.display === 'flex')) {
+        return;
+    }
+    const printModal = document.getElementById('printProgressModal');
+    if (printModal && (printModal.classList.contains('open') || printModal.classList.contains('active') || printModal.style.display === 'flex')) {
+        return;
+    }
+    const feedModal = document.getElementById('materialFeedModal');
+    if (feedModal && (feedModal.classList.contains('open') || feedModal.classList.contains('active') || feedModal.style.display === 'flex')) {
+        return;
+    }
+
+    promptBlankMonitorProjection(currentMaterial);
+}
+
+function promptBlankMonitorProjection(item) {
+    if (!item) item = getCurrentQueueMaterial();
+    if (!item) return;
+
+    const displayName = getScheduleDisplayName(item) || item.hinban || item.kizai || '材料';
+    const rollDisplay = item.currentRollIndex || item.rollIndex || 1;
+    const totalRollsDisplay = item.totalRolls || 1;
+
+    const title = _t('fk_monitor_blank_title') || 'モニター未投影の確認 (Monitor is Blank)';
+    const bodyHTML = `
+        <div style="background: #FFFBEB; border: 1.5px solid #F59E0B; border-radius: var(--btn-radius, 10px); padding: 16px; margin-bottom: 16px;">
+            <div style="display: flex; align-items: flex-start; gap: 12px;">
+                <span style="font-size: 1.8rem; line-height: 1;">📺</span>
+                <div>
+                    <div style="font-size: 1rem; font-weight: 800; color: #92400E; margin-bottom: 4px;">
+                        ${_t('fk_monitor_blank_heading') || 'モニターがブランク（未投影）です'}
+                    </div>
+                    <div style="font-size: 0.88rem; color: #78350F; line-height: 1.5;">
+                        ${_t('fk_monitor_blank_desc') || '投入キューに材料がありますが、モニターに図面が投影されていません。'}
+                    </div>
+                </div>
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.9); border: 1px solid #FCD34D; border-radius: 8px; padding: 10px 14px; margin-top: 12px;">
+                <div style="font-size: 0.78rem; font-weight: 700; color: #92400E; text-transform: uppercase;">${_t('fk_current_material') || '現在の材料'}</div>
+                <div style="font-size: 1.15rem; font-weight: 900; color: #1E293B; margin-top: 2px;">${escapeHtml(displayName)}</div>
+                <div style="font-size: 0.82rem; color: #64748B; margin-top: 2px;">
+                    ${_t('fk_roll_unit') || 'ロール'}: <strong>#${escapeHtml(String(rollDisplay))}</strong> / ${escapeHtml(String(totalRollsDisplay))}
+                    ${item.orderIndex ? ` • ${_t('fk_th_no') || '順序'}: #${escapeHtml(String(item.orderIndex))}` : ''}
+                </div>
+            </div>
+        </div>
+        <p style="font-size: 0.92rem; color: var(--text-main, #334155); text-align: center; margin: 0; line-height: 1.6; font-weight: 600;">
+            ${_t('fk_prompt_project_current_material') || 'モニターに現在の材料を投影しますか？'}
+        </p>
+    `;
+
+    const actionsHTML = `
+        <button type="button" class="btn btn-secondary" onclick="dismissBlankMonitorWarning()">${_t('fk_btn_later') || 'あとで'}</button>
+        <button type="button" class="btn btn-primary" style="background: #10B981; border-color: #10B981; font-weight: 800;" onclick="confirmProjectCurrentMaterialFromWarning()">${_t('fk_btn_project_now') || 'モニターに投影する'}</button>
+    `;
+
+    state.pendingBlankMonitorMaterial = item;
+    showBatchModal(title, bodyHTML, actionsHTML);
+}
+
+async function confirmProjectCurrentMaterialFromWarning() {
+    closeBatchModal();
+    const item = state.pendingBlankMonitorMaterial || getCurrentQueueMaterial();
+    if (item) {
+        await projectQueueMaterialToMonitor(item);
+    }
+}
+
+function dismissBlankMonitorWarning() {
+    closeBatchModal();
+    // Snooze popup for 90 seconds while keeping banner in Queue tab visible
+    state.blankMonitorWarningDismissedUntil = Date.now() + 90 * 1000;
 }
 
 document.addEventListener('languageChanged', (e) => {
@@ -2981,7 +3249,7 @@ async function renderInfoTab(data, item) {
                     <div class="info-sub-title">${localizeMasterValue(productMaster['品名'] || item.hinmei || '')} ${productMaster['仕様'] ? `— ${localizeMasterValue(productMaster['仕様'])}` : ''}</div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn-project-monitor" onclick="projectCurrentItemToMonitor()">
+                    <button type="button" class="btn-project-monitor ${state.isMonitorBlank ? 'is-blank-highlight' : ''}" onclick="projectCurrentItemToMonitor()">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="2" y="3" width="20" height="14" rx="2"></rect>
                             <line x1="8" y1="21" x2="16" y2="21"></line>
@@ -5646,6 +5914,9 @@ async function submitModalRollToQueue() {
 
         const rawQRVal = state.currentModalRawQR || document.getElementById('feedRawQRInput')?.value?.trim() || edit.qrScanned || '';
 
+        const parsedBicho = parseFloat(state.currentModalBicho);
+        const bichoVal = !isNaN(parsedBicho) ? parsedBicho : (parseFloat(edit?.bicho || edit?.meters || item?.meters) || 0);
+
         const enqueuePayload = {
             date: state.selectedDate,
             machine: state.machineName || 'PSA2',
@@ -5848,6 +6119,9 @@ async function fetchProductionQueue() {
 
             // Auto-trigger pdfDisplayer when an item transitions to in-progress or a new in-progress is detected
             checkAndSyncActiveInProgress(data.queue);
+
+            // Check if monitor is still blank while items are queued/processing
+            checkBlankMonitorWarning();
         }
     } catch (err) {
         console.warn('⚠️ Could not fetch production queue:', err);
@@ -5916,6 +6190,7 @@ function renderStagingQueue() {
                 ${_t('fk_empty_queue')}
             </div>
         `;
+        updateBlankMonitorWarningUI(false);
         return;
     }
 
@@ -7087,6 +7362,10 @@ document.addEventListener('DOMContentLoaded', () => {
             pending.forEach(rec => enqueueBackgroundPhotoUpload(rec.itemId));
         }
     }).catch(err => console.warn('Could not check pending photo uploads:', err));
+
+    // Periodic detection: Ensure monitor is not blank while materials are being processed in queue
+    setTimeout(() => checkBlankMonitorWarning({ showModal: true }), 2000);
+    setInterval(() => checkBlankMonitorWarning({ showModal: true }), 25000);
 });
 
 window.addEventListener('online', () => {

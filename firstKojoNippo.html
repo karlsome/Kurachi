@@ -1810,6 +1810,111 @@
             stroke: currentColor;
         }
 
+        .btn-project-monitor.is-blank-highlight {
+            background: #FEF3C7;
+            color: #B45309;
+            border-color: #F59E0B;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+            animation: btnBlankAttentionPulse 2s infinite ease-in-out;
+        }
+
+        @keyframes btnBlankAttentionPulse {
+            0%, 100% { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3); transform: scale(1); }
+            50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); transform: scale(1.02); }
+        }
+
+        /* Blank Monitor Alert Banner in Queue Tab */
+        .blank-monitor-banner {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%);
+            border: 1.5px solid #F59E0B;
+            border-radius: 10px;
+            padding: 10px 14px;
+            margin-bottom: 14px;
+            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);
+            animation: bannerFadeIn 0.3s ease;
+        }
+
+        @keyframes bannerFadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .blank-monitor-banner-content {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .blank-monitor-banner-icon {
+            font-size: 1.5rem;
+            line-height: 1;
+            flex-shrink: 0;
+            animation: monitorIconPulse 2s infinite ease-in-out;
+        }
+
+        @keyframes monitorIconPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.18); }
+        }
+
+        .blank-monitor-banner-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .blank-monitor-banner-text strong {
+            font-size: 0.92rem;
+            font-weight: 800;
+            color: #92400E;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .blank-monitor-banner-text span {
+            font-size: 0.8rem;
+            color: #78350F;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .btn-blank-monitor-project {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #D97706;
+            color: #FFFFFF;
+            border: 1px solid #B45309;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 800;
+            cursor: pointer;
+            white-space: nowrap;
+            flex-shrink: 0;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(217, 119, 6, 0.25);
+        }
+
+        .btn-blank-monitor-project:hover {
+            background: #B45309;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(217, 119, 6, 0.35);
+        }
+
+        .btn-blank-monitor-project:active {
+            transform: translateY(0);
+        }
+
         .btn-reset-monitor {
             font-size: 0.85rem;
             font-weight: 700;
@@ -4228,6 +4333,25 @@
                         </div>
                         <span class="scanner-header-pill" id="queueScannerStatus" data-i18n="fk_scanner_ready">スキャナー待機中</span>
                     </div>
+                </div>
+
+                <!-- Blank Monitor Alert Banner -->
+                <div id="blankMonitorWarningBanner" class="blank-monitor-banner" style="display: none;">
+                    <div class="blank-monitor-banner-content">
+                        <span class="blank-monitor-banner-icon">📺</span>
+                        <div class="blank-monitor-banner-text">
+                            <strong data-i18n="fk_monitor_blank_banner_title">モニターがブランク（未投影）です</strong>
+                            <span id="blankMonitorBannerSubtext" data-i18n="fk_monitor_blank_banner_sub">現在の材料をモニターに投影してください</span>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-blank-monitor-project" onclick="projectQueueMaterialToMonitor()">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+                            <line x1="8" y1="21" x2="16" y2="21"></line>
+                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                        </svg>
+                        <span data-i18n="fk_btn_project_now">モニターに投影する</span>
+                    </button>
                 </div>
 
                 <!-- Flat Itemized Queue Container -->
