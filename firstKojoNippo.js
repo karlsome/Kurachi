@@ -1739,8 +1739,30 @@ function renderScheduleTableView(groups, items) {
 
         const isProcessed = isScheduleRowProcessed(item, idx, groups);
 
+        // Map item to corresponding group and roll index in groups
+        let matchedGIdx = 0;
+        let matchedRIdx = 0;
+        if (groups && Array.isArray(groups)) {
+            for (let gi = 0; gi < groups.length; gi++) {
+                const grp = groups[gi];
+                if (grp && grp.items) {
+                    const ri = grp.items.findIndex(it => 
+                        it === item || 
+                        (it.id && item.id && it.id === item.id) ||
+                        (it.orderIndex !== undefined && item.orderIndex !== undefined && Number(it.orderIndex) === Number(item.orderIndex))
+                    );
+                    if (ri !== -1) {
+                        matchedGIdx = gi;
+                        matchedRIdx = ri;
+                        break;
+                    }
+                }
+            }
+        }
+        const itemId = getItemKey(item, matchedGIdx, matchedRIdx);
+
         rows.push(`
-            <tr class="item-row ${isProcessed ? 'is-processed' : ''}" data-item-id="${escapeHtml(item.id || '')}" onclick="previewHistoryItem('${escapeHtml(item.id || '')}', event)" style="cursor: pointer;" title="${isProcessed ? '処理済み (クリックで詳細)' : _t('fk_btn_detail')}">
+            <tr class="item-row ${isProcessed ? 'is-processed' : ''}" data-item-id="${escapeHtml(itemId)}" onclick="openMaterialFeedModalForRollItem('${escapeHtml(itemId)}', ${matchedGIdx}, ${matchedRIdx}, event)" style="cursor: pointer;" title="${isProcessed ? '処理済み (キューに追加済)' : _t('fk_btn_feed')}">
                 <td class="center font-bold">${idx + 1}</td>
                 <td class="center time-cell">
                     <strong>${escapeHtml(item.startTime || '—')}</strong><br>
@@ -4540,15 +4562,40 @@ function proceedToCameraFromManual() {
 function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
     if (event) event.stopPropagation();
 
-    if (!state.currentGroups || !state.currentGroups[gIdx]) {
-        console.warn('Group not found for index:', gIdx);
+    if (!state.currentGroups || state.currentGroups.length === 0) {
+        if (state.scheduledItems && state.scheduledItems.length > 0) {
+            state.currentGroups = groupScheduledItems(state.scheduledItems);
+        }
+    }
+
+    let group = (state.currentGroups && gIdx !== undefined && gIdx !== null && gIdx >= 0) ? state.currentGroups[gIdx] : null;
+    let item = (group && group.items && rIdx !== undefined && rIdx !== null && rIdx >= 0) ? group.items[rIdx] : null;
+
+    // Fallback: search by itemId across groups if not directly found
+    if ((!group || !item) && state.currentGroups) {
+        for (let gi = 0; gi < state.currentGroups.length; gi++) {
+            const grp = state.currentGroups[gi];
+            if (grp && grp.items) {
+                const ri = grp.items.findIndex(it => 
+                    (it.id && itemId && it.id === itemId) || 
+                    getItemKey(it, gi, ri) === itemId
+                );
+                if (ri !== -1) {
+                    group = grp;
+                    item = grp.items[ri];
+                    gIdx = gi;
+                    rIdx = ri;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!group || !item) {
+        console.warn('Group or item not found for index/id:', { itemId, gIdx, rIdx });
         return;
     }
-    const group = state.currentGroups[gIdx];
     if (group.type === 'setup') return;
-
-    const item = (group.items && group.items[rIdx]) || group.items[0];
-    if (!item) return;
 
     if (isRollEnqueuedOrProcessed(item, group, gIdx, rIdx)) {
         showToast('ℹ️ この巻きは既にキューに追加または処理されています', 'info', 2500);
@@ -5192,6 +5239,11 @@ async function savePhotoAndEnqueue(ctx, base64) {
             pill.className = 'flat-camera-pill is-shot';
             pill.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2 3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> 撮影済`;
         }
+    }
+    const tableRow = document.querySelector(`.history-schedule-table tr.item-row[data-item-id="${itemId}"]`);
+    if (tableRow) {
+        tableRow.classList.add('is-processed');
+        tableRow.title = '処理済み (キューに追加済)';
     }
 
     // 4. Submit and enqueue roll
