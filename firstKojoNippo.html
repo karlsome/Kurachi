@@ -3358,6 +3358,28 @@
             border-color: #A7F3D0;
         }
 
+        .feed-numpad-field.is-missing {
+            border-color: #F87171 !important;
+            background: #FEF2F2 !important;
+        }
+
+        .feed-numpad-field.is-missing .feed-numpad-field-label {
+            color: #DC2626 !important;
+        }
+
+        .feed-numpad-field.is-missing .feed-numpad-field-val {
+            color: #DC2626 !important;
+        }
+
+        .feed-numpad-field.is-filled {
+            border-color: #A7F3D0;
+        }
+
+        .btn-submit-enqueue-flat.is-incomplete {
+            opacity: 0.85;
+            box-shadow: none;
+        }
+
         .feed-numpad-field-label {
             font-size: 0.875rem;
             font-weight: 800;
@@ -4295,14 +4317,14 @@
                     <div style="display: flex; flex-direction: column; gap: 8px;">
                         <!-- 総長 -->
                         <div class="feed-numpad-field" onclick="openFieldPickerModal('socho')">
-                            <span class="feed-numpad-field-label">総長 (m)</span>
+                            <span class="feed-numpad-field-label">総長 (m) ★必須</span>
                             <span class="feed-numpad-field-val" id="manualSochoDisplay">未入力</span>
                         </div>
 
                         <!-- S引き長 -->
                         <div class="feed-numpad-field" onclick="openFieldPickerModal('shiki')">
-                            <span class="feed-numpad-field-label">S引き長 (m)</span>
-                            <span class="feed-numpad-field-val" id="manualShikiDisplay">0</span>
+                            <span class="feed-numpad-field-label">S引き長 (m) ★必須</span>
+                            <span class="feed-numpad-field-val" id="manualShikiDisplay">0 m</span>
                         </div>
 
                         <!-- 美長 / 純長 (実長) -->
@@ -4315,12 +4337,12 @@
                     <!-- 2 Metadata Fields: 品番 & ロット番号/日付 -->
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px;">
                         <div class="feed-numpad-field" style="padding: 10px 12px; flex-direction: column; align-items: flex-start; gap: 4px;" onclick="openFieldPickerModal('hinban')">
-                            <span class="feed-numpad-field-label" style="font-size: 0.75rem;">品番 / 基材コード</span>
+                            <span class="feed-numpad-field-label" style="font-size: 0.75rem;">品番 / 基材コード ★必須</span>
                             <span class="feed-numpad-field-val" id="manualHinbanDisplay" style="font-size: 0.95rem; word-break: break-all;">-</span>
                         </div>
 
                         <div class="feed-numpad-field" style="padding: 10px 12px; flex-direction: column; align-items: flex-start; gap: 4px;" onclick="openFieldPickerModal('lot')">
-                            <span class="feed-numpad-field-label" style="font-size: 0.75rem;">メーカーロット / 日付</span>
+                            <span class="feed-numpad-field-label" style="font-size: 0.75rem;">メーカーロット / 日付 ★必須</span>
                             <span class="feed-numpad-field-val" id="manualLotDisplay" style="font-size: 0.95rem; word-break: break-all;">-</span>
                         </div>
                     </div>

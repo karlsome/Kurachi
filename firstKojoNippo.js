@@ -4284,6 +4284,71 @@ function switchFeedModalView(view) {
     }
 }
 
+function validateModalRequiredFields(optCtx) {
+    const ctx = optCtx || state.currentModalRollContext;
+    const edit = (ctx && ctx.itemId) ? getItemEdit(ctx.itemId, ctx.item) : null;
+    const missing = [];
+
+    // 1. 総長 (m)
+    const rawSocho = (state.currentModalSocho !== undefined && state.currentModalSocho !== null && state.currentModalSocho !== '')
+        ? state.currentModalSocho
+        : (edit?.socho ?? '');
+    const sochoStr = String(rawSocho).trim();
+    const sochoNum = parseFloat(sochoStr);
+    const isSochoValid = Boolean(sochoStr !== '' && !isNaN(sochoNum) && sochoNum > 0);
+    if (!isSochoValid) {
+        missing.push({ field: 'socho', name: '総長 (m)' });
+    }
+
+    // 2. S引き長 (m) (0 m is valid)
+    const rawShiki = (state.currentModalShiki !== undefined && state.currentModalShiki !== null && state.currentModalShiki !== '')
+        ? state.currentModalShiki
+        : (edit?.shiki ?? '');
+    const shikiStr = String(rawShiki).trim();
+    const shikiNum = parseFloat(shikiStr);
+    const isShikiValid = Boolean(shikiStr !== '' && !isNaN(shikiNum) && shikiNum >= 0);
+    if (!isShikiValid) {
+        missing.push({ field: 'shiki', name: 'S引き長 (m)' });
+    }
+
+    // 3. 美長 / 実長 (m)
+    const rawBicho = (state.currentModalBicho !== undefined && state.currentModalBicho !== null && state.currentModalBicho !== '')
+        ? state.currentModalBicho
+        : (edit?.bicho ?? '');
+    const bichoStr = String(rawBicho).trim();
+    const bichoNum = parseFloat(bichoStr);
+    const isBichoValid = Boolean(bichoStr !== '' && !isNaN(bichoNum) && bichoNum > 0);
+    if (!isBichoValid) {
+        missing.push({ field: 'bicho', name: '美長 / 実長 (m)' });
+    }
+
+    // 4. 品番 / 基材コード
+    const rawHinban = (state.currentModalHinban || edit?.hinban || '').trim();
+    const isHinbanValid = Boolean(rawHinban && rawHinban !== '-' && rawHinban !== '未入力');
+    if (!isHinbanValid) {
+        missing.push({ field: 'hinban', name: '品番 / 基材コード' });
+    }
+
+    // 5. メーカーロット / 日付
+    const rawLot = (state.currentModalLotNo || edit?.lotNo || '').trim();
+    const isLotValid = Boolean(rawLot && rawLot !== '-' && rawLot !== '未入力');
+    if (!isLotValid) {
+        missing.push({ field: 'lot', name: 'メーカーロット / 日付' });
+    }
+
+    return {
+        isValid: missing.length === 0,
+        missing: missing,
+        status: {
+            socho: isSochoValid,
+            shiki: isShikiValid,
+            bicho: isBichoValid,
+            hinban: isHinbanValid,
+            lot: isLotValid
+        }
+    };
+}
+
 function updateManualDisplays() {
     const sochoEl = document.getElementById('manualSochoDisplay');
     const shikiEl = document.getElementById('manualShikiDisplay');
@@ -4291,20 +4356,58 @@ function updateManualDisplays() {
     const hinbanEl = document.getElementById('manualHinbanDisplay');
     const lotEl = document.getElementById('manualLotDisplay');
 
+    const v = validateModalRequiredFields();
+
     if (sochoEl) {
-        sochoEl.textContent = (state.currentModalSocho !== '' && state.currentModalSocho !== undefined) ? `${state.currentModalSocho} m` : '未入力';
+        sochoEl.textContent = v.status.socho ? `${state.currentModalSocho} m` : '未入力';
+        const card = sochoEl.closest('.feed-numpad-field');
+        if (card) {
+            card.classList.toggle('is-missing', !v.status.socho);
+            card.classList.toggle('is-filled', v.status.socho);
+        }
     }
     if (shikiEl) {
-        shikiEl.textContent = (state.currentModalShiki !== '' && state.currentModalShiki !== undefined) ? `${state.currentModalShiki} m` : '0 m';
+        shikiEl.textContent = v.status.shiki ? `${state.currentModalShiki} m` : '未入力';
+        const card = shikiEl.closest('.feed-numpad-field');
+        if (card) {
+            card.classList.toggle('is-missing', !v.status.shiki);
+            card.classList.toggle('is-filled', v.status.shiki);
+        }
     }
     if (bichoEl) {
-        bichoEl.textContent = (state.currentModalBicho !== '' && state.currentModalBicho !== undefined) ? `${state.currentModalBicho} m` : '0 m';
+        bichoEl.textContent = v.status.bicho ? `${state.currentModalBicho} m` : '未入力';
+        const card = bichoEl.closest('.feed-numpad-field');
+        if (card) {
+            card.classList.toggle('is-missing', !v.status.bicho);
+            card.classList.toggle('is-filled', v.status.bicho);
+        }
     }
     if (hinbanEl) {
-        hinbanEl.textContent = state.currentModalHinban || '-';
+        hinbanEl.textContent = v.status.hinban ? state.currentModalHinban : '未入力';
+        const card = hinbanEl.closest('.feed-numpad-field');
+        if (card) {
+            card.classList.toggle('is-missing', !v.status.hinban);
+            card.classList.toggle('is-filled', v.status.hinban);
+        }
     }
     if (lotEl) {
-        lotEl.textContent = state.currentModalLotNo || '-';
+        lotEl.textContent = v.status.lot ? state.currentModalLotNo : '未入力';
+        const card = lotEl.closest('.feed-numpad-field');
+        if (card) {
+            card.classList.toggle('is-missing', !v.status.lot);
+            card.classList.toggle('is-filled', v.status.lot);
+        }
+    }
+
+    const proceedBtn = document.getElementById('btnManualProceedPhoto');
+    if (proceedBtn) {
+        if (!v.isValid) {
+            proceedBtn.classList.add('is-incomplete');
+            proceedBtn.title = `未入力の項目があります: ${v.missing.map(m => m.name).join(', ')}`;
+        } else {
+            proceedBtn.classList.remove('is-incomplete');
+            proceedBtn.title = '確認して写真撮影へ進む';
+        }
     }
 }
 
@@ -4415,11 +4518,20 @@ function materialKeypadConfirm() {
 }
 
 function proceedToCameraFromManual() {
-    const bichoVal = parseFloat(state.currentModalBicho);
-    if (isNaN(bichoVal) || bichoVal <= 0) {
-        alert('美長 / 純長（実長）が未入力です。\n総長とS引き長、または美長をタップして入力してください。');
+    const validation = validateModalRequiredFields();
+    if (!validation.isValid) {
+        const missingNames = validation.missing.map(m => `・${m.name}`).join('\n');
+        alert(`以下の必須項目が未入力です。各項目をタップして入力・確認してください：\n\n${missingNames}`);
         return;
     }
+
+    const socho = parseFloat(state.currentModalSocho);
+    const bicho = parseFloat(state.currentModalBicho);
+    if (!isNaN(socho) && !isNaN(bicho) && socho < bicho) {
+        alert(`総長（${socho} m）が美長（${bicho} m）より短くなっています。\n数値を再確認してください。`);
+        return;
+    }
+
     saveCurrentModalManualEdits();
     triggerNativeCameraForModal();
 }
@@ -4999,6 +5111,12 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
 
 // --- Native Device Camera Capture ---
 function triggerNativeCameraForModal() {
+    const validation = validateModalRequiredFields();
+    if (!validation.isValid) {
+        const missingNames = validation.missing.map(m => `・${m.name}`).join('\n');
+        alert(`以下の必須項目が未入力です。全項目の入力が完了するまで写真撮影に進めません：\n\n${missingNames}`);
+        return;
+    }
     const fileInput = document.getElementById('modalRollCameraInput');
     if (fileInput) {
         fileInput.click();
@@ -5211,10 +5329,11 @@ async function submitModalRollToQueue() {
 
     const edit = getItemEdit(itemId, item);
 
-    // 1. Validate length: bicho must be > 0
-    const bichoVal = parseFloat(state.currentModalBicho || edit.bicho || edit.meters || item.meters || 100);
-    if (isNaN(bichoVal) || bichoVal <= 0) {
-        alert('材料長（美長 / 実長 / 純長）が未入力です。\nQRコードをスキャンするか、手動入力してください。');
+    // 1. Validate all 5 required fields (3 lengths, lot, hinban)
+    const validation = validateModalRequiredFields(ctx);
+    if (!validation.isValid) {
+        const missingNames = validation.missing.map(m => `・${m.name}`).join('\n');
+        alert(`投入キューへの登録には全5項目の入力が必須です：\n\n${missingNames}`);
         return;
     }
 
@@ -5231,7 +5350,7 @@ async function submitModalRollToQueue() {
         showQueueAddingModal(item, ctx, state.capturedPhotoBase64 || edit?.photoBase64 || dbPhoto?.base64 || edit.photoUrl);
 
         let photoUrl = edit.photoUrl || dbPhoto?.photoUrl || '';
-        const lotNoVal = state.currentModalLotNo || edit.lotNo || `${(state.selectedDate || '').replace(/-/g, '').slice(2)}-${item.rollIndex || rIdx + 1}`;
+        const lotNoVal = (state.currentModalLotNo || edit.lotNo || '').trim();
         const kizaiCode = group?.kizai || item.kizai || group?.hinban || item.hinban || state.currentModalHinban || '';
         const rollIdx = item.rollIndex || (rIdx + 1);
 
