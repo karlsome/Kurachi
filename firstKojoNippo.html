@@ -2320,6 +2320,16 @@
         .history-schedule-table tr.item-row.is-processed .text-sub {
             color: #6B7280;
         }
+        .history-schedule-table tr.item-row.is-excluded-row td {
+            opacity: 0.55;
+            background-color: #F9FAFB !important;
+            color: #9CA3AF !important;
+            text-decoration: line-through;
+        }
+        .history-schedule-table tr.item-row.is-excluded-row .excluded-tag {
+            text-decoration: none;
+            display: inline-block;
+        }
 
         .history-flat-list {
             display: flex;
@@ -4310,26 +4320,26 @@
 
             <!-- VIEW 2: Manual Input Mode (Shown when 手動入力 is pressed) -->
             <div id="feedManualView" class="feed-view-pane" style="display: none;">
-                <p class="feed-manual-instruct">項目をタップして数値を入力・確認してください</p>
+                <p class="feed-manual-instruct" data-i18n="fk_feed_manual_instruct">項目をタップして数値を入力・確認してください</p>
 
                 <div class="feed-manual-fields-wrap">
                     <!-- 3 Lengths -->
                     <div style="display: flex; flex-direction: column; gap: 8px;">
                         <!-- 総長 -->
                         <div class="feed-numpad-field" onclick="openFieldPickerModal('socho')">
-                            <span class="feed-numpad-field-label">総長 (m) ★必須</span>
+                            <span class="feed-numpad-field-label" data-i18n="fk_label_socho">総長 (m) ★必須</span>
                             <span class="feed-numpad-field-val" id="manualSochoDisplay">未入力</span>
                         </div>
 
                         <!-- S引き長 -->
                         <div class="feed-numpad-field" onclick="openFieldPickerModal('shiki')">
-                            <span class="feed-numpad-field-label">S引き長 (m) ★必須</span>
+                            <span class="feed-numpad-field-label" data-i18n="fk_label_shiki">S引き長 (m) ★必須</span>
                             <span class="feed-numpad-field-val" id="manualShikiDisplay">0 m</span>
                         </div>
 
                         <!-- 美長 / 純長 (実長) -->
                         <div class="feed-numpad-field is-bicho" onclick="openFieldPickerModal('bicho')">
-                            <span class="feed-numpad-field-label">美長 / 実長 (m) ★必須</span>
+                            <span class="feed-numpad-field-label" data-i18n="fk_label_bicho">美長 / 実長 (m) ★必須</span>
                             <span class="feed-numpad-field-val bicho-val" id="manualBichoDisplay">0 m</span>
                         </div>
                     </div>
@@ -4337,12 +4347,12 @@
                     <!-- 2 Metadata Fields: 品番 & ロット番号/日付 -->
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px;">
                         <div class="feed-numpad-field" style="padding: 10px 12px; flex-direction: column; align-items: flex-start; gap: 4px;" onclick="openFieldPickerModal('hinban')">
-                            <span class="feed-numpad-field-label" style="font-size: 0.75rem;">品番 / 基材コード ★必須</span>
+                            <span class="feed-numpad-field-label" data-i18n="fk_label_hinban_code" style="font-size: 0.75rem;">品番 / 基材コード ★必須</span>
                             <span class="feed-numpad-field-val" id="manualHinbanDisplay" style="font-size: 0.95rem; word-break: break-all;">-</span>
                         </div>
 
                         <div class="feed-numpad-field" style="padding: 10px 12px; flex-direction: column; align-items: flex-start; gap: 4px;" onclick="openFieldPickerModal('lot')">
-                            <span class="feed-numpad-field-label" style="font-size: 0.75rem;">メーカーロット / 日付 ★必須</span>
+                            <span class="feed-numpad-field-label" data-i18n="fk_label_lot_date" style="font-size: 0.75rem;">メーカーロット / 日付 ★必須</span>
                             <span class="feed-numpad-field-val" id="manualLotDisplay" style="font-size: 0.95rem; word-break: break-all;">-</span>
                         </div>
                     </div>
@@ -4350,16 +4360,16 @@
 
                 <!-- Learn QR Prompt Banner (Shown when an unknown QR code was scanned) -->
                 <div id="feedLearnQRBanner" style="display: none; margin: 12px 0 6px 0; background: #FEF3C7; border: 1.5px solid #FCD34D; border-radius: var(--btn-radius); padding: 12px 14px; text-align: center;">
-                    <div style="font-size: 0.88rem; color: #92400E; font-weight: 800; margin-bottom: 4px;">未学習のQRコードです</div>
-                    <div style="font-size: 0.78rem; color: #78350F; margin-bottom: 8px;">各項目（3長・品番・ロット）を確認/入力し、学習ボタンを押してください</div>
+                    <div style="font-size: 0.88rem; color: #92400E; font-weight: 800; margin-bottom: 4px;" data-i18n="fk_unlearned_qr_title">未学習のQRコードです</div>
+                    <div style="font-size: 0.78rem; color: #78350F; margin-bottom: 8px;" data-i18n="fk_unlearned_qr_desc">各項目（3長・品番・ロット）を確認/入力し、学習ボタンを押してください</div>
                     <div id="feedLearnQRSnippet" style="font-family: inherit; font-size: 0.72rem; color: #92400E; background: #FFFBEB; border: 1px dashed #FCD34D; border-radius: 4px; padding: 4px 8px; margin-bottom: 10px; word-break: break-all; max-height: 48px; overflow-y: auto;"></div>
-                    <button type="button" class="btn-feed-row-flat" style="background: #F59E0B; color: #FFFFFF; font-size: 0.92rem; padding: 10px 20px; border: none; font-weight: 800; width: 100%; border-radius: 6px; box-shadow: 0 2px 4px rgba(245,158,11,0.3);" onclick="learnQRFromCurrentInputs()">
+                    <button type="button" class="btn-feed-row-flat" style="background: #F59E0B; color: #FFFFFF; font-size: 0.92rem; padding: 10px 20px; border: none; font-weight: 800; width: 100%; border-radius: 6px; box-shadow: 0 2px 4px rgba(245,158,11,0.3);" onclick="learnQRFromCurrentInputs()" data-i18n="fk_btn_learn_qr">
                         この形式を学習して全端末に共有
                     </button>
                 </div>
 
                 <div id="feedNoQRLinkWrap" style="text-align: center; margin-top: 8px;">
-                    <button type="button" class="feed-link-exclude" style="font-size: 0.8rem; color: var(--text-soft);" onclick="markCurrentMaterialAsNoQR()">
+                    <button type="button" class="feed-link-exclude" style="font-size: 0.8rem; color: var(--text-soft);" onclick="markCurrentMaterialAsNoQR()" data-i18n="fk_btn_mark_no_qr">
                         この基材はQRなしとして登録（次回から手動優先）
                     </button>
                 </div>
@@ -4493,10 +4503,10 @@
 
             <!-- Bottom actions: Manual Entry & Cancel -->
             <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px;">
-                <button type="button" class="btn-feed-row-flat" style="background: var(--blue-soft); border: 1.5px solid var(--blue); color: var(--blue); font-weight: 800; padding: 12px; font-size: 0.95rem; border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center;" onclick="handleValuePickerManualEntry()">
+                <button type="button" class="btn-feed-row-flat" style="background: var(--blue-soft); border: 1.5px solid var(--blue); color: var(--blue); font-weight: 800; padding: 12px; font-size: 0.95rem; border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center;" onclick="handleValuePickerManualEntry()" data-i18n="fk_btn_manual_input_entry">
                     手動で入力する
                 </button>
-                <button type="button" class="btn-cancel-flat" style="padding: 10px;" onclick="closeFeedValuePickerModal()">
+                <button type="button" class="btn-cancel-flat" style="padding: 10px;" onclick="closeFeedValuePickerModal()" data-i18n="fk_btn_cancel">
                     キャンセル
                 </button>
             </div>

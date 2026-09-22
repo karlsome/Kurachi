@@ -1540,6 +1540,91 @@ function isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx) {
     return false;
 }
 
+// Check whether all previous scheduled items in priority order are handled (either enqueued or excluded)
+function checkSchedulePriorityOrder(targetItem, gIdx, rIdx) {
+    if (!targetItem || targetItem.type === 'setup') {
+        return { canProceed: true, skippedItems: [] };
+    }
+
+    let scheduleItems = state.scheduledItems;
+    if (!scheduleItems || !Array.isArray(scheduleItems) || scheduleItems.length === 0) {
+        if (state.dailySchedule && Array.isArray(state.dailySchedule.scheduleOrder)) {
+            scheduleItems = computeTimeSchedule(state.dailySchedule.scheduleOrder, state.dailySchedule.startTime || '08:00');
+        }
+    }
+
+    if (!scheduleItems || scheduleItems.length === 0) {
+        return { canProceed: true, skippedItems: [] };
+    }
+
+    // Find index of targetItem in scheduleItems
+    const targetIdx = scheduleItems.findIndex(s => 
+        s === targetItem ||
+        (s.id && targetItem.id && s.id === targetItem.id) ||
+        (s.orderIndex !== undefined && targetItem.orderIndex !== undefined && Number(s.orderIndex) === Number(targetItem.orderIndex))
+    );
+
+    if (targetIdx <= 0) {
+        return { canProceed: true, skippedItems: [] };
+    }
+
+    const skippedItems = [];
+
+    for (let i = 0; i < targetIdx; i++) {
+        const prevItem = scheduleItems[i];
+        if (!prevItem || prevItem.type === 'setup') continue;
+
+        // Locate prevItem's group and roll index in currentGroups
+        let prevGIdx = 0;
+        let prevRIdx = 0;
+        let prevGroup = null;
+
+        if (state.currentGroups && Array.isArray(state.currentGroups)) {
+            for (let gi = 0; gi < state.currentGroups.length; gi++) {
+                const grp = state.currentGroups[gi];
+                if (grp && grp.items) {
+                    const ri = grp.items.findIndex(it => 
+                        it === prevItem || 
+                        (it.id && prevItem.id && it.id === prevItem.id) ||
+                        (it.orderIndex !== undefined && prevItem.orderIndex !== undefined && Number(it.orderIndex) === Number(prevItem.orderIndex))
+                    );
+                    if (ri !== -1) {
+                        prevGroup = grp;
+                        prevGIdx = gi;
+                        prevRIdx = ri;
+                        break;
+                    }
+                }
+            }
+        }
+
+        const prevItemId = getItemKey(prevItem, prevGIdx, prevRIdx);
+        const prevEdit = getItemEdit(prevItemId, prevItem);
+
+        // Previous item is handled if already enqueued/processed or marked as excluded
+        const isExcluded = Boolean(prevEdit && prevEdit.isExcluded);
+        const isProcessed = isRollEnqueuedOrProcessed(prevItem, prevGroup, prevGIdx, prevRIdx);
+
+        if (!isProcessed && !isExcluded) {
+            skippedItems.push({
+                item: prevItem,
+                itemId: prevItemId,
+                gIdx: prevGIdx,
+                rIdx: prevRIdx,
+                orderIndex: prevItem.orderIndex || (i + 1),
+                kizai: prevItem.kizai || prevItem.hinban || '',
+                rollIndex: prevItem.rollIndex || 1,
+                totalRolls: prevItem.totalRolls || 1
+            });
+        }
+    }
+
+    return {
+        canProceed: skippedItems.length === 0,
+        skippedItems
+    };
+}
+
 // -----------------------------------------------------
 // Print-style Schedule & History Table Shared Helpers
 // -----------------------------------------------------
@@ -1760,9 +1845,21 @@ function renderScheduleTableView(groups, items) {
             }
         }
         const itemId = getItemKey(item, matchedGIdx, matchedRIdx);
+        const edit = getItemEdit(itemId, item);
+        const isExcluded = Boolean(edit && edit.isExcluded);
+
+        let rowTitle = _t('fk_btn_feed');
+        if (isProcessed) {
+            rowTitle = _t('fk_tooltip_processed') || '処理済み (キューに追加済)';
+        } else if (isExcluded) {
+            rowTitle = _t('fk_tooltip_excluded') || '除外済み (タップして復帰可能)';
+        }
+
+        const excludedBadgeText = _t('fk_status_excluded_badge') || '[除外]';
+        const rollCellContent = `${item.rollIndex || 1}/${item.totalRolls || 1}${isExcluded ? ` <span class="excluded-tag" style="color:#DC2626; font-size:0.75rem; font-weight:800;">${escapeHtml(excludedBadgeText)}</span>` : ''}`;
 
         rows.push(`
-            <tr class="item-row ${isProcessed ? 'is-processed' : ''}" data-item-id="${escapeHtml(itemId)}" onclick="openMaterialFeedModalForRollItem('${escapeHtml(itemId)}', ${matchedGIdx}, ${matchedRIdx}, event)" style="cursor: pointer;" title="${isProcessed ? '処理済み (キューに追加済)' : _t('fk_btn_feed')}">
+            <tr class="item-row ${isProcessed ? 'is-processed' : ''} ${isExcluded ? 'is-excluded-row' : ''}" data-item-id="${escapeHtml(itemId)}" onclick="openMaterialFeedModalForRollItem('${escapeHtml(itemId)}', ${matchedGIdx}, ${matchedRIdx}, event)" style="cursor: pointer;" title="${escapeHtml(rowTitle)}">
                 <td class="center font-bold">${idx + 1}</td>
                 <td class="center time-cell">
                     <strong>${escapeHtml(item.startTime || '—')}</strong><br>
@@ -1774,7 +1871,7 @@ function renderScheduleTableView(groups, items) {
                 <td class="center color-cell">${escapeHtml(colorDisplay)}</td>
                 <td class="center habanaga-cell">${escapeHtml(habanagaDisplay)}</td>
                 <td class="center kataban-cell">${katabanDisplay}</td>
-                <td class="center roll-cell font-bold">${item.rollIndex || 1}/${item.totalRolls || 1}</td>
+                <td class="center roll-cell font-bold">${rollCellContent}</td>
                 <td class="right qty-cell font-bold">${qtyDisplay}</td>
             </tr>
         `);
@@ -1793,24 +1890,24 @@ function renderScheduleTableView(groups, items) {
     return `
         <div class="history-sheet">
             <div class="history-summary-strip">
-                <span>予定時: <strong>${escapeHtml(plannedTimeSpan)}</strong> (${escapeHtml(timeFormatted)})</span>
-                <span>予定総数: <strong>${rollCount} 巻/束</strong> (${scheduleItems.length} 工程)</span>
-                <span>予定総生産量: <strong>${totalProdFormatted}</strong></span>
+                <span>${_t('fk_summary_planned_time') || '予定時'}: <strong>${escapeHtml(plannedTimeSpan)}</strong> (${escapeHtml(timeFormatted)})</span>
+                <span>${_t('fk_summary_total_rolls') || '予定総数'}: <strong>${rollCount} ${_t('fk_roll_count') || '巻'}</strong> (${scheduleItems.length})</span>
+                <span>${_t('fk_summary_total_prod') || '予定総生産量'}: <strong>${totalProdFormatted}</strong></span>
             </div>
 
             <table class="history-schedule-table">
                 <thead>
                     <tr>
-                        <th style="width: 4%;">No.</th>
-                        <th style="width: 8%;">時間</th>
-                        <th style="width: 14%;">出荷先名</th>
-                        <th style="width: 22%;">基材コード</th>
-                        <th style="width: 8%;">処理コード</th>
-                        <th style="width: 9%;">色コード</th>
-                        <th style="width: 9%;">幅長コード</th>
-                        <th style="width: 9%;">型番</th>
-                        <th style="width: 6%;">巻数</th>
-                        <th style="width: 11%;">生産数量</th>
+                        <th style="width: 4%;">${_t('fk_th_no') || 'No.'}</th>
+                        <th style="width: 8%;">${_t('fk_th_time') || '時間'}</th>
+                        <th style="width: 14%;">${_t('fk_th_dest') || '出荷先名'}</th>
+                        <th style="width: 22%;">${_t('fk_th_kizai') || '基材コード'}</th>
+                        <th style="width: 8%;">${_t('fk_th_shori') || '処理コード'}</th>
+                        <th style="width: 9%;">${_t('fk_th_color') || '色コード'}</th>
+                        <th style="width: 9%;">${_t('fk_th_habanaga') || '幅長コード'}</th>
+                        <th style="width: 9%;">${_t('fk_th_kataban') || '型番'}</th>
+                        <th style="width: 6%;">${_t('fk_th_roll') || '巻数'}</th>
+                        <th style="width: 11%;">${_t('fk_th_qty') || '生産数量'}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -2537,6 +2634,7 @@ document.addEventListener('languageChanged', (e) => {
     renderStagingQueue();
     renderHistoryList();
     updateHistoryBadges();
+    updateManualDisplays();
 });
 
 // -----------------------------------------------------
@@ -3437,16 +3535,20 @@ function openFieldPickerModal(fieldKey) {
     const modalEl = document.getElementById('feedValuePickerModal');
 
     const fieldLabels = {
-        hinban: '品番 / 基材コード',
-        lot: 'メーカーロット / 日付',
-        socho: '総長 (m)',
-        shiki: 'S引き長 (m)',
-        bicho: '美長 / 実長 (m)'
+        hinban: _t('fk_label_hinban_code') || '品番 / 基材コード',
+        lot: _t('fk_label_lot_date') || 'メーカーロット / 日付',
+        socho: _t('fk_label_socho') || '総長 (m)',
+        shiki: _t('fk_label_shiki') || 'S引き長 (m)',
+        bicho: _t('fk_label_bicho') || '美長 / 実長 (m)'
     };
 
-    const label = fieldLabels[fieldKey] || '項目';
-    if (titleEl) titleEl.textContent = `${label} を選択`;
-    if (subEl) subEl.textContent = `QRコードから検出された値（全 ${tokens.length} 件）\n※長押しまたは「分割」で一部を取り出せます`;
+    const label = fieldLabels[fieldKey] || (_t('fk_picker_target_item') || '項目');
+    const selectSuffix = _t('fk_picker_target_select') || 'を選択';
+    if (titleEl) titleEl.textContent = `${label} ${selectSuffix}`.trim();
+    if (subEl) {
+        const subTemplate = _t('fk_picker_detected_sub') || 'QRコードから検出された値（全 {count} 件）\n※長押しまたは「分割」で一部を取り出せます';
+        subEl.textContent = subTemplate.replace('{count}', tokens.length);
+    }
 
     // Determine current value to highlight
     let currentVal = '';
@@ -3947,7 +4049,8 @@ function handleValuePickerManualEntry() {
 
     if (target === 'hinban') {
         const current = state.currentModalHinban || '';
-        const newVal = prompt('品番 / 基材コードを手動入力してください:', current);
+        const promptMsg = _t('fk_prompt_enter_hinban') || '品番 / 基材コードを手動入力してください:';
+        const newVal = prompt(promptMsg, current);
         if (newVal !== null) {
             state.currentModalHinban = newVal.trim();
             updateManualDisplays();
@@ -3956,7 +4059,8 @@ function handleValuePickerManualEntry() {
         }
     } else if (target === 'lot') {
         const current = state.currentModalLotNo || '';
-        const newVal = prompt('メーカーロット / 日付を手動入力してください (例: 2026-09-18):', current);
+        const promptMsg = _t('fk_prompt_enter_lot') || 'メーカーロット / 日付を手動入力してください (例: 2026-09-18):';
+        const newVal = prompt(promptMsg, current);
         if (newVal !== null) {
             state.currentModalLotNo = normalizeDateStringToISO(newVal.trim());
             updateManualDisplays();
@@ -4319,7 +4423,7 @@ function validateModalRequiredFields(optCtx) {
     const sochoNum = parseFloat(sochoStr);
     const isSochoValid = Boolean(sochoStr !== '' && !isNaN(sochoNum) && sochoNum > 0);
     if (!isSochoValid) {
-        missing.push({ field: 'socho', name: '総長 (m)' });
+        missing.push({ field: 'socho', name: _t('fk_label_socho') || '総長 (m)' });
     }
 
     // 2. S引き長 (m) (0 m is valid)
@@ -4330,7 +4434,7 @@ function validateModalRequiredFields(optCtx) {
     const shikiNum = parseFloat(shikiStr);
     const isShikiValid = Boolean(shikiStr !== '' && !isNaN(shikiNum) && shikiNum >= 0);
     if (!isShikiValid) {
-        missing.push({ field: 'shiki', name: 'S引き長 (m)' });
+        missing.push({ field: 'shiki', name: _t('fk_label_shiki') || 'S引き長 (m)' });
     }
 
     // 3. 美長 / 実長 (m)
@@ -4341,21 +4445,22 @@ function validateModalRequiredFields(optCtx) {
     const bichoNum = parseFloat(bichoStr);
     const isBichoValid = Boolean(bichoStr !== '' && !isNaN(bichoNum) && bichoNum > 0);
     if (!isBichoValid) {
-        missing.push({ field: 'bicho', name: '美長 / 実長 (m)' });
+        missing.push({ field: 'bicho', name: _t('fk_label_bicho') || '美長 / 実長 (m)' });
     }
 
     // 4. 品番 / 基材コード
     const rawHinban = (state.currentModalHinban || edit?.hinban || '').trim();
-    const isHinbanValid = Boolean(rawHinban && rawHinban !== '-' && rawHinban !== '未入力');
+    const unentered = (_t('fk_not_entered') || '未入力').toLowerCase();
+    const isHinbanValid = Boolean(rawHinban && rawHinban !== '-' && rawHinban !== '未入力' && rawHinban.toLowerCase() !== 'not entered' && rawHinban.toLowerCase() !== unentered);
     if (!isHinbanValid) {
-        missing.push({ field: 'hinban', name: '品番 / 基材コード' });
+        missing.push({ field: 'hinban', name: _t('fk_label_hinban_code') || '品番 / 基材コード' });
     }
 
     // 5. メーカーロット / 日付
     const rawLot = (state.currentModalLotNo || edit?.lotNo || '').trim();
-    const isLotValid = Boolean(rawLot && rawLot !== '-' && rawLot !== '未入力');
+    const isLotValid = Boolean(rawLot && rawLot !== '-' && rawLot !== '未入力' && rawLot.toLowerCase() !== 'not entered' && rawLot.toLowerCase() !== unentered);
     if (!isLotValid) {
-        missing.push({ field: 'lot', name: 'メーカーロット / 日付' });
+        missing.push({ field: 'lot', name: _t('fk_label_lot_date') || 'メーカーロット / 日付' });
     }
 
     return {
@@ -4379,9 +4484,10 @@ function updateManualDisplays() {
     const lotEl = document.getElementById('manualLotDisplay');
 
     const v = validateModalRequiredFields();
+    const unenteredText = _t('fk_not_entered') || '未入力';
 
     if (sochoEl) {
-        sochoEl.textContent = v.status.socho ? `${state.currentModalSocho} m` : '未入力';
+        sochoEl.textContent = v.status.socho ? `${state.currentModalSocho} m` : unenteredText;
         const card = sochoEl.closest('.feed-numpad-field');
         if (card) {
             card.classList.toggle('is-missing', !v.status.socho);
@@ -4389,7 +4495,7 @@ function updateManualDisplays() {
         }
     }
     if (shikiEl) {
-        shikiEl.textContent = v.status.shiki ? `${state.currentModalShiki} m` : '未入力';
+        shikiEl.textContent = v.status.shiki ? `${state.currentModalShiki} m` : unenteredText;
         const card = shikiEl.closest('.feed-numpad-field');
         if (card) {
             card.classList.toggle('is-missing', !v.status.shiki);
@@ -4397,7 +4503,7 @@ function updateManualDisplays() {
         }
     }
     if (bichoEl) {
-        bichoEl.textContent = v.status.bicho ? `${state.currentModalBicho} m` : '未入力';
+        bichoEl.textContent = v.status.bicho ? `${state.currentModalBicho} m` : unenteredText;
         const card = bichoEl.closest('.feed-numpad-field');
         if (card) {
             card.classList.toggle('is-missing', !v.status.bicho);
@@ -4405,7 +4511,7 @@ function updateManualDisplays() {
         }
     }
     if (hinbanEl) {
-        hinbanEl.textContent = v.status.hinban ? state.currentModalHinban : '未入力';
+        hinbanEl.textContent = v.status.hinban ? state.currentModalHinban : unenteredText;
         const card = hinbanEl.closest('.feed-numpad-field');
         if (card) {
             card.classList.toggle('is-missing', !v.status.hinban);
@@ -4413,7 +4519,7 @@ function updateManualDisplays() {
         }
     }
     if (lotEl) {
-        lotEl.textContent = v.status.lot ? state.currentModalLotNo : '未入力';
+        lotEl.textContent = v.status.lot ? state.currentModalLotNo : unenteredText;
         const card = lotEl.closest('.feed-numpad-field');
         if (card) {
             card.classList.toggle('is-missing', !v.status.lot);
@@ -4465,13 +4571,13 @@ function openMaterialKeypad(targetField) {
     const keypadModal = document.getElementById('materialKeypadModal');
 
     if (targetField === 'socho') {
-        if (titleEl) titleEl.textContent = '総長 (m) を入力';
+        if (titleEl) titleEl.textContent = _t('fk_keypad_title_socho') || '総長 (m) を入力';
         currentKeypadBuffer = (state.currentModalSocho !== undefined && state.currentModalSocho !== '') ? String(state.currentModalSocho) : '';
     } else if (targetField === 'shiki') {
-        if (titleEl) titleEl.textContent = 'S引き長 (m) を入力';
+        if (titleEl) titleEl.textContent = _t('fk_keypad_title_shiki') || 'S引き長 (m) を入力';
         currentKeypadBuffer = (state.currentModalShiki !== undefined && state.currentModalShiki !== '') ? String(state.currentModalShiki) : '0';
     } else {
-        if (titleEl) titleEl.textContent = '美長 / 純長 (m) を入力';
+        if (titleEl) titleEl.textContent = _t('fk_keypad_title_bicho') || '美長 / 実長 (m) を入力';
         currentKeypadBuffer = (state.currentModalBicho !== undefined && state.currentModalBicho !== '') ? String(state.currentModalBicho) : '';
     }
 
@@ -4543,15 +4649,35 @@ function proceedToCameraFromManual() {
     const validation = validateModalRequiredFields();
     if (!validation.isValid) {
         const missingNames = validation.missing.map(m => `・${m.name}`).join('\n');
-        alert(`以下の必須項目が未入力です。各項目をタップして入力・確認してください：\n\n${missingNames}`);
+        const alertMsg = _t('fk_missing_fields_prompt') || '以下の必須項目が未入力です。各項目をタップして入力・確認してください：';
+        alert(`${alertMsg}\n\n${missingNames}`);
         return;
     }
 
     const socho = parseFloat(state.currentModalSocho);
     const bicho = parseFloat(state.currentModalBicho);
     if (!isNaN(socho) && !isNaN(bicho) && socho < bicho) {
-        alert(`総長（${socho} m）が美長（${bicho} m）より短くなっています。\n数値を再確認してください。`);
+        const shorterMsg = _t('fk_socho_shorter_bicho') || `総長（${socho} m）が美長（${bicho} m）より短くなっています。\n数値を再確認してください。`;
+        alert(shorterMsg);
         return;
+    }
+
+    // Check priority order before proceeding to camera
+    const ctx = state.currentModalRollContext;
+    if (ctx && ctx.item) {
+        const currentEdit = getItemEdit(ctx.itemId, ctx.item);
+        if (!currentEdit.isExcluded) {
+            const priorityCheck = checkSchedulePriorityOrder(ctx.item, ctx.gIdx, ctx.rIdx);
+            if (!priorityCheck.canProceed) {
+                const skipped = priorityCheck.skippedItems;
+                const rollUnit = _t('fk_roll_unit') || '巻';
+                const skippedListText = skipped.map(s => `  ・#${s.orderIndex}: ${s.kizai || 'Item'} (${s.rollIndex}/${s.totalRolls} ${rollUnit})`).join('\n');
+                const skipPrefix = _t('fk_priority_cannot_skip_prefix') || '⚠️ Cannot skip:';
+                const blockedMsg = _t('fk_priority_camera_blocked') || 'Please feed or exclude them before taking photos.';
+                alert(`${skipPrefix}\n${skippedListText}\n\n${blockedMsg}`);
+                return;
+            }
+        }
     }
 
     saveCurrentModalManualEdits();
@@ -4603,6 +4729,33 @@ function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
     }
 
     const resolvedItemId = itemId || getItemKey(item, gIdx, rIdx);
+    const currentEdit = getItemEdit(resolvedItemId, item);
+
+    // --- Priority Order Check (Sequential 1 -> 2 -> 3...) ---
+    // If the roll itself is already excluded, allow opening so user can restore it if desired.
+    if (!currentEdit.isExcluded) {
+        const priorityCheck = checkSchedulePriorityOrder(item, gIdx, rIdx);
+        if (!priorityCheck.canProceed) {
+            const skipped = priorityCheck.skippedItems;
+            const rollUnit = _t('fk_roll_unit') || '巻';
+            const skippedListText = skipped.map(s => `  ・#${s.orderIndex}: ${s.kizai || 'Item'} (${s.rollIndex}/${s.totalRolls} ${rollUnit})`).join('\n');
+            const firstSkipped = skipped[0];
+
+            const skipPrefix = _t('fk_priority_cannot_skip_prefix') || '⚠️ Cannot skip:';
+            const excludeInstruct = _t('fk_priority_exclude_instruction') || 'Please feed or exclude them before continuing.';
+            const openPromptTemplate = _t('fk_priority_open_skipped_prompt') || '▶ Open unhandled roll (#{order})?';
+            const openPrompt = openPromptTemplate.replace('{order}', firstSkipped?.orderIndex || '1');
+
+            const confirmMsg = `${skipPrefix}\n${skippedListText}\n\n${excludeInstruct}\n\n${openPrompt}`;
+
+            const ok = confirm(confirmMsg);
+            if (ok && firstSkipped) {
+                openMaterialFeedModalForRollItem(firstSkipped.itemId, firstSkipped.gIdx, firstSkipped.rIdx);
+            }
+            return;
+        }
+    }
+
     state.currentModalRollContext = { itemId: resolvedItemId, gIdx, rIdx, item, group };
     state.currentFeedItem = item;
     state.currentFeedGroup = group;
@@ -4787,8 +4940,8 @@ function showQueueAddingModal(item, ctx, photoSrc) {
 
     if (spinnerRow) spinnerRow.style.display = 'flex';
     if (successRow) successRow.style.display = 'none';
-    if (statusText) statusText.textContent = '投入キューに追加中...';
-    if (subText) subText.textContent = 'サーバーへ登録しています...';
+    if (statusText) statusText.textContent = _t('fk_queue_adding_status') || '投入キューに追加中...';
+    if (subText) subText.textContent = _t('fk_queue_adding_server') || 'サーバーへ登録しています...';
 
     modal.classList.add('open', 'active');
     modal.style.display = 'flex';
@@ -4801,7 +4954,7 @@ function setQueueAddingModalSuccess(msg) {
 
     if (spinnerRow) spinnerRow.style.display = 'none';
     if (successRow) successRow.style.display = 'flex';
-    if (successText) successText.textContent = msg || '投入完了！キュー一覧へ移動します';
+    if (successText) successText.textContent = msg || _t('fk_queue_adding_success') || '投入完了！キュー一覧へ移動します';
 }
 
 function closeQueueAddingModal() {
@@ -4989,17 +5142,16 @@ function showBlurWarning(score, onRetake, onProceed) {
     overlay.innerHTML = `
         <div style="background: #ffffff; border-radius: 16px; padding: 24px; max-width: 380px; width: 90%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.3); border: 2px solid #f59e0b;">
             <div style="font-size: 40px; margin-bottom: 8px;">⚠️</div>
-            <h3 style="font-size: 18px; font-weight: 800; color: #1e293b; margin: 0 0 8px;">写真が少しブレています</h3>
+            <h3 style="font-size: 18px; font-weight: 800; color: #1e293b; margin: 0 0 8px;">${_t('fk_blur_warning_title') || '写真が少しブレています'}</h3>
             <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0 0 20px;">
-                文字やQRコードがぼやけている可能性があります。<br>
-                このまま登録しますか？
+                ${_t('fk_blur_warning_desc') || '文字やQRコードがぼやけている可能性があります。<br>このまま登録しますか？'}
             </p>
             <div style="display: flex; gap: 10px;">
                 <button id="blurRetakeBtn" style="flex: 1; padding: 12px; border: 1.5px solid #cbd5e1; border-radius: 10px; background: #f8fafc; font-weight: 700; color: #334155; font-size: 14px; cursor: pointer;">
-                    📷 撮り直す
+                    ${_t('fk_btn_blur_retake') || '📷 撮り直す'}
                 </button>
                 <button id="blurProceedBtn" style="flex: 1; padding: 12px; border: none; border-radius: 10px; background: #2563eb; font-weight: 700; color: #ffffff; font-size: 14px; cursor: pointer;">
-                    このまま使用
+                    ${_t('fk_btn_blur_proceed') || 'このまま使用'}
                 </button>
             </div>
         </div>
@@ -5161,7 +5313,8 @@ function triggerNativeCameraForModal() {
     const validation = validateModalRequiredFields();
     if (!validation.isValid) {
         const missingNames = validation.missing.map(m => `・${m.name}`).join('\n');
-        alert(`以下の必須項目が未入力です。全項目の入力が完了するまで写真撮影に進めません：\n\n${missingNames}`);
+        const alertMsg = _t('fk_camera_all_req_alert') || '以下の必須項目が未入力です。全項目の入力が完了するまで写真撮影に進めません：';
+        alert(`${alertMsg}\n\n${missingNames}`);
         return;
     }
     const fileInput = document.getElementById('modalRollCameraInput');
@@ -5385,7 +5538,20 @@ async function submitModalRollToQueue() {
     const validation = validateModalRequiredFields(ctx);
     if (!validation.isValid) {
         const missingNames = validation.missing.map(m => `・${m.name}`).join('\n');
-        alert(`投入キューへの登録には全5項目の入力が必須です：\n\n${missingNames}`);
+        const alertMsg = _t('fk_queue_all_req_alert') || '投入キューへの登録には全5項目の入力が必須です：';
+        alert(`${alertMsg}\n\n${missingNames}`);
+        return;
+    }
+
+    // 1.1 Priority order validation check
+    const priorityCheck = checkSchedulePriorityOrder(item, gIdx, rIdx);
+    if (!priorityCheck.canProceed) {
+        const skipped = priorityCheck.skippedItems;
+        const rollUnit = _t('fk_roll_unit') || '巻';
+        const skippedListText = skipped.map(s => `  ・#${s.orderIndex}: ${s.kizai || 'Item'} (${s.rollIndex}/${s.totalRolls} ${rollUnit})`).join('\n');
+        const skipPrefix = _t('fk_priority_cannot_skip_prefix') || '⚠️ Cannot skip:';
+        const blockedMsg = _t('fk_priority_queue_blocked') || 'Please feed or exclude them before adding to queue.';
+        alert(`${skipPrefix}\n${skippedListText}\n\n${blockedMsg}`);
         return;
     }
 
