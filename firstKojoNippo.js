@@ -2635,6 +2635,15 @@ document.addEventListener('languageChanged', (e) => {
     renderHistoryList();
     updateHistoryBadges();
     updateManualDisplays();
+    if (state.selectedItem) {
+        if (state.lastLoadedItemDetailData) {
+            renderInfoTab(state.lastLoadedItemDetailData, state.selectedItem);
+        } else {
+            loadItemDetail(state.selectedItem);
+        }
+    } else {
+        loadItemDetail(null);
+    }
 });
 
 // -----------------------------------------------------
@@ -2650,13 +2659,13 @@ async function loadItemDetail(item) {
                 <div class="info-card">
                     <div class="info-card-header">
                         <div>
-                            <span class="info-badge-title" style="background: var(--amber-soft); color: var(--amber);">段取り (Setup)</span>
-                            <div class="info-main-title">⚙️ ${item.name || '段取り / 段替'}</div>
-                            <div class="info-sub-title">所要時間: <strong>${item.duration} 分</strong> | 予定時間: ${item.startTime} - ${item.endTime}</div>
+                            <span class="info-badge-title" style="background: var(--amber-soft); color: var(--amber);">${_t('fk_info_badge_setup') || '段取り'}</span>
+                            <div class="info-main-title">⚙️ ${item.name || _t('fk_info_setup_default_name') || '段取り / 段替'}</div>
+                            <div class="info-sub-title">${_t('fk_info_duration_label') || '所要時間:'} <strong>${item.duration} ${_t('fk_min_unit') || '分'}</strong> | ${_t('fk_info_planned_time_label') || '予定時間:'} ${item.startTime} - ${item.endTime}</div>
                         </div>
                     </div>
                     <div class="info-sub-section">
-                        <p style="color: var(--text-muted); font-size: 0.95rem;">金型の交換、材料のセッティング、初期調整を行ってください。</p>
+                        <p style="color: var(--text-muted); font-size: 0.95rem;">${_t('fk_info_setup_desc') || '金型の交換、材料のセッティング、初期調整を行ってください。'}</p>
                     </div>
                 </div>
             `;
@@ -2664,12 +2673,12 @@ async function loadItemDetail(item) {
         }
         container.innerHTML = `
             <div class="card">
-                <h2>指示・詳細情報 (Information & Instructions)</h2>
+                <h2>${_t('fk_info_title') || '指示・詳細情報'}</h2>
                 <div class="placeholder-state">
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                    <h3>ロットが選択されていません (No Lot Selected)</h3>
-                    <p>生産一覧 (List) タブから対象のロットを選択すると、品番構造や構成材料の詳細情報が表示されます。</p>
-                    <button type="button" class="btn btn-primary" style="margin-top: 16px;" onclick="switchMainTab(1)">一覧へ戻る (Go to List)</button>
+                    <h3>${_t('fk_info_no_lot') || 'ロットが選択されていません'}</h3>
+                    <p>${_t('fk_info_no_lot_desc') || '生産一覧 (List) タブから対象のロットを選択すると、品番構造や構成材料の詳細情報が表示されます。'}</p>
+                    <button type="button" class="btn btn-primary" style="margin-top: 16px;" onclick="switchMainTab(1)">${_t('fk_info_btn_back_list') || '一覧へ戻る'}</button>
                 </div>
             </div>
         `;
@@ -2690,6 +2699,7 @@ async function loadItemDetail(item) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.success) {
+            state.lastLoadedItemDetailData = data;
             await renderInfoTab(data, item);
         } else {
             throw new Error(data.error || 'Failed to load details');
@@ -2699,12 +2709,88 @@ async function loadItemDetail(item) {
         container.innerHTML = `
             <div class="placeholder-state">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                <h3>詳細情報の取得に失敗しました (Error Loading Details)</h3>
+                <h3>${_t('fk_info_error_loading') || '詳細情報の取得に失敗しました'}</h3>
                 <p>${err.message || 'Failed to fetch'}</p>
-                <button type="button" class="btn btn-secondary" style="margin-top: 15px;" onclick="loadItemDetail(state.selectedItem)">再試行 (Retry)</button>
+                <button type="button" class="btn btn-secondary" style="margin-top: 15px;" onclick="loadItemDetail(state.selectedItem)">${_t('fk_info_retry') || '再試行'}</button>
             </div>
         `;
     }
+}
+
+function localizeStructureSegment(segment) {
+    if (!segment) return '';
+    const keyMap = {
+        '分類コード': 'fk_seg_category',
+        '顧客コード': 'fk_seg_customer',
+        '基材コード': 'fk_seg_kizai',
+        '色コード': 'fk_seg_color',
+        '処理コード': 'fk_seg_process',
+        '粘着コード': 'fk_seg_adhesive',
+        '厚コード': 'fk_seg_thickness',
+        '幅長コード': 'fk_seg_width_length',
+    };
+    const key = keyMap[segment];
+    return (key ? _t(key) : null) || segment;
+}
+
+function localizeMasterValue(val) {
+    if (val === undefined || val === null || val === '') return val;
+    const str = String(val).trim();
+
+    // Direct mapping
+    const directMap = {
+        '粘着品': 'fk_val_adhesive_product',
+        '主材料': 'fk_val_main_material',
+        '副資材': 'fk_val_auxiliary_material',
+        '片面粘着剤付': 'fk_val_single_sided_adh',
+        '両面粘着剤付': 'fk_val_double_sided_adh',
+        '粘着無し': 'fk_val_no_adhesive',
+        '粘着なし': 'fk_val_no_adhesive',
+        '3層品': 'fk_val_3_layer',
+        '2層品': 'fk_val_2_layer',
+        '単層品': 'fk_val_single_layer',
+        'DKグレイ': 'fk_val_dk_gray',
+        '佐々木CT': 'fk_val_sasaki_ct',
+        '豊田通商': 'fk_val_toyota_tsusho',
+        '小瀬工場': 'fk_val_oze_plant',
+        '無': 'fk_val_none',
+        'なし': 'fk_val_none',
+        '有': 'fk_val_yes',
+        'あり': 'fk_val_yes',
+        '中': 'fk_val_medium',
+        '高': 'fk_val_high',
+        '低': 'fk_val_low',
+    };
+
+    if (directMap[str]) {
+        const trans = _t(directMap[str]);
+        if (trans) return trans;
+    }
+
+    const currentLang = localStorage.getItem('appLanguage') || 'ja';
+    if (currentLang !== 'ja') {
+        let result = str;
+        if (result === '佐々木CT') return _t('fk_val_sasaki_ct') || 'Sasaki CT';
+        if (result === '豊田通商') return _t('fk_val_toyota_tsusho') || 'Toyota Tsusho';
+        if (result === '小瀬工場') return _t('fk_val_oze_plant') || 'Oze Plant';
+
+        if (result.includes('長尺')) {
+            const lr = _t('fk_val_long_roll') || 'Long Roll';
+            result = result.replace(/長尺/g, lr);
+        }
+        if (result.includes('短尺')) {
+            const sr = _t('fk_val_short_roll') || 'Short Roll';
+            result = result.replace(/短尺/g, sr);
+        }
+        if (result.endsWith('ﾗﾝ') || result.endsWith('ラン')) {
+            result = result.replace(/[ﾗラン]+$/g, ' Run');
+        }
+        if (result.includes('ﾏ')) {
+            result = result.replace(/ﾏ/g, 'Ma');
+        }
+        return result;
+    }
+    return str;
 }
 
 async function renderInfoTab(data, item) {
@@ -2728,8 +2814,8 @@ async function renderInfoTab(data, item) {
             if (!val) return '';
             return `
                 <div class="structure-chip">
-                    <span class="structure-chip-label">${s.segment}</span>
-                    <span class="structure-chip-val">${val}</span>
+                    <span class="structure-chip-label">${localizeStructureSegment(s.segment)}</span>
+                    <span class="structure-chip-val">${localizeMasterValue(val)}</span>
                 </div>
             `;
         }).join('');
@@ -2737,38 +2823,38 @@ async function renderInfoTab(data, item) {
 
     // Product Master Data Items
     const masterFields = [
-        { label: '梱包数 (Pack Qty)', val: productMaster['梱包数'] },
-        { label: '生産単位数 (Prod Unit)', val: productMaster['生産単位数'] },
-        { label: '発注ロット数 (Order Lot)', val: productMaster['発注ロット数'] },
-        { label: '品目区分 (Category)', val: productMaster['品目区分'] },
-        { label: '出荷先名 (Shipping Dest)', val: productMaster['出荷先名'] },
-        { label: '受注先コード (Customer Code)', val: productMaster['受注先コード'] },
-        { label: '図番 (Drawing No.)', val: productMaster['図番'] },
-        { label: '仕様 (Specs)', val: productMaster['仕様'] },
-        { label: '型番 (Model)', val: productMaster['型番'] },
-        { label: '速度 (Speed)', val: productMaster['速度'] },
-        { label: 'ライン形態 (Line Form)', val: productMaster['ライン形態'] },
-        { label: '繰出機 (Unwinder)', val: productMaster['繰出機'] },
+        { label: _t('fk_mf_pack_qty') || '梱包数', val: productMaster['梱包数'] },
+        { label: _t('fk_mf_prod_unit') || '生産単位数', val: productMaster['生産単位数'] },
+        { label: _t('fk_mf_order_lot') || '発注ロット数', val: productMaster['発注ロット数'] },
+        { label: _t('fk_mf_category') || '品目区分', val: productMaster['品目区分'] },
+        { label: _t('fk_mf_shipping_dest') || '出荷先名', val: productMaster['出荷先名'] },
+        { label: _t('fk_mf_customer_code') || '受注先コード', val: productMaster['受注先コード'] },
+        { label: _t('fk_mf_drawing_no') || '図番', val: productMaster['図番'] },
+        { label: _t('fk_mf_specs') || '仕様', val: productMaster['仕様'] },
+        { label: _t('fk_mf_model') || '型番', val: productMaster['型番'] },
+        { label: _t('fk_mf_speed') || '速度', val: productMaster['速度'] },
+        { label: _t('fk_mf_line_form') || 'ライン形態', val: productMaster['ライン形態'] },
+        { label: _t('fk_mf_unwinder') || '繰出機', val: productMaster['繰出機'] },
         {
-            label: '接着剤有無 (Adhesive)',
-            val: productMaster['接着剤有無'] === 1 ? '有 (Yes)' : productMaster['接着剤有無'] === 2 ? '無 (No)' : productMaster['接着剤有無']
+            label: _t('fk_mf_adhesive') || '接着剤有無',
+            val: productMaster['接着剤有無'] === 1 ? (_t('fk_mf_adhesive_yes') || '有') : productMaster['接着剤有無'] === 2 ? (_t('fk_mf_adhesive_no') || '無') : productMaster['接着剤有無']
         },
-        { label: 'クリーン度 (Cleanliness)', val: productMaster['クリーン度'] },
-        { label: '乾燥温度 (Dry Temp)', val: productMaster['乾燥温度'] },
-        { label: 'ロール温度 (Roll Temp)', val: productMaster['ロール温度'] },
-        { label: '基材厚 (Base Thick)', val: productMaster['基材厚'] },
-        { label: '基材幅 (Base Width)', val: productMaster['基材幅'] },
-        { label: '基材長 (Base Length)', val: productMaster['基材長'] },
-        { label: '粘着剤厚 (Adhesive Thick)', val: productMaster['粘着剤厚'] },
-        { label: '粘着剤幅 (Adhesive Width)', val: productMaster['粘着剤幅'] },
-        { label: '粘着剤長 (Adhesive Length)', val: productMaster['粘着剤長'] },
-        { label: '粘着倍率 (Adhesive Ratio)', val: productMaster['粘着倍率'] },
+        { label: _t('fk_mf_cleanliness') || 'クリーン度', val: productMaster['クリーン度'] },
+        { label: _t('fk_mf_dry_temp') || '乾燥温度', val: productMaster['乾燥温度'] },
+        { label: _t('fk_mf_roll_temp') || 'ロール温度', val: productMaster['ロール温度'] },
+        { label: _t('fk_mf_base_thick') || '基材厚', val: productMaster['基材厚'] },
+        { label: _t('fk_mf_base_width') || '基材幅', val: productMaster['基材幅'] },
+        { label: _t('fk_mf_base_length') || '基材長', val: productMaster['基材長'] },
+        { label: _t('fk_mf_adh_thick') || '粘着剤厚', val: productMaster['粘着剤厚'] },
+        { label: _t('fk_mf_adh_width') || '粘着剤幅', val: productMaster['粘着剤幅'] },
+        { label: _t('fk_mf_adh_length') || '粘着剤長', val: productMaster['粘着剤長'] },
+        { label: _t('fk_mf_adh_ratio') || '粘着倍率', val: productMaster['粘着倍率'] },
     ];
 
     const masterDataHTML = masterFields.filter(f => f.val !== undefined && f.val !== null && f.val !== '').map(f => `
         <div class="master-data-item">
             <span class="master-data-label">${f.label}</span>
-            <span class="master-data-val">${f.val}</span>
+            <span class="master-data-val">${localizeMasterValue(f.val)}</span>
         </div>
     `).join('');
 
@@ -2785,37 +2871,37 @@ async function renderInfoTab(data, item) {
                 if (!val) return '';
                 return `
                     <div class="structure-chip" style="border-color: rgba(109, 40, 217, 0.25); background: #FAF5FF;">
-                        <span class="structure-chip-label" style="color: #7E22CE;">${s.segment}</span>
-                        <span class="structure-chip-val">${val}</span>
+                        <span class="structure-chip-label" style="color: #7E22CE;">${localizeStructureSegment(s.segment)}</span>
+                        <span class="structure-chip-val">${localizeMasterValue(val)}</span>
                     </div>
                 `;
             }).join('');
         }
 
         const ingFields = [
-            { label: '品目区分 (Category)', val: ingMaster['品目区分'] },
-            { label: '手配先コード (Supplier)', val: ingMaster['手配先コード'] },
-            { label: '生産単位数 (Prod Unit)', val: ingMaster['生産単位数'] },
-            { label: '発注ロット数 (Order Lot)', val: ingMaster['発注ロット数'] },
-            { label: '出荷先名 (Shipping Dest)', val: ingMaster['出荷先名'] },
-            { label: '仕様 (Specs)', val: ingMaster['仕様'] },
-            { label: '型番 (Model)', val: ingMaster['型番'] },
+            { label: _t('fk_mf_category') || '品目区分', val: ingMaster['品目区分'] },
+            { label: _t('fk_mf_supplier') || '手配先コード', val: ingMaster['手配先コード'] },
+            { label: _t('fk_mf_prod_unit') || '生産単位数', val: ingMaster['生産単位数'] },
+            { label: _t('fk_mf_order_lot') || '発注ロット数', val: ingMaster['発注ロット数'] },
+            { label: _t('fk_mf_shipping_dest') || '出荷先名', val: ingMaster['出荷先名'] },
+            { label: _t('fk_mf_specs') || '仕様', val: ingMaster['仕様'] },
+            { label: _t('fk_mf_model') || '型番', val: ingMaster['型番'] },
             {
-                label: '接着剤有無 (Adhesive)',
-                val: ingMaster['接着剤有無'] === 1 ? '有 (Yes)' : ingMaster['接着剤有無'] === 2 ? '無 (No)' : ingMaster['接着剤有無']
+                label: _t('fk_mf_adhesive') || '接着剤有無',
+                val: ingMaster['接着剤有無'] === 1 ? (_t('fk_mf_adhesive_yes') || '有') : ingMaster['接着剤有無'] === 2 ? (_t('fk_mf_adhesive_no') || '無') : ingMaster['接着剤有無']
             },
-            { label: '基材厚 (Base Thick)', val: ingMaster['基材厚'] },
-            { label: '基材幅 (Base Width)', val: ingMaster['基材幅'] },
-            { label: '基材長 (Base Length)', val: ingMaster['基材長'] },
-            { label: '粘着剤厚 (Adhesive Thick)', val: ingMaster['粘着剤厚'] },
-            { label: '粘着剤幅 (Adhesive Width)', val: ingMaster['粘着剤幅'] },
-            { label: '粘着剤長 (Adhesive Length)', val: ingMaster['粘着剤長'] },
+            { label: _t('fk_mf_base_thick') || '基材厚', val: ingMaster['基材厚'] },
+            { label: _t('fk_mf_base_width') || '基材幅', val: ingMaster['基材幅'] },
+            { label: _t('fk_mf_base_length') || '基材長', val: ingMaster['基材長'] },
+            { label: _t('fk_mf_adh_thick') || '粘着剤厚', val: ingMaster['粘着剤厚'] },
+            { label: _t('fk_mf_adh_width') || '粘着剤幅', val: ingMaster['粘着剤幅'] },
+            { label: _t('fk_mf_adh_length') || '粘着剤長', val: ingMaster['粘着剤長'] },
         ];
 
         const ingDataHTML = ingFields.filter(f => f.val !== undefined && f.val !== null && f.val !== '').map(f => `
             <div class="master-data-item">
                 <span class="master-data-label">${f.label}</span>
-                <span class="master-data-val">${f.val}</span>
+                <span class="master-data-val">${localizeMasterValue(f.val)}</span>
             </div>
         `).join('');
 
@@ -2823,22 +2909,22 @@ async function renderInfoTab(data, item) {
             <div class="ingredient-section-card">
                 <div class="info-card-header" style="border-color: rgba(109, 40, 217, 0.2);">
                     <div>
-                        <span class="info-badge-title material-badge">構成材料・原材料 (Ingredient / Material)</span>
+                        <span class="info-badge-title material-badge">${_t('fk_info_ingredient_info') || '構成材料・原材料'}</span>
                         <div class="info-main-title" style="color: #6D28D9;">${ingredient['品番']}</div>
-                        <div class="info-sub-title">${ingMaster['品名'] || ''} ${ingMaster['仕様'] ? `— ${ingMaster['仕様']}` : ''}</div>
+                        <div class="info-sub-title">${localizeMasterValue(ingMaster['品名'] || '')} ${ingMaster['仕様'] ? `— ${localizeMasterValue(ingMaster['仕様'])}` : ''}</div>
                     </div>
                 </div>
 
                 ${ingStructureHTML ? `
                     <div class="info-sub-section">
-                        <div class="info-sub-section-title" style="color: #6D28D9;">材料品番構造 (Material Structure)</div>
+                        <div class="info-sub-section-title" style="color: #6D28D9;">${_t('fk_info_ingredient_structure') || '材料品番構造'}</div>
                         <div class="structure-grid">${ingStructureHTML}</div>
                     </div>
                 ` : ''}
 
                 ${ingDataHTML ? `
                     <div class="info-sub-section">
-                        <div class="info-sub-section-title" style="color: #6D28D9;">材料マスタ (Material Master Data)</div>
+                        <div class="info-sub-section-title" style="color: #6D28D9;">${_t('fk_info_ingredient_master') || '材料マスタ'}</div>
                         <div class="master-data-grid">${ingDataHTML}</div>
                     </div>
                 ` : ''}
@@ -2849,11 +2935,11 @@ async function renderInfoTab(data, item) {
             <div class="ingredient-section-card">
                 <div class="info-card-header" style="border-color: rgba(109, 40, 217, 0.2);">
                     <div>
-                        <span class="info-badge-title material-badge">構成材料・原材料 (Ingredient / Material)</span>
+                        <span class="info-badge-title material-badge">${_t('fk_info_ingredient_info') || '構成材料・原材料'}</span>
                         <div class="info-main-title" style="color: #6D28D9;">${ingredientHinban}</div>
                     </div>
                 </div>
-                <p style="color: var(--text-muted); font-size: 0.9rem;">材料マスタの詳細は未登録です。</p>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">${_t('fk_info_ingredient_unregistered') || '材料マスタの詳細は未登録です。'}</p>
             </div>
         `;
     }
@@ -2873,13 +2959,13 @@ async function renderInfoTab(data, item) {
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-size: 1.3rem;">🟣</span>
                     <div>
-                        <strong style="color: #6B21A8; font-size: 0.95rem;">現在生産中 (Currently in Production)</strong>
-                        <div style="font-size: 0.8rem; color: #7E22CE;">開始時間: ${lifecycle.actualStartTime || '--:--'} • モニター表示中</div>
+                        <strong style="color: #6B21A8; font-size: 0.95rem;">${_t('fk_info_running_title') || '現在生産中'}</strong>
+                        <div style="font-size: 0.8rem; color: #7E22CE;">${_t('fk_info_running_start') || '開始時間:'} ${lifecycle.actualStartTime || '--:--'} • ${_t('fk_info_running_monitor') || 'モニター表示中'}</div>
                     </div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">材料投入・キュー追加</button>
-                    <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${groupIdx}, event)">生産完了</button>
+                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">${_t('fk_info_btn_feed_queue') || '材料投入・キュー追加'}</button>
+                    <button type="button" class="btn-batch-action btn-batch-done" onclick="showDoneConfirmation(${groupIdx}, event)">${_t('fk_info_btn_finish_prod') || '生産完了'}</button>
                 </div>
             </div>
         `;
@@ -2888,13 +2974,13 @@ async function renderInfoTab(data, item) {
             <div class="info-preview-banner" style="background: #DEF7EC; border-color: #A7F3D0;">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <div>
-                        <strong style="color: #03543F; font-size: 0.95rem;">生産完了済み (Completed)</strong>
-                        <div style="font-size: 0.8rem; color: #047857;">実績: ${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} (${lifecycle.actualDurationMins}分)</div>
+                        <strong style="color: #03543F; font-size: 0.95rem;">${_t('fk_info_completed_title') || '生産完了済み'}</strong>
+                        <div style="font-size: 0.8rem; color: #047857;">${_t('fk_info_completed_actual') || '実績:'} ${lifecycle.actualStartTime} - ${lifecycle.actualEndTime} (${lifecycle.actualDurationMins} ${_t('fk_min_unit') || '分'})</div>
                     </div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">材料投入・キュー追加</button>
-                    <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${groupIdx}, event)">再開・リセット</button>
+                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">${_t('fk_info_btn_feed_queue') || '材料投入・キュー追加'}</button>
+                    <button type="button" class="btn-batch-action btn-batch-reopen" onclick="showReopenModal(${groupIdx}, event)">${_t('fk_info_btn_reopen') || '再開・リセット'}</button>
                 </div>
             </div>
         `;
@@ -2904,13 +2990,13 @@ async function renderInfoTab(data, item) {
             <div class="info-preview-banner">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <div>
-                        <strong style="color: #1E40AF; font-size: 0.95rem;">事前確認中 (Preview Mode)</strong>
-                        <div style="font-size: 0.8rem; color: #3B82F6;">※タブレット上での事前確認です。モニター表示には影響しません。</div>
+                        <strong style="color: #1E40AF; font-size: 0.95rem;">${_t('fk_info_preview_title') || '事前確認中'}</strong>
+                        <div style="font-size: 0.8rem; color: #3B82F6;">${_t('fk_info_preview_desc') || '※タブレット上での事前確認です。モニター表示には影響しません。'}</div>
                     </div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">材料投入・キュー追加</button>
-                    ${groupIdx >= 0 ? `<button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${groupIdx}, event)">このロットを開始</button>` : ''}
+                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">${_t('fk_info_btn_feed_queue') || '材料投入・キュー追加'}</button>
+                    ${groupIdx >= 0 ? `<button type="button" class="btn-batch-action btn-batch-start" onclick="startBatchGroup(${groupIdx}, event)">${_t('fk_info_btn_start_lot') || 'このロットを開始'}</button>` : ''}
                 </div>
             </div>
         `;
@@ -2924,23 +3010,23 @@ async function renderInfoTab(data, item) {
         <div class="info-card">
             <div class="info-card-header">
                 <div>
-                    <span class="info-badge-title product-badge">製品情報 (Product Info)</span>
+                    <span class="info-badge-title product-badge">${_t('fk_info_product_info') || '製品情報'}</span>
                     <div class="info-main-title">${item.hinban}</div>
-                    <div class="info-sub-title">${productMaster['品名'] || item.hinmei || ''} ${productMaster['仕様'] ? `— ${productMaster['仕様']}` : ''}</div>
+                    <div class="info-sub-title">${localizeMasterValue(productMaster['品名'] || item.hinmei || '')} ${productMaster['仕様'] ? `— ${localizeMasterValue(productMaster['仕様'])}` : ''}</div>
                 </div>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">材料投入・キュー追加</button>
+                    <button type="button" class="btn btn-primary" style="background: var(--brand); font-weight: 800; padding: 6px 14px;" onclick="openMaterialFeedModalForCurrentItem()">${_t('fk_info_btn_feed_queue') || '材料投入・キュー追加'}</button>
                     <span class="tag-pill roll-tag" style="font-size: 0.9rem; padding: 6px 12px;">Roll ${item.rollIndex || 1} / ${item.totalRolls || 1}</span>
                     <span class="tag-pill meter-tag" style="font-size: 0.9rem; padding: 6px 12px;">${item.meters || 0} m</span>
                     <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800;">${item.startTime || '--:--'} - ${item.endTime || '--:--'}</span>
-                    <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800; background: #ECFDF5; color: #059669; border-color: rgba(5, 150, 105, 0.3);">${durationMins} 分</span>
+                    <span class="tag-pill" style="font-size: 0.9rem; padding: 6px 12px; font-weight: 800; background: #ECFDF5; color: #059669; border-color: rgba(5, 150, 105, 0.3);">${durationMins} ${_t('fk_min_unit') || '分'}</span>
                 </div>
             </div>
 
             <!-- Structure Segments -->
             ${productStructureHTML ? `
                 <div class="info-sub-section">
-                    <div class="info-sub-section-title">品番構造 (Structure)</div>
+                    <div class="info-sub-section-title">${_t('fk_info_structure') || '品番構造'}</div>
                     <div class="structure-grid">${productStructureHTML}</div>
                 </div>
             ` : ''}
@@ -2948,23 +3034,23 @@ async function renderInfoTab(data, item) {
             <!-- Process 2010 Data -->
             ${process2010 ? `
                 <div class="info-sub-section">
-                    <div class="info-sub-section-title">工程データ (Process Data - 2010)</div>
+                    <div class="info-sub-section-title">${_t('fk_info_process_data') || '工程データ (2010)'}</div>
                     <div class="process-cards-grid">
                         <div class="process-stat-card">
-                            <span class="process-stat-label">作業時間 (Work Time)</span>
+                            <span class="process-stat-label">${_t('fk_stat_work_time') || '作業時間'}</span>
                             <span class="process-stat-val">${process2010['作業時間'] ?? 'N/A'}</span>
                         </div>
                         <div class="process-stat-card">
-                            <span class="process-stat-label">段取時間 (Setup Time)</span>
+                            <span class="process-stat-label">${_t('fk_stat_setup_time') || '段取時間'}</span>
                             <span class="process-stat-val">${process2010['段取時間'] ?? 'N/A'}</span>
                         </div>
                         <div class="process-stat-card">
-                            <span class="process-stat-label">型番 (Model)</span>
-                            <span class="process-stat-val">${process2010['型番'] ?? 'N/A'}</span>
+                            <span class="process-stat-label">${_t('fk_stat_model') || '型番'}</span>
+                            <span class="process-stat-val">${localizeMasterValue(process2010['型番']) ?? 'N/A'}</span>
                         </div>
                         <div class="process-stat-card" style="background: #ECFDF5; border-color: rgba(5, 150, 105, 0.25);">
-                            <span class="process-stat-label" style="color: #059669;">所要時間 (Duration)</span>
-                            <span class="process-stat-val" style="color: #047857;">${durationMins} 分</span>
+                            <span class="process-stat-label" style="color: #059669;">${_t('fk_stat_duration') || '所要時間'}</span>
+                            <span class="process-stat-val" style="color: #047857;">${durationMins} ${_t('fk_min_unit') || '分'}</span>
                         </div>
                     </div>
                 </div>
@@ -2973,7 +3059,7 @@ async function renderInfoTab(data, item) {
             <!-- Master Data -->
             ${masterDataHTML ? `
                 <div class="info-sub-section">
-                    <div class="info-sub-section-title">製品マスタ (Product Master Data)</div>
+                    <div class="info-sub-section-title">${_t('fk_info_product_master') || '製品マスタ'}</div>
                     <div class="master-data-grid">${masterDataHTML}</div>
                 </div>
             ` : ''}
