@@ -5,7 +5,7 @@
 
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.39:3000";
+const serverURL = "http://192.168.0.20:3000";
 
 function getTodayDateString() {
     const now = new Date();
@@ -1566,7 +1566,7 @@ function checkSchedulePriorityOrder(targetItem, gIdx, rIdx) {
     }
 
     // Find index of targetItem in scheduleItems
-    const targetIdx = scheduleItems.findIndex(s => 
+    const targetIdx = scheduleItems.findIndex(s =>
         s === targetItem ||
         (s.id && targetItem.id && s.id === targetItem.id) ||
         (s.orderIndex !== undefined && targetItem.orderIndex !== undefined && Number(s.orderIndex) === Number(targetItem.orderIndex))
@@ -1591,8 +1591,8 @@ function checkSchedulePriorityOrder(targetItem, gIdx, rIdx) {
             for (let gi = 0; gi < state.currentGroups.length; gi++) {
                 const grp = state.currentGroups[gi];
                 if (grp && grp.items) {
-                    const ri = grp.items.findIndex(it => 
-                        it === prevItem || 
+                    const ri = grp.items.findIndex(it =>
+                        it === prevItem ||
                         (it.id && prevItem.id && it.id === prevItem.id) ||
                         (it.orderIndex !== undefined && prevItem.orderIndex !== undefined && Number(it.orderIndex) === Number(prevItem.orderIndex))
                     );
@@ -1722,8 +1722,8 @@ function isScheduleRowProcessed(item, idx, groups) {
         for (let gi = 0; gi < groups.length; gi++) {
             const grp = groups[gi];
             if (grp && grp.items) {
-                const ri = grp.items.findIndex(it => 
-                    it === item || 
+                const ri = grp.items.findIndex(it =>
+                    it === item ||
                     (it.id && item.id && it.id === item.id) ||
                     (it.orderIndex !== undefined && item.orderIndex !== undefined && Number(it.orderIndex) === Number(item.orderIndex))
                 );
@@ -1839,8 +1839,8 @@ function renderScheduleTableView(groups, items) {
             for (let gi = 0; gi < groups.length; gi++) {
                 const grp = groups[gi];
                 if (grp && grp.items) {
-                    const ri = grp.items.findIndex(it => 
-                        it === item || 
+                    const ri = grp.items.findIndex(it =>
+                        it === item ||
                         (it.id && item.id && it.id === item.id) ||
                         (it.orderIndex !== undefined && item.orderIndex !== undefined && Number(it.orderIndex) === Number(item.orderIndex))
                     );
@@ -2660,7 +2660,7 @@ async function resetMonitorDisplay() {
 // Blank Monitor Detection & Current Material Projection
 // -----------------------------------------------------
 function getCurrentQueueMaterial() {
-    const activeAndQueued = (state.stagingQueue || []).filter(item => 
+    const activeAndQueued = (state.stagingQueue || []).filter(item =>
         item && (item.status === 'active' || item.status === 'in-progress' || item.status === 'queued' || item.status === 'queue')
     );
     if (activeAndQueued.length === 0) return null;
@@ -2792,7 +2792,7 @@ async function projectQueueMaterialToMonitor(queueItem) {
 
 async function checkBlankMonitorWarning(options = { showModal: true }) {
     // 1. Check if there is data in the queue tab
-    const activeAndQueued = (state.stagingQueue || []).filter(item => 
+    const activeAndQueued = (state.stagingQueue || []).filter(item =>
         item && (item.status === 'active' || item.status === 'in-progress' || item.status === 'queued' || item.status === 'queue')
     );
 
@@ -3880,6 +3880,17 @@ function openFieldPickerModal(fieldKey) {
         subEl.textContent = subTemplate.replace('{count}', tokens.length);
     }
 
+    const manualBtn = document.getElementById('feedValuePickerManualBtn');
+    if (manualBtn) {
+        if (fieldKey === 'lot') {
+            manualBtn.textContent = (_t('fk_btn_open_date_picker') || '日付ピッカーを開く');
+        } else if (fieldKey === 'socho' || fieldKey === 'shiki' || fieldKey === 'bicho') {
+            manualBtn.textContent = '🔢 ' + (_t('fk_btn_keypad_input_entry') || 'テンキーで手動入力');
+        } else {
+            manualBtn.textContent = '⌨️ ' + (_t('fk_btn_manual_input_entry') || '手動で入力する');
+        }
+    }
+
     // Determine current value to highlight
     let currentVal = '';
     if (fieldKey === 'hinban') currentVal = state.currentModalHinban;
@@ -4388,15 +4399,7 @@ function handleValuePickerManualEntry() {
             checkLearnQRBannerEligibility();
         }
     } else if (target === 'lot') {
-        const current = state.currentModalLotNo || '';
-        const promptMsg = _t('fk_prompt_enter_lot') || 'メーカーロット / 日付を手動入力してください (例: 2026-09-18):';
-        const newVal = prompt(promptMsg, current);
-        if (newVal !== null) {
-            state.currentModalLotNo = normalizeDateStringToISO(newVal.trim());
-            updateManualDisplays();
-            saveCurrentModalManualEdits();
-            checkLearnQRBannerEligibility();
-        }
+        openLotDatePickerModal();
     } else if (target === 'socho' || target === 'shiki' || target === 'bicho') {
         openMaterialKeypad(target);
     }
@@ -4410,6 +4413,95 @@ function promptEditManualLot() {
     openFieldPickerModal('lot');
 }
 
+// -----------------------------------------------------
+// Touch Date Picker Modal Controllers for Maker Lot / Date
+// -----------------------------------------------------
+function formatDateToYYYYMMDD(d) {
+    if (!d || isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function openLotDatePickerModal(initialDate) {
+    const modalEl = document.getElementById('lotDatePickerModal');
+    const input = document.getElementById('lotModalDatePickerInput');
+    if (!modalEl || !input) return;
+
+    let dateToSet = '';
+    const rawVal = initialDate || state.currentModalLotNo || '';
+    if (rawVal) {
+        const norm = normalizeDateStringToISO(rawVal);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
+            dateToSet = norm;
+        }
+    }
+    if (!dateToSet) {
+        dateToSet = formatDateToYYYYMMDD(new Date());
+    }
+
+    input.value = dateToSet;
+
+    modalEl.classList.add('open');
+    modalEl.style.display = 'flex';
+
+    // Auto-focus and attempt to show native wheel/calendar picker on supported browsers
+    setTimeout(() => {
+        try {
+            if (typeof input.showPicker === 'function') {
+                input.showPicker();
+            } else {
+                input.focus();
+            }
+        } catch (_) {
+            // showPicker may require direct activation in some browsers; fallback gracefully
+        }
+    }, 120);
+}
+
+function closeLotDatePickerModal() {
+    const modalEl = document.getElementById('lotDatePickerModal');
+    if (modalEl) {
+        modalEl.classList.remove('open');
+        modalEl.style.display = 'none';
+    }
+}
+
+function confirmLotDatePicker() {
+    const input = document.getElementById('lotModalDatePickerInput');
+    const selectedDate = input ? input.value : '';
+    if (!selectedDate) {
+        alert(_t('fk_lot_date_picker_title') || '日付を選択してください');
+        return;
+    }
+
+    const normalizedDate = normalizeDateStringToISO(selectedDate);
+    state.currentModalLotNo = normalizedDate;
+    updateManualDisplays();
+    saveCurrentModalManualEdits();
+    checkLearnQRBannerEligibility();
+
+    closeLotDatePickerModal();
+    closeFeedValuePickerModal();
+
+    const toastMsg = (_t('fk_lot_date_set_toast') || 'メーカーロット / 日付を「{date}」に設定しました').replace('{date}', normalizedDate);
+    showToast(toastMsg, 'info', 1800);
+}
+
+function fallbackManualLotPrompt() {
+    closeLotDatePickerModal();
+    const current = state.currentModalLotNo || '';
+    const promptMsg = _t('fk_prompt_enter_lot') || 'メーカーロット / 日付を手動入力してください (例: 2026-09-18):';
+    const newVal = prompt(promptMsg, current);
+    if (newVal !== null) {
+        state.currentModalLotNo = normalizeDateStringToISO(newVal.trim());
+        updateManualDisplays();
+        saveCurrentModalManualEdits();
+        checkLearnQRBannerEligibility();
+    }
+}
+
 async function learnQRFromCurrentInputs() {
     const rawQR = (state.currentModalRawQR || document.getElementById('feedRawQRInput')?.value || '').trim();
     if (!rawQR) {
@@ -4418,10 +4510,10 @@ async function learnQRFromCurrentInputs() {
     }
 
     const kizai = (state.currentModalHinban ||
-                   state.currentModalRollContext?.item?.kizai ||
-                   state.currentModalRollContext?.group?.kizai ||
-                   state.currentModalRollContext?.item?.hinban ||
-                   '').trim();
+        state.currentModalRollContext?.item?.kizai ||
+        state.currentModalRollContext?.group?.kizai ||
+        state.currentModalRollContext?.item?.hinban ||
+        '').trim();
 
     if (!kizai) {
         alert('基材コードまたは品番が見つかりません。品番欄を入力してください。');
@@ -4558,10 +4650,10 @@ async function learnQRFromCurrentInputs() {
 
 async function markCurrentMaterialAsNoQR() {
     const kizai = (state.currentModalHinban ||
-                   state.currentModalRollContext?.item?.kizai ||
-                   state.currentModalRollContext?.group?.kizai ||
-                   state.currentModalRollContext?.item?.hinban ||
-                   '').trim();
+        state.currentModalRollContext?.item?.kizai ||
+        state.currentModalRollContext?.group?.kizai ||
+        state.currentModalRollContext?.item?.hinban ||
+        '').trim();
 
     if (!kizai) {
         alert('基材コードが見つかりません。');
@@ -4635,10 +4727,10 @@ function handleUSBBarcodeScanned(barcode) {
         if (qrInput) qrInput.value = barcode;
 
         const currentKizai = (state.currentModalRollContext?.item?.kizai ||
-                              state.currentModalRollContext?.group?.kizai ||
-                              state.currentModalRollContext?.item?.hinban ||
-                              state.currentModalRollContext?.group?.hinban ||
-                              state.currentModalHinban || '').trim();
+            state.currentModalRollContext?.group?.kizai ||
+            state.currentModalRollContext?.item?.hinban ||
+            state.currentModalRollContext?.group?.hinban ||
+            state.currentModalHinban || '').trim();
 
         // 1. Try learned pattern matching first
         const learnedPattern = findLearnedPatternForKizai(currentKizai, barcode);
@@ -5032,8 +5124,8 @@ function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
         for (let gi = 0; gi < state.currentGroups.length; gi++) {
             const grp = state.currentGroups[gi];
             if (grp && grp.items) {
-                const ri = grp.items.findIndex(it => 
-                    (it.id && itemId && it.id === itemId) || 
+                const ri = grp.items.findIndex(it =>
+                    (it.id && itemId && it.id === itemId) ||
                     getItemKey(it, gi, ri) === itemId
                 );
                 if (ri !== -1) {
@@ -5803,7 +5895,7 @@ function handleThumbImgError(imgEl, originalUrl, itemId) {
                 imgEl.classList.remove('img-loading-pulse');
                 imgEl.dataset.fallbackLoaded = 'true';
             }
-        }).catch(() => {});
+        }).catch(() => { });
     }
 
     if (currentRetry >= maxRetries) {
@@ -6165,7 +6257,7 @@ function renderStagingQueue() {
     const tabBadge = document.getElementById('tabQueueBadge');
     const totalCountBadge = document.getElementById('queueTotalCountBadge');
 
-    const activeAndQueued = state.stagingQueue.filter(item => 
+    const activeAndQueued = state.stagingQueue.filter(item =>
         item && (item.status === 'active' || item.status === 'in-progress' || item.status === 'queued' || item.status === 'queue')
     );
 
@@ -6596,8 +6688,8 @@ async function executeCancelQueueItem(queueId, itemId, hinban, targetQueueItem) 
             if (state.scheduledItems) {
                 state.scheduledItems.forEach((s, idx) => {
                     const match = (itemId && (s.id === itemId || s._id === itemId)) ||
-                                  (orderIdx !== undefined && Number(s.orderIndex) === Number(orderIdx)) ||
-                                  (hinbanCode && s.hinban === hinbanCode && Number(s.rollIndex) === Number(rollIdx));
+                        (orderIdx !== undefined && Number(s.orderIndex) === Number(orderIdx)) ||
+                        (hinbanCode && s.hinban === hinbanCode && Number(s.rollIndex) === Number(rollIdx));
                     if (match) {
                         if (s.id) keysToReset.add(String(s.id));
                         if (s._id) keysToReset.add(String(s._id));
@@ -6611,11 +6703,11 @@ async function executeCancelQueueItem(queueId, itemId, hinban, targetQueueItem) 
             Object.keys(edits).forEach(k => {
                 const e = edits[k];
                 const keyMatches = (orderIdx !== undefined && k.endsWith(`_${orderIdx}`)) ||
-                                   (itemId && k.includes(String(itemId))) ||
-                                   (queueId && k.includes(String(queueId))) ||
-                                   (e && e.mongoProductionId && String(e.mongoProductionId) === String(queueId)) ||
-                                   (e && orderIdx !== undefined && Number(e.orderIndex) === Number(orderIdx)) ||
-                                   (e && rollIdx !== undefined && Number(e.rollIndex) === Number(rollIdx) && (e.hinban === hinbanCode || e.kizai === hinbanCode));
+                    (itemId && k.includes(String(itemId))) ||
+                    (queueId && k.includes(String(queueId))) ||
+                    (e && e.mongoProductionId && String(e.mongoProductionId) === String(queueId)) ||
+                    (e && orderIdx !== undefined && Number(e.orderIndex) === Number(orderIdx)) ||
+                    (e && rollIdx !== undefined && Number(e.rollIndex) === Number(rollIdx) && (e.hinban === hinbanCode || e.kizai === hinbanCode));
                 if (keyMatches) {
                     keysToReset.add(k);
                 }
@@ -6642,7 +6734,7 @@ async function executeCancelQueueItem(queueId, itemId, hinban, targetQueueItem) 
                 }
                 try {
                     await firstKojoPhotoDB.deletePhoto(k);
-                } catch (e) {}
+                } catch (e) { }
             }
 
             // Save updated edits to localStorage
@@ -6791,8 +6883,8 @@ function renderHistoryTableView() {
     completedDocs.forEach((doc, qIdx) => {
         let matchedSched = null;
         if (state.scheduledItems) {
-            matchedSched = state.scheduledItems.find(s => 
-                (doc.itemId && s.id === doc.itemId) || 
+            matchedSched = state.scheduledItems.find(s =>
+                (doc.itemId && s.id === doc.itemId) ||
                 (doc._id && s.id === doc._id) ||
                 (s.hinban === doc.hinban && (Number(s.rollIndex) === Number(doc.rollIndex) || Number(s.orderIndex) === Number(doc.orderIndex))) ||
                 (s.kizai === doc.kizai && Number(s.orderIndex) === Number(doc.orderIndex))
@@ -7023,7 +7115,7 @@ function renderHistoryList() {
 
     // 1. Load history items directly from MongoDB queue collection (synced across all tablets)
     // ONLY completed or excluded items belong in the History tab!
-    const historyDocs = queueDocs.filter(doc => 
+    const historyDocs = queueDocs.filter(doc =>
         doc && (doc.status === 'completed' || doc.status === 'excluded' || doc.status === 'scrapped')
     );
 
@@ -7031,8 +7123,8 @@ function renderHistoryList() {
         // Find matching item in scheduledItems to resolve exact orderIndex (#1, #2, #3...)
         let matchedSched = null;
         if (state.scheduledItems) {
-            matchedSched = state.scheduledItems.find(s => 
-                (doc.itemId && s.id === doc.itemId) || 
+            matchedSched = state.scheduledItems.find(s =>
+                (doc.itemId && s.id === doc.itemId) ||
                 (s.hinban === doc.hinban && (s.rollIndex == doc.rollIndex || s.orderIndex == doc.orderIndex)) ||
                 (s.kizai === doc.kizai && s.orderIndex == doc.orderIndex)
             );
@@ -7109,7 +7201,7 @@ function renderHistoryList() {
     let html = '';
     filtered.forEach(it => {
         const isExcluded = (it.status === 'excluded' || it.type === 'excluded');
-        
+
         let statusTagHTML = '';
         let actionHTML = '';
 

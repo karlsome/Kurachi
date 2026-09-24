@@ -3763,6 +3763,74 @@
             margin-top: 8px;
         }
 
+        /* ---------------- Lot / Date Picker Modal ---------------- */
+        #lotDatePickerModal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.65);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100070;
+            padding: 16px;
+            backdrop-filter: blur(3px);
+        }
+
+        #lotDatePickerModal.open {
+            display: flex !important;
+        }
+
+        .lot-date-picker-card {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            border-radius: var(--card-radius);
+            padding: 22px;
+            max-width: 440px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--shadow-pop);
+            animation: modalPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            box-sizing: border-box;
+        }
+
+        .lot-date-input-wrap {
+            margin: 12px 0 16px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .lot-modal-date-input {
+            width: 100%;
+            height: 60px;
+            font-size: 1.45rem;
+            font-weight: 800;
+            text-align: center;
+            border: 2.5px solid var(--blue);
+            background: #F0F9FF;
+            color: #0369A1;
+            border-radius: 12px;
+            box-sizing: border-box;
+            padding: 8px 16px;
+            outline: none;
+            box-shadow: 0 2px 10px rgba(2, 132, 199, 0.18);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .lot-modal-date-input:focus {
+            border-color: #0284C7;
+            background: #FFFFFF;
+            box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.28);
+        }
+
+        .lot-modal-date-input::-webkit-calendar-picker-indicator {
+            display: none;
+            -webkit-appearance: none;
+        }
+
         .feed-token-choice-btn {
             background: var(--bg-subtle);
             border: 1.5px solid var(--border);
@@ -4697,12 +4765,50 @@
 
             <!-- Bottom actions: Manual Entry & Cancel -->
             <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px;">
-                <button type="button" class="btn-feed-row-flat" style="background: var(--blue-soft); border: 1.5px solid var(--blue); color: var(--blue); font-weight: 800; padding: 12px; font-size: 0.95rem; border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center;" onclick="handleValuePickerManualEntry()" data-i18n="fk_btn_manual_input_entry">
+                <button type="button" class="btn-feed-row-flat" id="feedValuePickerManualBtn" style="background: var(--blue-soft); border: 1.5px solid var(--blue); color: var(--blue); font-weight: 800; padding: 12px; font-size: 0.95rem; border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center; gap: 6px;" onclick="handleValuePickerManualEntry()" data-i18n="fk_btn_manual_input_entry">
                     手動で入力する
                 </button>
                 <button type="button" class="btn-cancel-flat" style="padding: 10px;" onclick="closeFeedValuePickerModal()" data-i18n="fk_btn_cancel">
                     キャンセル
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dedicated Touch Date Picker Modal for Maker Lot / Date -->
+    <div id="lotDatePickerModal">
+        <div class="lot-date-picker-card">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <div>
+                    <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                        <span data-i18n="fk_lot_date_picker_title">日付の選択 (Maker Lot / Date)</span>
+                    </h3>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;" data-i18n="fk_lot_date_picker_subtitle">
+                        日付を選択してください
+                    </div>
+                </div>
+                <button type="button" class="feed-modal-close-btn" onclick="closeLotDatePickerModal()">✕</button>
+            </div>
+
+            <!-- Touch Date Input -->
+            <div class="lot-date-input-wrap">
+                <input type="date" id="lotModalDatePickerInput" class="lot-modal-date-input" onclick="try { this.showPicker(); } catch(e) {}">
+            </div>
+
+            <!-- Bottom Actions -->
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px;">
+                <button type="button" class="btn-feed-row-flat" style="background: #10B981; border: 1.5px solid #059669; color: #FFFFFF; font-weight: 800; padding: 12px; font-size: 1rem; border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;" onclick="confirmLotDatePicker()">
+                    <span style="font-size: 1.1rem;">✓</span>
+                    <span data-i18n="fk_btn_confirm_date">この日付で決定</span>
+                </button>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" class="btn-cancel-flat" style="flex: 1; padding: 10px;" onclick="closeLotDatePickerModal()" data-i18n="fk_btn_cancel">
+                        キャンセル
+                    </button>
+                    <button type="button" class="btn-cancel-flat" style="flex: 1; padding: 10px; font-size: 0.8rem; color: var(--text-muted);" onclick="fallbackManualLotPrompt()" title="文字や記号を含む特殊なロット番号を手動入力">
+                        テキストで手動入力...
+                    </button>
+                </div>
             </div>
         </div>
     </div>

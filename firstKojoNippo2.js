@@ -6,7 +6,7 @@
 // Determine backend server URL
 //const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.39:3000";
+const serverURL = "http://192.168.0.20:3000";
 
 // -----------------------------------------------------
 // Date & Time Helpers
@@ -650,11 +650,11 @@ async function fetchProductionQueue(showLoading = false) {
 
                 // Partition into Active, Queued (Waiting), and Completed
                 const active = rawQueue.find(item => item.status === 'active') ||
-                               rawQueue.find(item => item.status === 'in-progress');
-                const queued = rawQueue.filter(item => 
+                    rawQueue.find(item => item.status === 'in-progress');
+                const queued = rawQueue.filter(item =>
                     item !== active && (
-                        item.status === 'queued' || 
-                        item.status === 'queue' || 
+                        item.status === 'queued' ||
+                        item.status === 'queue' ||
                         (item.status !== 'active' && item.status !== 'in-progress' && item.status !== 'completed' && item.status !== 'scrapped')
                     )
                 );
@@ -1058,8 +1058,8 @@ function renderHistoryCardView() {
     const items = completedDocs.map((doc, qIdx) => {
         let matchedSched = null;
         if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
-            matchedSched = scheduleCache.scheduleOrder.find(s => 
-                (doc.itemId && s.id === doc.itemId) || 
+            matchedSched = scheduleCache.scheduleOrder.find(s =>
+                (doc.itemId && s.id === doc.itemId) ||
                 (doc._id && s.id === doc._id) ||
                 (doc.groupId && s.groupId === doc.groupId && Number(s.rollIndex) === Number(doc.rollIndex)) ||
                 (s.hinban === doc.hinban && (Number(s.rollIndex) === Number(doc.rollIndex) || Number(s.orderIndex) === Number(doc.orderIndex))) ||
@@ -1183,8 +1183,8 @@ function renderHistoryTableView() {
     completedDocs.forEach((doc, qIdx) => {
         let matchedSched = null;
         if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
-            matchedSched = scheduleCache.scheduleOrder.find(s => 
-                (doc.itemId && s.id === doc.itemId) || 
+            matchedSched = scheduleCache.scheduleOrder.find(s =>
+                (doc.itemId && s.id === doc.itemId) ||
                 (doc._id && s.id === doc._id) ||
                 (doc.groupId && s.groupId === doc.groupId && Number(s.rollIndex) === Number(doc.rollIndex)) ||
                 (s.hinban === doc.hinban && (Number(s.rollIndex) === Number(doc.rollIndex) || Number(s.orderIndex) === Number(doc.orderIndex))) ||
@@ -1333,9 +1333,9 @@ function renderHistoryTableView() {
 }
 
 async function handleHistoryReprint(itemId, rollIndex, totalRolls) {
-    const item = (state.completedItems || []).find(d => 
-        String(d._id) === String(itemId) || 
-        String(d.queueId) === String(itemId) || 
+    const item = (state.completedItems || []).find(d =>
+        String(d._id) === String(itemId) ||
+        String(d.queueId) === String(itemId) ||
         String(d.itemId) === String(itemId)
     );
     if (!item) {
@@ -1371,17 +1371,17 @@ async function handleHistoryReprint(itemId, rollIndex, totalRolls) {
 }
 
 function handleHistoryItemClick(itemId) {
-    const item = (state.completedItems || []).find(d => 
-        String(d._id) === String(itemId) || 
-        String(d.queueId) === String(itemId) || 
+    const item = (state.completedItems || []).find(d =>
+        String(d._id) === String(itemId) ||
+        String(d.queueId) === String(itemId) ||
         String(d.itemId) === String(itemId)
     );
     if (!item) return;
 
     let matchedSched = null;
     if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
-        matchedSched = scheduleCache.scheduleOrder.find(s => 
-            (item.itemId && s.id === item.itemId) || 
+        matchedSched = scheduleCache.scheduleOrder.find(s =>
+            (item.itemId && s.id === item.itemId) ||
             (item._id && s.id === item._id) ||
             (item.groupId && s.groupId === item.groupId && Number(s.rollIndex) === Number(item.rollIndex)) ||
             (s.hinban === item.hinban && (Number(s.rollIndex) === Number(item.rollIndex) || Number(s.orderIndex) === Number(item.orderIndex))) ||
