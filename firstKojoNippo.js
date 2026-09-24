@@ -358,16 +358,16 @@ function switchMainTab(index, skipAnimation = false) {
     tabs.forEach(t => t.classList.remove('active'));
     if (tabs[index]) tabs[index].classList.add('active');
 
-    // 7 tabs => 100 / 7 = 14.285714% shift per tab
+    // 6 tabs => 100 / 6 = 16.666667% shift per tab
     if (container) {
         if (skipAnimation) {
             const origTransition = container.style.transition;
             container.style.transition = 'none';
-            container.style.transform = `translateX(-${index * (100 / 7)}%)`;
+            container.style.transform = `translateX(-${index * (100 / 6)}%)`;
             void container.offsetHeight; // Force reflow
             container.style.transition = origTransition;
         } else {
-            container.style.transform = `translateX(-${index * (100 / 7)}%)`;
+            container.style.transform = `translateX(-${index * (100 / 6)}%)`;
         }
     }
     state.currentMainTab = index;
