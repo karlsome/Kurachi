@@ -3538,10 +3538,6 @@
             background: var(--bg-surface);
         }
 
-        .feed-numpad-field.is-bicho {
-            background: var(--brand-soft);
-            border-color: #A7F3D0;
-        }
 
         .feed-numpad-field.is-missing {
             border-color: #F87171 !important;
@@ -3571,9 +3567,6 @@
             color: var(--text-soft);
         }
 
-        .feed-numpad-field.is-bicho .feed-numpad-field-label {
-            color: var(--brand);
-        }
 
         .feed-numpad-field-val {
             font-size: 1.25rem;
@@ -3582,11 +3575,6 @@
             color: var(--text-main);
         }
 
-        .feed-numpad-field-val.bicho-val {
-            color: var(--brand);
-            font-size: 1.35rem;
-            font-weight: 900;
-        }
 
         .feed-calc-sign {
             text-align: center;
@@ -4600,9 +4588,9 @@
                         </div>
 
                         <!-- 美長 / 純長 (実長) -->
-                        <div class="feed-numpad-field is-bicho" onclick="openFieldPickerModal('bicho')">
+                        <div class="feed-numpad-field" onclick="openFieldPickerModal('bicho')">
                             <span class="feed-numpad-field-label" data-i18n="fk_label_bicho">美長 / 実長 (m) ★必須</span>
-                            <span class="feed-numpad-field-val bicho-val" id="manualBichoDisplay">0 m</span>
+                            <span class="feed-numpad-field-val" id="manualBichoDisplay">0 m</span>
                         </div>
                     </div>
 

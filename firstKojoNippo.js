@@ -3709,15 +3709,11 @@ function parseBarcodeWithLearnedPattern(pattern, barcode) {
         lotNo = normalizeDateStringToISO(tokens[mapping.lotIndex]);
     }
 
-    // Auto-calculate bicho if socho and shiki are given but bicho was omitted in QR
-    if (bicho === null && socho !== '') {
-        const so = parseFloat(socho) || 0;
-        const sh = parseFloat(shiki) || 0;
-        bicho = Math.max(0, parseFloat((so - sh).toFixed(2)));
-    }
-
     if (bicho !== null && !isNaN(bicho)) {
         return { socho, shiki, bicho, hinban, lotNo, isLearned: true };
+    }
+    if (hinban || lotNo || socho || shiki) {
+        return { socho, shiki, bicho: bicho !== null ? bicho : '', hinban, lotNo, isLearned: true };
     }
     return null;
 }
@@ -3743,9 +3739,6 @@ function parseBarcodeHeuristics(barcode) {
     if (hinbanMatch) { hinbanVal = hinbanMatch[1].trim(); }
     if (lotMatch) { lotVal = lotMatch[1].trim(); }
 
-    if (sochoMatch && shikiMatch && bichoVal === null) {
-        bichoVal = Math.max(0, parseFloat((parseFloat(sochoMatch[1]) - parseFloat(shikiMatch[1])).toFixed(2)));
-    }
 
     // Pattern 2: Multi-space, comma, tab, or semicolon separated format
     if (!matched) {
@@ -4354,16 +4347,8 @@ function selectFieldTokenValue(fieldKey, tokenVal) {
         state.currentModalLotNo = normalizeDateStringToISO(tokenVal);
     } else if (fieldKey === 'socho') {
         state.currentModalSocho = tokenVal;
-        const so = parseFloat(tokenVal) || 0;
-        const sh = parseFloat(state.currentModalShiki) || 0;
-        state.currentModalBicho = Math.max(0, parseFloat((so - sh).toFixed(2)));
     } else if (fieldKey === 'shiki') {
         state.currentModalShiki = tokenVal || '0';
-        const so = parseFloat(state.currentModalSocho) || 0;
-        const sh = parseFloat(tokenVal) || 0;
-        if (state.currentModalSocho) {
-            state.currentModalBicho = Math.max(0, parseFloat((so - sh).toFixed(2)));
-        }
     } else if (fieldKey === 'bicho') {
         state.currentModalBicho = tokenVal;
     }
@@ -5048,16 +5033,8 @@ function materialKeypadConfirm() {
     const val = currentKeypadBuffer;
     if (currentKeypadTarget === 'socho') {
         state.currentModalSocho = val;
-        const so = parseFloat(val) || 0;
-        const sh = parseFloat(state.currentModalShiki) || 0;
-        state.currentModalBicho = Math.max(0, parseFloat((so - sh).toFixed(2)));
     } else if (currentKeypadTarget === 'shiki') {
         state.currentModalShiki = val || '0';
-        const so = parseFloat(state.currentModalSocho) || 0;
-        const sh = parseFloat(val) || 0;
-        if (state.currentModalSocho) {
-            state.currentModalBicho = Math.max(0, parseFloat((so - sh).toFixed(2)));
-        }
     } else if (currentKeypadTarget === 'bicho') {
         state.currentModalBicho = val;
     }
