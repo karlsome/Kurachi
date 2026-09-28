@@ -284,7 +284,10 @@ function buildBrotherPrintFields(item, rollIndex, totalRolls) {
         }
         textHinban = hinban;
         textSebangou = labelHinban;
-        barcode = `${labelHinban || hinban},${lotNo},${meters}`;
+        const uniqueID = (item.uniqueID || '').trim();
+        barcode = uniqueID
+            ? `${labelHinban || hinban},${lotNo},${meters},${uniqueID}`
+            : `${labelHinban || hinban},${lotNo},${meters}`;
     }
 
     return {
@@ -1452,6 +1455,7 @@ function handleHistoryItemClick(itemId) {
                 <div><span style="color: var(--text-soft); font-weight: 700;">出荷先:</span> <strong>${escapeHtml(dest)}</strong></div>
                 <div><span style="color: var(--text-soft); font-weight: 700;">完了日時:</span> <strong>${escapeHtml(timeStr)}</strong></div>
                 <div><span style="color: var(--text-soft); font-weight: 700;">作業担当:</span> <strong>${escapeHtml(worker)}</strong></div>
+                ${item.uniqueID ? `<div style="grid-column: 1 / -1;"><span style="color: var(--text-soft); font-weight: 700;">固有ID (UID):</span> <code style="font-size: 0.9rem; font-weight: 800; color: #1E293B; background: #E2E8F0; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.5px;">${escapeHtml(item.uniqueID)}</code></div>` : ''}
             </div>
 
             ${photoUrl ? `
@@ -1495,6 +1499,26 @@ async function handlePrintRollLabel() {
     state.isPrinting = true;
 
     const item = state.activeItem;
+
+    // Ensure item has a uniqueID before printing
+    if (!item.uniqueID && (item._id || item.queueId || item.itemId)) {
+        try {
+            const res = await fetch(`${serverURL}/api/production/queue/ensure-unique-id`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ _id: item._id, queueId: item.queueId, itemId: item.itemId })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.uniqueID) {
+                    item.uniqueID = data.uniqueID;
+                }
+            }
+        } catch (e) {
+            console.warn('Could not ensure uniqueID from server:', e);
+        }
+    }
+
     const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
     const totalRolls = Number(item.totalRolls) || 1;
 
@@ -1528,6 +1552,7 @@ async function handlePrintRollLabel() {
             hinban: item.hinban,
             rollIndex: curRoll,
             totalRolls: totalRolls,
+            uniqueID: item.uniqueID || '',
             timestamp: now.toISOString(),
             timeStr
         };
@@ -1538,7 +1563,8 @@ async function handlePrintRollLabel() {
             rollIndex: curRoll,
             totalRolls: totalRolls,
             lotNo: item.lotNo || fields.txtLotNo || '',
-            barcode: fields.txtBarcode || '',
+            barcode: fields.barcode_barcode || fields.txtBarcode || '',
+            uniqueID: item.uniqueID || '',
             worker: state.workerName || '包装作業者',
             machine: state.machineName,
             timestamp: now.toISOString(),

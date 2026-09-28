@@ -36923,6 +36923,47 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
 
 // 2. First Factory Queue API (MongoDB: submittedDB.firstFactoryProduction & firstFactoryQueue)
 
+// --- First Factory Unique 6-Character Base62 Roll ID Generator (Strategy 2: Atomic Central Counter) ---
+const ROLL_UNIQUE_ID_M = BigInt(62 ** 6); // 56,800,235,584 permutations
+const ROLL_UNIQUE_ID_A = 2865743789n;     // Coprime to 2 and 31 (gcd = 1)
+const ROLL_UNIQUE_ID_C = 1013904223n;
+const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+function encodeSeqTo6CharID(seqNumber) {
+  let val = (BigInt(seqNumber) * ROLL_UNIQUE_ID_A + ROLL_UNIQUE_ID_C) % ROLL_UNIQUE_ID_M;
+  let s = '';
+  for (let i = 0; i < 6; i++) {
+    s = BASE62_CHARS[Number(val % 62n)] + s;
+    val = val / 62n;
+  }
+  return s;
+}
+
+let firstFactoryIndexEnsured = false;
+async function ensureFirstFactoryIndexes(db) {
+  if (firstFactoryIndexEnsured) return;
+  try {
+    const prodCol = db.collection('firstFactoryProduction');
+    await prodCol.createIndex({ uniqueID: 1 }, { unique: true, sparse: true });
+    firstFactoryIndexEnsured = true;
+  } catch (err) {
+    console.warn('⚠️ Could not create index on firstFactoryProduction.uniqueID:', err.message);
+  }
+}
+
+async function getNextRollUniqueID(db) {
+  await ensureFirstFactoryIndexes(db);
+  const countersCol = db.collection('counters');
+  const counterResult = await countersCol.findOneAndUpdate(
+    { _id: 'firstFactoryProduction_uniqueID' },
+    { $inc: { seq: 1 } },
+    { returnDocument: 'after', upsert: true }
+  );
+  const doc = counterResult?.value || counterResult || {};
+  const seq = doc.seq || 1;
+  return encodeSeqTo6CharID(seq);
+}
+
 // GET active queue list
 app.get('/api/production/queue', async (req, res) => {
   try {
@@ -36957,10 +36998,63 @@ app.get('/api/production/queue', async (req, res) => {
         .toArray();
     }
 
+    // Backfill any active or queued items that don't have uniqueID yet
+    if (Array.isArray(queue) && queue.length > 0) {
+      for (const item of queue) {
+        if (!item.uniqueID && item._id && item.status !== 'completed' && item.status !== 'scrapped') {
+          try {
+            item.uniqueID = await getNextRollUniqueID(db);
+            await productionCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } }).catch(() => {});
+            await queueCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } }).catch(() => {});
+          } catch (e) {
+            console.warn('⚠️ Could not backfill uniqueID for queue item:', e.message);
+          }
+        }
+      }
+    }
+
     res.json({ success: true, queue });
   } catch (error) {
     console.error('❌ Error in GET /api/production/queue:', error);
     res.status(500).json({ error: 'Failed to fetch production queue' });
+  }
+});
+
+// Ensure an item in firstFactoryProduction has a uniqueID (e.g. before printing on Tablet 2)
+app.post('/api/production/queue/ensure-unique-id', async (req, res) => {
+  try {
+    const { _id, queueId, itemId } = req.body;
+    const targetId = _id || queueId;
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    let item = null;
+    const { ObjectId } = require('mongodb');
+    if (targetId && ObjectId.isValid(targetId)) {
+      item = await productionCol.findOne({ _id: new ObjectId(targetId) }) || await queueCol.findOne({ _id: new ObjectId(targetId) });
+    }
+    if (!item && targetId) {
+      item = await productionCol.findOne({ _id: targetId }) || await queueCol.findOne({ _id: targetId });
+    }
+    if (!item && itemId) {
+      item = await productionCol.findOne({ itemId }) || await queueCol.findOne({ itemId });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    if (!item.uniqueID) {
+      item.uniqueID = await getNextRollUniqueID(db);
+      await productionCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } });
+      await queueCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } }).catch(() => {});
+    }
+
+    res.json({ success: true, uniqueID: item.uniqueID, item });
+  } catch (error) {
+    console.error('❌ Error in /api/production/queue/ensure-unique-id:', error);
+    res.status(500).json({ error: 'Failed to ensure uniqueID' });
   }
 });
 
@@ -37077,9 +37171,13 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       : (activeItem ? 'queue' : 'in-progress');
     const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
 
+    // Generate guaranteed unique 6-character Base62 uniqueID
+    const uniqueID = await getNextRollUniqueID(db);
+
     const newItem = {
       date: targetDate,
       machine: targetMachine,
+      uniqueID,
       worker: worker || '',
       feederWorker: worker || '',
       wrapperWorker: '',
@@ -37141,6 +37239,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       date: targetDate,
       machine: targetMachine,
       _id: newItem._id,
+      uniqueID: newItem.uniqueID,
       status: finalStatus
     });
 
@@ -37148,11 +37247,12 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       broadcastScanForProductionItem(newItem).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
     }
 
-    console.log(`📋 Enqueued roll item to firstFactoryProduction [${newItem.hinban || newItem.groupId}] (Roll #${newItem.rollIndex}/${newItem.totalRolls}) -> pos: ${queuePosition}, status: ${finalStatus}, _id: ${newItem._id}`);
+    console.log(`📋 Enqueued roll item to firstFactoryProduction [${newItem.hinban || newItem.groupId}] (Roll #${newItem.rollIndex}/${newItem.totalRolls}) [uniqueID: ${newItem.uniqueID}] -> pos: ${queuePosition}, status: ${finalStatus}, _id: ${newItem._id}`);
     res.json({
       success: true,
       _id: newItem._id,
       id: newItem._id,
+      uniqueID: newItem.uniqueID,
       item: newItem
     });
   } catch (error) {
@@ -37239,6 +37339,11 @@ app.post('/api/production/queue/advance', async (req, res) => {
       completionUpdate.manualReason = reason || '印刷不可による手動進行';
     }
 
+    if (!item.uniqueID) {
+      item.uniqueID = await getNextRollUniqueID(db);
+      completionUpdate.uniqueID = item.uniqueID;
+    }
+
     const printEntry = printLog || (manualAdvance ? {
       manualAdvance: true,
       reason: reason || '印刷不可による手動進行',
@@ -37254,6 +37359,10 @@ app.post('/api/production/queue/advance', async (req, res) => {
       timestamp: new Date().toISOString(),
       timeStr: timeNow
     });
+
+    if (!printEntry.uniqueID) {
+      printEntry.uniqueID = item.uniqueID || completionUpdate.uniqueID || '';
+    }
 
     const updateQuery = { _id: item._id };
     await productionCol.updateOne(updateQuery, {

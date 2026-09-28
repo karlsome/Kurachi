@@ -728,7 +728,10 @@ function buildBrotherPrintFields(group, rollItem, rollIndex, totalRolls) {
         }
         textHinban = hinban;
         textSebangou = labelHinban;
-        barcode = `${labelHinban || hinban},${lotNo},${meters}`;
+        const uniqueID = (rollItem.uniqueID || (typeof getItemEdit === 'function' ? getItemEdit(rollItem.itemId || rollItem.id, rollItem).uniqueID : '') || '').trim();
+        barcode = uniqueID
+            ? `${labelHinban || hinban},${lotNo},${meters},${uniqueID}`
+            : `${labelHinban || hinban},${lotNo},${meters}`;
     }
 
     return {
@@ -1121,7 +1124,8 @@ function getItemEdit(itemId, defaultItem = {}) {
         totalRolls: existing.totalRolls || defaultItem.totalRolls || 1,
         shippingDest: existing.shippingDest || defaultItem.shippingDest || '',
         color: existing.color || defaultItem.color || '',
-        zuban: existing.zuban || defaultItem.zuban || ''
+        zuban: existing.zuban || defaultItem.zuban || '',
+        uniqueID: existing.uniqueID || defaultItem.uniqueID || ''
     };
 }
 
@@ -1272,11 +1276,13 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
 
         const mongoId = data._id || data.item?._id || '';
         const assignedStatus = data.item?.status || 'in-progress';
+        const assignedUniqueID = data.uniqueID || data.item?.uniqueID || '';
         const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
         setItemEdit(itemId, {
             enqueued: true,
             enqueuedAt: timeNow,
             mongoProductionId: mongoId,
+            uniqueID: assignedUniqueID,
             status: assignedStatus,
             lotNo: lotNoVal,
             hinban: item.hinban || '',
@@ -1396,6 +1402,8 @@ async function enqueueBatchGroup(gIdx, event) {
                     setItemEdit(itemId, {
                         enqueued: true,
                         enqueuedAt: timeNow,
+                        mongoProductionId: data._id || data.item?._id || '',
+                        uniqueID: data.uniqueID || data.item?.uniqueID || '',
                         lotNo: lotNoVal,
                         hinban: item.hinban || '',
                         kizai: item.kizai || group.kizai || '',
@@ -6036,6 +6044,7 @@ async function submitModalRollToQueue() {
 
         const mongoId = data._id || data.item?._id || '';
         const assignedStatus = data.item?.status || 'in-progress';
+        const assignedUniqueID = data.uniqueID || data.item?.uniqueID || '';
         const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
 
         if (data.alreadyEnqueued) {
@@ -6043,6 +6052,7 @@ async function submitModalRollToQueue() {
                 enqueued: true,
                 enqueuedAt: timeNow,
                 mongoProductionId: mongoId,
+                uniqueID: assignedUniqueID,
                 status: assignedStatus,
                 photoUrl: data.item?.photoUrl || photoUrl || ''
             });
@@ -6061,6 +6071,7 @@ async function submitModalRollToQueue() {
             enqueued: true,
             enqueuedAt: timeNow,
             mongoProductionId: mongoId,
+            uniqueID: assignedUniqueID,
             status: assignedStatus,
             lotNo: lotNoVal,
             hinban: state.currentModalHinban || item.hinban || '',
