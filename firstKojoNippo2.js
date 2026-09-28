@@ -905,7 +905,7 @@ function renderQueueSection() {
         const qId = item._id || item.queueId || '';
 
         return `
-            <div class="queue-item-card" onclick="handleSelectQueueItem('${qId}', '${escapeHtml(hinban)}')">
+            <div class="queue-item-card">
                 <div class="queue-card-top">
                     <div class="queue-pos-badge">#${listNum}</div>
                     <div class="queue-rolls-tag">${rolls} ${rollCountUnit} ${plannedTag}</div>

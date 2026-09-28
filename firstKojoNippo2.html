@@ -820,15 +820,8 @@
             flex-direction: column;
             gap: 12px;
             box-shadow: var(--shadow-card);
-            cursor: pointer;
-            transition: all var(--transition-smooth);
+            cursor: default;
             position: relative;
-        }
-
-        .queue-item-card:hover {
-            border-color: rgba(37, 99, 235, 0.35);
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-float);
         }
 
         .queue-card-top {
@@ -1716,9 +1709,6 @@
                     <div class="section-title">
                         <span data-i18n="fk2_next_in_line">次工程キュー</span>
                         <span class="badge-count" id="queueCountBadge">0件</span>
-                    </div>
-                    <div style="font-size: 0.8rem; color: var(--text-soft); font-weight: 700;" data-i18n="fk2_queue_instruction">
-                        ※ 先行して包装を行う場合はカードを選択してください
                     </div>
                 </div>
 

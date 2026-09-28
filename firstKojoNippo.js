@@ -6051,7 +6051,9 @@ async function submitModalRollToQueue() {
             closeQueueAddingModal();
             closeMaterialFeedModal();
             await fetchProductionQueue();
-            switchMainTab(2);
+            renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+            updateHistoryBadges();
+            showToast(`ℹ️ #${item.orderIndex || rollIdx} は既にキューに追加されています`, 'info', 3000);
             return;
         }
 
@@ -6085,9 +6087,7 @@ async function submitModalRollToQueue() {
         await new Promise(r => setTimeout(r, 450));
         closeQueueAddingModal();
         closeMaterialFeedModal();
-
-        // Switch to Queue tab (index 2) to show the new roll in queue
-        switchMainTab(2);
+        showToast(`✓ #${item.orderIndex || rollIdx} をキューに追加しました`, 'success', 3000);
 
     } catch (err) {
         closeQueueAddingModal();
