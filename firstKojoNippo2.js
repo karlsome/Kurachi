@@ -782,6 +782,21 @@ function renderHeroCard() {
     const metersPerRoll = item.rollMeters || item.metersPerRoll || item.meters || 100;
     const photoUrl = item.imageUrl || item.photoUrl || '';
 
+    let shippingDest = item.shippingDest || '';
+    if (!shippingDest || shippingDest === '—') {
+        const scheduleCache = getDailyScheduleCache(state.selectedDate);
+        if (scheduleCache?.scheduleOrder) {
+            const matchedSched = scheduleCache.scheduleOrder.find(s =>
+                (item.itemId && (s.id === item.itemId || s.itemId === item.itemId)) ||
+                (s.kizai && (s.kizai === item.hinban || s.kizai === item.kizai)) ||
+                (s.hinban && (s.hinban === item.hinban || s.hinban === item.kizai))
+            );
+            if (matchedSched?.shippingDest && matchedSched.shippingDest !== '—') {
+                shippingDest = matchedSched.shippingDest;
+            }
+        }
+    }
+
     const rollUnit = (typeof _t === 'function' && _t('fk_roll_unit')) || '巻き';
     const metersPerRollText = (typeof _t === 'function' && _t('fk2_meters_per_roll')) || 'm / 巻';
     const photoCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票写真';
@@ -793,6 +808,7 @@ function renderHeroCard() {
     const cantPrintLabel = (typeof _t === 'function' && _t('fk2_btn_cant_print')) || '印刷不可・次へ';
     const scrapLabel = (typeof _t === 'function' && _t('fk2_btn_scrap')) || '1巻破棄';
     const finishEarlyLabel = (typeof _t === 'function' && _t('fk2_btn_finish_early')) || '中途完了';
+    const shippingDestPrefix = (typeof _t === 'function' && _t('fk_shipping_dest')) || 'Ship To: ';
 
     const titleReprint = (typeof _t === 'function' && _t('fk2_title_reprint')) || '直前に印刷したラベルをそのまま再発行します';
     const titleCantPrint = (typeof _t === 'function' && _t('fk2_title_cant_print')) || 'プリンター障害等で印刷できない場合に手動で完了して次へ進めます';
@@ -815,6 +831,10 @@ function renderHeroCard() {
                     <span><strong>${metersPerRoll}</strong>${metersPerRollText}</span>
                     <span class="hero-meta-divider">•</span>
                     <span><strong>${escapeHtml(color)}</strong></span>
+                    ${shippingDest && shippingDest !== '—' ? `
+                        <span class="hero-meta-divider">•</span>
+                        <span>${escapeHtml(shippingDestPrefix)}<strong>${escapeHtml(shippingDest)}</strong></span>
+                    ` : ''}
                 </div>
             </div>
 
