@@ -9,6 +9,152 @@
 const serverURL = "http://192.168.0.20:3000";
 
 // -----------------------------------------------------
+// KEYENCE TR-W1000 Mini PC IP Resolution & Temperature Snapshot
+// -----------------------------------------------------
+// Link for Google Sheets IP database (from DCP interactive backend.js)
+const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
+
+// In-memory cache for resolved Mini PC IP (always re-fetched fresh on page load / reload)
+let psaMiniPcIP = null;
+let isResolvingMiniPcIP = false;
+
+/**
+ * Retrieve fresh Mini PC IP from Google Sheets for the PSA2 machine.
+ * Ensures fresh IP is fetched on page load / reload as requested.
+ * @param {boolean} forceRefresh - If true, bypasses any in-memory cache
+ * @returns {Promise<string|null>} IP address string
+ */
+async function resolvePsaMiniPcIP(forceRefresh = false) {
+    if (psaMiniPcIP && !forceRefresh) {
+        return psaMiniPcIP;
+    }
+    if (isResolvingMiniPcIP) {
+        for (let i = 0; i < 25 && isResolvingMiniPcIP; i++) {
+            await new Promise(r => setTimeout(r, 100));
+        }
+        if (psaMiniPcIP) return psaMiniPcIP;
+    }
+
+    isResolvingMiniPcIP = true;
+    try {
+        const machine = state.machineName || 'PSA2';
+        const fetchUrl = `${ipURL}?filter=${encodeURIComponent(machine)}&_t=${Date.now()}`;
+        console.log(`🌐 Fetching fresh Mini PC IP from Google Sheets for [${machine}]: ${fetchUrl}`);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4500);
+
+        const res = await fetch(fetchUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+            const rawText = await res.text();
+            const cleaned = rawText.replace(/"/g, '').trim();
+            if (cleaned && /^(\d{1,3}\.){3}\d{1,3}$/.test(cleaned)) {
+                psaMiniPcIP = cleaned;
+                console.log(`📍 Fresh Mini PC IP resolved for [${machine}]: ${cleaned}`);
+                return cleaned;
+            }
+        }
+        console.warn('⚠️ Google Sheets IP lookup returned non-IP format:', await res.text().catch(() => ''));
+    } catch (err) {
+        console.warn('⚠️ Error fetching fresh Mini PC IP from Google Sheets:', err.message);
+    } finally {
+        isResolvingMiniPcIP = false;
+    }
+    return psaMiniPcIP;
+}
+
+/**
+ * Query the KEYENCE TR-W1000 OCR service on the Mini PC (port 5056).
+ * Non-blocking with strict timeout (2500ms).
+ * @returns {Promise<Object|null>} Temperature readings snapshot
+ */
+async function fetchLiveTemperaturesFromMiniPC() {
+    try {
+        const ip = await resolvePsaMiniPcIP(false);
+        if (!ip) {
+            console.warn('⚠️ No Mini PC IP available for TR-W1000 temperature snapshot');
+            return null;
+        }
+
+        const url = `http://${ip}:5056/api/trw/live`;
+        console.log(`🌡️ Fetching live temperatures from Mini PC: ${url}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+            console.warn(`Mini PC TR-W1000 OCR response not OK: HTTP ${res.status}`);
+            return null;
+        }
+
+        const data = await res.json();
+        if (data && data.values) {
+            return {
+                ambientTemp: data.values.ambientTemp,
+                ambientHumidity: data.values.ambientHumidity,
+                ovenTemp1: data.values.ovenTemp1,
+                ovenTemp2: data.values.ovenTemp2,
+                ovenTemp3: data.values.ovenTemp3,
+                capturedAt: new Date().toISOString(),
+                sourceIp: ip,
+                ocrStatus: data.ocrStatus || 'ok'
+            };
+        }
+    } catch (err) {
+        console.warn('⚠️ Failed to fetch temperatures from Mini PC (non-blocking):', err.message);
+    }
+    return null;
+}
+
+/**
+ * Save temperature snapshot to the in-progress document on the server.
+ * If setInProgress is true, also marks the roll as in-progress.
+ */
+async function saveRollTemperatureSnapshot(item, temperatures, setInProgress = false) {
+    if (!item || (!item._id && !item.queueId && !item.uniqueID)) return;
+    try {
+        const targetId = item._id || item.queueId;
+        const payload = {
+            _id: targetId,
+            queueId: targetId,
+            uniqueID: item.uniqueID || '',
+            date: state.selectedDate,
+            machine: state.machineName || 'PSA2',
+            temperatures: temperatures || null,
+            setInProgress: Boolean(setInProgress)
+        };
+
+        const res = await fetch(`${serverURL}/api/production/queue/temperature-snapshot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+            console.log(`✅ Saved temperature snapshot to roll [${item.hinban || item.groupId}]:`, temperatures);
+            if (temperatures) {
+                item.temperatures = temperatures;
+                item.tempSnapshotAt = temperatures.capturedAt;
+                if (temperatures.ambientTemp !== undefined) item.ambientTemp = temperatures.ambientTemp;
+                if (temperatures.ambientHumidity !== undefined) item.ambientHumidity = temperatures.ambientHumidity;
+                if (temperatures.ovenTemp1 !== undefined) item.ovenTemp1 = temperatures.ovenTemp1;
+                if (temperatures.ovenTemp2 !== undefined) item.ovenTemp2 = temperatures.ovenTemp2;
+                if (temperatures.ovenTemp3 !== undefined) item.ovenTemp3 = temperatures.ovenTemp3;
+            }
+            if (setInProgress) {
+                item.status = 'in-progress';
+            }
+        }
+    } catch (err) {
+        console.warn('⚠️ Failed saving temperature snapshot to server:', err.message);
+    }
+}
+
+// -----------------------------------------------------
 // Date & Time Helpers
 // -----------------------------------------------------
 function getTodayDateString() {
@@ -681,8 +827,29 @@ async function fetchProductionQueue(showLoading = false) {
 
                 // If no item is explicitly active, but there are queued items, default the first one as active target
                 if (!state.activeItem && queued.length > 0) {
-                    state.activeItem = queued[0];
+                    const firstQueued = queued[0];
+                    state.activeItem = firstQueued;
                     state.waitingItems = queued.slice(1);
+
+                    // Beginning of production: Transition first queue item to in-progress and capture start temperatures
+                    if (!firstQueued._tempSnapshotRequested) {
+                        firstQueued._tempSnapshotRequested = true;
+                        console.log(`🏁 Beginning of production: Transitioning first queue roll [${firstQueued.hinban}] to in-progress and capturing temperatures...`);
+                        fetchLiveTemperaturesFromMiniPC().then(async (temps) => {
+                            await saveRollTemperatureSnapshot(firstQueued, temps, true);
+                            firstQueued.status = 'in-progress';
+                            renderApp();
+                        });
+                    }
+                } else if (state.activeItem && (!state.activeItem.temperatures || state.activeItem.temperatures.ambientTemp === undefined) && !state.activeItem._tempSnapshotRequested) {
+                    // Active item exists (e.g. reload or already in-progress) but lacks temperature snapshot
+                    state.activeItem._tempSnapshotRequested = true;
+                    fetchLiveTemperaturesFromMiniPC().then(async (temps) => {
+                        if (temps) {
+                            await saveRollTemperatureSnapshot(state.activeItem, temps, false);
+                            renderApp();
+                        }
+                    });
                 }
                 saveLocalQueue();
             }),
@@ -837,6 +1004,12 @@ function renderHeroCard() {
                     ${shippingDest && shippingDest !== '—' ? `
                         <span class="hero-meta-divider">•</span>
                         <span>${escapeHtml(shippingDestPrefix)}<strong>${escapeHtml(shippingDest)}</strong></span>
+                    ` : ''}
+                    ${((item.ovenTemp1 !== undefined && item.ovenTemp1 !== null) || (item.temperatures && item.temperatures.ovenTemp1 !== undefined)) ? `
+                        <span class="hero-meta-divider">•</span>
+                        <span class="roll-temp-badge" style="display: inline-flex; align-items: center; gap: 4px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); padding: 2px 8px; border-radius: 6px; font-weight: 700; color: #1E40AF; font-size: 0.8rem;" title="開始時スナップショット温度 (Start In-Progress Snapshot)">
+                            🌡️ 炉:${item.ovenTemp1 !== undefined ? item.ovenTemp1 : item.temperatures?.ovenTemp1}°/${(item.ovenTemp2 !== undefined ? item.ovenTemp2 : item.temperatures?.ovenTemp2) || '—'}°/${(item.ovenTemp3 !== undefined ? item.ovenTemp3 : item.temperatures?.ovenTemp3) || '—'}°C · 室:${(item.ambientTemp !== undefined ? item.ambientTemp : item.temperatures?.ambientTemp) || '—'}°C
+                        </span>
                     ` : ''}
                 </div>
             </div>
@@ -1621,6 +1794,14 @@ async function advanceQueueRoll(item, curRoll, totalRolls, options = {}) {
     const queueId = item._id || item.queueId;
     const groupId = item.groupId;
 
+    // Pre-fetch live temperatures from Mini PC for the next roll transitioning to in-progress
+    let nextTemps = null;
+    try {
+        nextTemps = await fetchLiveTemperaturesFromMiniPC();
+    } catch (e) {
+        console.warn('Could not fetch live temps during advance:', e);
+    }
+
     try {
         const payload = {
             _id: queueId,
@@ -1633,7 +1814,8 @@ async function advanceQueueRoll(item, curRoll, totalRolls, options = {}) {
             totalRolls,
             manualAdvance: Boolean(options.manualAdvance),
             reason: options.reason || '',
-            printLog: options.printLog || null
+            printLog: options.printLog || null,
+            nextRollTemperatures: nextTemps || null
         };
 
         const res = await fetch(`${serverURL}/api/production/queue/advance`, {
@@ -1647,6 +1829,11 @@ async function advanceQueueRoll(item, curRoll, totalRolls, options = {}) {
         } else {
             const data = await res.json();
             console.log('⏩ Queue advanced:', data);
+
+            // If nextActiveItem was activated and we have temps, ensure it's saved to the document
+            if (data.nextActiveItem && nextTemps && !data.nextActiveItem.temperatures) {
+                await saveRollTemperatureSnapshot(data.nextActiveItem, nextTemps, false);
+            }
         }
     } catch (e) {
         console.warn('Could not advance queue on server, updating locally:', e);
@@ -1840,6 +2027,14 @@ async function handleSelectQueueItem(queueId, hinban) {
 
         playChime('beep');
         showToast(`🎯 包装対象を「${hinban}」に切り替えました`, 'info');
+
+        // Capture temperature snapshot for newly selected in-progress roll
+        fetchLiveTemperaturesFromMiniPC().then(temps => {
+            if (temps) {
+                saveRollTemperatureSnapshot({ _id: queueId }, temps, true);
+            }
+        });
+
         await fetchProductionQueue();
     } catch (err) {
         console.warn('Queue select API error, switching locally:', err);
@@ -2095,8 +2290,10 @@ function setupEventListeners() {
         btnRefresh.addEventListener('click', () => {
             btnRefresh.style.transform = 'rotate(180deg)';
             setTimeout(() => { btnRefresh.style.transform = ''; }, 300);
+            // Re-fetch fresh Mini PC IP on reload / manual refresh
+            resolvePsaMiniPcIP(true);
             fetchProductionQueue(true);
-            showToast('キューを更新しました', 'info', 1800);
+            showToast('キューと設備IPを更新しました', 'info', 1800);
         });
     }
 
@@ -2174,6 +2371,8 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 firstKojoNippo2 initialized (Tablet 2 Wrapping & Label Printing)');
     parseUrlParams();
     setupEventListeners();
+    // Always fetch fresh Mini PC IP from Google Sheets on page load / reload
+    resolvePsaMiniPcIP(true);
     fetchProductionQueue(true);
     initEventSource();
 

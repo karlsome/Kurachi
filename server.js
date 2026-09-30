@@ -37392,10 +37392,22 @@ app.post('/api/production/queue/advance', async (req, res) => {
         startEpoch: Date.now(),
         updatedAt: new Date()
       };
+
+      if (req.body.nextRollTemperatures && typeof req.body.nextRollTemperatures === 'object') {
+        const t = req.body.nextRollTemperatures;
+        nextUpdate.temperatures = t;
+        if (t.ambientTemp !== undefined) nextUpdate.ambientTemp = t.ambientTemp;
+        if (t.ambientHumidity !== undefined) nextUpdate.ambientHumidity = t.ambientHumidity;
+        if (t.ovenTemp1 !== undefined) nextUpdate.ovenTemp1 = t.ovenTemp1;
+        if (t.ovenTemp2 !== undefined) nextUpdate.ovenTemp2 = t.ovenTemp2;
+        if (t.ovenTemp3 !== undefined) nextUpdate.ovenTemp3 = t.ovenTemp3;
+        nextUpdate.tempSnapshotAt = t.capturedAt || new Date().toISOString();
+      }
+
       await productionCol.updateOne({ _id: nextItem._id }, { $set: nextUpdate });
       await queueCol.updateOne({ _id: nextItem._id }, { $set: nextUpdate });
-      console.log(`▶️ Activated next roll in queue [${nextItem.hinban || nextItem.groupId}] Roll #${nextItem.rollIndex}/${nextItem.totalRolls} (_id: ${nextItem._id})`);
-      broadcastScanForProductionItem({ ...nextItem, status: 'in-progress' }).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
+      console.log(`▶️ Activated next roll in queue [${nextItem.hinban || nextItem.groupId}] Roll #${nextItem.rollIndex}/${nextItem.totalRolls} (_id: ${nextItem._id})${nextUpdate.temperatures ? ' [SNAPSHOT TEMPS RECORDED]' : ''}`);
+      broadcastScanForProductionItem({ ...nextItem, ...nextUpdate, status: 'in-progress' }).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
     }
 
     broadcastProductionEvent({
@@ -37425,6 +37437,89 @@ app.post('/api/production/queue/advance', async (req, res) => {
   } catch (error) {
     console.error('❌ Error in POST /api/production/queue/advance:', error);
     res.status(500).json({ error: 'Failed to advance queue' });
+  }
+});
+
+// Record temperature snapshot for an in-progress roll (and optionally set to in-progress if beginning)
+app.post('/api/production/queue/temperature-snapshot', async (req, res) => {
+  try {
+    const { _id, queueId, uniqueID, date, machine, temperatures, setInProgress } = req.body;
+    const targetId = _id || queueId;
+    if (!targetId && !uniqueID && (!date || !machine)) {
+      return res.status(400).json({ error: 'Target identifier is required' });
+    }
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+    const { ObjectId } = require('mongodb');
+
+    let item = null;
+    if (targetId && ObjectId.isValid(targetId)) {
+      item = await productionCol.findOne({ _id: new ObjectId(targetId) });
+      if (!item) item = await queueCol.findOne({ _id: new ObjectId(targetId) });
+    }
+    if (!item && targetId) {
+      item = await productionCol.findOne({ _id: targetId }) || await queueCol.findOne({ _id: targetId });
+    }
+    if (!item && targetId) {
+      item = await productionCol.findOne({ queueId: targetId }) || await queueCol.findOne({ queueId: targetId });
+    }
+    if (!item && uniqueID) {
+      item = await productionCol.findOne({ uniqueID }) || await queueCol.findOne({ uniqueID });
+    }
+    if (!item && date && machine) {
+      item = await productionCol.findOne({ date, machine, status: { $in: ['in-progress', 'active'] } });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const updateDoc = {
+      updatedAt: new Date()
+    };
+
+    if (temperatures && typeof temperatures === 'object') {
+      updateDoc.temperatures = temperatures;
+      if (temperatures.ambientTemp !== undefined) updateDoc.ambientTemp = temperatures.ambientTemp;
+      if (temperatures.ambientHumidity !== undefined) updateDoc.ambientHumidity = temperatures.ambientHumidity;
+      if (temperatures.ovenTemp1 !== undefined) updateDoc.ovenTemp1 = temperatures.ovenTemp1;
+      if (temperatures.ovenTemp2 !== undefined) updateDoc.ovenTemp2 = temperatures.ovenTemp2;
+      if (temperatures.ovenTemp3 !== undefined) updateDoc.ovenTemp3 = temperatures.ovenTemp3;
+      updateDoc.tempSnapshotAt = temperatures.capturedAt || new Date().toISOString();
+    }
+
+    if (setInProgress || item.status === 'queue' || item.status === 'queued') {
+      updateDoc.status = 'in-progress';
+      if (!item.startedAt) updateDoc.startedAt = new Date();
+      if (!item.actualStartTime) updateDoc.actualStartTime = timeNow;
+      if (!item.startEpoch) updateDoc.startEpoch = Date.now();
+    }
+
+    await productionCol.updateOne({ _id: item._id }, { $set: updateDoc });
+    await queueCol.updateOne({ _id: item._id }, { $set: updateDoc });
+
+    console.log(`🌡️ Saved temperature snapshot for [${item.hinban || item.groupId}] Roll #${item.rollIndex}/${item.totalRolls}:`, temperatures);
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: item.date || date,
+      machine: item.machine || machine,
+      _id: item._id,
+      status: updateDoc.status || item.status
+    });
+
+    res.json({
+      success: true,
+      _id: item._id,
+      status: updateDoc.status || item.status,
+      temperatures: updateDoc.temperatures || null
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/temperature-snapshot:', error);
+    res.status(500).json({ error: 'Failed to save temperature snapshot' });
   }
 });
 
