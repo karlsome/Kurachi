@@ -7358,7 +7358,12 @@ app.post('/api/factory/production-period', async (req, res) => {
       "StopCall.count": 1, "StopCall.totalWaitMinutes": 1,
       "createdAt": 1, "Comment": 1, "ショット数": 1,
       "材料ロット": 1, "材料背番号": 1,
-      "Total_Meters": 1, "Total_Pieces": 1
+      "Total_Meters": 1, "Total_Pieces": 1,
+      "非不良廃棄": 1, "非不良廃棄_詳細": 1, "疵引処理数": 1,
+      "Break_Time_Data": 1, "Maintenance_Data": 1,
+      "初物チェック画像": 1, "終物チェック画像": 1, "材料ラベル画像": 1,
+      "materialLabelImages": 1, "materialLabelImageCount": 1,
+      "uniqueID": 1
     };
 
     const results = await Promise.all(collections.map((col, index) => {
