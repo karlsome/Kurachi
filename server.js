@@ -1,6 +1,14 @@
 // This is the COMBINED version of `server.js` with all `masterUserServer.js` routes ported into it.
 // Nothing from `masterUserServer.js` is lost — everything is now under the same server, same Express instance.
 // The port used will still be 3000 (same as original `server.js`) unless you change it below.
+const dns = require('dns');
+// Fix for iPhone hotspot / cellular tethering DNS SRV resolution failure (EBADRESP)
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+} catch (e) {
+  console.warn('⚠️ Could not set custom DNS servers:', e.message);
+}
+
 const jwt = require('jsonwebtoken');
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
