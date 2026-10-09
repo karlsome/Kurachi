@@ -1816,39 +1816,35 @@
         <div class="modal-card" style="max-width: 480px;">
             <button type="button" class="modal-close-btn" onclick="closeFinishEarlyModal()">✕</button>
             <div style="font-size: 2.2rem; margin-bottom: 8px;">🏁</div>
-            <h3 class="modal-title" data-i18n="fk2_finish_early_title">ロット中途完了の確認</h3>
+            <h3 class="modal-title" data-i18n="fk2_finish_early_title">中途完了 (メーター数変更)</h3>
             <p class="modal-body" id="finishEarlySubtitle" style="margin-bottom: 14px;" data-i18n="fk2_finish_early_sub">
-                材料の短尺や不足により、予定巻数に満たない状態でロットを完了します。
+                材料短尺等により、予定と異なるメーター数でこの巻を完了します。
             </p>
 
             <div
                 style="background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--btn-radius); padding: 12px 16px; margin-bottom: 16px;">
-                <div style="font-size: 0.825rem; color: var(--text-soft); font-weight: 700;" data-i18n="fk2_planned_rolls">予定巻き数</div>
-                <div style="font-size: 1.2rem; font-weight: 900; color: var(--text-main);" id="plannedRollsDisplay">3 巻
-                </div>
+                <div style="font-size: 0.825rem; color: var(--text-soft); font-weight: 700;" data-i18n="fk2_planned_meters">予定メーター数</div>
+                <div style="font-size: 1.25rem; font-weight: 900; color: var(--text-main);" id="plannedMetersDisplay">0 m</div>
             </div>
 
-            <label style="font-size: 0.85rem; font-weight: 800; color: var(--text-main);">
-                <span data-i18n="fk2_actual_rolls">実仕上がり巻き数:</span>
-                <input type="number" class="modal-input" id="inputActualRolls" min="0" max="99" value="1">
+            <label style="font-size: 0.85rem; font-weight: 800; color: var(--text-main); display: block;">
+                <span data-i18n="fk2_actual_meters">実仕上がりメーター数 (m):</span>
+                <input type="number" class="modal-input" id="inputActualMeters" step="0.1" min="0" value="0" style="margin-top: 6px; font-size: 1.15rem; font-weight: 800;">
             </label>
 
-            <label
-                style="font-size: 0.85rem; font-weight: 800; color: var(--text-main); margin-top: 12px; display: block;">
-                <span data-i18n="fk2_finish_reason">中途終了の理由:</span>
-                <select class="modal-input" id="selectFinishReason">
-                    <option value="材料短尺・原反不足" data-i18n="fk2_reason_short">材料短尺・原反不足</option>
-                    <option value="計画数変更・指示" data-i18n="fk2_reason_plan_change">計画数変更・指示</option>
-                    <option value="歩留まり差" data-i18n="fk2_reason_yield">歩留まり差</option>
-                    <option value="その他" data-i18n="other">その他</option>
-                </select>
-            </label>
-
-            <div class="modal-actions" style="margin-top: 20px;">
-                <button type="button" class="btn-edge" onclick="closeFinishEarlyModal()" data-i18n="cancel">キャンセル</button>
-                <button type="button" class="btn-edge finish-btn" onclick="submitFinishEarly()"
-                    style="background: var(--brand); color: #fff;" data-i18n="fk2_btn_confirm_finish">
-                    完了を確定する
+            <div class="modal-actions" style="margin-top: 24px; display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; gap: 8px; width: 100%;">
+                    <button type="button" class="btn-edge" onclick="submitFinishEarly(false)"
+                        style="flex: 1; background: #FFFBEB; border-color: #F59E0B; color: #B45309; font-weight: 700; padding: 12px 8px; font-size: 0.875rem;" data-i18n="fk2_btn_skip_print_complete">
+                        ⚠️ 印刷スキップして完了
+                    </button>
+                    <button type="button" class="btn-edge finish-btn" onclick="submitFinishEarly(true)"
+                        style="flex: 1.2; background: var(--brand); color: #fff; font-weight: 800; padding: 12px 12px; font-size: 0.925rem;" data-i18n="fk2_btn_print_complete">
+                        🖨️ 印刷して完了
+                    </button>
+                </div>
+                <button type="button" class="btn-edge" onclick="closeFinishEarlyModal()" data-i18n="cancel" style="width: 100%; padding: 8px 12px;">
+                    キャンセル
                 </button>
             </div>
         </div>

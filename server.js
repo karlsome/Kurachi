@@ -37339,6 +37339,15 @@ app.post('/api/production/queue/advance', async (req, res) => {
       completionUpdate.manualReason = reason || '印刷不可による手動進行';
     }
 
+    if (req.body.meters !== undefined && req.body.meters !== null) {
+      completionUpdate.meters = Number(req.body.meters);
+      completionUpdate.rollMeters = Number(req.body.meters);
+    }
+
+    if (req.body.finishedEarly) {
+      completionUpdate.finishedEarly = true;
+    }
+
     if (!item.uniqueID) {
       item.uniqueID = await getNextRollUniqueID(db);
       completionUpdate.uniqueID = item.uniqueID;
@@ -37702,33 +37711,42 @@ app.post('/api/production/queue/finish-early', async (req, res) => {
     const targetMachine = item.machine || machine;
     const rollsProduced = Number(actualRollsProduced) || 0;
 
+    const finishMeters = req.body.meters !== undefined ? Number(req.body.meters) : (req.body.actualMeters !== undefined ? Number(req.body.actualMeters) : null);
+
+    const updateFields = {
+      status: 'completed',
+      actualRollsProduced: rollsProduced,
+      finishedEarly: true,
+      completedAt: new Date(),
+      updatedAt: new Date()
+    };
+    if (finishMeters !== null) {
+      updateFields.meters = finishMeters;
+      updateFields.rollMeters = finishMeters;
+    }
+
     await queueCollection.updateOne(
       { _id: item._id },
-      {
-        $set: {
-          status: 'completed',
-          actualRollsProduced: rollsProduced,
-          finishedEarly: true,
-          completedAt: new Date(),
-          updatedAt: new Date()
-        }
-      }
+      { $set: updateFields }
     );
 
     if (item.groupId) {
       const productionCollection = db.collection('firstFactoryProduction');
+      const prodUpdate = {
+        status: 'completed',
+        actualRollsProduced: rollsProduced,
+        finishedEarly: true,
+        actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        endEpoch: Date.now(),
+        updatedAt: new Date()
+      };
+      if (finishMeters !== null) {
+        prodUpdate.meters = finishMeters;
+        prodUpdate.rollMeters = finishMeters;
+      }
       await productionCollection.updateOne(
         { date: targetDate, groupId: item.groupId },
-        {
-          $set: {
-            status: 'completed',
-            actualRollsProduced: rollsProduced,
-            finishedEarly: true,
-            actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
-            endEpoch: Date.now(),
-            updatedAt: new Date()
-          }
-        }
+        { $set: prodUpdate }
       );
     }
 

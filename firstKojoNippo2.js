@@ -627,7 +627,7 @@ function updateScrapReasonButtons() {
     });
 }
 
-// Finish Early Modal
+// Finish Early Modal (Meter Adjustment)
 function openFinishEarlyModal() {
     if (!state.activeItem) {
         const noActiveWarn = (typeof _t === 'function' && _t('fk2_no_active_lot_toast')) || '包装中のアイテムがありません';
@@ -635,20 +635,21 @@ function openFinishEarlyModal() {
         return;
     }
     const modal = document.getElementById('finishEarlyModal');
-    const plannedDisplay = document.getElementById('plannedRollsDisplay');
-    const inputActual = document.getElementById('inputActualRolls');
+    const plannedDisplay = document.getElementById('plannedMetersDisplay');
+    const inputActual = document.getElementById('inputActualMeters');
 
-    const total = state.activeItem.totalRolls || 1;
-    const currentRoll = state.activeItem.currentRollIndex || state.activeItem.rollIndex || 1;
+    const item = state.activeItem;
+    const plannedMeters = Number(item.meters || item.rollMeters || item.metersPerRoll || 0);
 
     if (plannedDisplay) {
-        const rollCountUnit = (typeof _t === 'function' && _t('fk_roll_count')) || '巻';
-        const plannedTag = (typeof _t === 'function' && _t('fk2_planned_tag')) || '予定';
-        plannedDisplay.textContent = `${total} ${rollCountUnit} (${plannedTag})`;
+        plannedDisplay.textContent = `${plannedMeters} m`;
     }
     if (inputActual) {
-        inputActual.value = Math.max(0, currentRoll - 1);
-        inputActual.max = total;
+        inputActual.value = plannedMeters > 0 ? plannedMeters : '';
+        setTimeout(() => {
+            inputActual.focus();
+            inputActual.select();
+        }, 80);
     }
 
     if (modal) modal.classList.add('open');
@@ -1815,7 +1816,9 @@ async function advanceQueueRoll(item, curRoll, totalRolls, options = {}) {
             manualAdvance: Boolean(options.manualAdvance),
             reason: options.reason || '',
             printLog: options.printLog || null,
-            nextRollTemperatures: nextTemps || null
+            nextRollTemperatures: nextTemps || null,
+            meters: options.meters !== undefined ? options.meters : (item.meters || item.rollMeters),
+            finishedEarly: Boolean(options.finishedEarly)
         };
 
         const res = await fetch(`${serverURL}/api/production/queue/advance`, {
@@ -1839,6 +1842,13 @@ async function advanceQueueRoll(item, curRoll, totalRolls, options = {}) {
         console.warn('Could not advance queue on server, updating locally:', e);
         // Local update
         item.status = 'completed';
+        if (options.meters !== undefined) {
+            item.meters = options.meters;
+            item.rollMeters = options.meters;
+        }
+        if (options.finishedEarly) {
+            item.finishedEarly = true;
+        }
         saveLocalQueue();
     }
 
@@ -1955,49 +1965,128 @@ async function submitScrapRoll() {
 }
 
 // -----------------------------------------------------
-// Edge Case 3: Finish Lot Early
+// Edge Case 3: Finish Lot Early (Meter Adjustment)
 // -----------------------------------------------------
-async function submitFinishEarly() {
+async function submitFinishEarly(shouldPrint = true) {
     if (!state.activeItem) return;
+    if (state.isPrinting) return;
 
     const item = state.activeItem;
-    const inputActual = document.getElementById('inputActualRolls');
-    const selectReason = document.getElementById('selectFinishReason');
+    const inputActual = document.getElementById('inputActualMeters');
+    const actualMeters = parseFloat(inputActual?.value);
 
-    const actualRolls = Number(inputActual?.value || 0);
-    const reason = selectReason?.value || '材料短尺・原反不足';
+    if (isNaN(actualMeters) || actualMeters <= 0) {
+        showToast('⚠️ 有効なメーター数を入力してください', 'warning');
+        return;
+    }
 
     closeFinishEarlyModal();
-    playChime('warning');
 
-    try {
-        const res = await fetch(`${serverURL}/api/production/queue/finish-early`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                date: state.selectedDate,
-                machine: state.machineName,
-                queueId: item._id || item.queueId,
-                groupId: item.groupId,
-                actualRollsProduced: actualRolls,
-                reason
-            })
-        });
+    // Update activeItem meters to the actual finished meters
+    item.meters = actualMeters;
+    item.rollMeters = actualMeters;
+    item.finishedEarly = true;
 
-        if (!res.ok) {
-            throw new Error(`Server finish-early failed: HTTP ${res.status}`);
+    const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
+    const totalRolls = Number(item.totalRolls) || 1;
+
+    if (shouldPrint) {
+        state.isPrinting = true;
+
+        // Ensure uniqueID exists
+        if (!item.uniqueID && (item._id || item.queueId || item.itemId)) {
+            try {
+                const res = await fetch(`${serverURL}/api/production/queue/ensure-unique-id`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ _id: item._id, queueId: item.queueId, itemId: item.itemId })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.uniqueID) item.uniqueID = data.uniqueID;
+                }
+            } catch (e) {
+                console.warn('Could not ensure uniqueID from server:', e);
+            }
         }
 
-        showToast(`🏁 ロット中途完了: 実 ${actualRolls} 巻で完了しました`, 'info');
-        await fetchProductionQueue();
-    } catch (err) {
-        console.warn('Finish early API error, advancing locally:', err);
-        item.status = 'completed';
-        item.actualRollsProduced = actualRolls;
-        item.finishedEarly = true;
-        saveLocalQueue();
-        await fetchProductionQueue();
-        showToast(`🏁 ロットを中途完了しました (実 ${actualRolls} 巻)`, 'info');
+        // Build brother print fields with updated actual meters
+        const fields = buildBrotherPrintFields(item, curRoll, totalRolls);
+        showPrintProgressModal('ラベル印刷中...', `【${item.hinban}】Roll ${curRoll} / ${totalRolls} (実 ${actualMeters}m)`);
+
+        try {
+            const printResult = await executeBrotherPrint(fields);
+            if (!printResult.success) {
+                console.warn('Printer warning/error:', printResult.error);
+                updatePrintProgressError(printResult.error || 'プリンターエラー (印刷未完了)');
+                state.isPrinting = false;
+                showToast('❌ 印刷に失敗しました。プリンターを確認してください。（障害時は「印刷スキップして完了」で進めます）', 'error', 6000);
+                return;
+            }
+
+            playChime('success');
+            updatePrintProgressSuccess('印刷完了！', `Roll ${curRoll} / ${totalRolls} (実 ${actualMeters}m) を発行しました`);
+
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+            state.lastPrinted = {
+                fields,
+                hinban: item.hinban,
+                rollIndex: curRoll,
+                totalRolls: totalRolls,
+                uniqueID: item.uniqueID || '',
+                meters: actualMeters,
+                timestamp: now.toISOString(),
+                timeStr
+            };
+            localStorage.setItem('firstkojo2_last_printed', JSON.stringify(state.lastPrinted));
+
+            const printLogPayload = {
+                rollIndex: curRoll,
+                totalRolls: totalRolls,
+                lotNo: item.lotNo || fields.txtLotNo || '',
+                barcode: fields.barcode_barcode || fields.txtBarcode || '',
+                uniqueID: item.uniqueID || '',
+                meters: actualMeters,
+                worker: state.workerName || '包装作業者',
+                machine: state.machineName,
+                timestamp: now.toISOString(),
+                timeStr,
+                printSuccess: true,
+                finishedEarly: true
+            };
+
+            await advanceQueueRoll(item, curRoll, totalRolls, {
+                meters: actualMeters,
+                finishedEarly: true,
+                printLog: printLogPayload
+            });
+
+            showToast(`✅ Roll ${curRoll}/${totalRolls} を実 ${actualMeters}m でラベル発行・完了しました`, 'success');
+        } catch (err) {
+            console.error('Error during finish early print:', err);
+            updatePrintProgressError(err.message || '印刷エラー');
+        } finally {
+            state.isPrinting = false;
+        }
+    } else {
+        // Skip printing & complete
+        playChime('warning');
+        showPrintProgressModal('中途完了 進行中...', `【${item.hinban}】Roll ${curRoll} / ${totalRolls} (実 ${actualMeters}m · 印刷スキップ)`);
+
+        try {
+            await advanceQueueRoll(item, curRoll, totalRolls, {
+                manualAdvance: true,
+                reason: `中途完了 (実 ${actualMeters}m · 印刷スキップ)`,
+                meters: actualMeters,
+                finishedEarly: true
+            });
+            updatePrintProgressSuccess('完了！', `Roll ${curRoll} / ${totalRolls} (実 ${actualMeters}m) を印刷スキップで完了しました`);
+            showToast(`⚠️ Roll ${curRoll}/${totalRolls} を実 ${actualMeters}m で完了しました (印刷スキップ)`, 'warning', 4000);
+        } catch (err) {
+            console.error('Error during skip print advance:', err);
+            updatePrintProgressError(err.message || '進行エラー');
+        }
     }
 }
 
