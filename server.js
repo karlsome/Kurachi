@@ -13415,6 +13415,260 @@ app.get('/api/factory-status/machines/:factoryName', async (req, res) => {
   }
 });
 
+// ============================================
+// DIGITAL TWIN — live per-machine state for the freyaAdmin2 3D dashboard
+// Sources: cycleCountDB (live cycles), tabletLogDB (worker/背番号/alerts),
+//          masterDB (pcPerCycle), setsubiDB (heads/table length/pairs), productionGoalsDB
+// ============================================
+const DIGITAL_TWIN_IDLE_MS = 10 * 60 * 1000;       // no cycle for 10 min => idle
+const DIGITAL_TWIN_OFF_MS = 60 * 60 * 1000;        // no activity for 60 min => off
+const DIGITAL_TWIN_RESET_HOUR_JST = 2;             // ioT listener resets cycles at 02:00
+const DIGITAL_TWIN_JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DIGITAL_TWIN_STATUS_PRIORITY = ['stopCall', 'cncCancel', 'maintenance', 'break', 'running', 'idle', 'off'];
+
+function getDigitalTwinProductionDay(nowMs = Date.now()) {
+  const jstNow = new Date(nowMs + DIGITAL_TWIN_JST_OFFSET_MS); // UTC fields == JST wall clock
+  const todayCutoff = Date.UTC(
+    jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate(), DIGITAL_TWIN_RESET_HOUR_JST
+  ) - DIGITAL_TWIN_JST_OFFSET_MS;
+  const cutoffMs = nowMs < todayCutoff ? todayCutoff - 24 * 60 * 60 * 1000 : todayCutoff;
+  return {
+    cutoffMs,
+    productionDate: new Date(cutoffMs + DIGITAL_TWIN_JST_OFFSET_MS).toISOString().slice(0, 10),
+    calendarDate: jstNow.toISOString().slice(0, 10),
+  };
+}
+
+// cycleCountDB timestamps are naive JST (Python datetime.now().isoformat())
+function parseDigitalTwinTimestamp(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.getTime();
+  const str = String(value).trim();
+  const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(str);
+  const ms = Date.parse(hasZone ? str : `${str}+09:00`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function splitDigitalTwinEquipment(value) {
+  return String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+// sessionID format: `${背番号|setup}_${設備}_${工場}_${date}_${n}`
+function getDigitalTwinSessionEquipment(sessionID) {
+  const parts = String(sessionID || '').split('_');
+  return parts.length >= 5 ? parts[1] : '';
+}
+
+function toDigitalTwinNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+app.get('/api/digital-twin/:factoryName', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    const nowMs = Date.now();
+    const { cutoffMs, productionDate, calendarDate } = getDigitalTwinProductionDay(nowMs);
+    const masterDb = client.db(DB_NAME);
+    const submittedDb = client.db('submittedDB');
+
+    const [cycleDocs, setsubiDocs, logDocs, goalRows] = await Promise.all([
+      masterDb.collection('cycleCountDB').find({ factory }).toArray(),
+      masterDb.collection(CHECK_FORM_EQUIPMENT_COLLECTION)
+        .find({ 工場: factory, _archived: { $ne: true } })
+        .project({ name: 1, noOfHead: 1, tableLength: 1 })
+        .toArray(),
+      submittedDb.collection('tabletLogDB')
+        .find({ 工場: factory, Date: { $in: [...new Set([productionDate, calendarDate])] } })
+        .project({ 設備: 1, sessionID: 1, 背番号: 1, 品番: 1, Worker_Name: 1, Action: 1, Status: 1, Timestamp: 1 })
+        .toArray(),
+      submittedDb.collection('productionGoalsDB').aggregate([
+        { $match: { factory, date: productionDate } },
+        { $group: { _id: null, target: { $sum: { $convert: { input: '$targetQuantity', to: 'double', onError: 0, onNull: 0 } } } } },
+      ]).toArray(),
+    ]);
+
+    // ── Machines + pairs from setsubiDB ──
+    const machines = new Map();
+    const ensureMachine = (id) => {
+      if (!machines.has(id)) {
+        machines.set(id, {
+          id, noOfHead: 1, tableLength: null, hasCycleSensor: false,
+          cycleRaw: null, lastCycleMs: null,
+          stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null,
+          lastLogMs: null, lastLogStatus: null, sessionEquipment: '',
+          worker: '', sebanggo: '', hinban: '', sebanggoAt: 0,
+        });
+      }
+      return machines.get(id);
+    };
+    const pairOf = new Map();
+    setsubiDocs.forEach((doc) => {
+      const names = splitDigitalTwinEquipment(doc.name);
+      if (names.length === 2) {
+        pairOf.set(names[0], names[1]);
+        pairOf.set(names[1], names[0]);
+        return;
+      }
+      if (names.length !== 1) return;
+      const m = ensureMachine(names[0]);
+      m.noOfHead = toDigitalTwinNumber(doc.noOfHead) || 1;
+      m.tableLength = toDigitalTwinNumber(doc.tableLength);
+    });
+
+    // ── Live cycles (latest doc per machine) ──
+    cycleDocs.forEach((doc) => {
+      const id = String(doc.machine || '').trim();
+      if (!id) return;
+      const m = ensureMachine(id);
+      const ts = parseDigitalTwinTimestamp(doc.timestamp);
+      if (m.lastCycleMs !== null && ts !== null && ts < m.lastCycleMs) return;
+      m.hasCycleSensor = true;
+      m.cycleRaw = Number(doc.cycle) || 0;
+      m.lastCycleMs = ts;
+    });
+
+    // ── Tablet log replay (oldest → newest) for alerts, worker, 背番号 ──
+    const logs = logDocs
+      .map((log) => ({ ...log, ms: parseDigitalTwinTimestamp(log.Timestamp) }))
+      .filter((log) => log.ms !== null && log.ms >= cutoffMs && log.ms <= nowMs + 60000)
+      .sort((a, b) => a.ms - b.ms);
+
+    logs.forEach((log) => {
+      const action = String(log.Action || '');
+      const sessionEquip = getDigitalTwinSessionEquipment(log.sessionID);
+      const isSetup = String(log.sessionID || '').startsWith('setup_');
+      splitDigitalTwinEquipment(log.設備).forEach((id) => {
+        const m = ensureMachine(id);
+        m.lastLogMs = log.ms;
+        m.lastLogStatus = log.Status || null;
+        if (sessionEquip) m.sessionEquipment = sessionEquip;
+        if (log.Worker_Name) m.worker = log.Worker_Name;
+        if (log.背番号 && !isSetup && log.ms >= m.sebanggoAt) {
+          m.sebanggo = log.背番号;
+          m.hinban = log.品番 || '';
+          m.sebanggoAt = log.ms;
+        }
+
+        if (action.startsWith('Stop call activated')) m.stopCallAt = log.ms;
+        else if (/^Stop call (unlocked|resolved|canceled)/.test(action)) m.stopCallAt = null;
+        else if (action.startsWith('CNC Cancel Button Detected')) m.cncCancelAt = log.ms;
+        else if (action.startsWith('CNC Cancel Unlocked')) m.cncCancelAt = null;
+        else if (action === 'Maintenance started') m.maintenanceAt = log.ms;
+        else if (action === 'Maintenance ended') m.maintenanceAt = null;
+        else if (action === 'Break started') m.breakAt = log.ms;
+        else if (action === 'Break ended') m.breakAt = null;
+        else if (action === 'Submit button pressed' || action === 'Reset button pressed') {
+          m.breakAt = null;
+          m.maintenanceAt = null;
+        }
+      });
+    });
+
+    // ── pcPerCycle from masterDB for active 背番号 ──
+    const sebanggoList = [...new Set([...machines.values()].map((m) => m.sebanggo).filter(Boolean))];
+    const products = sebanggoList.length
+      ? await masterDb.collection('masterDB')
+        .find({ 背番号: { $in: sebanggoList } })
+        .project({ 背番号: 1, 工場: 1, pcPerCycle: 1, machineConfig: 1 })
+        .toArray()
+      : [];
+    const productBySebanggo = new Map();
+    products.forEach((p) => {
+      const existing = productBySebanggo.get(p.背番号);
+      if (!existing || (p.工場 === factory && existing.工場 !== factory)) productBySebanggo.set(p.背番号, p);
+    });
+    const resolvePcPerCycle = (product, machineId) => {
+      if (!product) return null;
+      const config = product.machineConfig && typeof product.machineConfig === 'object' ? product.machineConfig : null;
+      return toDigitalTwinNumber(config?.[machineId]?.pcPerCycle) ?? toDigitalTwinNumber(product.pcPerCycle);
+    };
+
+    // ── Per-machine status ──
+    const results = new Map();
+    machines.forEach((m) => {
+      const cycleIsToday = m.lastCycleMs !== null && m.lastCycleMs >= cutoffMs;
+      const todayCycles = cycleIsToday ? m.cycleRaw : 0;
+      const lastActivityMs = Math.max(cycleIsToday ? m.lastCycleMs : 0, m.lastLogMs || 0) || null;
+
+      let status = 'off';
+      if (m.stopCallAt) status = 'stopCall';
+      else if (m.cncCancelAt) status = 'cncCancel';
+      else if (m.maintenanceAt) status = 'maintenance';
+      else if (m.breakAt) status = 'break';
+      else if (cycleIsToday && nowMs - m.lastCycleMs < DIGITAL_TWIN_IDLE_MS) status = 'running';
+      else if (!m.hasCycleSensor && m.lastLogMs && nowMs - m.lastLogMs < DIGITAL_TWIN_IDLE_MS && m.lastLogStatus === 'in-progress') status = 'running';
+      else if (lastActivityMs && nowMs - lastActivityMs < DIGITAL_TWIN_OFF_MS) status = 'idle';
+
+      const pcPerCycle = resolvePcPerCycle(productBySebanggo.get(m.sebanggo), m.id);
+      results.set(m.id, {
+        id: m.id,
+        noOfHead: m.noOfHead,
+        tableLength: m.tableLength,
+        hasCycleSensor: m.hasCycleSensor,
+        status,
+        cycle: m.cycleRaw,
+        todayCycles,
+        lastCycleAt: m.lastCycleMs ? new Date(m.lastCycleMs).toISOString() : null,
+        secondsSinceCycle: cycleIsToday ? Math.max(0, Math.round((nowMs - m.lastCycleMs) / 1000)) : null,
+        lastActivityAt: lastActivityMs ? new Date(lastActivityMs).toISOString() : null,
+        worker: m.worker || '',
+        sebanggo: m.sebanggo || '',
+        hinban: m.hinban || '',
+        pcPerCycle,
+        pieces: pcPerCycle ? todayCycles * pcPerCycle : null,
+        alertSince: m.stopCallAt || m.cncCancelAt || m.maintenanceAt || m.breakAt
+          ? new Date(m.stopCallAt || m.cncCancelAt || m.maintenanceAt || m.breakAt).toISOString()
+          : null,
+        pair: null,
+        _sessionEquipment: m.sessionEquipment,
+      });
+    });
+
+    // ── Pairs: fixed partners; merged status + shared count when running together ──
+    results.forEach((r) => {
+      const partnerId = pairOf.get(r.id);
+      if (!partnerId) return;
+      const partner = results.get(partnerId);
+      const together = splitDigitalTwinEquipment(r._sessionEquipment).length === 2
+        || (partner && splitDigitalTwinEquipment(partner._sessionEquipment).length === 2
+          && splitDigitalTwinEquipment(partner._sessionEquipment).includes(r.id));
+      r.pair = { partner: partnerId, together: Boolean(together) };
+    });
+    results.forEach((r) => {
+      if (!r.pair?.together) return;
+      const partner = results.get(r.pair.partner);
+      if (!partner) return;
+      const statuses = [r.status, partner.status];
+      r.pair.status = DIGITAL_TWIN_STATUS_PRIORITY.find((s) => statuses.includes(s)) || r.status;
+      r.pair.sharedCycles = (r.todayCycles || 0) + (partner.todayCycles || 0);
+      r.pair.sharedPieces = (r.pieces ?? 0) + (partner.pieces ?? 0);
+      r.pair.worker = r.worker || partner.worker;
+      r.pair.sebanggo = r.sebanggo || partner.sebanggo;
+    });
+
+    const machineList = [...results.values()]
+      .map(({ _sessionEquipment, ...rest }) => rest)
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    res.json({
+      success: true,
+      factory,
+      generatedAt: new Date(nowMs).toISOString(),
+      productionDate,
+      idleThresholdMinutes: DIGITAL_TWIN_IDLE_MS / 60000,
+      goal: goalRows[0]?.target || 0,
+      machines: machineList,
+    });
+  } catch (error) {
+    console.error(`Error building digital twin for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
 app.post('/api/factory-status/snapshot', async (req, res) => {
   try {
     await client.connect();
