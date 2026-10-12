@@ -1,6 +1,14 @@
 // This is the COMBINED version of `server.js` with all `masterUserServer.js` routes ported into it.
 // Nothing from `masterUserServer.js` is lost — everything is now under the same server, same Express instance.
 // The port used will still be 3000 (same as original `server.js`) unless you change it below.
+const dns = require('dns');
+// Fix for iPhone hotspot / cellular tethering DNS SRV resolution failure (EBADRESP)
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+} catch (e) {
+  console.warn('⚠️ Could not set custom DNS servers:', e.message);
+}
+
 const jwt = require('jsonwebtoken');
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
@@ -1208,7 +1216,45 @@ app.post("/api/broadcast-scan", async (req, res) => {
   });
   
   // ✅ Insert log to tabletLogDB in parallel with SSE broadcast
-  if ((sebanggo || zuban) && hinban) {
+  if (isClearAction) {
+    try {
+      await client.connect();
+      const database = client.db("submittedDB");
+      const tabletLogDB = database.collection("tabletLogDB");
+      
+      const currentDate = new Date();
+      const dateYYYYMMDD = currentDate.toISOString().split('T')[0]; // yyyy-mm-dd
+      const timeHHMMSS = currentDate.toTimeString().split(' ')[0]; // HH:mm:ss
+      
+      // Extract 工場 and sessionID from additionalData
+      const 工場 = additionalData?.工場 || additionalData?.factory || '';
+      const sessionID = additionalData?.sessionID || '';
+      const Worker_Name = additionalData?.Worker_Name || additionalData?.workerName || additionalData?.worker || '';
+      
+      for (const normalizedMachineId of machineIds) {
+        const logEntry = {
+          sessionID: sessionID,
+          背番号: '',
+          図番: '',
+          品番: '',
+          工場: 工場,
+          設備: normalizedMachineId,
+          設備_原形式: machineId.toUpperCase(),
+          Worker_Name,
+          Action: 'clear',
+          Status: 'Reset',
+          Timestamp: currentDate.toISOString(),
+          Date: dateYYYYMMDD,
+          Time: timeHHMMSS,
+          AdditionalData: { action: 'clear' }
+        };
+        await tabletLogDB.insertOne(logEntry);
+      }
+      console.log(`📝 Tablet clear/reset logs inserted for ${machineIds.length} machine(s) (Action: clear, Status: Reset)`);
+    } catch (error) {
+      console.error('❌ Error inserting tablet clear log:', error);
+    }
+  } else if ((sebanggo || zuban) && hinban) {
     try {
       await client.connect();
       const database = client.db("submittedDB");
@@ -7362,7 +7408,12 @@ app.post('/api/factory/production-period', async (req, res) => {
       "StopCall.count": 1, "StopCall.totalWaitMinutes": 1,
       "createdAt": 1, "Comment": 1, "ショット数": 1,
       "材料ロット": 1, "材料背番号": 1,
-      "Total_Meters": 1, "Total_Pieces": 1
+      "Total_Meters": 1, "Total_Pieces": 1,
+      "非不良廃棄": 1, "非不良廃棄_詳細": 1, "疵引処理数": 1,
+      "Break_Time_Data": 1, "Maintenance_Data": 1,
+      "初物チェック画像": 1, "終物チェック画像": 1, "材料ラベル画像": 1,
+      "materialLabelImages": 1, "materialLabelImageCount": 1,
+      "uniqueID": 1
     };
 
     const results = await Promise.all(collections.map((col, index) => {
@@ -36670,15 +36721,78 @@ const productionSseClients = new Set();
 
 function broadcastProductionEvent(eventData) {
   const payload = `data: ${JSON.stringify(eventData)}\n\n`;
+  const eventDateNorm = eventData && eventData.date ? String(eventData.date).replace(/\//g, '-').trim() : '';
   productionSseClients.forEach(client => {
     try {
-      if (!client.date || client.date === eventData.date) {
+      const clientDateNorm = client && client.date ? String(client.date).replace(/\//g, '-').trim() : '';
+      if (!clientDateNorm || !eventDateNorm || clientDateNorm === eventDateNorm) {
         client.res.write(payload);
       }
     } catch (e) {
       productionSseClients.delete(client);
     }
   });
+}
+
+// Auto-broadcast scan data to pdfDisplayer when roll becomes in-progress
+async function broadcastScanForProductionItem(item) {
+  if (!item) return;
+  const hinban = item.hinban || item.kizai || '';
+  const zuban = item.zuban ? String(item.zuban).trim() : '';
+  if (!hinban && !zuban) return;
+
+  const targetMachine = item.machine || 'PSA2';
+  let peers = [];
+  try {
+    peers = await getRelatedMachineIds(targetMachine);
+  } catch (e) {
+    peers = [];
+  }
+  const allTargetMachines = Array.from(new Set([targetMachine, ...peers]));
+
+  const scanData = {
+    type: 'scan',
+    action: 'scan',
+    machineId: targetMachine,
+    sebanggo: '',
+    zuban: zuban,
+    hinban: hinban,
+    language: 'ja',
+    timestamp: new Date().toISOString(),
+    additionalData: {
+      factory: '第一工場',
+      工場: '第一工場',
+      Worker_Name: item.worker || item.feederWorker || '',
+      lotIndex: item.rollIndex || 1,
+      totalRolls: item.totalRolls || 1,
+      meters: item.rollMeters || item.meters || 0,
+      action: 'scan',
+      language: 'ja'
+    }
+  };
+
+  allTargetMachines.forEach(mid => {
+    const normalized = normalizeMachineSessionKey(mid);
+    machineLastScan.set(normalized, scanData);
+    broadcastToMachine(normalized, scanData);
+  });
+  console.log(`📄 Auto-broadcasted scan to pdfDisplayer for in-progress roll: [${hinban}] zuban: ${zuban} on ${targetMachine}`);
+}
+
+async function deleteFirebaseFileByUrl(photoUrl) {
+  if (!photoUrl || typeof photoUrl !== 'string' || !photoUrl.includes('firebasestorage.googleapis.com')) return;
+  try {
+    const urlObj = new URL(photoUrl);
+    const pathMatch = urlObj.pathname.match(/\/o\/(.+)$/);
+    if (pathMatch && pathMatch[1]) {
+      const storagePath = decodeURIComponent(pathMatch[1]);
+      const bucket = admin.storage().bucket();
+      await bucket.file(storagePath).delete({ ignoreNotFound: true });
+      console.log(`🗑️ Deleted Firebase Storage file upon cancel: ${storagePath}`);
+    }
+  } catch (err) {
+    console.warn('⚠️ Could not delete Firebase Storage file:', err.message);
+  }
 }
 
 app.get('/api/production/events', (req, res) => {
@@ -36688,7 +36802,8 @@ app.get('/api/production/events', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (res.flushHeaders) res.flushHeaders();
 
-  const clientObj = { res, date: req.query.date };
+  const clientDate = req.query.date ? String(req.query.date).replace(/\//g, '-').trim() : '';
+  const clientObj = { res, date: clientDate };
   productionSseClients.add(clientObj);
 
   res.write(`data: ${JSON.stringify({ type: 'connected', time: new Date().toISOString() })}\n\n`);
@@ -36894,13 +37009,129 @@ app.post('/api/production/print-log', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// First Factory (第一工場) Raw Material QR Code Learning API
+// (Database: Sasaki_Coating_MasterDB, Collection: firstKojoLearnedQR)
+// ---------------------------------------------------------------------------
+
+// GET all learned QR patterns
+app.get('/api/firstkojo/learned-qr', async (req, res) => {
+  try {
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const col = db.collection('firstKojoLearnedQR');
+    const patterns = await col.find({}).sort({ updatedAt: -1 }).toArray();
+    res.json({ success: true, patterns });
+  } catch (error) {
+    console.error('❌ Error in GET /api/firstkojo/learned-qr:', error);
+    res.status(500).json({ error: 'Failed to fetch learned QR patterns', details: error.message });
+  }
+});
+
+// POST save / update learned QR pattern
+app.post('/api/firstkojo/learned-qr', async (req, res) => {
+  try {
+    const {
+      kizai,
+      kizaiPrefix,
+      supplier,
+      sampleRawQR,
+      patternType,
+      delimiter,
+      fieldsPresent,
+      mapping,
+      hasQR,
+      learnedBy
+    } = req.body;
+
+    if (!kizai && !kizaiPrefix) {
+      return res.status(400).json({ error: 'kizai or kizaiPrefix is required' });
+    }
+
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const col = db.collection('firstKojoLearnedQR');
+
+    const key = (kizai || kizaiPrefix).trim();
+    const filter = { kizai: key };
+
+    const updateDoc = {
+      $set: {
+        kizai: key,
+        kizaiPrefix: kizaiPrefix || key.slice(0, 5),
+        supplier: supplier || '',
+        sampleRawQR: sampleRawQR || '',
+        patternType: patternType || 'delimited',
+        delimiter: delimiter || ',',
+        fieldsPresent: fieldsPresent || {},
+        mapping: mapping || {},
+        hasQR: hasQR !== false,
+        learnedBy: learnedBy || '作業者',
+        updatedAt: new Date()
+      },
+      $setOnInsert: {
+        createdAt: new Date()
+      }
+    };
+
+    const result = await col.findOneAndUpdate(
+      filter,
+      updateDoc,
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    const savedPattern = result.value || result;
+    console.log(`🎓 Learned QR pattern saved for [${key}]:`, {
+      patternType,
+      delimiter,
+      hasQR: hasQR !== false,
+      mapping
+    });
+
+    // Broadcast update in realtime to all tablets
+    broadcastProductionEvent({
+      type: 'qr_patterns_updated',
+      kizai: key,
+      pattern: savedPattern,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ success: true, pattern: savedPattern });
+  } catch (error) {
+    console.error('❌ Error in POST /api/firstkojo/learned-qr:', error);
+    res.status(500).json({ error: 'Failed to save learned QR pattern', details: error.message });
+  }
+});
+
+// DELETE learned QR pattern
+app.delete('/api/firstkojo/learned-qr/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ObjectId } = require('mongodb');
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const col = db.collection('firstKojoLearnedQR');
+
+    const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { kizai: id };
+    await col.deleteOne(query);
+
+    broadcastProductionEvent({
+      type: 'qr_patterns_updated',
+      deletedId: id,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in DELETE /api/firstkojo/learned-qr:', error);
+    res.status(500).json({ error: 'Failed to delete pattern', details: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // First Factory (第一工場) Label Photo Upload & Queue Management API
 // ---------------------------------------------------------------------------
 
-// 1. Firebase Storage label photo upload
-app.post('/api/firstkojo/upload-label-photo', async (req, res) => {
+// 1. Dedicated Firebase Storage label photo upload
+app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], async (req, res) => {
   try {
-    const { base64, date, machine, worker, lotNo, hinban } = req.body;
+    const { base64, date, machine, worker, lotNo, hinban, queueId, itemId } = req.body;
 
     if (!base64) {
       return res.status(400).json({ error: 'Missing base64 image data' });
@@ -36917,7 +37148,8 @@ app.post('/api/firstkojo/upload-label-photo', async (req, res) => {
     const targetLotNo = lotNo || 'nolot';
     const timestamp = Date.now();
 
-    const filePath = `firstKojo/${targetMachine}/${targetDate}_${targetWorker}_${targetLotNo}_${timestamp}_materialLabel.jpg`;
+    // Directory structure: firstKojo/${date}/${machine}/${worker}_${lotNo}_${timestamp}_materialLabel.jpg
+    const filePath = req.body.filePath || `firstKojo/${targetDate}/${targetMachine}/${targetWorker}_${targetLotNo}_${timestamp}_materialLabel.jpg`;
     const file = bucket.file(filePath);
 
     await uploadToFirebaseWithRetry(file, buffer, {
@@ -36933,14 +37165,97 @@ app.post('/api/firstkojo/upload-label-photo', async (req, res) => {
     const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
 
     console.log(`📸 Uploaded first factory label photo: ${publicUrl}`);
-    res.json({ success: true, url: publicUrl });
+
+    // If an item in firstFactoryQueue is associated, update its photoUrl in MongoDB
+    try {
+      const db = client.db('submittedDB');
+      const queueCol = db.collection('firstFactoryQueue');
+      let updateFilter = null;
+      if (queueId) {
+        const { ObjectId } = require('mongodb');
+        try { updateFilter = { _id: new ObjectId(queueId) }; } catch (e) { }
+      }
+      if (!updateFilter && itemId) {
+        updateFilter = { itemId: itemId };
+      }
+      if (!updateFilter && targetLotNo && targetLotNo !== 'nolot') {
+        updateFilter = { date: targetDate, lotNo: targetLotNo };
+      }
+
+      if (updateFilter) {
+        const updateDoc = { $set: { imageUrl: publicUrl, updatedAt: new Date() } };
+        const updateResult = await queueCol.updateMany(updateFilter, updateDoc);
+        let prodModified = 0;
+        try {
+          const prodCol = db.collection('firstFactoryProduction');
+          const prodRes = await prodCol.updateMany(updateFilter, updateDoc);
+          prodModified = prodRes.modifiedCount || 0;
+        } catch (prodErr) {
+          console.warn('⚠️ Could not link photo to firstFactoryProduction:', prodErr.message);
+        }
+        if (updateResult.modifiedCount > 0 || prodModified > 0) {
+          console.log(`🔗 Linked imageUrl to firstFactoryQueue & firstFactoryProduction:`, updateFilter);
+          broadcastProductionEvent({ type: 'queue_updated', date: targetDate, imageUrl: publicUrl });
+        }
+      }
+    } catch (dbErr) {
+      console.warn('⚠️ Could not link photo to firstFactoryQueue document:', dbErr.message);
+    }
+
+    res.json({
+      success: true,
+      url: publicUrl,
+      imageUrl: publicUrl,
+      filePath
+    });
   } catch (error) {
     console.error('❌ Error uploading first factory label photo:', error);
     res.status(500).json({ error: 'Failed to upload label photo', details: error.message });
   }
 });
 
-// 2. First Factory Queue API (MongoDB: submittedDB.firstFactoryQueue)
+// 2. First Factory Queue API (MongoDB: submittedDB.firstFactoryProduction & firstFactoryQueue)
+
+// --- First Factory Unique 6-Character Base62 Roll ID Generator (Strategy 2: Atomic Central Counter) ---
+const ROLL_UNIQUE_ID_M = BigInt(62 ** 6); // 56,800,235,584 permutations
+const ROLL_UNIQUE_ID_A = 2865743789n;     // Coprime to 2 and 31 (gcd = 1)
+const ROLL_UNIQUE_ID_C = 1013904223n;
+const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+function encodeSeqTo6CharID(seqNumber) {
+  let val = (BigInt(seqNumber) * ROLL_UNIQUE_ID_A + ROLL_UNIQUE_ID_C) % ROLL_UNIQUE_ID_M;
+  let s = '';
+  for (let i = 0; i < 6; i++) {
+    s = BASE62_CHARS[Number(val % 62n)] + s;
+    val = val / 62n;
+  }
+  return s;
+}
+
+let firstFactoryIndexEnsured = false;
+async function ensureFirstFactoryIndexes(db) {
+  if (firstFactoryIndexEnsured) return;
+  try {
+    const prodCol = db.collection('firstFactoryProduction');
+    await prodCol.createIndex({ uniqueID: 1 }, { unique: true, sparse: true });
+    firstFactoryIndexEnsured = true;
+  } catch (err) {
+    console.warn('⚠️ Could not create index on firstFactoryProduction.uniqueID:', err.message);
+  }
+}
+
+async function getNextRollUniqueID(db) {
+  await ensureFirstFactoryIndexes(db);
+  const countersCol = db.collection('counters');
+  const counterResult = await countersCol.findOneAndUpdate(
+    { _id: 'firstFactoryProduction_uniqueID' },
+    { $inc: { seq: 1 } },
+    { returnDocument: 'after', upsert: true }
+  );
+  const doc = counterResult?.value || counterResult || {};
+  const seq = doc.seq || 1;
+  return encodeSeqTo6CharID(seq);
+}
 
 // GET active queue list
 app.get('/api/production/queue', async (req, res) => {
@@ -36949,15 +37264,47 @@ app.get('/api/production/queue', async (req, res) => {
     const query = {};
     if (date) query.date = date;
     if (machine) query.machine = machine;
-    if (status) query.status = status;
+    if (status) {
+      if (status === 'active' || status === 'in-progress') {
+        query.status = { $in: ['active', 'in-progress'] };
+      } else if (status === 'queued' || status === 'queue') {
+        query.status = { $in: ['queued', 'queue'] };
+      } else {
+        query.status = status;
+      }
+    }
 
     const db = client.db('submittedDB');
-    const queueCollection = db.collection('firstFactoryQueue');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
 
-    const queue = await queueCollection
+    let queue = await productionCol
       .find(query)
       .sort({ queuePosition: 1, createdAt: 1 })
       .toArray();
+
+    // Fallback to firstFactoryQueue if no records found in firstFactoryProduction
+    if (!queue || queue.length === 0) {
+      queue = await queueCol
+        .find(query)
+        .sort({ queuePosition: 1, createdAt: 1 })
+        .toArray();
+    }
+
+    // Backfill any active or queued items that don't have uniqueID yet
+    if (Array.isArray(queue) && queue.length > 0) {
+      for (const item of queue) {
+        if (!item.uniqueID && item._id && item.status !== 'completed' && item.status !== 'scrapped') {
+          try {
+            item.uniqueID = await getNextRollUniqueID(db);
+            await productionCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } }).catch(() => {});
+            await queueCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } }).catch(() => {});
+          } catch (e) {
+            console.warn('⚠️ Could not backfill uniqueID for queue item:', e.message);
+          }
+        }
+      }
+    }
 
     res.json({ success: true, queue });
   } catch (error) {
@@ -36966,7 +37313,45 @@ app.get('/api/production/queue', async (req, res) => {
   }
 });
 
-// Enqueue new lot / item
+// Ensure an item in firstFactoryProduction has a uniqueID (e.g. before printing on Tablet 2)
+app.post('/api/production/queue/ensure-unique-id', async (req, res) => {
+  try {
+    const { _id, queueId, itemId } = req.body;
+    const targetId = _id || queueId;
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    let item = null;
+    const { ObjectId } = require('mongodb');
+    if (targetId && ObjectId.isValid(targetId)) {
+      item = await productionCol.findOne({ _id: new ObjectId(targetId) }) || await queueCol.findOne({ _id: new ObjectId(targetId) });
+    }
+    if (!item && targetId) {
+      item = await productionCol.findOne({ _id: targetId }) || await queueCol.findOne({ _id: targetId });
+    }
+    if (!item && itemId) {
+      item = await productionCol.findOne({ itemId }) || await queueCol.findOne({ itemId });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    if (!item.uniqueID) {
+      item.uniqueID = await getNextRollUniqueID(db);
+      await productionCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } });
+      await queueCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } }).catch(() => {});
+    }
+
+    res.json({ success: true, uniqueID: item.uniqueID, item });
+  } catch (error) {
+    console.error('❌ Error in /api/production/queue/ensure-unique-id:', error);
+    res.status(500).json({ error: 'Failed to ensure uniqueID' });
+  }
+});
+
+// Enqueue new lot / roll item
 app.post('/api/production/queue/enqueue', async (req, res) => {
   try {
     const {
@@ -36974,6 +37359,8 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       machine,
       worker,
       groupId,
+      itemId,
+      orderIndex,
       hinban,
       hinmei,
       kizai,
@@ -36985,14 +37372,21 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       totalRolls,
       totalMeters,
       rollMeters,
+      meters,
       rollIndex,
       lotNo,
       rawMaterialQR,
       rawMaterialLength,
       manufacturerUid,
       photoUrl,
-      status
+      imageUrl,
+      status,
+      socho,
+      shiki,
+      bicho
     } = req.body;
+
+    const finalImageUrl = imageUrl || photoUrl || '';
 
     if (!date) {
       return res.status(400).json({ error: 'date is required' });
@@ -37002,10 +37396,51 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
     const targetMachine = machine || 'PSA2';
 
     const db = client.db('submittedDB');
-    const queueCollection = db.collection('firstFactoryQueue');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
 
-    // Find highest queuePosition for (date, machine)
-    const lastItem = await queueCollection
+    // Duplicate Protection: check if this exact roll is already enqueued / active / completed across any tablet
+    const duplicateOrConds = [];
+    if (itemId) duplicateOrConds.push({ itemId: itemId });
+    if (groupId && rollIndex) duplicateOrConds.push({ groupId: groupId, rollIndex: Number(rollIndex) });
+    if (orderIndex && Number(orderIndex) > 0) duplicateOrConds.push({ orderIndex: Number(orderIndex) });
+
+    if (duplicateOrConds.length > 0) {
+      const duplicateQuery = {
+        date: targetDate,
+        machine: targetMachine,
+        status: { $nin: ['cancelled', 'deleted'] },
+        $or: duplicateOrConds
+      };
+
+      const existingItem = await productionCol.findOne(duplicateQuery) || await queueCol.findOne(duplicateQuery);
+      if (existingItem) {
+        console.log(`⚠️ Item already enqueued [${existingItem.hinban || existingItem.groupId}] (Roll #${existingItem.rollIndex}, Order #${existingItem.orderIndex}) -> returning existing _id: ${existingItem._id}`);
+        // If imageUrl was missing and is now provided, update it
+        if (finalImageUrl && (!existingItem.imageUrl && !existingItem.photoUrl)) {
+          const photoPatch = { imageUrl: finalImageUrl, updatedAt: new Date() };
+          await productionCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
+          await queueCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
+        }
+        broadcastProductionEvent({
+          type: 'queue_updated',
+          date: targetDate,
+          machine: targetMachine,
+          _id: existingItem._id,
+          status: existingItem.status
+        });
+        return res.json({
+          success: true,
+          alreadyEnqueued: true,
+          _id: existingItem._id,
+          id: existingItem._id,
+          item: existingItem
+        });
+      }
+    }
+
+    // Find highest queuePosition for (date, machine) across both collections
+    const lastItem = await productionCol
       .find({ date: targetDate, machine: targetMachine })
       .sort({ queuePosition: -1 })
       .limit(1)
@@ -37015,19 +37450,33 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       : 0;
     const queuePosition = maxPos + 1;
 
-    // Check if there is an active item in queue
-    const activeItem = await queueCollection.findOne({
+    // Check if there is already an active / in-progress item for (date, machine)
+    const activeItem = await productionCol.findOne({
       date: targetDate,
       machine: targetMachine,
-      status: 'active'
+      status: { $in: ['active', 'in-progress'] }
     });
-    const finalStatus = status || (activeItem ? 'queued' : 'active');
+
+    // If an item is already in-progress on this machine, this roll is 'queue'.
+    // If NO roll is currently in-progress (e.g. shift start or previous lot finished), this roll directly becomes 'in-progress'!
+    const finalStatus = (status && status !== 'queue' && status !== 'queued')
+      ? status
+      : (activeItem ? 'queue' : 'in-progress');
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+
+    // Generate guaranteed unique 6-character Base62 uniqueID
+    const uniqueID = await getNextRollUniqueID(db);
 
     const newItem = {
       date: targetDate,
       machine: targetMachine,
+      uniqueID,
       worker: worker || '',
+      feederWorker: worker || '',
+      wrapperWorker: '',
       groupId: groupId || '',
+      itemId: itemId || '',
+      orderIndex: Number(orderIndex) || null,
       hinban: hinban || '',
       hinmei: hinmei || '',
       kizai: kizai || '',
@@ -37038,100 +37487,121 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       shippingDest: shippingDest || '',
       totalRolls: Number(totalRolls) || 1,
       totalMeters: Number(totalMeters) || 0,
-      rollMeters: Number(rollMeters) || 0,
+      rollMeters: Number(rollMeters) || Number(meters) || 0,
+      meters: Number(rollMeters) || Number(meters) || 0,
+      socho: socho || '',
+      shiki: shiki || '0',
+      bicho: bicho !== undefined && bicho !== null ? Number(bicho) : (Number(rollMeters) || Number(meters) || 0),
       rollIndex: Number(rollIndex) || 1,
       currentRollIndex: Number(rollIndex) || 1,
       lotNo: lotNo || '',
       rawMaterialQR: rawMaterialQR || '',
       rawMaterialLength: rawMaterialLength || '',
       manufacturerUid: manufacturerUid || '',
-      photoUrl: photoUrl || '',
+      imageUrl: finalImageUrl,
       queuePosition,
       status: finalStatus,
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      printHistory: []
     };
 
-    if (finalStatus === 'active') {
+    if (finalStatus === 'in-progress' || finalStatus === 'active') {
       newItem.startedAt = new Date();
+      newItem.actualStartTime = timeNow;
+      newItem.startEpoch = Date.now();
     }
 
-    const insertResult = await queueCollection.insertOne(newItem);
+    // Insert into submittedDB.firstFactoryProduction
+    const insertResult = await productionCol.insertOne(newItem);
     newItem._id = insertResult.insertedId;
 
-    // Sync to firstFactoryProduction with status 'in-progress' if it's the first active item
-    if (finalStatus === 'active' && newItem.groupId) {
-      const productionCollection = db.collection('firstFactoryProduction');
-      await productionCollection.updateOne(
-        { date: targetDate, groupId: newItem.groupId },
-        {
-          $set: {
-            date: targetDate,
-            groupId: newItem.groupId,
-            machine: newItem.machine,
-            worker: newItem.worker,
-            hinban: newItem.hinban,
-            hinmei: newItem.hinmei,
-            kizai: newItem.kizai,
-            color: newItem.color,
-            zuban: newItem.zuban,
-            totalRolls: newItem.totalRolls,
-            totalMeters: newItem.totalMeters,
-            status: 'in-progress',
-            actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
-            startEpoch: Date.now(),
-            updatedAt: new Date()
-          },
-          $setOnInsert: {
-            createdAt: new Date()
-          }
-        },
+    // Mirror to firstFactoryQueue with identical _id for complete compatibility
+    try {
+      await queueCol.updateOne(
+        { _id: newItem._id },
+        { $set: newItem },
         { upsert: true }
       );
+    } catch (qErr) {
+      console.warn('⚠️ Could not mirror to firstFactoryQueue:', qErr.message);
     }
 
     broadcastProductionEvent({
       type: 'queue_updated',
       date: targetDate,
-      machine: targetMachine
+      machine: targetMachine,
+      _id: newItem._id,
+      uniqueID: newItem.uniqueID,
+      status: finalStatus
     });
 
-    console.log(`📋 Enqueued item [${newItem.hinban || newItem.groupId}] -> pos: ${queuePosition}, status: ${finalStatus}`);
-    res.json({ success: true, item: newItem });
+    if (finalStatus === 'in-progress' || finalStatus === 'active') {
+      broadcastScanForProductionItem(newItem).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
+    }
+
+    console.log(`📋 Enqueued roll item to firstFactoryProduction [${newItem.hinban || newItem.groupId}] (Roll #${newItem.rollIndex}/${newItem.totalRolls}) [uniqueID: ${newItem.uniqueID}] -> pos: ${queuePosition}, status: ${finalStatus}, _id: ${newItem._id}`);
+    res.json({
+      success: true,
+      _id: newItem._id,
+      id: newItem._id,
+      uniqueID: newItem.uniqueID,
+      item: newItem
+    });
   } catch (error) {
     console.error('❌ Error in POST /api/production/queue/enqueue:', error);
     res.status(500).json({ error: 'Failed to enqueue item' });
   }
 });
 
-// Advance roll / lot
+// Advance roll / lot (from in-progress to completed, and activate next queue item)
 app.post('/api/production/queue/advance', async (req, res) => {
   try {
-    const { date, machine, queueId, groupId, rollIndex, totalRolls } = req.body;
+    const {
+      _id,
+      queueId,
+      groupId,
+      date,
+      machine,
+      worker,
+      rollIndex,
+      totalRolls,
+      manualAdvance,
+      reason,
+      printLog
+    } = req.body;
 
     const db = client.db('submittedDB');
-    const queueCollection = db.collection('firstFactoryQueue');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
 
+    const targetId = _id || queueId;
     let item = null;
-    if (queueId) {
-      if (ObjectId.isValid(queueId)) {
-        item = await queueCollection.findOne({ _id: new ObjectId(queueId) });
+
+    if (targetId) {
+      const { ObjectId } = require('mongodb');
+      if (ObjectId.isValid(targetId)) {
+        item = await productionCol.findOne({ _id: new ObjectId(targetId) });
+        if (!item) item = await queueCol.findOne({ _id: new ObjectId(targetId) });
       }
       if (!item) {
-        item = await queueCollection.findOne({ _id: queueId });
+        item = await productionCol.findOne({ _id: targetId });
+        if (!item) item = await queueCol.findOne({ _id: targetId });
       }
       if (!item) {
-        item = await queueCollection.findOne({ queueId });
+        item = await productionCol.findOne({ queueId: targetId });
+        if (!item) item = await queueCol.findOne({ queueId: targetId });
       }
     }
-    if (!item && groupId) {
-      const groupQuery = { groupId };
-      if (date) groupQuery.date = date;
-      if (machine) groupQuery.machine = machine;
-      item = await queueCollection.findOne(groupQuery);
-    }
+
     if (!item && date && machine) {
-      item = await queueCollection.findOne({ date, machine, status: 'active' });
+      item = await productionCol.findOne({ date, machine, status: { $in: ['in-progress', 'active'] } });
+      if (!item) item = await queueCol.findOne({ date, machine, status: { $in: ['in-progress', 'active'] } });
+    }
+
+    if (!item && groupId) {
+      item = await productionCol.findOne({ groupId, status: { $in: ['in-progress', 'active'] } });
+      if (!item) item = await queueCol.findOne({ groupId, status: { $in: ['in-progress', 'active'] } });
     }
 
     if (!item) {
@@ -37140,119 +37610,218 @@ app.post('/api/production/queue/advance', async (req, res) => {
 
     const targetDate = item.date || date;
     const targetMachine = item.machine || machine;
-    const targetGroupId = item.groupId || groupId;
-    const targetTotalRolls = Number(totalRolls) || Number(item.totalRolls) || 1;
+    const targetWorker = worker || item.wrapperWorker || item.worker || '';
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
 
-    const rollThatCompleted = rollIndex !== undefined ? Number(rollIndex) : (item.currentRollIndex || item.rollIndex || 1);
-    const nextRollIndex = rollThatCompleted + 1;
-
-    let newStatus = item.status;
-    let completedAt = null;
-
-    if (nextRollIndex > targetTotalRolls) {
-      newStatus = 'completed';
-      completedAt = new Date();
-    }
-
-    const updateFields = {
-      currentRollIndex: nextRollIndex,
-      rollIndex: nextRollIndex,
-      status: newStatus,
+    // Mark current item completed
+    const completionUpdate = {
+      status: 'completed',
+      wrapperWorker: targetWorker,
+      completedAt: new Date(),
+      actualEndTime: timeNow,
+      endEpoch: Date.now(),
+      manualAdvance: Boolean(manualAdvance),
       updatedAt: new Date()
     };
-    if (completedAt) {
-      updateFields.completedAt = completedAt;
+
+    if (item.startEpoch) {
+      completionUpdate.actualDurationMins = Math.max(1, Math.round((Date.now() - item.startEpoch) / 60000));
     }
 
-    await queueCollection.updateOne({ _id: item._id }, { $set: updateFields });
+    if (manualAdvance) {
+      completionUpdate.manualReason = reason || '印刷不可による手動進行';
+    }
 
-    if (newStatus === 'completed') {
-      const productionCollection = db.collection('firstFactoryProduction');
-      if (targetGroupId) {
-        await productionCollection.updateOne(
-          { date: targetDate, groupId: targetGroupId },
-          {
-            $set: {
-              status: 'completed',
-              actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
-              endEpoch: Date.now(),
-              updatedAt: new Date()
-            }
-          }
-        );
+    if (req.body.meters !== undefined && req.body.meters !== null) {
+      completionUpdate.meters = Number(req.body.meters);
+      completionUpdate.rollMeters = Number(req.body.meters);
+    }
+
+    if (req.body.finishedEarly) {
+      completionUpdate.finishedEarly = true;
+    }
+
+    if (!item.uniqueID) {
+      item.uniqueID = await getNextRollUniqueID(db);
+      completionUpdate.uniqueID = item.uniqueID;
+    }
+
+    const printEntry = printLog || (manualAdvance ? {
+      manualAdvance: true,
+      reason: reason || '印刷不可による手動進行',
+      worker: targetWorker,
+      timestamp: new Date().toISOString(),
+      timeStr: timeNow
+    } : {
+      rollIndex: item.rollIndex || 1,
+      totalRolls: item.totalRolls || 1,
+      lotNo: item.lotNo || '',
+      worker: targetWorker,
+      machine: targetMachine,
+      timestamp: new Date().toISOString(),
+      timeStr: timeNow
+    });
+
+    if (!printEntry.uniqueID) {
+      printEntry.uniqueID = item.uniqueID || completionUpdate.uniqueID || '';
+    }
+
+    const updateQuery = { _id: item._id };
+    await productionCol.updateOne(updateQuery, {
+      $set: completionUpdate,
+      $push: { printHistory: printEntry }
+    });
+    await queueCol.updateOne(updateQuery, {
+      $set: completionUpdate,
+      $push: { printHistory: printEntry }
+    });
+
+    console.log(`✅ Completed roll [${item.hinban || item.groupId}] Roll #${item.rollIndex}/${item.totalRolls} (_id: ${item._id}) by ${targetWorker}${manualAdvance ? ' [MANUAL ADVANCE]' : ''}`);
+
+    // Find next queued item to activate
+    const nextItem = await productionCol.findOne(
+      { date: targetDate, machine: targetMachine, status: { $in: ['queue', 'queued'] } },
+      { sort: { queuePosition: 1, createdAt: 1 } }
+    );
+
+    let nextActivatedId = null;
+    if (nextItem) {
+      nextActivatedId = nextItem._id;
+      const nextUpdate = {
+        status: 'in-progress',
+        startedAt: new Date(),
+        actualStartTime: timeNow,
+        startEpoch: Date.now(),
+        updatedAt: new Date()
+      };
+
+      if (req.body.nextRollTemperatures && typeof req.body.nextRollTemperatures === 'object') {
+        const t = req.body.nextRollTemperatures;
+        nextUpdate.temperatures = t;
+        if (t.ambientTemp !== undefined) nextUpdate.ambientTemp = t.ambientTemp;
+        if (t.ambientHumidity !== undefined) nextUpdate.ambientHumidity = t.ambientHumidity;
+        if (t.ovenTemp1 !== undefined) nextUpdate.ovenTemp1 = t.ovenTemp1;
+        if (t.ovenTemp2 !== undefined) nextUpdate.ovenTemp2 = t.ovenTemp2;
+        if (t.ovenTemp3 !== undefined) nextUpdate.ovenTemp3 = t.ovenTemp3;
+        nextUpdate.tempSnapshotAt = t.capturedAt || new Date().toISOString();
       }
 
-      // Activate next queued item
-      const nextItem = await queueCollection.findOne(
-        { date: targetDate, machine: targetMachine, status: 'queued' },
-        { sort: { queuePosition: 1, createdAt: 1 } }
-      );
-
-      if (nextItem) {
-        await queueCollection.updateOne(
-          { _id: nextItem._id },
-          {
-            $set: {
-              status: 'active',
-              startedAt: new Date(),
-              updatedAt: new Date()
-            }
-          }
-        );
-
-        if (nextItem.groupId) {
-          await productionCollection.updateOne(
-            { date: targetDate, groupId: nextItem.groupId },
-            {
-              $set: {
-                date: targetDate,
-                groupId: nextItem.groupId,
-                machine: nextItem.machine,
-                worker: nextItem.worker,
-                hinban: nextItem.hinban,
-                hinmei: nextItem.hinmei,
-                kizai: nextItem.kizai,
-                color: nextItem.color,
-                zuban: nextItem.zuban,
-                totalRolls: nextItem.totalRolls,
-                totalMeters: nextItem.totalMeters,
-                status: 'in-progress',
-                actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
-                startEpoch: Date.now(),
-                updatedAt: new Date()
-              },
-              $setOnInsert: { createdAt: new Date() }
-            },
-            { upsert: true }
-          );
-        }
-      }
+      await productionCol.updateOne({ _id: nextItem._id }, { $set: nextUpdate });
+      await queueCol.updateOne({ _id: nextItem._id }, { $set: nextUpdate });
+      console.log(`▶️ Activated next roll in queue [${nextItem.hinban || nextItem.groupId}] Roll #${nextItem.rollIndex}/${nextItem.totalRolls} (_id: ${nextItem._id})${nextUpdate.temperatures ? ' [SNAPSHOT TEMPS RECORDED]' : ''}`);
+      broadcastScanForProductionItem({ ...nextItem, ...nextUpdate, status: 'in-progress' }).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
     }
 
     broadcastProductionEvent({
       type: 'queue_updated',
       date: targetDate,
-      machine: targetMachine
+      machine: targetMachine,
+      completedId: item._id,
+      nextActiveId: nextActivatedId
     });
 
     broadcastProductionEvent({
       type: 'queue_roll_printed',
       date: targetDate,
       machine: targetMachine,
-      groupId: targetGroupId,
-      rollIndex: rollThatCompleted,
-      totalRolls: targetTotalRolls
+      groupId: item.groupId,
+      rollIndex: item.rollIndex || 1,
+      totalRolls: item.totalRolls || 1,
+      manualAdvance: Boolean(manualAdvance)
     });
 
-    console.log(`⏩ Advanced queue [${item.hinban || targetGroupId}]: roll ${rollThatCompleted}/${targetTotalRolls} -> status: ${newStatus}`);
     res.json({
       success: true,
-      status: newStatus,
-      currentRollIndex: nextRollIndex
+      status: 'completed',
+      completedItem: { ...item, ...completionUpdate },
+      nextActiveItem: nextItem ? { ...nextItem, status: 'in-progress' } : null
     });
   } catch (error) {
     console.error('❌ Error in POST /api/production/queue/advance:', error);
     res.status(500).json({ error: 'Failed to advance queue' });
+  }
+});
+
+// Record temperature snapshot for an in-progress roll (and optionally set to in-progress if beginning)
+app.post('/api/production/queue/temperature-snapshot', async (req, res) => {
+  try {
+    const { _id, queueId, uniqueID, date, machine, temperatures, setInProgress } = req.body;
+    const targetId = _id || queueId;
+    if (!targetId && !uniqueID && (!date || !machine)) {
+      return res.status(400).json({ error: 'Target identifier is required' });
+    }
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+    const { ObjectId } = require('mongodb');
+
+    let item = null;
+    if (targetId && ObjectId.isValid(targetId)) {
+      item = await productionCol.findOne({ _id: new ObjectId(targetId) });
+      if (!item) item = await queueCol.findOne({ _id: new ObjectId(targetId) });
+    }
+    if (!item && targetId) {
+      item = await productionCol.findOne({ _id: targetId }) || await queueCol.findOne({ _id: targetId });
+    }
+    if (!item && targetId) {
+      item = await productionCol.findOne({ queueId: targetId }) || await queueCol.findOne({ queueId: targetId });
+    }
+    if (!item && uniqueID) {
+      item = await productionCol.findOne({ uniqueID }) || await queueCol.findOne({ uniqueID });
+    }
+    if (!item && date && machine) {
+      item = await productionCol.findOne({ date, machine, status: { $in: ['in-progress', 'active'] } });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const updateDoc = {
+      updatedAt: new Date()
+    };
+
+    if (temperatures && typeof temperatures === 'object') {
+      updateDoc.temperatures = temperatures;
+      if (temperatures.ambientTemp !== undefined) updateDoc.ambientTemp = temperatures.ambientTemp;
+      if (temperatures.ambientHumidity !== undefined) updateDoc.ambientHumidity = temperatures.ambientHumidity;
+      if (temperatures.ovenTemp1 !== undefined) updateDoc.ovenTemp1 = temperatures.ovenTemp1;
+      if (temperatures.ovenTemp2 !== undefined) updateDoc.ovenTemp2 = temperatures.ovenTemp2;
+      if (temperatures.ovenTemp3 !== undefined) updateDoc.ovenTemp3 = temperatures.ovenTemp3;
+      updateDoc.tempSnapshotAt = temperatures.capturedAt || new Date().toISOString();
+    }
+
+    if (setInProgress || item.status === 'queue' || item.status === 'queued') {
+      updateDoc.status = 'in-progress';
+      if (!item.startedAt) updateDoc.startedAt = new Date();
+      if (!item.actualStartTime) updateDoc.actualStartTime = timeNow;
+      if (!item.startEpoch) updateDoc.startEpoch = Date.now();
+    }
+
+    await productionCol.updateOne({ _id: item._id }, { $set: updateDoc });
+    await queueCol.updateOne({ _id: item._id }, { $set: updateDoc });
+
+    console.log(`🌡️ Saved temperature snapshot for [${item.hinban || item.groupId}] Roll #${item.rollIndex}/${item.totalRolls}:`, temperatures);
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: item.date || date,
+      machine: item.machine || machine,
+      _id: item._id,
+      status: updateDoc.status || item.status
+    });
+
+    res.json({
+      success: true,
+      _id: item._id,
+      status: updateDoc.status || item.status,
+      temperatures: updateDoc.temperatures || null
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/temperature-snapshot:', error);
+    res.status(500).json({ error: 'Failed to save temperature snapshot' });
   }
 });
 
@@ -37435,33 +38004,42 @@ app.post('/api/production/queue/finish-early', async (req, res) => {
     const targetMachine = item.machine || machine;
     const rollsProduced = Number(actualRollsProduced) || 0;
 
+    const finishMeters = req.body.meters !== undefined ? Number(req.body.meters) : (req.body.actualMeters !== undefined ? Number(req.body.actualMeters) : null);
+
+    const updateFields = {
+      status: 'completed',
+      actualRollsProduced: rollsProduced,
+      finishedEarly: true,
+      completedAt: new Date(),
+      updatedAt: new Date()
+    };
+    if (finishMeters !== null) {
+      updateFields.meters = finishMeters;
+      updateFields.rollMeters = finishMeters;
+    }
+
     await queueCollection.updateOne(
       { _id: item._id },
-      {
-        $set: {
-          status: 'completed',
-          actualRollsProduced: rollsProduced,
-          finishedEarly: true,
-          completedAt: new Date(),
-          updatedAt: new Date()
-        }
-      }
+      { $set: updateFields }
     );
 
     if (item.groupId) {
       const productionCollection = db.collection('firstFactoryProduction');
+      const prodUpdate = {
+        status: 'completed',
+        actualRollsProduced: rollsProduced,
+        finishedEarly: true,
+        actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        endEpoch: Date.now(),
+        updatedAt: new Date()
+      };
+      if (finishMeters !== null) {
+        prodUpdate.meters = finishMeters;
+        prodUpdate.rollMeters = finishMeters;
+      }
       await productionCollection.updateOne(
         { date: targetDate, groupId: item.groupId },
-        {
-          $set: {
-            status: 'completed',
-            actualRollsProduced: rollsProduced,
-            finishedEarly: true,
-            actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
-            endEpoch: Date.now(),
-            updatedAt: new Date()
-          }
-        }
+        { $set: prodUpdate }
       );
     }
 
@@ -37525,6 +38103,94 @@ app.post('/api/production/queue/finish-early', async (req, res) => {
   }
 });
 
+// Cancel / delete a queued roll item, returning it cleanly to the list tab
+app.post('/api/production/queue/cancel', async (req, res) => {
+  try {
+    const { date, machine, queueId, itemId } = req.body;
+    if (!queueId && !itemId) {
+      return res.status(400).json({ error: 'queueId or itemId is required' });
+    }
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    // 1. Locate the exact item by _id (preferred) or itemId
+    let item = null;
+    if (queueId) {
+      if (ObjectId.isValid(queueId)) {
+        item = await productionCol.findOne({ _id: new ObjectId(queueId) }) || await queueCol.findOne({ _id: new ObjectId(queueId) });
+      }
+      if (!item) {
+        item = await productionCol.findOne({ _id: queueId }) || await queueCol.findOne({ _id: queueId });
+      }
+      if (!item) {
+        item = await productionCol.findOne({ queueId }) || await queueCol.findOne({ queueId });
+      }
+    }
+    if (!item && itemId) {
+      item = await productionCol.findOne({ itemId, status: { $in: ['queue', 'queued'] } }) || await queueCol.findOne({ itemId, status: { $in: ['queue', 'queued'] } });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetId = item._id;
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+    const photoUrl = item.photoUrl || item.imageUrl || '';
+
+    // 2. Strictly delete ONLY this single exact document by its unique _id
+    await productionCol.deleteOne({ _id: targetId });
+    await queueCol.deleteOne({ _id: targetId });
+    if (ObjectId.isValid(targetId)) {
+      await productionCol.deleteOne({ _id: new ObjectId(targetId) });
+      await queueCol.deleteOne({ _id: new ObjectId(targetId) });
+    }
+
+    // 3. Delete photo from Firebase Storage in background
+    if (photoUrl) {
+      deleteFirebaseFileByUrl(photoUrl).catch(() => {});
+    }
+
+    // 3. Re-compact queue positions for remaining items
+    const remainingItems = await productionCol
+      .find({ date: targetDate, machine: targetMachine, status: { $in: ['queue', 'queued'] } })
+      .sort({ queuePosition: 1, createdAt: 1 })
+      .toArray();
+
+    for (let i = 0; i < remainingItems.length; i++) {
+      await productionCol.updateOne({ _id: remainingItems[i]._id }, { $set: { queuePosition: i + 1 } });
+      await queueCol.updateOne({ _id: remainingItems[i]._id }, { $set: { queuePosition: i + 1 } });
+    }
+
+    // 4. Broadcast SSE to all connected clients
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine,
+      cancelledId: item._id,
+      itemId: item.itemId
+    });
+
+    console.log(`🗑️ Cancelled & deleted queue item [${item.hinban || item.kizai}] (Roll #${item.rollIndex}, Order #${item.orderIndex}, itemId: ${item.itemId}) -> Returned to list`);
+    res.json({
+      success: true,
+      deletedItem: {
+        _id: item._id,
+        itemId: item.itemId,
+        orderIndex: item.orderIndex,
+        rollIndex: item.rollIndex,
+        hinban: item.hinban
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/cancel:', error);
+    res.status(500).json({ error: 'Failed to cancel queue item' });
+  }
+});
+
 // Reorder queue positions
 app.post('/api/production/queue/reorder', async (req, res) => {
   try {
@@ -37536,6 +38202,7 @@ app.post('/api/production/queue/reorder', async (req, res) => {
 
     const db = client.db('submittedDB');
     const queueCollection = db.collection('firstFactoryQueue');
+    const productionCol = db.collection('firstFactoryProduction');
 
     for (let i = 0; i < orderedQueueIds.length; i++) {
       const qId = orderedQueueIds[i];
@@ -37544,6 +38211,12 @@ app.post('/api/production/queue/reorder', async (req, res) => {
         : { $or: [{ _id: qId }, { queueId: qId }] };
 
       await queueCollection.updateOne(query, {
+        $set: {
+          queuePosition: i + 1,
+          updatedAt: new Date()
+        }
+      });
+      await productionCol.updateOne(query, {
         $set: {
           queuePosition: i + 1,
           updatedAt: new Date()
@@ -37646,6 +38319,8 @@ app.post('/api/production/queue/select', async (req, res) => {
       date: targetDate,
       machine: targetMachine
     });
+
+    broadcastScanForProductionItem({ ...item, machine: targetMachine, status: 'in-progress' }).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
 
     console.log(`🎯 Active wrapping item switched to: [${item.hinban || item._id}] (${targetDate} / ${targetMachine})`);
     res.json({ success: true, item });

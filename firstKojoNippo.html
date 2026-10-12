@@ -17,43 +17,43 @@
            ============================================================ */
         :root {
             /* Surfaces */
-            --bg-app: #F4F6FA;
+            --bg-app: #F5F5F7;
             --bg-surface: #FFFFFF;
-            --bg-subtle: #F7F8FB;
-            --bg-inset: #EEF1F6;
+            --bg-subtle: #F9FAFB;
+            --bg-inset: #F3F4F6;
 
             /* Borders */
-            --border: #E6E8EF;
-            --border-strong: #D6DAE3;
+            --border: rgba(0, 0, 0, 0.08);
+            --border-strong: rgba(0, 0, 0, 0.14);
 
             /* Text */
-            --text-main: #0F172A;
-            --text-muted: #475569;
-            --text-soft: #64748B;
+            --text-main: #111827;
+            --text-muted: #4B5563;
+            --text-soft: #6B7280;
 
             /* Brand + Semantic */
-            --brand: #1F9D6B;
-            --brand-hover: #178A5C;
-            --brand-soft: #E7F5EF;
-            --blue: #2E6FF2;
-            --blue-hover: #1F5DD8;
-            --blue-soft: #E8F0FE;
-            --red: #E5484D;
-            --red-hover: #CE3B40;
-            --red-soft: #FCEBEC;
-            --amber: #E0900E;
-            --amber-soft: #FBF0DC;
-            --orange: #FF9800;
-            --orange-soft: #FFF3E0;
+            --brand: #10B981;
+            --brand-hover: #059669;
+            --brand-soft: #ECFDF5;
+            --blue: #2563EB;
+            --blue-hover: #1D4ED8;
+            --blue-soft: #EFF6FF;
+            --red: #EF4444;
+            --red-hover: #DC2626;
+            --red-soft: #FEF2F2;
+            --amber: #F59E0B;
+            --amber-soft: #FEF3C7;
+            --orange: #F97316;
+            --orange-soft: #FFEDD5;
 
             /* Radii */
-            --card-radius: 12px;
-            --btn-radius: 8px;
-            --r-pill: 6px;
+            --card-radius: 14px;
+            --btn-radius: 18px;
+            --r-pill: 12px;
 
             /* Elevation */
-            --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.06);
-            --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.14);
+            --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+            --shadow-pop: 0 10px 25px rgba(0, 0, 0, 0.1);
 
             --transition-smooth: 0.18s ease;
             --header-height: 64px;
@@ -69,7 +69,7 @@
         }
 
         body {
-            font-family: 'Nunito Sans', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", "Nunito Sans", "Noto Sans JP", sans-serif;
             background-color: var(--bg-app);
             color: var(--text-main);
             height: 100vh;
@@ -112,6 +112,12 @@
             pointer-events: none;
             white-space: nowrap;
             user-select: none;
+        }
+
+        @media (max-width: 900px) {
+            .freya-center-mark {
+                display: none;
+            }
         }
 
         .header-title-section {
@@ -204,17 +210,18 @@
             border: none;
             color: var(--text-soft);
             font-family: inherit;
-            font-size: 0.8125rem;
-            font-weight: 700;
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
             cursor: pointer;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 5px;
+            gap: 4px;
             transition: color var(--transition-smooth), opacity var(--transition-smooth);
             position: relative;
-            border-bottom: 3px solid transparent;
+            border-bottom: 2.5px solid transparent;
         }
 
         .tab-btn:hover:not(.locked) {
@@ -223,11 +230,11 @@
 
         .tab-btn.active {
             color: var(--brand);
-            border-bottom: 3px solid var(--brand);
+            border-bottom: 2.5px solid var(--brand);
         }
 
         .tab-btn.locked {
-            opacity: 0.4;
+            opacity: 0.35;
             cursor: not-allowed;
         }
 
@@ -245,6 +252,7 @@
             align-items: center;
             justify-content: center;
             height: 24px;
+            position: relative;
         }
 
         .tab-btn .tab-icon svg {
@@ -255,6 +263,24 @@
             fill: none;
             stroke-linecap: round;
             stroke-linejoin: round;
+        }
+
+        .tab-btn .tab-label-wrap {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .tab-badge {
+            background: var(--brand);
+            color: #FFFFFF;
+            font-size: 0.7rem;
+            font-weight: 800;
+            padding: 1px 6px;
+            border-radius: 999px;
+            min-width: 16px;
+            text-align: center;
+            line-height: 1.3;
         }
 
         /* ---------------- Viewport & Panels ---------------- */
@@ -268,17 +294,18 @@
 
         .tab-panels-container {
             display: flex;
-            width: 500%; /* 5 tabs: User, List, Info, Production, Submit */
+            width: 600%; /* 6 tabs: User, List, Queue, Info, History, Production */
             height: 100%;
             transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
             transform: translate3d(0, 0, 0);
             -webkit-transform-style: flat;
+            transform-style: flat;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
         }
 
         .tab-panel {
-            width: 20%; /* 100% / 5 tabs */
+            width: 16.666667%; /* 100% / 6 tabs */
             height: 100%;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
@@ -303,8 +330,8 @@
 
         /* ---------------- Cards & Layouts ---------------- */
         .card {
-            background: var(--bg-surface);
-            border: 1px solid var(--border);
+            background: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.08);
             border-radius: var(--card-radius);
             padding: 20px;
             margin-bottom: 16px;
@@ -312,9 +339,10 @@
         }
 
         .card h2 {
-            font-size: 1.125rem;
-            font-weight: 800;
+            font-size: 1.08rem;
+            font-weight: 700;
             color: var(--text-main);
+            letter-spacing: -0.015em;
             margin-bottom: 16px;
             padding-bottom: 12px;
             border-bottom: 1px solid var(--border);
@@ -326,52 +354,55 @@
             align-items: center;
             justify-content: center;
             text-align: center;
-            padding: 60px 20px;
-            color: var(--text-muted);
-            background: var(--bg-surface);
-            border: 1px dashed var(--border-strong);
+            padding: 50px 20px;
+            color: var(--text-soft);
+            background: #FAFAFA;
+            border: 1px dashed rgba(0, 0, 0, 0.12);
             border-radius: var(--card-radius);
-            min-height: 280px;
+            min-height: 240px;
         }
 
         .placeholder-state svg {
-            width: 48px;
-            height: 48px;
-            stroke: var(--text-soft);
-            margin-bottom: 16px;
+            width: 44px;
+            height: 44px;
+            stroke: #9CA3AF;
+            margin-bottom: 14px;
         }
 
         .placeholder-state h3 {
-            font-size: 1.1rem;
-            font-weight: 800;
+            font-size: 1.05rem;
+            font-weight: 700;
             color: var(--text-main);
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
 
         .placeholder-state p {
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             color: var(--text-muted);
             max-width: 380px;
+            line-height: 1.5;
         }
 
         /* ---------------- User Tab Specifics ---------------- */
         .user-setup-card {
-            background: var(--bg-surface);
-            border: 1px solid var(--border);
-            border-radius: var(--card-radius);
-            padding: 24px;
+            background: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 16px;
+            padding: 28px 24px;
             width: 100%;
-            max-width: 500px;
-            margin: 20px auto;
+            max-width: 480px;
+            margin: 24px auto;
             box-sizing: border-box;
-            box-shadow: var(--shadow-card);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
         }
 
         .user-setup-card h2 {
             margin-bottom: 20px;
-            font-size: 1.25rem;
-            font-weight: 800;
+            font-size: 1.2rem;
+            font-weight: 700;
+            letter-spacing: -0.015em;
             text-align: center;
+            color: var(--text-main);
         }
 
         #welcomeBackContainer,
@@ -390,35 +421,36 @@
         /* ---------------- Form Elements ---------------- */
         .tap-field {
             width: 100%;
-            min-height: 52px;
-            padding: 14px 16px;
-            font-size: 1.05rem;
-            font-weight: 700;
-            border: 1.5px solid var(--border-strong);
-            border-radius: var(--btn-radius);
-            background-color: var(--bg-surface);
+            min-height: 48px;
+            padding: 12px 16px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border: 1px solid var(--border-strong);
+            border-radius: 12px;
+            background-color: #F9FAFB;
             color: var(--text-main);
             cursor: pointer;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' fill='none' stroke='%232E6FF2' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
             background-position: right 14px center;
-            background-size: 20px;
+            background-size: 18px;
             outline: none;
-            transition: border-color var(--transition-smooth);
+            transition: all var(--transition-smooth);
         }
 
         .tap-field:focus,
         .tap-field:hover {
-            border-color: var(--blue);
+            border-color: var(--brand);
+            background-color: #FFFFFF;
         }
 
         /* ---------------- Buttons ---------------- */
         .btn {
-            min-height: 46px;
+            min-height: 44px;
             padding: 0 20px;
             font-family: inherit;
-            font-size: 0.95rem;
-            font-weight: 700;
+            font-size: 0.9rem;
+            font-weight: 600;
             letter-spacing: -0.01em;
             line-height: 1.25;
             border-radius: var(--btn-radius);
@@ -429,16 +461,17 @@
             justify-content: center;
             gap: 8px;
             text-align: center;
-            transition: background var(--transition-smooth), border-color var(--transition-smooth), color var(--transition-smooth);
+            transition: all var(--transition-smooth);
         }
 
         .btn:active {
-            transform: translateY(1px);
+            transform: scale(0.98);
         }
 
         .btn-primary {
             background: var(--brand);
             color: #FFFFFF;
+            box-shadow: 0 1px 3px rgba(16, 185, 129, 0.25);
         }
 
         .btn-primary:hover {
@@ -446,14 +479,18 @@
         }
 
         .btn-secondary {
-            background: var(--bg-surface);
-            border-color: var(--border-strong);
-            color: var(--text-main);
+            background: #F3F4F6;
+            color: #374151;
+            border: 1px solid transparent;
         }
 
         .btn-secondary:hover {
-            background: var(--bg-subtle);
-            border-color: var(--text-soft);
+            background: #E5E7EB;
+            color: #111827;
+        }
+
+        .btn-full {
+            width: 100%;
         }
 
         .btn-alert {
@@ -647,15 +684,15 @@
 
         /* ---------------- List Tab (Schedule) - 10" Portrait Tablet ---------------- */
         .schedule-header-card {
-            background: var(--bg-surface);
-            border: 1px solid var(--border);
+            background: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.08);
             border-radius: var(--card-radius);
-            padding: 16px 18px;
-            margin-bottom: 16px;
+            padding: 14px 18px;
+            margin-bottom: 14px;
             box-shadow: var(--shadow-card);
             display: flex;
             flex-direction: column;
-            gap: 14px;
+            gap: 12px;
         }
 
         .date-nav-row {
@@ -669,135 +706,138 @@
         .date-picker-wrap {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             flex: 1;
-            min-width: 260px;
+            min-width: 240px;
         }
 
         .date-input {
-            min-height: 44px;
-            padding: 8px 12px;
-            background: var(--bg-subtle);
-            border: 1.5px solid var(--border-strong);
-            border-radius: var(--btn-radius);
+            min-height: 40px;
+            padding: 6px 14px;
+            background: #F3F4F6;
+            border: 1px solid #E5E7EB;
+            border-radius: 18px;
             color: var(--text-main);
             font-family: inherit;
-            font-size: 1rem;
-            font-weight: 700;
+            font-size: 0.92rem;
+            font-weight: 600;
             outline: none;
             cursor: pointer;
             flex: 1;
+            transition: all var(--transition-smooth);
         }
 
         .date-input:focus {
-            border-color: var(--blue);
-            background: var(--bg-surface);
+            border-color: var(--brand);
+            background: #FFFFFF;
+            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
         }
 
         .date-nav-btn {
-            min-width: 44px;
-            height: 44px;
-            background: var(--bg-surface);
-            border: 1px solid var(--border-strong);
-            border-radius: var(--btn-radius);
+            min-width: 38px;
+            height: 38px;
+            background: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            border-radius: 19px;
             color: var(--text-main);
-            font-weight: 800;
-            font-size: 1.1rem;
+            font-weight: 700;
+            font-size: 0.95rem;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            transition: var(--transition-smooth);
+            transition: all var(--transition-smooth);
             padding: 0 12px;
         }
 
         .date-nav-btn:hover {
-            border-color: var(--blue);
-            color: var(--blue);
+            border-color: var(--brand);
+            color: var(--brand);
+            background: #FAFAFA;
         }
 
         .date-nav-btn.today-btn {
-            font-size: 0.85rem;
-            font-weight: 700;
-            background: var(--blue-soft);
-            border-color: var(--blue);
-            color: var(--blue);
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: #ECFDF5;
+            border-color: #A7F3D0;
+            color: #059669;
         }
 
         .schedule-stats-bar {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             overflow-x: auto;
             padding-bottom: 2px;
         }
 
         .stat-chip {
-            background: var(--bg-subtle);
-            border: 1px solid var(--border);
-            border-radius: var(--r-pill);
-            padding: 6px 12px;
-            font-size: 0.825rem;
-            font-weight: 700;
-            color: var(--text-muted);
+            background: #F3F4F6;
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
+            padding: 4px 10px;
+            font-size: 0.775rem;
+            font-weight: 600;
+            color: #4B5563;
             white-space: nowrap;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
         }
 
         .stat-chip strong {
-            color: var(--text-main);
-            font-weight: 800;
+            color: #111827;
+            font-weight: 700;
         }
 
         .stat-chip.brand-chip {
-            background: var(--brand-soft);
-            border-color: rgba(31, 157, 107, 0.3);
-            color: var(--brand);
+            background: #ECFDF5;
+            border-color: #A7F3D0;
+            color: #059669;
         }
 
         .stat-chip.brand-chip strong {
-            color: var(--brand);
+            color: #059669;
         }
 
-        /* View Mode Switcher (Card vs Table) */
+        /* View Mode Switcher (Apple Segmented Control) */
         .view-mode-switcher {
             display: inline-flex;
-            background: var(--bg-inset);
-            border: 1.5px solid var(--border-strong);
-            border-radius: var(--btn-radius);
+            background: #E5E7EB;
+            border: none;
+            border-radius: 18px;
             padding: 2px;
             gap: 2px;
             margin-left: auto;
         }
 
         .view-mode-btn {
-            height: 38px;
+            height: 34px;
             padding: 0 14px;
             background: transparent;
             border: none;
-            border-radius: calc(var(--btn-radius) - 2px);
+            border-radius: 16px;
             font-family: inherit;
-            font-size: 0.85rem;
-            font-weight: 800;
-            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #6B7280;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
             transition: all var(--transition-smooth);
             white-space: nowrap;
         }
 
         .view-mode-btn:hover {
-            color: var(--text-main);
+            color: #111827;
         }
 
         .view-mode-btn.active {
-            background: var(--bg-surface);
-            color: var(--brand);
-            font-weight: 900;
+            background: #FFFFFF;
+            color: #111827;
+            font-weight: 700;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
 
@@ -1136,81 +1176,132 @@
             color: #FFFFFF;
         }
 
-        /* ---------------- Batch Group Card Styling ---------------- */
+        /* ---------------- Batch Group Card Styling (Apple Style Flat) ---------------- */
         .batch-group-card {
-            background: var(--bg-surface);
-            border: 1.5px solid var(--border);
-            border-radius: var(--card-radius);
-            box-shadow: var(--shadow-card);
+            background: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 14px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            transition: var(--transition-smooth);
+            transition: box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s ease;
             position: relative;
+            user-select: none;
         }
 
         .batch-group-card:hover {
-            border-color: var(--border-strong);
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+            border-color: rgba(0, 0, 0, 0.15);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
         }
 
         .batch-group-card.group-tinted {
-            background: #F8FAFC;
+            background: #FFFFFF;
         }
 
         /* Batch Header */
         .batch-header {
             display: flex;
-            flex-direction: column;
-            gap: 12px;
-            padding: 16px 20px;
-            border-bottom: 1px solid var(--border);
-            cursor: pointer;
-            background: var(--bg-surface);
-            transition: var(--transition-smooth);
-        }
-
-        .batch-group-card.group-tinted .batch-header {
-            background: #F8FAFC;
-        }
-
-        .batch-header-top-row {
-            display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
-            flex-wrap: wrap;
+            gap: 16px;
+            padding: 14px 18px;
+            cursor: pointer;
+            background: #FFFFFF;
+            transition: background 0.15s ease;
         }
 
-        .batch-order-and-title {
+        .batch-header:hover {
+            background: #FAFAFA;
+        }
+
+        .batch-header-left {
             display: flex;
             align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
+            gap: 14px;
             min-width: 0;
             flex: 1;
         }
 
         .batch-order-range {
-            background: var(--bg-inset);
-            border: 1.5px solid var(--border-strong);
-            color: var(--text-main);
-            font-size: 0.95rem;
-            font-weight: 900;
-            padding: 6px 12px;
-            border-radius: var(--btn-radius);
+            background: #F3F4F6;
+            border: 1px solid #E5E7EB;
+            color: #374151;
+            font-size: 0.88rem;
+            font-weight: 800;
+            padding: 6px 10px;
+            border-radius: 8px;
             white-space: nowrap;
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            letter-spacing: -0.01em;
+            flex-shrink: 0;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .batch-title-and-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+            flex: 1;
         }
 
         .batch-hinban-title {
-            font-size: 1.25rem;
-            font-weight: 900;
-            color: var(--text-main);
-            letter-spacing: -0.01em;
+            font-size: 1.08rem;
+            font-weight: 700;
+            color: #111827;
+            letter-spacing: -0.015em;
+            line-height: 1.25;
             word-break: break-word;
+        }
+
+        .batch-chips-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            font-size: 0.825rem;
+            margin-top: 1px;
+        }
+
+        .batch-time-text {
+            color: #6B7280;
+            font-weight: 600;
+            font-size: 0.825rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .batch-meta-divider {
+            color: #9CA3AF;
+            font-size: 0.75rem;
+            user-select: none;
+        }
+
+        .batch-meta-item {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 4px;
+            font-size: 0.825rem;
+            color: #4B5563;
+        }
+
+        .batch-meta-label {
+            color: #6B7280;
+            font-weight: 500;
+        }
+
+        .batch-meta-val {
+            color: #1F2937;
+            font-weight: 600;
+        }
+
+        .batch-header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
         }
 
         .batch-top-status {
@@ -1219,133 +1310,130 @@
             flex-shrink: 0;
         }
 
-        /* Chips Row */
-        .batch-chips-row {
+        .batch-expand-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
             display: flex;
             align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-            font-size: 0.825rem;
+            justify-content: center;
+            color: #9CA3AF;
+            transition: background 0.15s ease, color 0.15s ease;
         }
 
-        /* Actions Row */
-        .batch-actions-row {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 8px;
-            margin-top: 4px;
-            padding-top: 10px;
-            border-top: 1px solid rgba(0, 0, 0, 0.05);
+        .batch-expand-icon svg {
+            width: 18px;
+            height: 18px;
+            transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            stroke: currentColor;
+            stroke-width: 2.2;
+            fill: none;
         }
 
-        .batch-btn-group {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-            width: 100%;
+        .batch-group-card.is-expanded .batch-expand-icon svg {
+            transform: rotate(180deg);
         }
 
-        .batch-summary-pill {
-            font-weight: 800;
-            color: var(--text-main);
-            background: var(--bg-subtle);
-            border: 1px solid var(--border);
-            padding: 3px 8px;
-            border-radius: 6px;
-        }
-
-        .batch-header-right {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-shrink: 0;
-        }
-
-        .btn-select-batch {
-            min-height: 42px;
-            padding: 0 18px;
-            font-size: 0.9rem;
-            font-weight: 800;
-            border-radius: var(--btn-radius);
-            background: var(--bg-surface);
-            border: 1.5px solid var(--border-strong);
-            color: var(--text-main);
-            cursor: pointer;
-            transition: var(--transition-smooth);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .btn-select-batch:hover,
-        .batch-group-card.selected .btn-select-batch {
-            background: var(--brand);
-            border-color: var(--brand);
-            color: #FFFFFF;
-            box-shadow: 0 2px 8px rgba(31, 157, 107, 0.25);
+        .batch-group-card.is-expanded .batch-expand-icon {
+            color: #111827;
         }
 
         /* Batch Roll Sub-Rows */
         .batch-rolls-list {
-            display: flex;
+            display: none;
             flex-direction: column;
-            background: var(--bg-surface);
+            gap: 6px;
+            padding: 10px 14px 14px 14px;
+            background: #F9FAFB;
+            border-top: 1px solid #F1F3F7;
+        }
+
+        .batch-group-card.is-expanded .batch-rolls-list {
+            display: flex;
         }
 
         .batch-roll-row {
+            background: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            border-radius: 10px;
+            padding: 10px 14px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            padding: 10px 20px 10px 76px;
-            border-top: 1px solid var(--border);
-            transition: var(--transition-smooth);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+            transition: all 0.15s ease;
             cursor: pointer;
         }
 
-        .batch-roll-row:first-child {
-            border-top: none;
-        }
-
         .batch-roll-row:hover {
-            background: rgba(46, 111, 242, 0.04);
+            border-color: #CBD5E1;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
         }
 
         .batch-roll-row.active-roll {
-            background: rgba(31, 157, 107, 0.08);
+            background: #ECFDF5;
+            border-color: #A7F3D0;
         }
 
         .roll-row-left {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
             flex-wrap: wrap;
         }
 
         .roll-sub-badge {
-            font-size: 0.8rem;
-            font-weight: 900;
-            color: var(--text-muted);
-            background: var(--bg-inset);
-            border: 1px solid var(--border);
-            padding: 2px 8px;
-            border-radius: 4px;
-        }
-
-        .batch-roll-row.active-roll .roll-sub-badge {
-            background: var(--brand-soft);
-            color: var(--brand);
-            border-color: rgba(31, 157, 107, 0.3);
+            font-size: 0.775rem;
+            font-weight: 700;
+            color: #4B5563;
+            background: #F3F4F6;
+            border: 1px solid #E5E7EB;
+            padding: 2px 7px;
+            border-radius: 6px;
         }
 
         .roll-time {
-            font-size: 0.95rem;
-            font-weight: 800;
-            color: var(--text-main);
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #1F2937;
             font-variant-numeric: tabular-nums;
+        }
+
+        .roll-row-right {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-roll-exclude {
+            background: transparent;
+            border: 1px solid #E5E7EB;
+            color: #6B7280;
+            padding: 4px 12px;
+            font-size: 0.775rem;
+            font-weight: 600;
+            border-radius: 18px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .btn-roll-exclude:hover {
+            border-color: #FECACA;
+            color: #DC2626;
+            background: #FEF2F2;
+        }
+
+        .btn-roll-exclude.is-excluded {
+            background: #F3F4F6;
+            border-color: #D1D5DB;
+            color: #4B5563;
+        }
+
+        .batch-roll-row.is-excluded-row {
+            opacity: 0.45;
+            background: #F9FAFB !important;
         }
 
         /* ---------------- Flat Setup / Changeover Row ---------------- */
@@ -1353,13 +1441,13 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 10px 18px;
-            background: #F8FAFC;
-            border: 1px dashed #CBD5E1;
-            border-radius: var(--card-radius);
-            color: #64748B;
-            font-size: 0.85rem;
-            font-weight: 700;
+            padding: 10px 16px;
+            background: #FAFAFA;
+            border: 1px dashed #D1D5DB;
+            border-radius: 12px;
+            color: #6B7280;
+            font-size: 0.825rem;
+            font-weight: 600;
             user-select: none;
             cursor: default;
         }
@@ -1372,31 +1460,31 @@
 
         .setup-tag-pill {
             font-size: 0.75rem;
-            font-weight: 800;
-            background: #E2E8F0;
-            color: #475569;
-            padding: 3px 8px;
-            border-radius: 4px;
+            font-weight: 700;
+            background: #E5E7EB;
+            color: #374151;
+            padding: 2px 7px;
+            border-radius: 5px;
         }
 
         .setup-title-text {
-            font-size: 0.95rem;
-            font-weight: 800;
-            color: #475569;
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: #374151;
         }
 
         .setup-time-text {
-            font-size: 0.825rem;
-            color: #94A3B8;
+            font-size: 0.8rem;
+            color: #9CA3AF;
             font-variant-numeric: tabular-nums;
         }
 
-        /* ---------------- Batch Group State Styling (Flat Modern) ---------------- */
+        /* ---------------- Batch Group State Styling (Apple Modern) ---------------- */
         .batch-group-card.state-in-progress,
         .batch-group-card.state-running {
-            border: 2.5px solid #8B5CF6 !important;
+            border: 1.5px solid #8B5CF6 !important;
             background: #FFFFFF !important;
-            box-shadow: 0 0 0 3.5px rgba(139, 92, 246, 0.22), 0 8px 24px rgba(139, 92, 246, 0.12) !important;
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15), 0 4px 12px rgba(139, 92, 246, 0.08) !important;
         }
 
         .batch-group-card.state-in-progress::before,
@@ -1405,7 +1493,7 @@
             position: absolute;
             top: 0;
             left: 0;
-            width: 6px;
+            width: 4px;
             height: 100%;
             background: #8B5CF6;
             z-index: 2;
@@ -1413,8 +1501,7 @@
 
         .batch-group-card.state-in-progress .batch-header,
         .batch-group-card.state-running .batch-header {
-            background: rgba(139, 92, 246, 0.06) !important;
-            border-bottom: 1.5px solid rgba(139, 92, 246, 0.25) !important;
+            background: rgba(139, 92, 246, 0.03) !important;
         }
 
         .batch-group-card.state-in-progress .batch-order-range,
@@ -1424,22 +1511,17 @@
             color: #FFFFFF !important;
         }
 
-        .batch-group-card.state-in-progress .batch-roll-row,
-        .batch-group-card.state-running .batch-roll-row {
-            background: rgba(139, 92, 246, 0.02);
-        }
-
-        /* Completed State: Clean, Flat & Greyed Out */
+        /* Completed State: Clean, Flat & Soft */
         .batch-group-card.state-completed {
-            border-color: #E2E8F0;
-            background: #F8FAFC;
+            border-color: #E5E7EB;
+            background: #FAFAFA;
             box-shadow: none;
-            opacity: 0.72;
+            opacity: 0.75;
         }
 
         .batch-group-card.state-completed:hover {
             opacity: 0.95;
-            border-color: #CBD5E1;
+            border-color: #D1D5DB;
         }
 
         .batch-group-card.state-completed::before {
@@ -1447,22 +1529,21 @@
         }
 
         .batch-group-card.state-completed .batch-header {
-            background: #F8FAFC;
-            border-bottom-color: #E2E8F0;
+            background: #FAFAFA;
         }
 
         .batch-group-card.state-completed .batch-order-range {
-            background: #E2E8F0;
-            border-color: #CBD5E1;
-            color: #64748B;
+            background: #E5E7EB;
+            border-color: #D1D5DB;
+            color: #6B7280;
         }
 
         .batch-group-card.state-completed .batch-hinban-title {
-            color: #475569;
+            color: #6B7280;
         }
 
         .batch-group-card.state-completed .batch-rolls-list {
-            background: #F8FAFC;
+            background: #FAFAFA;
         }
 
         .batch-group-card.state-completed .batch-roll-row {
@@ -1662,11 +1743,11 @@
             border-color: #6EE7B7;
         }
 
-        /* ---------------- Info Tab Styling ---------------- */
+        /* ---------------- Info Tab Styling (Apple Flat) ---------------- */
         .info-layout-container {
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 16px;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             transform: translateZ(0);
@@ -1674,13 +1755,13 @@
 
         .info-card {
             background: #FFFFFF;
-            border: 1.5px solid var(--border);
+            border: 1px solid rgba(0, 0, 0, 0.08);
             border-radius: var(--card-radius);
-            padding: 22px;
+            padding: 20px;
             box-shadow: var(--shadow-card);
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 16px;
             transform: translateZ(0);
         }
 
@@ -1688,62 +1769,237 @@
             display: flex;
             align-items: flex-start;
             justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1.5px solid var(--border);
-            padding-bottom: 16px;
+            gap: 14px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 14px;
             flex-wrap: wrap;
         }
 
-        .info-badge-title {
-            font-size: 0.78rem;
+        .btn-project-monitor {
+            font-size: 0.85rem;
+            font-weight: 700;
+            padding: 6px 12px;
+            border-radius: 6px;
+            background: var(--blue-soft);
+            color: var(--blue);
+            border: 1px solid rgba(46, 111, 242, 0.25);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            transition: all var(--transition-smooth);
+            user-select: none;
+            box-shadow: none;
+            line-height: 1.25;
+            white-space: nowrap;
+        }
+
+        .btn-project-monitor:hover {
+            background: #DBEAFE;
+            border-color: rgba(46, 111, 242, 0.45);
+            color: #1D4ED8;
+        }
+
+        .btn-project-monitor:active {
+            transform: scale(0.97);
+            background: #BFDBFE;
+        }
+
+        .btn-project-monitor svg {
+            flex-shrink: 0;
+            stroke: currentColor;
+        }
+
+        .btn-project-monitor.is-blank-highlight {
+            background: #FEF3C7;
+            color: #B45309;
+            border-color: #F59E0B;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+            animation: btnBlankAttentionPulse 2s infinite ease-in-out;
+        }
+
+        @keyframes btnBlankAttentionPulse {
+            0%, 100% { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3); transform: scale(1); }
+            50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); transform: scale(1.02); }
+        }
+
+        /* Blank Monitor Alert Banner in Queue Tab */
+        .blank-monitor-banner {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%);
+            border: 1.5px solid #F59E0B;
+            border-radius: 10px;
+            padding: 10px 14px;
+            margin-bottom: 14px;
+            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);
+            animation: bannerFadeIn 0.3s ease;
+        }
+
+        @keyframes bannerFadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .blank-monitor-banner-content {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .blank-monitor-banner-icon {
+            font-size: 1.5rem;
+            line-height: 1;
+            flex-shrink: 0;
+            animation: monitorIconPulse 2s infinite ease-in-out;
+        }
+
+        @keyframes monitorIconPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.18); }
+        }
+
+        .blank-monitor-banner-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .blank-monitor-banner-text strong {
+            font-size: 0.92rem;
             font-weight: 800;
-            letter-spacing: 0.05em;
+            color: #92400E;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .blank-monitor-banner-text span {
+            font-size: 0.8rem;
+            color: #78350F;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .btn-blank-monitor-project {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #D97706;
+            color: #FFFFFF;
+            border: 1px solid #B45309;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 800;
+            cursor: pointer;
+            white-space: nowrap;
+            flex-shrink: 0;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(217, 119, 6, 0.25);
+        }
+
+        .btn-blank-monitor-project:hover {
+            background: #B45309;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(217, 119, 6, 0.35);
+        }
+
+        .btn-blank-monitor-project:active {
+            transform: translateY(0);
+        }
+
+        .btn-reset-monitor {
+            font-size: 0.85rem;
+            font-weight: 700;
+            padding: 6px 12px;
+            border-radius: 6px;
+            background: var(--red-soft);
+            color: var(--red);
+            border: 1px solid rgba(239, 68, 68, 0.25);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            transition: all var(--transition-smooth);
+            user-select: none;
+            box-shadow: none;
+            line-height: 1.25;
+            white-space: nowrap;
+        }
+
+        .btn-reset-monitor:hover {
+            background: #FEE2E2;
+            color: #DC2626;
+            border-color: rgba(220, 38, 38, 0.45);
+        }
+
+        .btn-reset-monitor:active {
+            transform: scale(0.97);
+            background: #FECACA;
+        }
+
+        .btn-reset-monitor svg {
+            flex-shrink: 0;
+            stroke: currentColor;
+        }
+
+        .info-badge-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
             text-transform: uppercase;
-            padding: 4px 10px;
-            border-radius: var(--r-pill);
+            padding: 3px 9px;
+            border-radius: 12px;
             display: inline-block;
-            margin-bottom: 6px;
+            margin-bottom: 4px;
         }
 
         .info-badge-title.product-badge {
-            background: var(--brand-soft);
-            color: var(--brand);
-            border: 1px solid rgba(31, 157, 107, 0.3);
+            background: #ECFDF5;
+            color: #059669;
+            border: 1px solid #A7F3D0;
         }
 
         .info-badge-title.material-badge {
-            background: #EDE9FE;
+            background: #F5F3FF;
             color: #6D28D9;
-            border: 1px solid rgba(109, 40, 217, 0.3);
+            border: 1px solid #DDD6FE;
         }
 
         .info-main-title {
-            font-size: 1.4rem;
-            font-weight: 900;
-            color: #0F172A;
-            letter-spacing: -0.02em;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #111827;
+            letter-spacing: -0.015em;
             word-break: break-all;
             line-height: 1.3;
         }
 
         .info-sub-title {
-            font-size: 0.95rem;
-            font-weight: 700;
-            color: #475569;
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: #6B7280;
             margin-top: 4px;
         }
 
         .info-sub-section {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
         }
 
         .info-sub-section-title {
-            font-size: 0.825rem;
-            font-weight: 800;
-            color: #334155;
-            letter-spacing: 0.04em;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #374151;
+            letter-spacing: 0.02em;
             text-transform: uppercase;
             display: flex;
             align-items: center;
@@ -1753,72 +2009,72 @@
         .structure-grid {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 8px;
         }
 
         .structure-chip {
-            background: #F8FAFC;
-            border: 1.2px solid #CBD5E1;
-            border-radius: var(--btn-radius);
+            background: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 10px;
             padding: 8px 12px;
             display: flex;
             flex-direction: column;
-            gap: 3px;
-            min-width: 100px;
+            gap: 2px;
+            min-width: 95px;
             transform: translateZ(0);
         }
 
         .structure-chip-label {
-            font-size: 0.725rem;
-            font-weight: 700;
-            color: #475569;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #6B7280;
         }
 
         .structure-chip-val {
-            font-size: 1rem;
-            font-weight: 900;
-            color: #0F172A;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #111827;
         }
 
         .process-cards-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: 12px;
-        }
-
-        .process-stat-card {
-            background: #EFF6FF;
-            border: 1.2px solid #93C5FD;
-            border-radius: var(--btn-radius);
-            padding: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            transform: translateZ(0);
-        }
-
-        .process-stat-label {
-            font-size: 0.75rem;
-            font-weight: 800;
-            color: #1D4ED8;
-        }
-
-        .process-stat-val {
-            font-size: 1.25rem;
-            font-weight: 900;
-            color: #0F172A;
-        }
-
-        .master-data-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
             gap: 10px;
         }
 
+        .process-stat-card {
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            border-radius: 10px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            transform: translateZ(0);
+        }
+
+        .process-stat-label {
+            font-size: 0.725rem;
+            font-weight: 700;
+            color: #2563EB;
+        }
+
+        .process-stat-val {
+            font-size: 1.15rem;
+            font-weight: 800;
+            color: #111827;
+        }
+
+        .master-data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 8px;
+        }
+
         .master-data-item {
-            background: #F8FAFC;
-            border: 1.2px solid #E2E8F0;
-            border-radius: var(--btn-radius);
+            background: #F9FAFB;
+            border: 1px solid #E5E7EB;
+            border-radius: 10px;
             padding: 8px 10px;
             display: flex;
             flex-direction: column;
@@ -1827,46 +2083,47 @@
         }
 
         .master-data-label {
-            font-size: 0.7rem;
-            font-weight: 700;
-            color: #475569;
+            font-size: 0.68rem;
+            font-weight: 600;
+            color: #6B7280;
         }
 
         .master-data-val {
-            font-size: 0.95rem;
-            font-weight: 800;
-            color: #0F172A;
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: #111827;
             word-break: break-all;
         }
 
         /* Material Highlight Box inside Product Info */
         .ingredient-callout-card {
-            background: linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%);
-            border: 1.5px solid #BFDBFE;
+            background: #F9FAFB;
+            border: 1px solid #E5E7EB;
             border-radius: var(--card-radius);
-            padding: 16px 18px;
+            padding: 14px 16px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 14px;
+            gap: 12px;
             cursor: pointer;
-            transition: var(--transition-smooth);
+            transition: all var(--transition-smooth);
         }
 
         .ingredient-callout-card:hover {
-            border-color: var(--blue);
-            box-shadow: 0 4px 12px rgba(46, 111, 242, 0.12);
+            border-color: var(--brand);
+            background: #FFFFFF;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
 
         .ingredient-section-card {
-            background: #FCFDFF;
-            border: 1.5px solid #C7D2FE;
+            background: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.08);
             border-radius: var(--card-radius);
-            padding: 22px;
+            padding: 20px;
             box-shadow: var(--shadow-card);
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 16px;
         }
 
         /* Setup / Break Item Card */
@@ -1908,75 +2165,70 @@
         /* ============================================================
            STAGING QUEUE DOCK & MATERIAL FEEDING FLOW (Tablet 1)
            ============================================================ */
-        .staging-queue-dock {
-            background: var(--bg-surface);
-            border: 1.5px solid var(--border);
-            border-radius: var(--card-radius);
-            box-shadow: var(--shadow-card);
+        /* ---------------- Queue Tab (Panel 2) ---------------- */
+        .queue-panel-header {
             margin-bottom: 16px;
-            overflow: hidden;
-            transition: all var(--transition-smooth);
         }
 
-        .staging-queue-header {
+        .queue-header-title-wrap {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 12px 16px;
-            background: linear-gradient(180deg, #FFFFFF 0%, var(--bg-subtle) 100%);
-            border-bottom: 1px solid var(--border);
-            cursor: pointer;
-            user-select: none;
-            gap: 10px;
+            gap: 12px;
             flex-wrap: wrap;
         }
 
-        .staging-queue-header:hover {
-            background: var(--bg-subtle);
+        .queue-header-title-wrap h2 {
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: var(--text-main);
+            letter-spacing: -0.01em;
+            margin: 0;
         }
 
-        .staging-queue-title-wrap {
+        .queue-section-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 16px 20px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow-card);
+        }
+
+        .queue-section-title-row {
             display: flex;
             align-items: center;
+            justify-content: space-between;
             gap: 10px;
-            flex-wrap: wrap;
+            margin-bottom: 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
         }
 
-        .staging-queue-icon {
-            font-size: 1.25rem;
-            line-height: 1;
-        }
-
-        .staging-queue-title {
+        .queue-section-heading {
             font-size: 0.95rem;
             font-weight: 800;
             color: var(--text-main);
             letter-spacing: -0.01em;
         }
 
-        .staging-queue-count-badge {
-            background: var(--brand-soft);
-            color: var(--brand);
-            border: 1px solid rgba(31, 157, 107, 0.3);
+        .queue-count-tag {
+            background: var(--bg-inset);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
             font-size: 0.75rem;
             font-weight: 800;
             padding: 2px 8px;
-            border-radius: 999px;
-        }
-
-        .staging-queue-header-actions {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            border-radius: var(--r-pill);
         }
 
         .scanner-header-pill {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            font-size: 0.75rem;
+            font-size: 0.775rem;
             font-weight: 700;
-            padding: 4px 10px;
+            padding: 5px 12px;
             border-radius: 999px;
             background: #ECFDF5;
             color: #065F46;
@@ -1984,77 +2236,510 @@
             white-space: nowrap;
         }
 
-        .scanner-header-pill.pulsing::before {
-            content: '';
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: #10B981;
-            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-            animation: scannerPulse 1.8s infinite;
-        }
-
-        @keyframes scannerPulse {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
-
-        .staging-queue-toggle-btn {
-            background: var(--bg-inset);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            width: 28px;
-            height: 28px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            transition: var(--transition-smooth);
-        }
-
-        .staging-queue-toggle-btn:hover {
-            border-color: var(--brand);
-            color: var(--brand);
-        }
-
-        .staging-queue-body {
-            padding: 14px 16px;
-            transition: max-height 0.25s ease, opacity 0.25s ease;
-            max-height: 520px;
-            overflow-y: auto;
-            opacity: 1;
-        }
-
-        .staging-queue-dock.collapsed .staging-queue-body {
-            max-height: 0;
-            padding-top: 0;
-            padding-bottom: 0;
-            opacity: 0;
-            overflow: hidden;
-        }
-
-        .staging-queue-dock.collapsed .staging-queue-header {
-            border-bottom: none;
-        }
-
-        .staging-queue-list {
+        .queue-items-list,
+        .queue-flat-list {
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
 
+        .queue-flat-row {
+            background: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: var(--card-radius);
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            transition: all var(--transition-smooth);
+            box-shadow: var(--shadow-card);
+            flex-wrap: wrap;
+        }
+
+        .queue-flat-row:hover {
+            border-color: rgba(0, 0, 0, 0.14);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .queue-flat-row.is-active {
+            border: 1.5px solid #10B981;
+            background: #FFFFFF;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        .queue-flat-row.is-staged {
+            background: #FFFFFF;
+        }
+
+        .queue-flat-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            flex: 1;
+            min-width: 260px;
+        }
+
+        .queue-pos-tag {
+            font-size: 0.775rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 12px;
+            white-space: nowrap;
+            letter-spacing: -0.01em;
+        }
+
+        .queue-pos-tag.pos-active {
+            background: #10B981;
+            color: #FFFFFF;
+        }
+
+        .queue-pos-tag.pos-queued {
+            background: #F3F4F6;
+            border: 1px solid #E5E7EB;
+            color: #4B5563;
+        }
+
+        .queue-flat-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #111827;
+            letter-spacing: -0.015em;
+        }
+
+        .queue-flat-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        /* ---------------- History Tab (Panel 4) ---------------- */
+        .history-panel-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .history-header {
+            margin-bottom: 4px;
+        }
+
+        .history-header-title-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .history-header-title-wrap h2 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #111827;
+            letter-spacing: -0.015em;
+            margin: 0;
+        }
+
+        .history-stats-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .history-stat-pill {
+            background: #F3F4F6;
+            border: 1px solid #E5E7EB;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.775rem;
+            font-weight: 600;
+            color: #4B5563;
+        }
+
+        .history-view-row,
+        .history-filter-row {
+            display: inline-flex;
+            background: #E5E7EB;
+            border: none;
+            border-radius: 18px;
+            padding: 2px;
+            gap: 2px;
+        }
+
+        .history-view-btn,
+        .history-filter-btn {
+            background: transparent;
+            border: none;
+            padding: 5px 16px;
+            border-radius: 16px;
+            font-size: 0.825rem;
+            font-weight: 600;
+            color: #6B7280;
+            cursor: pointer;
+            transition: all var(--transition-smooth);
+        }
+
+        .history-view-btn:hover,
+        .history-filter-btn:hover {
+            color: #111827;
+        }
+
+        .history-view-btn.active,
+        .history-filter-btn.active {
+            background: #FFFFFF;
+            color: #111827;
+            font-weight: 700;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* History Table View (Matching FreyaAdmin2 Print Layout) */
+        .history-sheet {
+            width: 100%;
+            background: #FFFFFF;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+            overflow-x: auto;
+            box-sizing: border-box;
+        }
+
+        .history-summary-strip {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f8fafc;
+            border: 1.5px solid #000;
+            border-bottom: none;
+            padding: 8px 14px;
+            font-size: 10pt;
+            font-weight: 700;
+            color: #000000;
+        }
+
+        .history-schedule-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 10pt;
+            background: #ffffff;
+            color: #000000;
+        }
+
+        .history-schedule-table th,
+        .history-schedule-table td {
+            border: 1.5px solid #000;
+            padding: 6px 5px;
+            vertical-align: middle;
+            word-break: break-word;
+        }
+
+        .history-schedule-table th {
+            background-color: #e2e8f0;
+            font-weight: 900;
+            text-align: center;
+            font-size: 10.5pt;
+            padding: 8px 4px;
+            color: #000000;
+        }
+
+        .history-schedule-table tr.setup-row {
+            background-color: #fffbeb !important;
+        }
+
+        .history-schedule-table tr.separator-black-row td {
+            background-color: #000000 !important;
+            height: 6px !important;
+            line-height: 6px !important;
+            padding: 0 !important;
+            border: 1.5px solid #000000 !important;
+            box-shadow: inset 0 0 0 1000px #000000 !important;
+        }
+
+        .history-schedule-table .setup-name {
+            color: #92400e;
+            font-size: 10.5pt;
+            padding-left: 14px;
+        }
+
+        .history-schedule-table .center { text-align: center; }
+        .history-schedule-table .left { text-align: left; }
+        .history-schedule-table .right { text-align: right; }
+        .history-schedule-table .font-bold { font-weight: 700; }
+        .history-schedule-table .text-sub {
+            font-size: 8.5pt;
+            color: #475569;
+            font-weight: normal;
+        }
+        .history-schedule-table .time-cell { width: 8%; }
+        .history-schedule-table .dest-cell { width: 14%; font-size: 9.5pt; }
+        .history-schedule-table .kizai-cell { width: 22%; font-size: 10pt; font-weight: 700; }
+        .history-schedule-table .shori-cell { width: 8%; font-size: 9.5pt; font-weight: 700; }
+        .history-schedule-table .color-cell { width: 9%; font-size: 9.5pt; font-weight: 700; }
+        .history-schedule-table .habanaga-cell { width: 9%; font-weight: 700; }
+        .history-schedule-table .kataban-cell { width: 9%; font-weight: 700; }
+        .history-schedule-table .roll-cell { width: 6%; font-weight: 700; font-size: 9.5pt; }
+        .history-schedule-table .qty-cell { width: 11%; font-weight: 700; }
+        .history-schedule-table tr.item-row:hover {
+            background-color: #f8fafc;
+        }
+        .history-schedule-table tr.item-row.is-processed td {
+            background-color: #E5E7EB !important;
+            color: #374151;
+        }
+        .history-schedule-table tr.item-row.is-processed:hover td {
+            background-color: #D1D5DB !important;
+        }
+        .history-schedule-table tr.item-row.is-processed .text-sub {
+            color: #6B7280;
+        }
+        .history-schedule-table tr.item-row.is-excluded-row td {
+            opacity: 0.55;
+            background-color: #F9FAFB !important;
+            color: #9CA3AF !important;
+            text-decoration: line-through;
+        }
+        .history-schedule-table tr.item-row.is-excluded-row .excluded-tag {
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .history-flat-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .history-row {
+            background: #FFFFFF;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: var(--card-radius);
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            box-shadow: var(--shadow-card);
+            flex-wrap: wrap;
+            transition: all var(--transition-smooth);
+        }
+
+        .history-row:hover {
+            border-color: rgba(0, 0, 0, 0.14);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .history-row.status-enqueued,
+        .history-row.is-enqueued {
+            border-left: 4px solid #10B981;
+        }
+
+        .history-row.status-excluded,
+        .history-row.is-excluded {
+            border-left: 4px solid #9CA3AF;
+            background: #FAFAFA;
+            opacity: 0.8;
+        }
+
+        .queue-flat-thumb,
+        .history-thumb,
+        .history-thumb-mini {
+            width: 44px;
+            height: 44px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid #E5E7EB;
+            cursor: pointer;
+            flex-shrink: 0;
+            background: #F3F4F6;
+            transition: transform 0.15s ease, opacity 0.25s ease;
+        }
+
+        .img-loading-pulse {
+            background: linear-gradient(90deg, #F3F4F6 25%, #E2E8F0 50%, #F3F4F6 75%) !important;
+            background-size: 200% 100% !important;
+            animation: imgPulse 1.5s infinite !important;
+        }
+
+        @keyframes imgPulse {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .queue-flat-thumb:hover,
+        .history-thumb:hover,
+        .history-thumb-mini:hover {
+            transform: scale(1.05);
+            border-color: var(--brand);
+        }
+
+        .queue-flat-thumb-placeholder,
+        .history-thumb-placeholder {
+            width: 48px;
+            height: 48px;
+            border-radius: 6px;
+            border: 1px dashed var(--border-strong);
+            background: var(--bg-inset);
+            color: var(--text-muted);
+            font-size: 0.65rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            text-align: center;
+        }
+
+        .history-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 240px;
+        }
+
+        .history-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .history-type-badge {
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 3px 8px;
+            border-radius: var(--r-pill);
+            white-space: nowrap;
+        }
+
+        .history-type-enqueued {
+            background: #ECFDF5;
+            color: #065F46;
+            border: 1px solid #A7F3D0;
+        }
+
+        .history-type-excluded {
+            background: #F1F5F9;
+            color: #475569;
+            border: 1px solid #CBD5E1;
+        }
+
+        .history-title {
+            font-size: 1rem;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+
+        .history-meta {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 2px;
+        }
+
+        .history-restore-btn {
+            background: var(--bg-surface);
+            color: var(--brand);
+            border: 1.5px solid var(--brand);
+            padding: 6px 14px;
+            font-size: 0.825rem;
+            font-weight: 800;
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            transition: all var(--transition-smooth);
+            white-space: nowrap;
+        }
+
+        .history-restore-btn:hover {
+            background: var(--brand);
+            color: #FFFFFF;
+        }
+
         /* Queue Empty State */
         .staging-queue-empty {
             text-align: center;
-            padding: 16px 12px;
+            padding: 20px 16px;
             color: var(--text-soft);
             font-size: 0.875rem;
             background: var(--bg-subtle);
             border-radius: 8px;
             border: 1px dashed var(--border-strong);
+        }
+
+        /* Flat Schedule List Action Buttons */
+        .btn-feed-primary {
+            background: var(--brand);
+            color: #FFFFFF;
+            border: none;
+            padding: 8px 18px;
+            font-size: 0.875rem;
+            font-weight: 800;
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            transition: background var(--transition-smooth);
+            white-space: nowrap;
+        }
+
+        .btn-feed-primary:hover {
+            background: var(--brand-hover);
+        }
+
+        .btn-detail-secondary {
+            background: #F3F4F6;
+            color: #374151;
+            border: 1px solid transparent;
+            padding: 5px 13px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            border-radius: 18px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .btn-detail-secondary:hover {
+            background: #E5E7EB;
+            color: #111827;
+        }
+
+        .batch-status-tag {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 3px 9px;
+            border-radius: 12px;
+            white-space: nowrap;
+            letter-spacing: -0.01em;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .batch-status-tag.status-pending {
+            background: #F3F4F6;
+            color: #4B5563;
+            border: 1px solid #E5E7EB;
+        }
+
+        .batch-status-tag.status-queued {
+            background: #EFF6FF;
+            color: #2563EB;
+            border: 1px solid #BFDBFE;
+        }
+
+        .batch-status-tag.status-active {
+            background: #ECFDF5;
+            color: #059669;
+            border: 1px solid #A7F3D0;
+        }
+
+        .batch-status-tag.status-completed {
+            background: #F3F4F6;
+            color: #9CA3AF;
+            border: 1px solid #E5E7EB;
         }
 
         /* Queue Item Cards */
@@ -2231,33 +2916,34 @@
         }
 
         .btn-staging-action {
-            min-height: 36px;
-            padding: 0 10px;
+            min-height: 32px;
+            padding: 0 12px;
             font-size: 0.78rem;
-            font-weight: 800;
-            border-radius: 6px;
+            font-weight: 600;
+            border-radius: 16px;
             cursor: pointer;
-            border: 1px solid var(--border-strong);
-            background: var(--bg-surface);
-            color: var(--text-main);
+            border: 1px solid #E5E7EB;
+            background: #F3F4F6;
+            color: #374151;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 4px;
-            transition: var(--transition-smooth);
+            transition: all var(--transition-smooth);
         }
 
         .btn-staging-action:hover {
-            border-color: var(--text-soft);
-            background: var(--bg-subtle);
+            border-color: #D1D5DB;
+            background: #E5E7EB;
+            color: #111827;
         }
 
         .btn-staging-reorder {
-            width: 34px;
-            min-height: 34px;
+            width: 32px;
+            min-height: 32px;
             padding: 0;
-            font-size: 0.85rem;
-            color: var(--text-muted);
+            font-size: 0.8rem;
+            color: #4B5563;
         }
 
         .btn-staging-reorder:disabled {
@@ -2265,26 +2951,76 @@
             cursor: not-allowed;
         }
 
+        .btn-queue-drag-handle {
+            width: 38px;
+            height: 38px;
+            min-width: 38px;
+            border-radius: 50%;
+            border: 1px solid #E2E8F0;
+            background: #F8FAFC;
+            color: #64748B;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: grab;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            transition: all 0.15s ease;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        .btn-queue-drag-handle:hover {
+            background: #EDF2F7;
+            color: #334155;
+            border-color: #CBD5E1;
+            transform: scale(1.06);
+        }
+
+        .btn-queue-drag-handle:active {
+            cursor: grabbing;
+            background: #E2E8F0;
+            color: #1E293B;
+            transform: scale(0.95);
+        }
+
+        .queue-flat-row.is-dragging {
+            opacity: 0.45;
+            border: 2px dashed #6366F1 !important;
+            background: #EEF2FF !important;
+        }
+
+        .queue-flat-row.drag-over-top {
+            border-top: 3px solid #4F46E5 !important;
+        }
+
+        .queue-flat-row.drag-over-bottom {
+            border-bottom: 3px solid #4F46E5 !important;
+        }
+
         .btn-staging-cancel {
-            color: var(--red);
-            border-color: rgba(229, 72, 77, 0.3);
-            background: var(--red-soft);
+            color: #DC2626;
+            border-color: #FECACA;
+            background: #FEF2F2;
         }
 
         .btn-staging-cancel:hover {
             background: #FEE2E2;
-            border-color: var(--red);
+            border-color: #FCA5A5;
         }
 
         .btn-staging-advance {
             background: #10B981;
             color: #FFFFFF;
-            border-color: #059669;
-            box-shadow: 0 1px 3px rgba(16, 185, 129, 0.2);
+            border: none;
+            box-shadow: 0 1px 3px rgba(16, 185, 129, 0.25);
+            font-weight: 700;
+            padding: 0 16px;
         }
 
         .btn-staging-advance:hover {
             background: #059669;
+            transform: translateY(-1px);
         }
 
         /* ---------------- Button for Schedule Cards ---------------- */
@@ -2323,38 +3059,364 @@
             transform: scale(1.04);
         }
 
-        /* ---------------- Feed Material Modal ---------------- */
-        #materialFeedModal > div {
-            max-width: 680px;
-            width: 95%;
-            max-height: 90vh;
+        /* ---------------- Adding to Queue Modal ---------------- */
+        #queueAddingModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 99999;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #queueAddingModal.active,
+        #queueAddingModal.open {
+            display: flex !important;
+        }
+
+        .queue-adding-card {
+            background: #FFFFFF;
+            width: 90%;
+            max-width: 400px;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+            padding: 24px 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            text-align: center;
+            animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .queue-adding-header {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .queue-adding-badge {
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: #4338CA;
+            background: #EEF2FF;
+            border: 1px solid #C7D2FE;
+            padding: 3px 10px;
+            border-radius: 9999px;
+            letter-spacing: 0.02em;
+        }
+
+        .queue-adding-roll-id {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: #0F172A;
+            line-height: 1.3;
+        }
+
+        .queue-adding-body {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 14px;
+            padding: 14px 16px;
+        }
+
+        .queue-adding-thumb-wrap {
+            width: 56px;
+            height: 56px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #E2E8F0;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #CBD5E1;
+        }
+
+        .queue-adding-thumb {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .queue-adding-thumb-placeholder {
+            color: #94A3B8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .queue-adding-status-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+            text-align: left;
+            flex: 1;
+        }
+
+        .queue-adding-spinner-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .queue-adding-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2.5px solid #CBD5E1;
+            border-top-color: #4F46E5;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        .queue-adding-status-text {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #1E293B;
+        }
+
+        .queue-adding-subtext {
+            font-size: 0.775rem;
+            color: #64748B;
+            padding-left: 30px;
+        }
+
+        .queue-adding-success-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            background: #ECFDF5;
+            border: 1px solid #A7F3D0;
+            color: #065F46;
+            padding: 12px;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            animation: fadeIn 0.2s ease-in;
+        }
+
+        .queue-adding-success-icon {
+            width: 24px;
+            height: 24px;
+            background: #10B981;
+            color: #FFFFFF;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 0.9rem;
+        }
+
+        /* ---------------- Queue Cancel Warning Modal ---------------- */
+        #queueCancelWarningModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 99999;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #queueCancelWarningModal.active,
+        #queueCancelWarningModal.open {
+            display: flex !important;
+        }
+
+        .queue-cancel-card {
+            background: #FFFFFF;
+            width: 90%;
+            max-width: 420px;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+            padding: 24px;
             display: flex;
             flex-direction: column;
             gap: 16px;
-            padding: 24px;
+            animation: modalPop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        .feed-modal-header {
+        .queue-cancel-header {
             display: flex;
             align-items: center;
+            gap: 12px;
+        }
+
+        .queue-cancel-icon-wrap {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: #FEF3C7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            flex-shrink: 0;
+        }
+
+        .queue-cancel-title {
+            font-size: 1.08rem;
+            font-weight: 800;
+            color: #1E293B;
+            margin: 0;
+        }
+
+        .queue-cancel-sub {
+            font-size: 0.775rem;
+            color: #64748B;
+            margin-top: 2px;
+        }
+
+        .queue-cancel-item-box {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 14px;
+            padding: 12px 14px;
+        }
+
+        .queue-cancel-thumb-wrap {
+            width: 52px;
+            height: 52px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #E2E8F0;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #CBD5E1;
+        }
+
+        .queue-cancel-thumb {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .queue-cancel-thumb-placeholder {
+            font-size: 0.72rem;
+            color: #94A3B8;
+        }
+
+        .queue-cancel-item-info {
+            flex: 1;
+            text-align: left;
+        }
+
+        .queue-cancel-item-name {
+            font-size: 1rem;
+            font-weight: 800;
+            color: #0F172A;
+        }
+
+        .queue-cancel-item-meta {
+            font-size: 0.8rem;
+            color: #64748B;
+            margin-top: 3px;
+        }
+
+        .queue-cancel-alert-box {
+            background: #FEF2F2;
+            border: 1px solid #FECACA;
+            border-radius: 12px;
+            padding: 12px 14px;
+            text-align: left;
+        }
+
+        .queue-cancel-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 4px;
+        }
+
+        .btn-danger-confirm {
+            background: #EF4444;
+            color: #FFFFFF;
+            border: none;
+            border-radius: 10px;
+            font-weight: 800;
+            font-size: 0.95rem;
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: background 0.15s ease, transform 0.1s ease;
+        }
+
+        .btn-danger-confirm:hover {
+            background: #DC2626;
+            transform: scale(1.02);
+        }
+
+        .btn-danger-confirm:active {
+            background: #B91C1C;
+            transform: scale(0.98);
+        }
+
+        /* ---------------- Simple Material Feed Modal ---------------- */
+        #materialFeedModal > div,
+        .feed-modal-card-simple {
+            max-width: 440px !important;
+            width: 92% !important;
+            background: var(--bg-surface) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: var(--card-radius) !important;
+            box-shadow: var(--shadow-pop) !important;
+            font-family: inherit !important;
+            padding: 24px 20px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 16px !important;
+            max-height: 90vh !important;
+            overflow-y: auto !important;
+        }
+
+        .feed-simple-header {
+            display: flex;
+            align-items: flex-start;
             justify-content: space-between;
+            gap: 12px;
             border-bottom: 1px solid var(--border);
             padding-bottom: 12px;
         }
 
-        .feed-modal-title {
-            font-size: 1.2rem;
-            font-weight: 900;
+        .feed-simple-title {
+            font-size: 1.15rem;
+            font-weight: 800;
             color: var(--text-main);
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            margin: 0;
+            line-height: 1.3;
+        }
+
+        .feed-simple-sub {
+            font-size: 0.825rem;
+            font-weight: 700;
+            color: var(--text-soft);
+            margin-top: 2px;
         }
 
         .feed-modal-close-btn {
             background: transparent;
             border: none;
-            font-size: 1.4rem;
+            font-size: 1.3rem;
             color: var(--text-soft);
             cursor: pointer;
             line-height: 1;
@@ -2367,190 +3429,677 @@
             background: var(--bg-inset);
         }
 
-        .feed-lot-summary-card {
-            background: var(--bg-subtle);
-            border: 1.5px solid var(--border);
-            border-radius: var(--card-radius);
-            padding: 14px 16px;
+        .feed-view-pane {
             display: flex;
             flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Scan Mode */
+        .feed-scan-box {
+            padding: 30px 16px;
+            text-align: center;
+            background: var(--bg-subtle);
+            border: 1.5px dashed var(--border-strong);
+            border-radius: var(--card-radius);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             gap: 8px;
         }
 
-        .feed-lot-title-row {
-            display: flex;
-            align-items: baseline;
-            justify-content: space-between;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-
-        .feed-lot-hinban {
-            font-size: 1.15rem;
-            font-weight: 900;
+        .feed-qr-icon-wrap {
+            width: 72px;
+            height: 72px;
+            border-radius: 16px;
+            background: var(--brand-soft);
+            border: 2px solid var(--brand);
             color: var(--brand);
-        }
-
-        .feed-lot-pills-row {
             display: flex;
-            gap: 6px;
             align-items: center;
-            flex-wrap: wrap;
+            justify-content: center;
+            margin-bottom: 4px;
         }
 
-        /* Photo Capture Area */
-        .feed-section-block {
-            background: var(--bg-surface);
-            border: 1.5px solid var(--border);
-            border-radius: var(--card-radius);
-            padding: 14px 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .feed-section-title {
-            font-size: 0.875rem;
+        .feed-scan-prompt {
+            font-size: 1.15rem;
             font-weight: 800;
             color: var(--text-main);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+            margin: 0;
         }
 
-        .feed-photo-actions-row {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            flex-wrap: wrap;
+        .feed-scan-detail {
+            font-size: 0.825rem;
+            color: var(--text-muted);
+            margin: 0;
+            line-height: 1.4;
         }
 
-        .btn-photo-capture {
-            background: #2563EB;
-            color: #FFFFFF;
+        .feed-scanner-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: var(--r-pill);
+            font-size: 0.775rem;
             font-weight: 800;
-            border: none;
-            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
-        }
-
-        .btn-photo-capture:hover {
-            background: #1D4ED8;
-        }
-
-        .feed-photo-preview-wrap {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            padding: 10px;
-            background: var(--bg-subtle);
-            border-radius: 8px;
-            border: 1px solid var(--border);
-        }
-
-        .feed-photo-preview-img {
-            max-height: 110px;
-            max-width: 140px;
-            object-fit: contain;
-            border-radius: 6px;
-            border: 1px solid var(--border-strong);
-            background: #000000;
-            cursor: pointer;
-        }
-
-        /* Scanner Area */
-        .scanner-status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
             background: #ECFDF5;
             border: 1px solid #A7F3D0;
-            border-radius: 6px;
-            font-size: 0.8rem;
-            font-weight: 800;
             color: #065F46;
-            transition: all var(--transition-smooth);
+            margin-top: 6px;
         }
 
-        .scanner-status-indicator.scanned-active {
+        .feed-scanner-badge.is-scanned {
             background: #FEF3C7;
             border-color: #FDE68A;
             color: #92400E;
-            animation: scannerFlash 0.5s ease;
         }
 
-        @keyframes scannerFlash {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.02); }
-            100% { transform: scale(1); }
+        .scanner-wedge-hidden {
+            position: absolute;
+            opacity: 0;
+            width: 1px;
+            height: 1px;
+            pointer-events: none;
         }
 
-        .feed-inputs-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        /* Manual Input Mode */
+        .feed-manual-instruct {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-align: center;
+            margin: 0;
+        }
+
+        .feed-manual-fields-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .feed-numpad-field {
+            background: var(--bg-subtle);
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+            transition: all var(--transition-smooth);
+        }
+
+        .feed-numpad-field:hover,
+        .feed-numpad-field:active {
+            border-color: var(--brand);
+            background: var(--bg-surface);
+        }
+
+
+        .feed-numpad-field.is-missing {
+            border-color: #F87171 !important;
+            background: #FEF2F2 !important;
+        }
+
+        .feed-numpad-field.is-missing .feed-numpad-field-label {
+            color: #DC2626 !important;
+        }
+
+        .feed-numpad-field.is-missing .feed-numpad-field-val {
+            color: #DC2626 !important;
+        }
+
+        .feed-numpad-field.is-filled {
+            border-color: #A7F3D0;
+        }
+
+        .btn-submit-enqueue-flat.is-incomplete {
+            opacity: 0.85;
+            box-shadow: none;
+        }
+
+        .feed-numpad-field-label {
+            font-size: 0.875rem;
+            font-weight: 800;
+            color: var(--text-soft);
+        }
+
+
+        .feed-numpad-field-val {
+            font-size: 1.25rem;
+            font-weight: 800;
+            font-family: 'Nunito Sans', monospace;
+            color: var(--text-main);
+        }
+
+
+        .feed-calc-sign {
+            text-align: center;
+            font-size: 1.15rem;
+            font-weight: 900;
+            color: var(--text-soft);
+            line-height: 1;
+        }
+
+        /* Footer */
+        .feed-simple-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+        }
+
+        .feed-link-exclude {
+            background: none;
+            border: none;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--red);
+            cursor: pointer;
+            text-decoration: underline;
+            padding: 4px;
+        }
+
+        .btn-cancel-flat {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            color: var(--text-main);
+            padding: 9px 18px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            transition: background var(--transition-smooth);
+        }
+
+        .btn-cancel-flat:hover {
+            background: var(--bg-inset);
+        }
+
+        .btn-submit-enqueue-flat {
+            background: var(--brand);
+            border: none;
+            color: #FFFFFF;
+            padding: 10px 22px;
+            font-size: 0.95rem;
+            font-weight: 800;
+            border-radius: var(--btn-radius);
+            cursor: pointer;
+            transition: background var(--transition-smooth);
+            white-space: nowrap;
+        }
+
+        .btn-submit-enqueue-flat:hover:not(:disabled) {
+            background: var(--brand-hover);
+        }
+
+        .btn-submit-enqueue-flat:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* ---------------- Numeric Keypad Modal (from DCP Interactive) ---------------- */
+        #materialKeypadModal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100050;
+            padding: 16px;
+        }
+
+        #materialKeypadModal.open {
+            display: flex !important;
+        }
+
+        .material-keypad-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            max-width: 320px;
+            width: 100%;
+            box-shadow: var(--shadow-pop);
+            display: flex;
+            flex-direction: column;
             gap: 12px;
         }
 
-        .feed-field-wrap {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-
-        .feed-field-label {
-            font-size: 0.775rem;
-            font-weight: 800;
-            color: var(--text-muted);
-        }
-
-        .feed-field-input {
-            width: 100%;
-            min-height: 44px;
-            padding: 10px 12px;
-            font-size: 0.95rem;
-            font-weight: 700;
-            font-family: inherit;
+        .material-keypad-display {
+            background: var(--bg-subtle);
             border: 1.5px solid var(--border-strong);
-            border-radius: var(--btn-radius);
-            background: var(--bg-surface);
+            border-radius: 10px;
+            padding: 12px 16px;
+            text-align: right;
+            font-size: 1.75rem;
+            font-weight: 800;
+            font-family: 'Nunito Sans', monospace;
             color: var(--text-main);
-            outline: none;
-            transition: border-color var(--transition-smooth), box-shadow var(--transition-smooth);
+            min-height: 54px;
+            line-height: 1.2;
             box-sizing: border-box;
         }
 
-        .feed-field-input:focus {
-            border-color: var(--blue);
-            box-shadow: 0 0 0 3px rgba(46, 111, 242, 0.15);
+        .checklist-keypad-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
         }
 
-        .feed-field-input[readonly] {
-            background: var(--bg-inset);
-            cursor: not-allowed;
-        }
-
-        .btn-feed-submit {
-            background: var(--brand);
-            color: #FFFFFF;
-            font-size: 1.05rem;
-            font-weight: 900;
-            min-height: 52px;
-            border: none;
+        .checklist-keypad-btn {
+            padding: 14px 0;
             border-radius: 10px;
-            box-shadow: 0 3px 12px rgba(31, 157, 107, 0.35);
+            border: 1px solid var(--border);
+            background: var(--bg-subtle);
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: var(--text-main);
             cursor: pointer;
+            text-align: center;
+            user-select: none;
+            transition: background 0.1s ease;
+        }
+
+        .checklist-keypad-btn:active {
+            background: var(--bg-inset);
+        }
+
+        /* ---------------- QR Token / Candidate Value Picker Modal ---------------- */
+        #feedValuePickerModal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.55);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100060;
+            padding: 16px;
+            backdrop-filter: blur(2px);
+        }
+
+        #feedValuePickerModal.open {
+            display: flex !important;
+        }
+
+        .feed-token-picker-card {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            max-width: 440px;
             width: 100%;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--shadow-pop);
+        }
+
+        .feed-token-picker-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+            max-height: 48vh;
+            padding-right: 4px;
+            margin-top: 8px;
+        }
+
+        /* ---------------- Lot / Date Picker Modal ---------------- */
+        #lotDatePickerModal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.65);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100070;
+            padding: 16px;
+            backdrop-filter: blur(3px);
+        }
+
+        #lotDatePickerModal.open {
+            display: flex !important;
+        }
+
+        .lot-date-picker-card {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            border-radius: var(--card-radius);
+            padding: 22px;
+            max-width: 440px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--shadow-pop);
+            animation: modalPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            box-sizing: border-box;
+        }
+
+        .lot-date-input-wrap {
+            margin: 12px 0 16px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .lot-modal-date-input {
+            width: 100%;
+            height: 60px;
+            font-size: 1.45rem;
+            font-weight: 800;
+            text-align: center;
+            border: 2.5px solid var(--blue);
+            background: #F0F9FF;
+            color: #0369A1;
+            border-radius: 12px;
+            box-sizing: border-box;
+            padding: 8px 16px;
+            outline: none;
+            box-shadow: 0 2px 10px rgba(2, 132, 199, 0.18);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .lot-modal-date-input:focus {
+            border-color: #0284C7;
+            background: #FFFFFF;
+            box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.28);
+        }
+
+        .lot-modal-date-input::-webkit-calendar-picker-indicator {
+            display: none;
+            -webkit-appearance: none;
+        }
+
+        .feed-token-choice-btn {
+            background: var(--bg-subtle);
+            border: 1.5px solid var(--border);
+            border-radius: var(--btn-radius);
+            padding: 12px 14px;
+            text-align: left;
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-main);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             transition: var(--transition-smooth);
+            font-family: inherit;
         }
 
-        .btn-feed-submit:hover:not(:disabled) {
-            background: var(--brand-hover);
+        .feed-token-choice-btn:hover,
+        .feed-token-choice-btn:active {
+            border-color: var(--blue);
+            background: var(--blue-soft);
+            color: var(--blue);
+        }
+
+        .feed-token-choice-btn.is-selected {
+            border-color: var(--blue);
+            background: var(--blue-soft);
+            color: var(--blue);
+            font-weight: 800;
+        }
+
+        .feed-token-index-badge {
+            font-size: 0.72rem;
+            background: rgba(100, 116, 139, 0.15);
+            color: var(--text-muted);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-weight: 700;
+        }
+
+        .feed-token-split-btn {
+            background: #F1F5F9;
+            border: 1px solid #CBD5E1;
+            color: #475569;
+            font-size: 0.78rem;
+            font-weight: 700;
+            padding: 5px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            white-space: nowrap;
+            transition: var(--transition-smooth);
+            font-family: inherit;
+        }
+
+        .feed-token-split-btn:hover,
+        .feed-token-split-btn:active {
+            background: #E2E8F0;
+            border-color: #94A3B8;
+            color: #1E293B;
+        }
+
+        /* ---------------- Token Substring / Split Modal ---------------- */
+        #qrTokenSplitModal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.65);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100070;
+            padding: 16px;
+            backdrop-filter: blur(3px);
+            box-sizing: border-box;
+        }
+
+        #qrTokenSplitModal.open {
+            display: flex !important;
+        }
+
+        .feed-split-modal-card {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border-strong);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            max-width: 480px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            overflow-x: hidden;
+            box-shadow: var(--shadow-pop);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-sizing: border-box;
+            font-family: inherit;
+        }
+
+        .feed-split-char-boxes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px;
+            max-height: 120px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            box-sizing: border-box;
+        }
+
+        .feed-split-char-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 42px;
+            padding: 0;
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            user-select: none;
+            box-sizing: border-box;
+            transition: var(--transition-smooth);
+            font-family: inherit;
+            flex-shrink: 0;
+        }
+
+        .feed-split-char-box .char-idx {
+            font-size: 0.62rem;
+            color: var(--text-muted);
+            line-height: 1;
+            font-family: inherit;
+        }
+
+        .feed-split-char-box .char-letter {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--text-main);
+            line-height: 1.2;
+            font-family: inherit;
+        }
+
+        .feed-split-char-box.in-range {
+            background: var(--blue-soft);
+            border-color: var(--blue);
+        }
+
+        .feed-split-char-box.in-range .char-letter {
+            color: var(--blue);
+            font-weight: 800;
+        }
+
+        .feed-split-chip {
+            background: #EFF6FF;
+            border: 1.5px solid #93C5FD;
+            color: #1D4ED8;
+            font-weight: 700;
+            font-size: 0.88rem;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            transition: var(--transition-smooth);
+            font-family: inherit;
+        }
+
+        .feed-split-chip:hover,
+        .feed-split-chip:active {
+            background: #DBEAFE;
+            border-color: #2563EB;
+        }
+
+        .feed-split-stepper-wrap {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .feed-split-stepper-btn {
+            background: var(--bg-surface);
+            border: 1.5px solid var(--border);
+            border-radius: 6px;
+            width: 38px;
+            height: 38px;
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: var(--transition-smooth);
+            font-family: inherit;
+            padding: 0;
+        }
+
+        .feed-split-stepper-btn:hover,
+        .feed-split-stepper-btn:active {
+            background: var(--bg-subtle);
+            border-color: var(--border-strong);
+        }
+
+        .feed-split-stepper-input {
+            flex: 1;
+            min-width: 0;
+            width: 100%;
+            height: 38px;
+            text-align: center;
+            font-weight: 800;
+            font-size: 1.1rem;
+            padding: 0 4px;
+            border: 1.5px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-surface);
+            color: var(--text-main);
+            box-sizing: border-box;
+            appearance: textfield;
+            -moz-appearance: textfield;
+            font-family: inherit;
+        }
+
+        .feed-split-stepper-input::-webkit-outer-spin-button,
+        .feed-split-stepper-input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        /* ---------------- Line Item Flat Camera Pill & Feed Button ---------------- */
+        .flat-camera-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 12px;
+            letter-spacing: -0.01em;
+            user-select: none;
+        }
+
+        .flat-camera-pill.is-unshot {
+            background: #FEF2F2;
+            border: 1px solid #FECACA;
+            color: #DC2626;
+        }
+
+        .flat-camera-pill.is-shot {
+            background: #ECFDF5;
+            border: 1px solid #A7F3D0;
+            color: #059669;
+        }
+
+        .btn-feed-row-flat {
+            background: #10B981;
+            color: #FFFFFF;
+            border: none;
+            padding: 5px 15px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            border-radius: 18px;
+            cursor: pointer;
+            box-shadow: 0 1px 3px rgba(16, 185, 129, 0.25);
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .btn-feed-row-flat:hover {
+            background: #059669;
             transform: translateY(-1px);
-        }
-
-        .btn-feed-submit:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
+            box-shadow: 0 2px 5px rgba(16, 185, 129, 0.35);
         }
 
         /* ---------------- Native Camera Modal ---------------- */
@@ -2692,7 +4241,7 @@
     <!-- Header -->
     <header>
         <div class="header-title-section">
-            <h1>第一工場 日報</h1>
+            <h1 data-i18n="fk_app_title">第一工場 日報</h1>
             <span class="status-tag" id="machineNameTag">設備: -</span>
         </div>
         <span class="freya-center-mark">Freya System v4</span>
@@ -2707,42 +4256,52 @@
         </div>
     </header>
 
-    <!-- Main Tab Bar (5 Tabs) -->
+    <!-- Main Tab Bar (6 Tabs) -->
     <div class="tab-bar" id="mainTabBar">
-        <!-- 1. User -->
+        <!-- 0. User -->
         <button type="button" class="tab-btn active" data-tab="0">
             <span class="tab-icon">
                 <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             </span>
-            <span class="tab-label">User</span>
+            <span class="tab-label" data-i18n="fk_tab_user">User</span>
         </button>
-        <!-- 2. List -->
+        <!-- 1. List -->
         <button type="button" class="tab-btn" data-tab="1">
             <span class="tab-icon">
                 <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             </span>
-            <span class="tab-label">List</span>
+            <span class="tab-label" data-i18n="fk_tab_list">List</span>
+        </button>
+        <!-- 2. Queue -->
+        <button type="button" class="tab-btn" data-tab="2">
+            <span class="tab-icon">
+                <svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            </span>
+            <span class="tab-label-wrap">
+                <span class="tab-label" data-i18n="fk_tab_queue">Queue</span>
+                <span class="tab-badge" id="tabQueueBadge" style="display: none;">0</span>
+            </span>
         </button>
         <!-- 3. Info -->
-        <button type="button" class="tab-btn" data-tab="2">
+        <button type="button" class="tab-btn" data-tab="3">
             <span class="tab-icon">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
             </span>
-            <span class="tab-label">Info</span>
+            <span class="tab-label" data-i18n="fk_tab_info">Info</span>
         </button>
-        <!-- 4. Production -->
-        <button type="button" class="tab-btn" data-tab="3">
+        <!-- 4. History -->
+        <button type="button" class="tab-btn" data-tab="4">
+            <span class="tab-icon">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 15 15"/></svg>
+            </span>
+            <span class="tab-label" data-i18n="fk_tab_history">History</span>
+        </button>
+        <!-- 5. Production -->
+        <button type="button" class="tab-btn" data-tab="5">
             <span class="tab-icon">
                 <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
             </span>
-            <span class="tab-label">Production</span>
-        </button>
-        <!-- 5. Submit -->
-        <button type="button" class="tab-btn" data-tab="4">
-            <span class="tab-icon">
-                <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            </span>
-            <span class="tab-label">Submit</span>
+            <span class="tab-label" data-i18n="fk_tab_production">Production</span>
         </button>
     </div>
 
@@ -2791,59 +4350,17 @@
                             <button type="button" class="date-nav-btn" id="btnNextDay" title="翌日 (Next Day)">›</button>
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                            <button type="button" class="date-nav-btn today-btn" id="btnToday">今日 (Today)</button>
-                            <button type="button" class="date-nav-btn" id="btnRefreshSchedule" title="再読み込み (Refresh)">↻</button>
+                            <button type="button" class="date-nav-btn today-btn" id="btnToday" data-i18n="today">今日</button>
+                            <button type="button" class="date-nav-btn" id="btnRefreshSchedule" title="再読み込み" data-i18n="fk_btn_refresh">再読込</button>
 
                             <!-- View Mode Switcher (Card vs Table) -->
                             <div class="view-mode-switcher" id="viewModeSwitcher">
-                                <button type="button" class="view-mode-btn active" id="btnViewCard" onclick="switchListViewMode('card')" title="カード表示 (Card View)">
-                                    📇 カード
+                                <button type="button" class="view-mode-btn active" id="btnViewCard" onclick="switchListViewMode('card')" title="カード表示" data-i18n="fk_view_card">
+                                    カード
                                 </button>
-                                <button type="button" class="view-mode-btn" id="btnViewTable" onclick="switchListViewMode('table')" title="リスト・テーブル表示 (Table / List View)">
-                                    📋 リスト
+                                <button type="button" class="view-mode-btn" id="btnViewTable" onclick="switchListViewMode('table')" title="リスト・テーブル表示" data-i18n="fk_view_list">
+                                    リスト
                                 </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Stats / Overview Bar -->
-                    <div class="schedule-stats-bar" id="scheduleStatsBar">
-                        <div class="stat-chip brand-chip" id="chipTotalItems">
-                            <span>全ロット:</span>
-                            <strong id="statTotalItemsVal">0 件</strong>
-                        </div>
-                        <div class="stat-chip" id="chipStartTime">
-                            <span>🕒 始業:</span>
-                            <strong id="statStartTimeVal">08:00</strong>
-                        </div>
-                        <div class="stat-chip" id="chipTotalDuration">
-                            <span>⏱️ 予定時間:</span>
-                            <strong id="statTotalDurationVal">0 分</strong>
-                        </div>
-                        <div class="stat-chip" id="chipEndTime">
-                            <span>🏁 終了目安:</span>
-                            <strong id="statEndTimeVal">--:--</strong>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Staging Queue Dock / Bar -->
-                <div class="staging-queue-dock" id="stagingQueueDock">
-                    <div class="staging-queue-header" onclick="toggleStagingQueueCollapse()">
-                        <div class="staging-queue-title-wrap">
-                            <span class="staging-queue-icon">⚡</span>
-                            <span class="staging-queue-title">投入中・準備キュー (In-Feed & Staged Queue)</span>
-                            <span class="staging-queue-count-badge" id="stagingQueueCountBadge">0 件</span>
-                        </div>
-                        <div class="staging-queue-header-actions">
-                            <span class="scanner-header-pill pulsing" id="scannerHeaderStatus">🟢 スキャナー待機中</span>
-                            <button type="button" class="staging-queue-toggle-btn" id="btnStagingQueueToggle" aria-label="キュー開閉">▲</button>
-                        </div>
-                    </div>
-                    <div class="staging-queue-body" id="stagingQueueBody">
-                        <div class="staging-queue-list" id="stagingQueueList">
-                            <div class="staging-queue-empty">
-                                📥 現在キューに入っている材料はありません。下のリストから「📦 材料投入・準備」を押して投入してください。
                             </div>
                         </div>
                     </div>
@@ -2855,22 +4372,82 @@
                 </div>
             </div>
 
-            <!-- Panel 2: Info -->
+            <!-- Panel 2: Queue -->
+            <div class="tab-panel" id="panelQueue">
+                <div class="queue-panel-header">
+                    <div class="queue-header-title-wrap">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <h2 data-i18n="fk_queue_title">投入キュー</h2>
+                            <span class="queue-count-tag" id="queueTotalCountBadge">0 件</span>
+                        </div>
+                        <span class="scanner-header-pill" id="queueScannerStatus" data-i18n="fk_scanner_ready">スキャナー待機中</span>
+                    </div>
+                </div>
+
+                <!-- Blank Monitor Alert Banner -->
+                <div id="blankMonitorWarningBanner" class="blank-monitor-banner" style="display: none;">
+                    <div class="blank-monitor-banner-content">
+                        <span class="blank-monitor-banner-icon">📺</span>
+                        <div class="blank-monitor-banner-text">
+                            <strong data-i18n="fk_monitor_blank_banner_title">モニターがブランク（未投影）です</strong>
+                            <span id="blankMonitorBannerSubtext" data-i18n="fk_monitor_blank_banner_sub">現在の材料をモニターに投影してください</span>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-blank-monitor-project" onclick="projectQueueMaterialToMonitor()">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+                            <line x1="8" y1="21" x2="16" y2="21"></line>
+                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                        </svg>
+                        <span data-i18n="fk_btn_project_now">モニターに投影する</span>
+                    </button>
+                </div>
+
+                <!-- Flat Itemized Queue Container -->
+                <div id="queueItemListContainer" class="queue-flat-list">
+                    <!-- Rendered dynamically as flat sequential rows -->
+                </div>
+            </div>
+
+            <!-- Panel 3: Info -->
             <div class="tab-panel" id="panelInfo">
                 <div class="info-layout-container" id="infoTabContainer">
                     <div class="card">
-                        <h2>指示・詳細情報 (Information & Instructions)</h2>
+                        <h2 data-i18n="fk_info_title">指示・詳細情報</h2>
                         <div class="placeholder-state">
                             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            <h3>ロットが選択されていません (No Lot Selected)</h3>
-                            <p>生産一覧 (List) タブから対象のロットを選択すると、品番構造や構成材料の詳細情報が表示されます。</p>
-                            <button type="button" class="btn btn-primary" style="margin-top: 16px;" onclick="switchMainTab(1)">一覧へ戻る (Go to List)</button>
+                            <h3 data-i18n="fk_info_no_lot">ロットが選択されていません</h3>
+                            <p data-i18n="fk_info_no_lot_desc">生産一覧 (List) タブから対象のロットを選択すると、品番構造や構成材料の詳細情報が表示されます。</p>
+                            <button type="button" class="btn btn-primary" style="margin-top: 16px;" onclick="switchMainTab(1)" data-i18n="fk_info_btn_back_list">一覧へ戻る</button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Panel 3: Production -->
+            <!-- Panel 4: History -->
+            <div class="tab-panel" id="panelHistory">
+                <div class="history-panel-wrap">
+                    <div class="history-header">
+                        <div class="history-header-title-wrap">
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <h2 data-i18n="fk_history_title">投入・除外履歴</h2>
+                                <span class="history-stat-pill" id="historyEnqueuedCountBadge">投入済: 0 件</span>
+                                <span class="history-stat-pill" id="historyExcludedCountBadge">除外: 0 件</span>
+                            </div>
+                            <div class="history-view-row">
+                                <button type="button" class="history-view-btn active" data-view="card" onclick="setHistoryView('card')" data-i18n="fk_view_card">カード</button>
+                                <button type="button" class="history-view-btn" data-view="list" onclick="setHistoryView('list')" data-i18n="fk_view_list">リスト</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="historyListContainer" class="history-flat-list">
+                        <!-- Rendered dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel 5: Production -->
             <div class="tab-panel" id="panelProduction">
                 <div class="card">
                     <h2>生産実績入力 (Production Entry)</h2>
@@ -2878,18 +4455,6 @@
                         <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
                         <h3>Production Tab</h3>
                         <p>Good counts, defect breakdown counters, and operational times will be recorded here.</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Panel 4: Submit -->
-            <div class="tab-panel" id="panelSubmit">
-                <div class="card">
-                    <h2>データ送信 (Data Submit)</h2>
-                    <div class="placeholder-state">
-                        <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                        <h3>Submit Tab</h3>
-                        <p>Review completed report data and submit to server.</p>
                     </div>
                 </div>
             </div>
@@ -2952,108 +4517,354 @@
         </div>
     </div>
 
-    <!-- Material Feed & Staging Modal -->
+    <!-- Simple Material Feed Modal -->
     <div id="materialFeedModal" class="modal">
-        <div>
-            <div class="feed-modal-header">
-                <div class="feed-modal-title">
-                    <span>📦</span>
-                    <span>材料投入・準備 (Feed Material & Enqueue)</span>
-                </div>
+        <div class="feed-modal-card-simple">
+            <!-- Modal Header: [基材コード - roll#1] -->
+            <div class="feed-simple-header">
+                <h3 id="feedModalHeaderTitle" class="feed-simple-title">基材コード - roll#1</h3>
                 <button type="button" class="feed-modal-close-btn" onclick="closeMaterialFeedModal()" title="閉じる">✕</button>
             </div>
 
-            <!-- Lot Summary -->
-            <div class="feed-lot-summary-card">
-                <div class="feed-lot-title-row">
-                    <span class="feed-lot-hinban" id="feedModalHinban">-</span>
-                    <span id="feedModalOrderRange" style="font-weight: 800; font-size: 0.85rem; color: var(--text-soft);">#1</span>
+            <!-- VIEW 1: Scan Mode (Default - ONLY SCAN UI) -->
+            <div id="feedScanView" class="feed-view-pane">
+                <div class="feed-scan-box">
+                    <div class="feed-qr-icon-wrap">
+                        <svg viewBox="0 0 24 24" width="44" height="44" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M7 17h.01"/><path d="M17 17h.01"/><path d="M7 7h.01"/><path d="M17 7h.01"/></svg>
+                    </div>
+                    <div class="feed-scan-prompt" data-i18n="fk_feed_scan_prompt">QRコードをスキャンしてください</div>
+                    <div class="feed-scan-detail" data-i18n="fk_feed_scan_detail">材料ラベルのQRコードをスキャナーで読み取ってください</div>
+                    <div id="feedScannerLiveBadge" class="feed-scanner-badge" data-i18n="fk_scanner_ready">🟢 スキャナー待機中</div>
                 </div>
-                <div class="feed-lot-pills-row">
-                    <span class="tag-pill" id="feedModalKizai">基材: -</span>
-                    <span class="tag-pill color-tag" id="feedModalColor">色: -</span>
-                    <span class="tag-pill" id="feedModalZuban">図番: -</span>
-                    <span class="tag-pill dest-tag" id="feedModalDest">出荷先: -</span>
-                    <span class="tag-pill roll-tag" id="feedModalRolls">1 / 1 巻き</span>
-                    <span class="tag-pill meter-tag" id="feedModalMeters">100 m</span>
+
+                <!-- Hidden USB scanner input (inputmode="none" prevents tablet on-screen keyboard) -->
+                <input type="text" id="feedRawQRInput" class="scanner-wedge-hidden" autocomplete="off" inputmode="none" tabindex="-1">
+
+                <div class="feed-simple-footer">
+                    <button type="button" class="btn-cancel-flat" onclick="closeMaterialFeedModal()" data-i18n="fk_btn_close">閉じる</button>
+                    <button type="button" class="btn-feed-row-flat" style="padding: 10px 22px; font-size: 0.95rem;" onclick="switchFeedModalView('manual')" data-i18n="fk_btn_manual">手動入力</button>
+                </div>
+                <div style="text-align: center; margin-top: -6px;">
+                    <button type="button" class="feed-link-exclude" onclick="excludeCurrentModalRoll()" data-i18n="fk_btn_exclude_roll">この巻きを除外</button>
                 </div>
             </div>
 
-            <!-- Material Label Photo Capture -->
-            <div class="feed-section-block">
-                <div class="feed-section-title">
-                    <span>📷 原材料ラベル写真 (Material Label Photo)</span>
-                    <span id="feedPhotoStatusBadge" style="font-size: 0.75rem; font-weight: 700; color: var(--text-soft);">未撮影</span>
-                </div>
-                
-                <div class="feed-photo-actions-row" id="feedPhotoActionsRow">
-                    <button type="button" class="btn btn-photo-capture" onclick="startCameraCapture()">
-                        📷 ラベル撮影 (Take Photo)
-                    </button>
-                    <button type="button" class="btn btn-secondary" onclick="triggerFileInputFallback()" style="font-size: 0.825rem; padding: 0 12px;">
-                        📁 ファイル選択 (File Fallback)
-                    </button>
-                    <input type="file" id="materialPhotoFileInput" accept="image/*" capture="environment" style="display: none;" onchange="handleFileChosen(event)">
+            <!-- VIEW 2: Manual Input Mode (Shown when 手動入力 is pressed) -->
+            <div id="feedManualView" class="feed-view-pane" style="display: none;">
+                <p class="feed-manual-instruct" data-i18n="fk_feed_manual_instruct">項目をタップして数値を入力・確認してください</p>
+
+                <div class="feed-manual-fields-wrap">
+                    <!-- 3 Lengths -->
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <!-- 総長 -->
+                        <div class="feed-numpad-field" onclick="openFieldPickerModal('socho')">
+                            <span class="feed-numpad-field-label" data-i18n="fk_label_socho">総長 (m) ★必須</span>
+                            <span class="feed-numpad-field-val" id="manualSochoDisplay">未入力</span>
+                        </div>
+
+                        <!-- S引き長 -->
+                        <div class="feed-numpad-field" onclick="openFieldPickerModal('shiki')">
+                            <span class="feed-numpad-field-label" data-i18n="fk_label_shiki">S引き長 (m) ★必須</span>
+                            <span class="feed-numpad-field-val" id="manualShikiDisplay">0 m</span>
+                        </div>
+
+                        <!-- 美長 / 純長 (実長) -->
+                        <div class="feed-numpad-field" onclick="openFieldPickerModal('bicho')">
+                            <span class="feed-numpad-field-label" data-i18n="fk_label_bicho">美長 / 実長 (m) ★必須</span>
+                            <span class="feed-numpad-field-val" id="manualBichoDisplay">0 m</span>
+                        </div>
+                    </div>
+
+                    <!-- 2 Metadata Fields: 品番 & ロット番号/日付 -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px;">
+                        <div class="feed-numpad-field" style="padding: 10px 12px; flex-direction: column; align-items: flex-start; gap: 4px;" onclick="openFieldPickerModal('hinban')">
+                            <span class="feed-numpad-field-label" data-i18n="fk_label_hinban_code" style="font-size: 0.75rem;">品番 / 基材コード ★必須</span>
+                            <span class="feed-numpad-field-val" id="manualHinbanDisplay" style="font-size: 0.95rem; word-break: break-all;">-</span>
+                        </div>
+
+                        <div class="feed-numpad-field" style="padding: 10px 12px; flex-direction: column; align-items: flex-start; gap: 4px;" onclick="openFieldPickerModal('lot')">
+                            <span class="feed-numpad-field-label" data-i18n="fk_label_lot_date" style="font-size: 0.75rem;">メーカーロット / 日付 ★必須</span>
+                            <span class="feed-numpad-field-val" id="manualLotDisplay" style="font-size: 0.95rem; word-break: break-all;">-</span>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Preview Thumbnail Area (Hidden until captured) -->
-                <div class="feed-photo-preview-wrap" id="feedPhotoPreviewWrap" style="display: none;">
-                    <img id="feedPhotoThumb" class="feed-photo-preview-img" src="" alt="材料ラベル" onclick="openPhotoEnlarged()">
-                    <div style="display: flex; flex-direction: column; gap: 6px; flex: 1;">
-                        <span style="font-size: 0.825rem; font-weight: 800; color: var(--brand);">✓ ラベル写真撮影済み</span>
-                        <div style="display: flex; gap: 8px;">
-                            <button type="button" class="btn btn-secondary" onclick="startCameraCapture()" style="min-height: 32px; padding: 0 10px; font-size: 0.775rem;">🔄 再撮影</button>
-                            <button type="button" class="btn btn-secondary" onclick="removeCapturedPhoto()" style="min-height: 32px; padding: 0 10px; font-size: 0.775rem; color: var(--red);">🗑️ 削除</button>
+                <!-- Learn QR Prompt Banner (Shown when an unknown QR code was scanned) -->
+                <div id="feedLearnQRBanner" style="display: none; margin: 12px 0 6px 0; background: #FEF3C7; border: 1.5px solid #FCD34D; border-radius: var(--btn-radius); padding: 12px 14px; text-align: center;">
+                    <div style="font-size: 0.88rem; color: #92400E; font-weight: 800; margin-bottom: 4px;" data-i18n="fk_unlearned_qr_title">未学習のQRコードです</div>
+                    <div style="font-size: 0.78rem; color: #78350F; margin-bottom: 8px;" data-i18n="fk_unlearned_qr_desc">各項目（3長・品番・ロット）を確認/入力し、学習ボタンを押してください</div>
+                    <div id="feedLearnQRSnippet" style="font-family: inherit; font-size: 0.72rem; color: #92400E; background: #FFFBEB; border: 1px dashed #FCD34D; border-radius: 4px; padding: 4px 8px; margin-bottom: 10px; word-break: break-all; max-height: 48px; overflow-y: auto;"></div>
+                    <button type="button" class="btn-feed-row-flat" style="background: #F59E0B; color: #FFFFFF; font-size: 0.92rem; padding: 10px 20px; border: none; font-weight: 800; width: 100%; border-radius: 6px; box-shadow: 0 2px 4px rgba(245,158,11,0.3);" onclick="learnQRFromCurrentInputs()" data-i18n="fk_btn_learn_qr">
+                        この形式を学習して全端末に共有
+                    </button>
+                </div>
+
+                <div id="feedNoQRLinkWrap" style="text-align: center; margin-top: 8px;">
+                    <button type="button" class="feed-link-exclude" style="font-size: 0.8rem; color: var(--text-soft);" onclick="markCurrentMaterialAsNoQR()" data-i18n="fk_btn_mark_no_qr">
+                        この基材はQRなしとして登録（次回から手動優先）
+                    </button>
+                </div>
+
+                <div class="feed-simple-footer">
+                    <button type="button" class="btn-cancel-flat" onclick="switchFeedModalView('scan')" data-i18n="fk_btn_back_scan">← スキャンに戻る</button>
+                    <button type="button" class="btn-submit-enqueue-flat" id="btnManualProceedPhoto" onclick="proceedToCameraFromManual()" data-i18n="fk_btn_proceed_photo">写真撮影へ進む →</button>
+                </div>
+            </div>
+
+            <!-- Hidden native camera input -->
+            <input type="file" id="modalRollCameraInput" accept="image/*" capture="environment" style="display: none;" onchange="handleModalRollCameraCapture(event)">
+        </div>
+    </div>
+
+    <!-- Adding to Queue Progress Modal -->
+    <div id="queueAddingModal" class="modal">
+        <div class="queue-adding-card">
+            <div class="queue-adding-header">
+                <span class="queue-adding-badge" id="queueAddingBadge">投入キュー登録中</span>
+                <div class="queue-adding-roll-id" id="queueAddingRollId">材料をキューに追加しています</div>
+            </div>
+
+            <div class="queue-adding-body">
+                <div class="queue-adding-thumb-wrap">
+                    <img id="queueAddingThumbImg" class="queue-adding-thumb" src="" alt="" style="display: none;">
+                    <div id="queueAddingThumbPlaceholder" class="queue-adding-thumb-placeholder">
+                        <svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    </div>
+                </div>
+
+                <div class="queue-adding-status-wrap">
+                    <div class="queue-adding-spinner-row" id="queueAddingSpinnerRow">
+                        <div class="queue-adding-spinner"></div>
+                        <span id="queueAddingStatusText" class="queue-adding-status-text">キューに追加中...</span>
+                    </div>
+                    <div id="queueAddingSubText" class="queue-adding-subtext">サーバーへ登録しています</div>
+                </div>
+            </div>
+
+            <div id="queueAddingSuccessRow" class="queue-adding-success-row" style="display: none;">
+                <div class="queue-adding-success-icon">✓</div>
+                <div class="queue-adding-success-text">投入完了！キュー一覧へ移動します</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Queue Cancel Warning Modal -->
+    <div id="queueCancelWarningModal" class="modal">
+        <div class="queue-cancel-card">
+            <div class="queue-cancel-header">
+                <div class="queue-cancel-icon-wrap">⚠️</div>
+                <div style="flex: 1; text-align: left;">
+                    <h3 class="queue-cancel-title" data-i18n="fk_cancel_modal_title">投入キュー取消の確認</h3>
+                    <div class="queue-cancel-sub" data-i18n="fk_cancel_modal_sub">この操作を実行するとキューから取り消されます</div>
+                </div>
+                <button type="button" class="feed-modal-close-btn" onclick="closeQueueCancelModal()" title="閉じる">✕</button>
+            </div>
+
+            <div class="queue-cancel-item-box">
+                <div id="queueCancelThumbWrap" class="queue-cancel-thumb-wrap">
+                    <img id="queueCancelThumbImg" class="queue-cancel-thumb" src="" alt="" style="display: none;">
+                    <div id="queueCancelThumbPlaceholder" class="queue-cancel-thumb-placeholder" data-i18n="fk_no_photo">写真なし</div>
+                </div>
+                <div class="queue-cancel-item-info">
+                    <div id="queueCancelItemName" class="queue-cancel-item-name">材料コード</div>
+                    <div id="queueCancelItemMeta" class="queue-cancel-item-meta">#1 · 0 m · ロット: -</div>
+                </div>
+            </div>
+
+            <div class="queue-cancel-alert-box">
+                <div style="font-weight: 700; color: #991B1B; font-size: 0.85rem; margin-bottom: 2px;" data-i18n="fk_cancel_modal_warning_title">ご注意</div>
+                <div style="font-size: 0.8rem; color: #B91C1C; line-height: 1.4;" data-i18n="fk_cancel_modal_warning_body">
+                    キューから削除され、撮影した写真データも破棄されます。<br>
+                    対象の材料は<strong>生産一覧 (List) タブ</strong>に未投入として復帰します。
+                </div>
+            </div>
+
+            <div class="queue-cancel-actions">
+                <button type="button" class="btn-cancel-flat" style="flex: 1;" onclick="closeQueueCancelModal()" data-i18n="fk_btn_back">戻る</button>
+                <button type="button" id="btnConfirmQueueCancel" class="btn-danger-confirm" style="flex: 1.2;" data-i18n="fk_btn_confirm_cancel">取り消す</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Numeric Keypad Modal (Copied from DCP interactive) -->
+    <div id="materialKeypadModal">
+        <div class="material-keypad-card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 id="materialKeypadTitle" style="font-size:1.05rem; font-weight:800; color: var(--text-main); margin: 0;">Numeric Input</h3>
+                <button type="button" class="feed-modal-close-btn" onclick="closeMaterialKeypad()">✕</button>
+            </div>
+            <div id="materialKeypadValue" class="material-keypad-display"></div>
+            <div class="checklist-keypad-grid">
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('7')">7</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('8')">8</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('9')">9</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('4')">4</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('5')">5</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('6')">6</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('1')">1</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('2')">2</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('3')">3</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('-')">-</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('0')">0</button>
+                <button type="button" class="checklist-keypad-btn" onclick="materialKeypadPress('.')">.</button>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button type="button" class="checklist-keypad-btn" style="flex:1; background:#ef4444; color:#fff;" onclick="materialKeypadClear()">C</button>
+                <button type="button" class="checklist-keypad-btn" style="flex:1; background:#6b7280; color:#fff;" onclick="materialKeypadBackspace()">⌫</button>
+                <button type="button" class="checklist-keypad-btn" style="flex:2; background:var(--brand); color:#fff;" onclick="materialKeypadConfirm()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Value Selection / QR Token Picker Modal -->
+    <div id="feedValuePickerModal">
+        <div class="feed-token-picker-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <div>
+                    <h3 id="feedValuePickerTitle" style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); margin: 0;">項目を選択</h3>
+                    <div id="feedValuePickerSubtitle" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">QRコードから検出された値を選択してください</div>
+                </div>
+                <button type="button" class="feed-modal-close-btn" onclick="closeFeedValuePickerModal()">✕</button>
+            </div>
+
+            <!-- List of extracted QR token candidates -->
+            <div id="feedValuePickerTokensList" class="feed-token-picker-list">
+                <!-- Dynamically populated tokens -->
+            </div>
+
+            <!-- Bottom actions: Manual Entry & Cancel -->
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px;">
+                <button type="button" class="btn-feed-row-flat" id="feedValuePickerManualBtn" style="background: var(--blue-soft); border: 1.5px solid var(--blue); color: var(--blue); font-weight: 800; padding: 12px; font-size: 0.95rem; border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center; gap: 6px;" onclick="handleValuePickerManualEntry()" data-i18n="fk_btn_manual_input_entry">
+                    手動で入力する
+                </button>
+                <button type="button" class="btn-cancel-flat" style="padding: 10px;" onclick="closeFeedValuePickerModal()" data-i18n="fk_btn_cancel">
+                    キャンセル
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dedicated Touch Date Picker Modal for Maker Lot / Date -->
+    <div id="lotDatePickerModal">
+        <div class="lot-date-picker-card">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <div>
+                    <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                        <span data-i18n="fk_lot_date_picker_title">日付の選択 (Maker Lot / Date)</span>
+                    </h3>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;" data-i18n="fk_lot_date_picker_subtitle">
+                        日付を選択してください
+                    </div>
+                </div>
+                <button type="button" class="feed-modal-close-btn" onclick="closeLotDatePickerModal()">✕</button>
+            </div>
+
+            <!-- Touch Date Input -->
+            <div class="lot-date-input-wrap">
+                <input type="date" id="lotModalDatePickerInput" class="lot-modal-date-input" onclick="try { this.showPicker(); } catch(e) {}">
+            </div>
+
+            <!-- Bottom Actions -->
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px;">
+                <button type="button" class="btn-feed-row-flat" style="background: #10B981; border: 1.5px solid #059669; color: #FFFFFF; font-weight: 800; padding: 12px; font-size: 1rem; border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;" onclick="confirmLotDatePicker()">
+                    <span style="font-size: 1.1rem;">✓</span>
+                    <span data-i18n="fk_btn_confirm_date">この日付で決定</span>
+                </button>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" class="btn-cancel-flat" style="flex: 1; padding: 10px;" onclick="closeLotDatePickerModal()" data-i18n="fk_btn_cancel">
+                        キャンセル
+                    </button>
+                    <button type="button" class="btn-cancel-flat" style="flex: 1; padding: 10px; font-size: 0.8rem; color: var(--text-muted);" onclick="fallbackManualLotPrompt()" title="文字や記号を含む特殊なロット番号を手動入力">
+                        テキストで手動入力...
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Token Substring / Split Modal -->
+    <div id="qrTokenSplitModal">
+        <div class="feed-split-modal-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
+                <div>
+                    <h3 id="splitModalTitle" style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); margin: 0;">値の分割・抽出</h3>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">連結された文字列から必要な部分を取り出します</div>
+                </div>
+                <button type="button" class="feed-modal-close-btn" onclick="closeTokenSplitModal()">✕</button>
+            </div>
+
+            <!-- Original Full Token Display -->
+            <div style="background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; box-sizing: border-box;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700;">元の文字列 (全体):</span>
+                    <span id="splitModalTokenBadge" class="feed-token-index-badge">#1</span>
+                </div>
+                <div id="splitModalOriginalToken" style="font-family: inherit; font-size: 1.15rem; font-weight: 800; color: var(--text-main); word-break: break-all;">
+                    -
+                </div>
+            </div>
+
+            <!-- Smart Auto-Detected Suggestions (e.g. Dates, Numbers) -->
+            <div id="splitModalSmartSection" style="display: flex; flex-direction: column; gap: 6px;">
+                <div style="font-size: 0.8rem; font-weight: 800; color: var(--text-main); display: flex; align-items: center;">
+                    <span>おすすめ候補 (タップで選択):</span>
+                </div>
+                <div id="splitModalSuggestionsList" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    <!-- Auto-populated chips -->
+                </div>
+            </div>
+
+            <!-- Interactive Range / Visual Slice Box -->
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 0.8rem; font-weight: 800; color: var(--text-main);">文字をタップまたは範囲を指定:</span>
+                    <span style="font-size: 0.72rem; color: var(--text-muted);">文字タップで開始/終了位置を変更</span>
+                </div>
+                <!-- Interactive character boxes -->
+                <div id="splitModalCharBoxes" class="feed-split-char-boxes">
+                    <!-- Populated dynamically -->
+                </div>
+
+                <!-- Start & Length controls with touch buttons -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; box-sizing: border-box;">
+                    <div style="background: var(--bg-subtle); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); box-sizing: border-box; min-width: 0;">
+                        <label style="font-size: 0.72rem; color: var(--text-muted); font-weight: 700; display: block; margin-bottom: 4px;">開始位置 (文字番号)</label>
+                        <div class="feed-split-stepper-wrap">
+                            <button type="button" class="feed-split-stepper-btn" onclick="adjustSplitRange('start', -1)">-</button>
+                            <input type="number" id="splitStartIndex" class="feed-split-stepper-input" min="0" value="0" oninput="onSplitRangeInputChange()">
+                            <button type="button" class="feed-split-stepper-btn" onclick="adjustSplitRange('start', 1)">+</button>
+                        </div>
+                    </div>
+                    <div style="background: var(--bg-subtle); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); box-sizing: border-box; min-width: 0;">
+                        <label style="font-size: 0.72rem; color: var(--text-muted); font-weight: 700; display: block; margin-bottom: 4px;">文字数 (長さ)</label>
+                        <div class="feed-split-stepper-wrap">
+                            <button type="button" class="feed-split-stepper-btn" onclick="adjustSplitRange('len', -1)">-</button>
+                            <input type="number" id="splitLength" class="feed-split-stepper-input" min="1" value="1" oninput="onSplitRangeInputChange()">
+                            <button type="button" class="feed-split-stepper-btn" onclick="adjustSplitRange('len', 1)">+</button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- USB QR Scanner Listener & Manual Inputs -->
-            <div class="feed-section-block">
-                <div class="feed-section-title">
-                    <span>⚡ 原材料情報入力・スキャナー</span>
+            <!-- Preview of Extracted Value & Auto Date Conversion -->
+            <div style="background: #F0FDF4; border: 1.5px solid #86EFAC; border-radius: 8px; padding: 12px; box-sizing: border-box;">
+                <div style="font-size: 0.75rem; color: #166534; font-weight: 800; margin-bottom: 2px;">抽出結果プレビュー:</div>
+                <div id="splitModalPreviewText" style="font-family: inherit; font-size: 1.25rem; font-weight: 800; color: #15803D; word-break: break-all;">
+                    -
                 </div>
-
-                <div class="scanner-status-indicator" id="feedModalScannerIndicator">
-                    <span>🟢</span>
-                    <span id="feedModalScannerText">USBスキャナー待機中 (バーコードまたはQRコードをスキャン)</span>
-                </div>
-
-                <div class="feed-field-wrap">
-                    <label class="feed-field-label" for="feedRawQRInput">原材料バーコード / QR (Raw Material QR) *自動入力または手動</label>
-                    <input type="text" id="feedRawQRInput" class="feed-field-input" placeholder="スキャナーで読み取るか直接入力..." autocomplete="off">
-                </div>
-
-                <div class="feed-inputs-grid">
-                    <div class="feed-field-wrap">
-                        <label class="feed-field-label" for="feedRawLengthInput">材料長 / Length (m)</label>
-                        <input type="number" id="feedRawLengthInput" class="feed-field-input" placeholder="100" step="any">
-                    </div>
-                    <div class="feed-field-wrap">
-                        <label class="feed-field-label" for="feedMfgUidInput">製造元ID / Manufacturer UID</label>
-                        <input type="text" id="feedMfgUidInput" class="feed-field-input" placeholder="例: LOT-998811">
-                    </div>
-                    <div class="feed-field-wrap">
-                        <label class="feed-field-label" for="feedLotNoInput">投入ロット番号 (Lot No.)</label>
-                        <input type="text" id="feedLotNoInput" class="feed-field-input" placeholder="260917-1">
-                    </div>
-                    <div class="feed-field-wrap">
-                        <label class="feed-field-label" for="feedWorkerDisplay">担当作業者 (Worker)</label>
-                        <input type="text" id="feedWorkerDisplay" class="feed-field-input" readonly>
-                    </div>
+                <div id="splitModalDateNotice" style="display: none; font-size: 0.76rem; color: #047857; margin-top: 4px; font-weight: 700;">
+                    日付形式 (YYYY-MM-DD) に自動変換されます
                 </div>
             </div>
 
-            <!-- Modal Action Footer -->
-            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
-                <button type="button" class="btn-feed-submit" id="btnFeedEnqueue" onclick="submitFeedAndEnqueue()">
-                    🚀 投入・キューに追加 (Feed & Add to Queue)
+            <!-- Actions: Use this value & Cancel -->
+            <div style="display: flex; gap: 10px; margin-top: 4px;">
+                <button type="button" class="btn-cancel-flat" style="flex: 1; padding: 12px;" onclick="closeTokenSplitModal()">
+                    戻る
                 </button>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 0.75rem; color: var(--text-soft);">※キュー追加後、TV画面へ自動反映され直ちに次の材料を準備できます</span>
-                    <button type="button" class="btn btn-secondary" onclick="closeMaterialFeedModal()" style="min-height: 36px; padding: 0 14px; font-size: 0.8rem;">閉じる (Close)</button>
-                </div>
+                <button type="button" class="btn-feed-row-flat" style="flex: 2; background: var(--brand); color: #fff; font-weight: 800; padding: 12px; font-size: 1rem; border-radius: var(--btn-radius);" onclick="confirmTokenSplitSelection()">
+                    この値を使用する
+                </button>
             </div>
         </div>
     </div>
@@ -3062,7 +4873,7 @@
     <div id="nativeCameraModal">
         <div class="camera-dialog-box">
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h3 style="font-size: 1.15rem; font-weight: 800; margin: 0;">📷 材料ラベル撮影 (Label Photo Camera)</h3>
+                <h3 style="font-size: 1.15rem; font-weight: 800; margin: 0;">材料ラベル撮影 (Label Photo Camera)</h3>
                 <button type="button" onclick="closeWebcamModal()" style="background: transparent; border: none; color: #94A3B8; font-size: 1.5rem; cursor: pointer;">✕</button>
             </div>
             
@@ -3075,7 +4886,7 @@
 
             <div class="camera-actions-row">
                 <button type="button" class="btn-cam-snap" id="btnWebcamSnap" onclick="captureWebcamSnapshot()">
-                    📸 撮影する (Capture)
+                    撮影する (Capture)
                 </button>
                 <button type="button" class="btn-cam-cancel" onclick="closeWebcamModal()">
                     ✕ キャンセル
@@ -3084,7 +4895,7 @@
 
             <div>
                 <button type="button" onclick="fallbackFromCameraToFile()" style="background: transparent; border: none; color: #93C5FD; font-size: 0.8rem; text-decoration: underline; cursor: pointer; padding: 4px;">
-                    📁 カメラが使えない場合はファイル選択へ切り替え
+                    カメラが使えない場合はファイル選択へ切り替え
                 </button>
             </div>
         </div>
@@ -3100,10 +4911,13 @@
         </div>
     </div>
 
+    <input type="file" id="rollPhotoFileInput" accept="image/*" capture="environment" style="display: none;" onchange="handleRollFileChosen(event)">
+
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- Script imports -->
+    <script src="i18n.js"></script>
     <script src="firstKojoNippo.js"></script>
 </body>
 
