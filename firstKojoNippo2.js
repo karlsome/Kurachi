@@ -4,9 +4,155 @@
  */
 
 // Determine backend server URL
-const serverURL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
-    ? window.location.origin
-    : "https://kurachi.onrender.com";
+//const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://localhost:3000";
+const serverURL = "http://192.168.0.20:3000";
+
+// -----------------------------------------------------
+// KEYENCE TR-W1000 Mini PC IP Resolution & Temperature Snapshot
+// -----------------------------------------------------
+// Link for Google Sheets IP database (from DCP interactive backend.js)
+const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
+
+// In-memory cache for resolved Mini PC IP (always re-fetched fresh on page load / reload)
+let psaMiniPcIP = null;
+let isResolvingMiniPcIP = false;
+
+/**
+ * Retrieve fresh Mini PC IP from Google Sheets for the PSA2 machine.
+ * Ensures fresh IP is fetched on page load / reload as requested.
+ * @param {boolean} forceRefresh - If true, bypasses any in-memory cache
+ * @returns {Promise<string|null>} IP address string
+ */
+async function resolvePsaMiniPcIP(forceRefresh = false) {
+    if (psaMiniPcIP && !forceRefresh) {
+        return psaMiniPcIP;
+    }
+    if (isResolvingMiniPcIP) {
+        for (let i = 0; i < 25 && isResolvingMiniPcIP; i++) {
+            await new Promise(r => setTimeout(r, 100));
+        }
+        if (psaMiniPcIP) return psaMiniPcIP;
+    }
+
+    isResolvingMiniPcIP = true;
+    try {
+        const machine = state.machineName || 'PSA2';
+        const fetchUrl = `${ipURL}?filter=${encodeURIComponent(machine)}&_t=${Date.now()}`;
+        console.log(`🌐 Fetching fresh Mini PC IP from Google Sheets for [${machine}]: ${fetchUrl}`);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4500);
+
+        const res = await fetch(fetchUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+            const rawText = await res.text();
+            const cleaned = rawText.replace(/"/g, '').trim();
+            if (cleaned && /^(\d{1,3}\.){3}\d{1,3}$/.test(cleaned)) {
+                psaMiniPcIP = cleaned;
+                console.log(`📍 Fresh Mini PC IP resolved for [${machine}]: ${cleaned}`);
+                return cleaned;
+            }
+        }
+        console.warn('⚠️ Google Sheets IP lookup returned non-IP format:', await res.text().catch(() => ''));
+    } catch (err) {
+        console.warn('⚠️ Error fetching fresh Mini PC IP from Google Sheets:', err.message);
+    } finally {
+        isResolvingMiniPcIP = false;
+    }
+    return psaMiniPcIP;
+}
+
+/**
+ * Query the KEYENCE TR-W1000 OCR service on the Mini PC (port 5056).
+ * Non-blocking with strict timeout (2500ms).
+ * @returns {Promise<Object|null>} Temperature readings snapshot
+ */
+async function fetchLiveTemperaturesFromMiniPC() {
+    try {
+        const ip = await resolvePsaMiniPcIP(false);
+        if (!ip) {
+            console.warn('⚠️ No Mini PC IP available for TR-W1000 temperature snapshot');
+            return null;
+        }
+
+        const url = `http://${ip}:5056/api/trw/live`;
+        console.log(`🌡️ Fetching live temperatures from Mini PC: ${url}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+            console.warn(`Mini PC TR-W1000 OCR response not OK: HTTP ${res.status}`);
+            return null;
+        }
+
+        const data = await res.json();
+        if (data && data.values) {
+            return {
+                ambientTemp: data.values.ambientTemp,
+                ambientHumidity: data.values.ambientHumidity,
+                ovenTemp1: data.values.ovenTemp1,
+                ovenTemp2: data.values.ovenTemp2,
+                ovenTemp3: data.values.ovenTemp3,
+                capturedAt: new Date().toISOString(),
+                sourceIp: ip,
+                ocrStatus: data.ocrStatus || 'ok'
+            };
+        }
+    } catch (err) {
+        console.warn('⚠️ Failed to fetch temperatures from Mini PC (non-blocking):', err.message);
+    }
+    return null;
+}
+
+/**
+ * Save temperature snapshot to the in-progress document on the server.
+ * If setInProgress is true, also marks the roll as in-progress.
+ */
+async function saveRollTemperatureSnapshot(item, temperatures, setInProgress = false) {
+    if (!item || (!item._id && !item.queueId && !item.uniqueID)) return;
+    try {
+        const targetId = item._id || item.queueId;
+        const payload = {
+            _id: targetId,
+            queueId: targetId,
+            uniqueID: item.uniqueID || '',
+            date: state.selectedDate,
+            machine: state.machineName || 'PSA2',
+            temperatures: temperatures || null,
+            setInProgress: Boolean(setInProgress)
+        };
+
+        const res = await fetch(`${serverURL}/api/production/queue/temperature-snapshot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+            console.log(`✅ Saved temperature snapshot to roll [${item.hinban || item.groupId}]:`, temperatures);
+            if (temperatures) {
+                item.temperatures = temperatures;
+                item.tempSnapshotAt = temperatures.capturedAt;
+                if (temperatures.ambientTemp !== undefined) item.ambientTemp = temperatures.ambientTemp;
+                if (temperatures.ambientHumidity !== undefined) item.ambientHumidity = temperatures.ambientHumidity;
+                if (temperatures.ovenTemp1 !== undefined) item.ovenTemp1 = temperatures.ovenTemp1;
+                if (temperatures.ovenTemp2 !== undefined) item.ovenTemp2 = temperatures.ovenTemp2;
+                if (temperatures.ovenTemp3 !== undefined) item.ovenTemp3 = temperatures.ovenTemp3;
+            }
+            if (setInProgress) {
+                item.status = 'in-progress';
+            }
+        }
+    } catch (err) {
+        console.warn('⚠️ Failed saving temperature snapshot to server:', err.message);
+    }
+}
 
 // -----------------------------------------------------
 // Date & Time Helpers
@@ -53,6 +199,10 @@ const state = {
     filterName: null,
     workerName: localStorage.getItem('firstkojo_nippo_worker_name') || '包装担当',
     soundEnabled: localStorage.getItem('firstkojo2_sound_enabled') !== 'false',
+
+    // Tab & View state
+    currentTab: 'work',   // 'work' | 'history'
+    historyView: 'card',  // 'card' | 'list'
 
     // Queue Data
     queue: [],
@@ -109,22 +259,27 @@ function parseUrlParams() {
     }
 
     // Update UI elements
-    const machineTag = document.getElementById('machineTag');
-    if (machineTag) {
-        if (state.machineName) {
-            machineTag.textContent = `設備: ${state.machineName}${state.filterName ? ` (${state.filterName})` : ''}`;
-            machineTag.style.color = '';
-            machineTag.style.borderColor = '';
-        } else {
-            machineTag.textContent = `設備: 未指定 (No Machine in URL)`;
-            machineTag.style.color = '#E5484D';
-            machineTag.style.borderColor = '#FCA5A5';
-        }
-    }
+    renderMachineTag();
 
     const datePicker = document.getElementById('datePickerInput');
     if (datePicker) {
         datePicker.value = state.selectedDate;
+    }
+}
+
+function renderMachineTag() {
+    const machineTag = document.getElementById('machineTag');
+    if (!machineTag) return;
+    const prefix = (typeof _t === 'function' && _t('fk_machine_prefix')) || '設備: ';
+    if (state.machineName) {
+        machineTag.textContent = `${prefix}${state.machineName}${state.filterName ? ` (${state.filterName})` : ''}`;
+        machineTag.style.color = '';
+        machineTag.style.borderColor = '';
+    } else {
+        const noMachine = (typeof _t === 'function' && _t('fk2_no_machine_specified')) || '未指定 (No Machine in URL)';
+        machineTag.textContent = `${prefix}${noMachine}`;
+        machineTag.style.color = '#E5484D';
+        machineTag.style.borderColor = '#FCA5A5';
     }
 }
 
@@ -275,7 +430,10 @@ function buildBrotherPrintFields(item, rollIndex, totalRolls) {
         }
         textHinban = hinban;
         textSebangou = labelHinban;
-        barcode = `${labelHinban || hinban},${lotNo},${meters}`;
+        const uniqueID = (item.uniqueID || '').trim();
+        barcode = uniqueID
+            ? `${labelHinban || hinban},${lotNo},${meters},${uniqueID}`
+            : `${labelHinban || hinban},${lotNo},${meters}`;
     }
 
     return {
@@ -356,10 +514,13 @@ function showPrintProgressModal(title, detailText) {
     const iconEl = document.getElementById('printModalIcon');
     const subEl = document.getElementById('printModalSub');
 
-    if (titleEl) titleEl.textContent = title || 'ラベル印刷中...';
+    const defaultTitle = (typeof _t === 'function' && _t('fk2_print_progress_title')) || 'ラベル印刷中...';
+    const defaultSub = (typeof _t === 'function' && _t('fk2_print_progress_sub')) || 'プリンターにラベル印刷データを送信しています。<br>しばらくお待ちください。';
+
+    if (titleEl) titleEl.textContent = title || defaultTitle;
     if (detailEl) detailEl.textContent = detailText || '';
     if (iconEl) iconEl.textContent = '🖨️';
-    if (subEl) subEl.innerHTML = 'プリンターにラベル印刷データを送信しています。<br>しばらくお待ちください。';
+    if (subEl) subEl.innerHTML = defaultSub;
 
     if (modal) modal.classList.add('open');
 }
@@ -370,10 +531,13 @@ function updatePrintProgressSuccess(title, detailText) {
     const iconEl = document.getElementById('printModalIcon');
     const subEl = document.getElementById('printModalSub');
 
-    if (titleEl) titleEl.textContent = title || '印刷完了！';
+    const defaultTitle = (typeof _t === 'function' && _t('fk2_print_success_title')) || '印刷完了！';
+    const defaultSub = (typeof _t === 'function' && _t('fk2_print_success_detail')) || '正常にラベルが発行されました。';
+
+    if (titleEl) titleEl.textContent = title || defaultTitle;
     if (detailEl) detailEl.textContent = detailText || '';
     if (iconEl) iconEl.textContent = '✅';
-    if (subEl) subEl.innerHTML = '正常にラベルが発行されました。';
+    if (subEl) subEl.innerHTML = defaultSub;
 
     setTimeout(() => {
         closePrintProgressModal();
@@ -385,7 +549,9 @@ function updatePrintProgressError(errorMessage) {
     const iconEl = document.getElementById('printModalIcon');
     const subEl = document.getElementById('printModalSub');
 
-    if (titleEl) titleEl.textContent = '印刷エラー';
+    const defaultTitle = (typeof _t === 'function' && _t('fk2_print_error_title')) || '印刷エラー';
+
+    if (titleEl) titleEl.textContent = defaultTitle;
     if (iconEl) iconEl.textContent = '⚠️';
     if (subEl) subEl.innerHTML = `<span style="color:var(--red);font-weight:800;">${errorMessage}</span><br><br>プリンターの電源・用紙・接続を確認してください。`;
 }
@@ -402,8 +568,9 @@ function openPhotoModal(photoUrl, captionText) {
     const img = document.getElementById('fullWarehousePhoto');
     const caption = document.getElementById('photoModalCaption');
 
+    const defaultCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票写真';
     if (img) img.src = photoUrl;
-    if (caption) caption.textContent = captionText || '現品票写真 (Warehouse Label Photo)';
+    if (caption) caption.textContent = captionText || defaultCaption;
     if (modal) modal.classList.add('open');
 }
 
@@ -415,7 +582,8 @@ function closePhotoModal() {
 // Scrap Modal
 function openScrapModal() {
     if (!state.activeItem) {
-        showToast('包装中のアイテムがありません', 'warning');
+        const noActiveWarn = (typeof _t === 'function' && _t('fk2_no_active_lot_toast')) || '包装中のアイテムがありません';
+        showToast(noActiveWarn, 'warning');
         return;
     }
     const modal = document.getElementById('scrapModal');
@@ -426,7 +594,8 @@ function openScrapModal() {
     const totalRolls = state.activeItem.totalRolls || 1;
 
     if (subtitle) {
-        subtitle.textContent = `【${state.activeItem.hinban}】の Roll #${curRoll} / ${totalRolls} を不良として破棄し、次へ進めますか？`;
+        const promptTemplate = (typeof _t === 'function' && _t('fk2_scrap_modal_sub')) || '現在の巻を不良として破棄し、次の巻へ進めますか？';
+        subtitle.textContent = `【${state.activeItem.hinban}】Roll #${curRoll} / ${totalRolls}: ${promptTemplate}`;
     }
     if (chkEntire) chkEntire.checked = false;
 
@@ -449,7 +618,8 @@ function selectScrapReason(reason) {
 function updateScrapReasonButtons() {
     const btns = document.querySelectorAll('#scrapReasonGrid .reason-btn');
     btns.forEach(btn => {
-        if (btn.textContent.trim() === state.selectedScrapReason) {
+        const onclickAttr = btn.getAttribute('onclick') || '';
+        if (onclickAttr.includes(`'${state.selectedScrapReason}'`) || onclickAttr.includes(`"${state.selectedScrapReason}"`)) {
             btn.classList.add('selected');
         } else {
             btn.classList.remove('selected');
@@ -457,23 +627,29 @@ function updateScrapReasonButtons() {
     });
 }
 
-// Finish Early Modal
+// Finish Early Modal (Meter Adjustment)
 function openFinishEarlyModal() {
     if (!state.activeItem) {
-        showToast('包装中のアイテムがありません', 'warning');
+        const noActiveWarn = (typeof _t === 'function' && _t('fk2_no_active_lot_toast')) || '包装中のアイテムがありません';
+        showToast(noActiveWarn, 'warning');
         return;
     }
     const modal = document.getElementById('finishEarlyModal');
-    const plannedDisplay = document.getElementById('plannedRollsDisplay');
-    const inputActual = document.getElementById('inputActualRolls');
+    const plannedDisplay = document.getElementById('plannedMetersDisplay');
+    const inputActual = document.getElementById('inputActualMeters');
 
-    const total = state.activeItem.totalRolls || 1;
-    const currentRoll = state.activeItem.currentRollIndex || state.activeItem.rollIndex || 1;
+    const item = state.activeItem;
+    const plannedMeters = Number(item.meters || item.rollMeters || item.metersPerRoll || 0);
 
-    if (plannedDisplay) plannedDisplay.textContent = `${total} 巻 (Planned)`;
+    if (plannedDisplay) {
+        plannedDisplay.textContent = `${plannedMeters} m`;
+    }
     if (inputActual) {
-        inputActual.value = Math.max(0, currentRoll - 1);
-        inputActual.max = total;
+        inputActual.value = plannedMeters > 0 ? plannedMeters : '';
+        setTimeout(() => {
+            inputActual.focus();
+            inputActual.select();
+        }, 80);
     }
 
     if (modal) modal.classList.add('open');
@@ -482,6 +658,116 @@ function openFinishEarlyModal() {
 function closeFinishEarlyModal() {
     const modal = document.getElementById('finishEarlyModal');
     if (modal) modal.classList.remove('open');
+}
+
+// -----------------------------------------------------
+// Schedule Cache for resolving Tablet 1 List Hinban
+// -----------------------------------------------------
+let scheduleCache = {
+    date: null,
+    itemsMap: new Map(),
+    itemsByOrder: new Map()
+};
+
+async function loadDailyScheduleForTablet2(dateStr) {
+    if (!dateStr) return;
+    if (scheduleCache.date === dateStr && scheduleCache.itemsMap.size > 0) return;
+
+    try {
+        const month = dateStr.slice(0, 7);
+        const day = parseInt(dateStr.slice(8, 10), 10);
+        let scheduleDoc = null;
+
+        try {
+            const dailyRes = await fetch(`${serverURL}/api/production/schedule/daily?month=${encodeURIComponent(month)}&date=${day}`);
+            if (dailyRes.ok) {
+                const dailyData = await dailyRes.json();
+                if (dailyData.success && dailyData.schedule) {
+                    scheduleDoc = dailyData.schedule;
+                }
+            }
+        } catch (e) { }
+
+        if (!scheduleDoc) {
+            try {
+                const res = await fetch(`${serverURL}/api/production/schedule?month=${encodeURIComponent(month)}`);
+                if (res.ok) {
+                    const json = await res.json();
+                    if (json.success && Array.isArray(json.schedules)) {
+                        scheduleDoc = json.schedules.find(s => s.month === month && Number(s.date) === day) || null;
+                    }
+                }
+            } catch (e) { }
+        }
+
+        const itemsMap = new Map();
+        const itemsByOrder = new Map();
+
+        if (scheduleDoc && Array.isArray(scheduleDoc.scheduleOrder)) {
+            scheduleDoc.scheduleOrder.forEach((it, idx) => {
+                const displayCode = it.kizai || it.hinban;
+                if (displayCode) {
+                    if (it.hinban) itemsMap.set(it.hinban, displayCode);
+                    if (it.id) itemsMap.set(it.id, displayCode);
+                    if (it.orderIndex !== undefined) itemsByOrder.set(Number(it.orderIndex), displayCode);
+                    itemsMap.set(`group_${it.hinban}_${idx}`, displayCode);
+                }
+            });
+        }
+
+        scheduleCache = {
+            date: dateStr,
+            itemsMap,
+            itemsByOrder,
+            scheduleOrder: scheduleDoc && Array.isArray(scheduleDoc.scheduleOrder) ? scheduleDoc.scheduleOrder : []
+        };
+    } catch (err) {
+        console.warn('Could not cache schedule for Tablet 2:', err);
+    }
+}
+
+function getTablet1Hinban(item) {
+    if (!item) return '品番未設定';
+
+    // 1. Check schedule lookup
+    if (scheduleCache && scheduleCache.itemsMap) {
+        if (item.groupId && scheduleCache.itemsMap.has(item.groupId)) {
+            return scheduleCache.itemsMap.get(item.groupId);
+        }
+        if (item.itemId && scheduleCache.itemsMap.has(item.itemId)) {
+            return scheduleCache.itemsMap.get(item.itemId);
+        }
+        if (item.orderIndex !== undefined && scheduleCache.itemsByOrder.has(Number(item.orderIndex))) {
+            return scheduleCache.itemsByOrder.get(Number(item.orderIndex));
+        }
+        if (item.hinban && scheduleCache.itemsMap.has(item.hinban)) {
+            return scheduleCache.itemsMap.get(item.hinban);
+        }
+        if (item.groupId && typeof item.groupId === 'string' && item.groupId.startsWith('group_')) {
+            const rawKey = item.groupId.replace(/^group_/, '').replace(/_\d+$/, '');
+            if (scheduleCache.itemsMap.has(rawKey)) {
+                return scheduleCache.itemsMap.get(rawKey);
+            }
+        }
+    }
+
+    // 2. Fallback to item.kizai or item.hinban
+    return item.kizai || item.hinban || '品番未設定';
+}
+
+function getTablet1OrderIndex(item, fallback) {
+    if (item && item.orderIndex !== undefined && item.orderIndex !== null && item.orderIndex !== '' && !isNaN(Number(item.orderIndex))) {
+        return item.orderIndex;
+    }
+    if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder) && item) {
+        const matched = scheduleCache.scheduleOrder.find(s =>
+            (item.itemId && s.id === item.itemId) ||
+            (item.groupId && s.groupId === item.groupId && Number(s.rollIndex) === Number(item.rollIndex)) ||
+            (s.hinban === item.hinban && (Number(s.rollIndex) === Number(item.rollIndex) || Number(s.orderIndex) === Number(item.orderIndex)))
+        );
+        if (matched && matched.orderIndex) return matched.orderIndex;
+    }
+    return fallback;
 }
 
 // -----------------------------------------------------
@@ -504,29 +790,72 @@ async function fetchProductionQueue(showLoading = false) {
         const url = `${serverURL}/api/production/queue?date=${encodeURIComponent(state.selectedDate)}&machine=${encodeURIComponent(state.machineName)}`;
         console.log(`📥 Fetching production queue: ${url}`);
 
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Queue fetch failed: HTTP ${response.status}`);
-        }
+        await Promise.all([
+            fetch(url).then(async response => {
+                if (!response.ok) {
+                    throw new Error(`Queue fetch failed: HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                const rawQueue = Array.isArray(data.queue) ? data.queue : [];
 
-        const data = await response.json();
-        const rawQueue = Array.isArray(data.queue) ? data.queue : [];
+                // Partition into Active, Queued (Waiting), and Completed
+                const active = rawQueue.find(item => item.status === 'active') ||
+                    rawQueue.find(item => item.status === 'in-progress');
+                const queued = rawQueue.filter(item =>
+                    item !== active && (
+                        item.status === 'queued' ||
+                        item.status === 'queue' ||
+                        (item.status !== 'active' && item.status !== 'in-progress' && item.status !== 'completed' && item.status !== 'scrapped')
+                    )
+                );
+                const completed = rawQueue.filter(item => item.status === 'completed' || item.status === 'scrapped');
 
-        // Partition into Active, Queued (Waiting), and Completed
-        const active = rawQueue.find(item => item.status === 'active');
-        const queued = rawQueue.filter(item => item.status === 'queued' || (item.status !== 'active' && item.status !== 'completed' && item.status !== 'scrapped'));
-        const completed = rawQueue.filter(item => item.status === 'completed' || item.status === 'scrapped');
+                // Sort queued items by orderIndex if available, then queuePosition/createdAt
+                queued.sort((a, b) => {
+                    const oA = (a.orderIndex !== undefined && a.orderIndex !== null && !isNaN(Number(a.orderIndex))) ? Number(a.orderIndex) : null;
+                    const oB = (b.orderIndex !== undefined && b.orderIndex !== null && !isNaN(Number(b.orderIndex))) ? Number(b.orderIndex) : null;
+                    if (oA !== null && oB !== null && oA !== oB) return oA - oB;
+                    const qA = Number(a.queuePosition) || 0;
+                    const qB = Number(b.queuePosition) || 0;
+                    if (qA !== qB) return qA - qB;
+                    return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+                });
 
-        state.queue = rawQueue;
-        state.activeItem = active || null;
-        state.waitingItems = queued;
-        state.completedItems = completed;
+                state.queue = rawQueue;
+                state.activeItem = active || null;
+                state.waitingItems = queued;
+                state.completedItems = completed;
 
-        // If no item is explicitly active, but there are queued items, default the first one as active target
-        if (!state.activeItem && queued.length > 0) {
-            state.activeItem = queued[0];
-            state.waitingItems = queued.slice(1);
-        }
+                // If no item is explicitly active, but there are queued items, default the first one as active target
+                if (!state.activeItem && queued.length > 0) {
+                    const firstQueued = queued[0];
+                    state.activeItem = firstQueued;
+                    state.waitingItems = queued.slice(1);
+
+                    // Beginning of production: Transition first queue item to in-progress and capture start temperatures
+                    if (!firstQueued._tempSnapshotRequested) {
+                        firstQueued._tempSnapshotRequested = true;
+                        console.log(`🏁 Beginning of production: Transitioning first queue roll [${firstQueued.hinban}] to in-progress and capturing temperatures...`);
+                        fetchLiveTemperaturesFromMiniPC().then(async (temps) => {
+                            await saveRollTemperatureSnapshot(firstQueued, temps, true);
+                            firstQueued.status = 'in-progress';
+                            renderApp();
+                        });
+                    }
+                } else if (state.activeItem && (!state.activeItem.temperatures || state.activeItem.temperatures.ambientTemp === undefined) && !state.activeItem._tempSnapshotRequested) {
+                    // Active item exists (e.g. reload or already in-progress) but lacks temperature snapshot
+                    state.activeItem._tempSnapshotRequested = true;
+                    fetchLiveTemperaturesFromMiniPC().then(async (temps) => {
+                        if (temps) {
+                            await saveRollTemperatureSnapshot(state.activeItem, temps, false);
+                            renderApp();
+                        }
+                    });
+                }
+                saveLocalQueue();
+            }),
+            loadDailyScheduleForTablet2(state.selectedDate)
+        ]);
 
         renderApp();
     } catch (err) {
@@ -545,8 +874,8 @@ function fallbackToLocalQueue() {
         try {
             const list = JSON.parse(cached);
             state.queue = list;
-            state.activeItem = list.find(i => i.status === 'active') || list[0] || null;
-            state.waitingItems = list.filter(i => i !== state.activeItem && i.status !== 'completed');
+            state.activeItem = list.find(i => i.status === 'active') || list.find(i => i.status === 'in-progress') || list[0] || null;
+            state.waitingItems = list.filter(i => i !== state.activeItem && i.status !== 'completed' && i.status !== 'scrapped');
             renderApp();
             return;
         } catch {
@@ -567,7 +896,9 @@ function saveLocalQueue() {
 function renderApp() {
     renderHeroCard();
     renderQueueSection();
+    renderHistory();
     updateLastPrintedInfo();
+    updateHistoryBadges();
 }
 
 function renderHeroCard() {
@@ -578,13 +909,14 @@ function renderHeroCard() {
 
     if (!item) {
         if (!state.machineName) {
+            const noMachineTitle = (typeof _t === 'function' && _t('fk2_no_machine_title')) || '設備（machine）パラメータが指定されていません';
+            const noMachineDesc = (typeof _t === 'function' && _t('fk2_no_machine_desc')) || 'URLに設備パラメータが付与されていません。<br>例: <code>?machine=PSA2&filter=第一工場</code> のように設備名を指定して開いてください。';
             wrapper.innerHTML = `
                 <div class="empty-queue-card" style="border-color: #FCA5A5; background: #FFFBFB;">
                     <div class="empty-icon" style="background: #FEE2E2; color: #DC2626;">⚠️</div>
-                    <h2 class="empty-title" style="color: #DC2626;">設備（machine）パラメータが指定されていません</h2>
+                    <h2 class="empty-title" style="color: #DC2626;">${noMachineTitle}</h2>
                     <p class="empty-subtitle">
-                        URLに設備パラメータが付与されていません。<br>
-                        例: <code>?machine=PSA2&filter=第一工場</code> のように設備名を指定して開いてください。
+                        ${noMachineDesc}
                     </p>
                 </div>
             `;
@@ -592,17 +924,20 @@ function renderHeroCard() {
         }
 
         // Empty State Placeholder
+        const emptyTitle = (typeof _t === 'function' && _t('fk2_no_active_title')) || '待機中: 投入工程からの登録を待っています';
+        const emptyDesc = (typeof _t === 'function' && _t('fk2_no_active_desc')) || '投入工程（Tablet 1）で原反QRまたは現品票写真が登録されると、自動的にここに表示されます。';
+        const refreshQueueText = (typeof _t === 'function' && _t('fk2_refresh_queue')) || '🔄 キューを再確認';
+
         wrapper.innerHTML = `
             <div class="empty-queue-card">
                 <div class="empty-icon">📦</div>
-                <h2 class="empty-title">待機中: 投入工程からの登録を待っています</h2>
+                <h2 class="empty-title">${emptyTitle}</h2>
                 <p class="empty-subtitle">
-                    Waiting for feeder station to register materials.<br>
-                    投入工程（Tablet 1）で原反QRまたは現品票写真が登録されると、自動的にここに表示されます。
+                    ${emptyDesc}
                 </p>
                 <div class="empty-actions">
                     <button type="button" class="btn-edge" onclick="fetchProductionQueue(true)">
-                        🔄 キューを再確認 (Refresh)
+                        ${refreshQueueText}
                     </button>
                 </div>
             </div>
@@ -612,162 +947,120 @@ function renderHeroCard() {
 
     const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
     const totalRolls = Number(item.totalRolls) || 1;
-    const hinban = item.hinban || '品番未設定';
+    const hinban = getTablet1Hinban(item);
+    const listNum = getTablet1OrderIndex(item, null);
     const color = item.color || '標準';
-    const hinmei = item.hinmei || '-';
-    const okyakuHinban = item.okyakuHinban || '-';
     const metersPerRoll = item.rollMeters || item.metersPerRoll || item.meters || 100;
-    const totalMeters = item.totalMeters || (metersPerRoll * totalRolls);
-    const shippingDest = item.shippingDest || '';
-    const rawQr = item.rawMaterialQR || item.rawQr || '-';
-    const rawLen = item.rawMaterialLength || item.materialLength || `${totalMeters}m`;
-    const mfgUid = item.manufacturerUid || item.lotNo || '-';
-    const photoUrl = item.photoUrl || '';
+    const photoUrl = item.imageUrl || item.photoUrl || '';
 
-    // Determine lbx label format name for operator visibility
-    const isSpecial = isSpecialKinuuraHinban(hinban);
-    let labelFormat = 'firstkojo4.lbx';
-    if (isSpecial) labelFormat = 'kinuuraLabel.lbx (衣浦特殊)';
-    else if (item.labelHinban === 'NC2') labelFormat = 'NC21.lbx (NC2専用)';
-
-    // Step dots
-    let stepDotsHtml = '';
-    for (let r = 1; r <= totalRolls; r++) {
-        let dotClass = 'roll-step-dot';
-        let dotText = `Roll ${r}`;
-
-        if (r < curRoll) {
-            dotClass += ' completed';
-            dotText = `✓ Roll ${r}`;
-        } else if (r === curRoll) {
-            dotClass += ' current';
-            dotText = `▶ Roll ${r}`;
+    let shippingDest = item.shippingDest || '';
+    if (!shippingDest || shippingDest === '—') {
+        const scheduleCache = getDailyScheduleCache(state.selectedDate);
+        if (scheduleCache?.scheduleOrder) {
+            const matchedSched = scheduleCache.scheduleOrder.find(s =>
+                (item.itemId && (s.id === item.itemId || s.itemId === item.itemId)) ||
+                (s.kizai && (s.kizai === item.hinban || s.kizai === item.kizai)) ||
+                (s.hinban && (s.hinban === item.hinban || s.hinban === item.kizai))
+            );
+            if (matchedSched?.shippingDest && matchedSched.shippingDest !== '—') {
+                shippingDest = matchedSched.shippingDest;
+            }
         }
-        stepDotsHtml += `<div class="${dotClass}">${dotText}</div>`;
     }
+
+    const rollUnit = (typeof _t === 'function' && _t('fk_roll_unit')) || '巻き';
+    const metersPerRollText = (typeof _t === 'function' && _t('fk2_meters_per_roll')) || 'm / 巻';
+    const photoCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票写真';
+    const tapToEnlarge = (typeof _t === 'function' && _t('fk2_tap_to_enlarge')) || 'タップで拡大';
+    const noPhotoText = (typeof _t === 'function' && _t('fk2_no_photo')) || '現品票写真なし';
+    const mainPrintLabel = (typeof _t === 'function' && _t('fk2_main_print_label')) || 'ラベル印刷 (Print Roll Label)';
+    const subPrintSuffix = (typeof _t === 'function' && _t('fk2_sub_print_label')) || 'のラベルを発行して次へ';
+    const reprintLabel = (typeof _t === 'function' && _t('fk2_btn_reprint')) || '直前再印刷';
+    const cantPrintLabel = (typeof _t === 'function' && _t('fk2_btn_cant_print')) || '印刷不可・次へ';
+    const scrapLabel = (typeof _t === 'function' && _t('fk2_btn_scrap')) || '1巻破棄';
+    const finishEarlyLabel = (typeof _t === 'function' && _t('fk2_btn_finish_early')) || '中途完了';
+    const shippingDestPrefix = (typeof _t === 'function' && _t('fk_shipping_dest')) || 'Ship To: ';
+
+    const titleReprint = (typeof _t === 'function' && _t('fk2_title_reprint')) || '直前に印刷したラベルをそのまま再発行します';
+    const titleCantPrint = (typeof _t === 'function' && _t('fk2_title_cant_print')) || 'プリンター障害等で印刷できない場合に手動で完了して次へ進めます';
+    const titleScrap = (typeof _t === 'function' && _t('fk2_title_scrap')) || 'キズ・シワなどの不良で1巻破棄して次へ';
+    const titleFinishEarly = (typeof _t === 'function' && _t('fk2_title_finish_early')) || '材料不足などで予定巻き数より早く終了';
 
     wrapper.innerHTML = `
         <div class="hero-wrapping-card has-active">
-            <!-- Header of Hero -->
+            <!-- Hinban Row: Exactly matching Tablet 1 List Tab (Now on top) -->
+            <div class="hinban-hero-row">
+                <div class="hinban-display">${escapeHtml(hinban)}</div>
+            </div>
+
+            <!-- Header of Hero: Metadata row (Below Name) -->
             <div class="hero-card-header">
-                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                    <div class="hero-status-pill">
-                        <span>▶</span>
-                        <span>現在包装中 (Currently Wrapping)</span>
-                    </div>
-                    <div class="roll-counter-badge">
-                        <span>Roll</span>
-                        <strong style="font-size: 1.35rem;">${curRoll}</strong>
-                        <span style="font-size: 0.95rem; opacity: 0.8;">/ ${totalRolls} 巻き</span>
-                    </div>
-                </div>
-                <div class="hero-lot-tag" title="ロット番号 (Auto Lot Number)">
-                    LOT: ${calcLotNumber(curRoll)}
-                </div>
-            </div>
-
-            <!-- 2-Column Specs & Photo Grid -->
-            <div class="hero-grid">
-                <!-- Left: Huge Product Specs -->
-                <div class="product-specs-pane">
-                    <div class="hinban-hero-row">
-                        <div style="display: flex; flex-direction: column;">
-                            <span class="hinban-label-small">品番 (PART NUMBER)</span>
-                            <div class="hinban-display">${escapeHtml(hinban)}</div>
-                        </div>
-                        <div class="color-badge" title="色 (Color)">
-                            🎨 ${escapeHtml(color)}
-                        </div>
-                    </div>
-
-                    <div class="spec-details-grid">
-                        <div class="spec-item">
-                            <span class="spec-label">お客様品番 (Customer Part No.)</span>
-                            <span class="spec-value highlight-blue">${escapeHtml(okyakuHinban)}</span>
-                        </div>
-                        <div class="spec-item">
-                            <span class="spec-label">品名 (Product Name)</span>
-                            <span class="spec-value">${escapeHtml(hinmei)}</span>
-                        </div>
-                        <div class="spec-item">
-                            <span class="spec-label">1巻長さ (Roll Length)</span>
-                            <span class="spec-value highlight-brand">${metersPerRoll} m / 巻</span>
-                        </div>
-                        <div class="spec-item">
-                            <span class="spec-label">納入先・ラベル様式</span>
-                            <span class="spec-value" style="font-size: 0.9rem;">
-                                ${shippingDest ? `${escapeHtml(shippingDest)}へ · ` : ''}${labelFormat}
-                            </span>
-                        </div>
-                    </div>
-
-                    <!-- Visual Step Progress Tracker -->
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <span class="spec-label">巻進捗 (Roll Progress):</span>
-                        <div class="roll-tracker">
-                            ${stepDotsHtml}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Right: Warehouse Label Photo Preview & Material Info -->
-                <div class="material-verification-pane">
-                    <div class="photo-preview-card" onclick="openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - 現品票写真')" title="タップして拡大表示 (Tap to Enlarge)">
-                        ${photoUrl ? `
-                            <img src="${photoUrl}" alt="現品票写真">
-                            <div class="photo-badge-overlay">
-                                <span>🔍</span>
-                                <span>タップで写真拡大 (Zoom)</span>
-                            </div>
-                        ` : `
-                            <div class="photo-placeholder">
-                                <span class="photo-placeholder-icon">📷</span>
-                                <span class="photo-placeholder-text">投入工程の現品票写真がありません</span>
-                                <span style="font-size: 0.75rem; color: var(--text-soft);">（Tablet 1で未撮影）</span>
-                            </div>
-                        `}
-                    </div>
-
-                    <div class="raw-material-box">
-                        <div class="raw-meta-row">
-                            <span class="raw-meta-title">原反QR文字列:</span>
-                            <div class="raw-qr-snippet" title="${escapeHtml(rawQr)}">${escapeHtml(rawQr)}</div>
-                        </div>
-                        <div class="raw-meta-row">
-                            <span class="raw-meta-title">原反実測 / 総長さ:</span>
-                            <span class="raw-meta-val">${escapeHtml(String(rawLen))} (総 ${totalMeters}m)</span>
-                        </div>
-                        <div class="raw-meta-row">
-                            <span class="raw-meta-title">メーカー製造ロット / UID:</span>
-                            <span class="raw-meta-val" style="font-family: ui-monospace, monospace;">${escapeHtml(mfgUid)}</span>
-                        </div>
-                    </div>
+                <div class="hero-meta-text">
+                    ${listNum ? `<span class="roll-sub-badge" style="font-size: 0.825rem; font-weight: 800; color: #1E293B; background: #F1F5F9; border: 1px solid #CBD5E1; padding: 2px 8px; border-radius: 6px;">#${listNum}</span><span class="hero-meta-divider">•</span>` : ''}
+                    <span>Roll <strong style="font-size: 1.1rem;">${curRoll}</strong> / ${totalRolls} ${rollUnit}</span>
+                    <span class="hero-meta-divider">•</span>
+                    <span><strong>${metersPerRoll}</strong>${metersPerRollText}</span>
+                    <span class="hero-meta-divider">•</span>
+                    <span><strong>${escapeHtml(color)}</strong></span>
+                    ${shippingDest && shippingDest !== '—' ? `
+                        <span class="hero-meta-divider">•</span>
+                        <span>${escapeHtml(shippingDestPrefix)}<strong>${escapeHtml(shippingDest)}</strong></span>
+                    ` : ''}
+                    ${((item.ovenTemp1 !== undefined && item.ovenTemp1 !== null) || (item.temperatures && item.temperatures.ovenTemp1 !== undefined)) ? `
+                        <span class="hero-meta-divider">•</span>
+                        <span class="roll-temp-badge" style="display: inline-flex; align-items: center; gap: 4px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); padding: 2px 8px; border-radius: 6px; font-weight: 700; color: #1E40AF; font-size: 0.8rem;" title="開始時スナップショット温度 (Start In-Progress Snapshot)">
+                            🌡️ 炉:${item.ovenTemp1 !== undefined ? item.ovenTemp1 : item.temperatures?.ovenTemp1}°/${(item.ovenTemp2 !== undefined ? item.ovenTemp2 : item.temperatures?.ovenTemp2) || '—'}°/${(item.ovenTemp3 !== undefined ? item.ovenTemp3 : item.temperatures?.ovenTemp3) || '—'}°C · 室:${(item.ambientTemp !== undefined ? item.ambientTemp : item.temperatures?.ambientTemp) || '—'}°C
+                        </span>
+                    ` : ''}
                 </div>
             </div>
 
-            <!-- Massive Action Button & Edge Case Controls -->
-            <div class="hero-action-container">
-                <button type="button" class="btn-massive-print" id="btnPrintRollLabel" onclick="handlePrintRollLabel()">
-                    <span class="print-icon">🖨️</span>
-                    <div class="print-text-group">
-                        <span class="main-print-label">ラベル印刷 (Print Roll Label)</span>
-                        <span class="sub-print-label">Roll ${curRoll} / ${totalRolls} のラベルを発行して進める</span>
-                    </div>
-                </button>
+            <!-- Compact Work Row: Warehouse Photo Thumbnail + Print Actions side-by-side -->
+            <div class="hero-work-row">
+                <!-- Thumbnail Preview -->
+                <div class="photo-preview-box" onclick="openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - ${escapeHtml(photoCaption)}')" title="${escapeHtml(tapToEnlarge)}">
+                    ${photoUrl ? `
+                        <img src="${photoUrl}" alt="${escapeHtml(photoCaption)}">
+                        <div class="photo-badge-overlay">
+                            <span>🔍</span>
+                            <span>${escapeHtml(tapToEnlarge)}</span>
+                        </div>
+                    ` : `
+                        <div class="photo-placeholder">
+                            <span class="photo-placeholder-icon">📷</span>
+                            <span class="photo-placeholder-text">${escapeHtml(noPhotoText)}</span>
+                        </div>
+                    `}
+                </div>
 
-                <div class="edge-controls-bar">
-                    <button type="button" class="btn-edge reprint-btn" onclick="handleReprintLastRoll()" title="直前に印刷したラベルをそのまま再発行します">
-                        <span>🔄</span>
-                        <span>直前ラベル再印刷 (Re-print)</span>
+                <!-- Print Action & Edge Controls -->
+                <div class="hero-actions-box">
+                    <button type="button" class="btn-massive-print" id="btnPrintRollLabel" onclick="handlePrintRollLabel()">
+                        <span class="print-icon">🖨️</span>
+                        <div class="print-text-group">
+                            <span class="main-print-label">${escapeHtml(mainPrintLabel)}</span>
+                            <span class="sub-print-label">Roll ${curRoll} / ${totalRolls} ${escapeHtml(subPrintSuffix)}</span>
+                        </div>
                     </button>
-                    <button type="button" class="btn-edge skip-btn" onclick="openScrapModal()" title="キズ・シワなどの不良で1巻破棄して次へ">
-                        <span>⚠️</span>
-                        <span>1巻破棄 / スキップ (Scrap)</span>
-                    </button>
-                    <button type="button" class="btn-edge finish-btn" onclick="openFinishEarlyModal()" title="材料不足などで予定巻き数より早く終了">
-                        <span>🏁</span>
-                        <span>ロット中途完了 (Finish Early)</span>
-                    </button>
+
+                    <div class="edge-controls-bar">
+                        <button type="button" class="btn-edge reprint-btn" onclick="handleReprintLastRoll()" title="${escapeHtml(titleReprint)}">
+                            <span>🔄</span>
+                            <span>${escapeHtml(reprintLabel)}</span>
+                        </button>
+                        <button type="button" class="btn-edge cant-print-btn" onclick="handleCantPrintAdvance()" title="${escapeHtml(titleCantPrint)}">
+                            <span>⚠️</span>
+                            <span>${escapeHtml(cantPrintLabel)}</span>
+                        </button>
+                        <button type="button" class="btn-edge skip-btn" onclick="openScrapModal()" title="${escapeHtml(titleScrap)}">
+                            <span>🗑️</span>
+                            <span>${escapeHtml(scrapLabel)}</span>
+                        </button>
+                        <button type="button" class="btn-edge finish-btn" onclick="openFinishEarlyModal()" title="${escapeHtml(titleFinishEarly)}">
+                            <span>🏁</span>
+                            <span>${escapeHtml(finishEarlyLabel)}</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -780,50 +1073,50 @@ function renderQueueSection() {
     if (!container) return;
 
     const items = state.waitingItems || [];
-    if (badge) badge.textContent = `${items.length}件`;
+    const countUnit = (typeof _t === 'function' && _t('count_unit')) || '件';
+    if (badge) badge.textContent = `${items.length}${countUnit}`;
 
     if (items.length === 0) {
+        const noWaitingText = (typeof _t === 'function' && _t('fk2_no_waiting')) || '次工程キューに待機中のロットはありません';
         container.innerHTML = `
-            <div style="grid-column: 1 / -1; background: var(--bg-surface); border: 1.5px dashed var(--border-strong); border-radius: var(--card-radius); padding: 32px 20px; text-align: center; color: var(--text-soft); font-weight: 700;">
-                次工程キューに待機中のロットはありません (No waiting lots in line)
+            <div style="grid-column: 1 / -1; background: var(--bg-surface); border: 1px dashed var(--border-strong); border-radius: var(--card-radius); padding: 36px 20px; text-align: center; color: var(--text-soft); font-weight: 700; box-shadow: var(--shadow-card);">
+                ${escapeHtml(noWaitingText)}
             </div>
         `;
         return;
     }
 
+    const rollCountUnit = (typeof _t === 'function' && _t('fk_roll_count')) || '巻';
+    const plannedTag = (typeof _t === 'function' && _t('fk2_planned_tag')) || '予定';
+    const customerPrefix = (typeof _t === 'function' && _t('fk2_customer_hinban')) || '客品番';
+    const photoCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票';
+
     container.innerHTML = items.map((item, index) => {
-        const qPos = index + 1;
-        const hinban = item.hinban || '品番未設定';
+        const listNum = getTablet1OrderIndex(item, index + 1);
+        const hinban = getTablet1Hinban(item);
         const color = item.color || '標準';
         const hinmei = item.hinmei || '-';
         const okyakuHinban = item.okyakuHinban || '';
         const rolls = item.totalRolls || 1;
-        const photoUrl = item.photoUrl || '';
+        const photoUrl = item.imageUrl || item.photoUrl || '';
         const qId = item._id || item.queueId || '';
 
         return `
-            <div class="queue-item-card" onclick="handleSelectQueueItem('${qId}', '${escapeHtml(hinban)}')">
+            <div class="queue-item-card">
                 <div class="queue-card-top">
-                    <div class="queue-pos-badge">順番 #${qPos}</div>
-                    <div class="queue-rolls-tag">${rolls} 巻 予定</div>
+                    <div class="queue-pos-badge">#${listNum}</div>
+                    <div class="queue-rolls-tag">${rolls} ${rollCountUnit} ${plannedTag}</div>
                 </div>
 
                 <div class="queue-item-body">
-                    <div class="queue-thumb" onclick="event.stopPropagation(); openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - 現品票')">
+                    <div class="queue-thumb" onclick="event.stopPropagation(); openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - ${escapeHtml(photoCaption)}')">
                         ${photoUrl ? `<img src="${photoUrl}" alt="Photo">` : '📷'}
                     </div>
                     <div class="queue-info">
                         <div class="queue-hinban">${escapeHtml(hinban)}</div>
-                        <div class="queue-color-hinmei">🎨 ${escapeHtml(color)} · ${escapeHtml(hinmei)}</div>
-                        ${okyakuHinban ? `<div class="queue-customer">客品番: ${escapeHtml(okyakuHinban)}</div>` : ''}
+                        <div class="queue-color-hinmei">${escapeHtml(color)} · ${escapeHtml(hinmei)}</div>
+                        ${okyakuHinban ? `<div class="queue-customer">${escapeHtml(customerPrefix)}: ${escapeHtml(okyakuHinban)}</div>` : ''}
                     </div>
-                </div>
-
-                <div class="queue-card-action">
-                    <button type="button" class="queue-switch-btn">
-                        <span>👆</span>
-                        <span>このロットを包装開始 (Start)</span>
-                    </button>
                 </div>
             </div>
         `;
@@ -834,8 +1127,9 @@ function updateLastPrintedInfo() {
     const el = document.getElementById('lastPrintedInfo');
     if (!el) return;
     if (state.lastPrinted) {
+        const lastPrintedPrefix = (typeof _t === 'function' && _t('fk2_last_printed')) || '最終印刷';
         const timeStr = state.lastPrinted.timeStr || (new Date(state.lastPrinted.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
-        el.textContent = `最終印刷: [${state.lastPrinted.hinban}] Roll ${state.lastPrinted.rollIndex}/${state.lastPrinted.totalRolls} (${timeStr})`;
+        el.textContent = `${lastPrintedPrefix}: [${state.lastPrinted.hinban}] Roll ${state.lastPrinted.rollIndex}/${state.lastPrinted.totalRolls} (${timeStr})`;
     } else {
         el.textContent = '';
     }
@@ -867,6 +1161,507 @@ function escapeHtml(str) {
 }
 
 // -----------------------------------------------------
+// Tab & History Navigation for Tablet 2
+// -----------------------------------------------------
+function switchTablet2Tab(tabName) {
+    state.currentTab = tabName;
+    const tabBtnWork = document.getElementById('tabBtnWork');
+    const tabBtnHistory = document.getElementById('tabBtnHistory');
+    const viewWork = document.getElementById('viewWork');
+    const viewHistory = document.getElementById('viewHistory');
+
+    if (tabName === 'history') {
+        if (tabBtnWork) tabBtnWork.classList.remove('active');
+        if (tabBtnHistory) tabBtnHistory.classList.add('active');
+        if (viewWork) viewWork.style.display = 'none';
+        if (viewHistory) viewHistory.style.display = 'block';
+        renderHistory();
+    } else {
+        if (tabBtnWork) tabBtnWork.classList.add('active');
+        if (tabBtnHistory) tabBtnHistory.classList.remove('active');
+        if (viewWork) viewWork.style.display = 'block';
+        if (viewHistory) viewHistory.style.display = 'none';
+        renderHeroCard();
+        renderQueueSection();
+    }
+}
+
+function setHistoryView(viewType) {
+    state.historyView = viewType;
+    const btnCard = document.getElementById('btnHistViewCard');
+    const btnList = document.getElementById('btnHistViewList');
+
+    if (btnCard) btnCard.classList.toggle('active', viewType === 'card');
+    if (btnList) btnList.classList.toggle('active', viewType === 'list');
+
+    renderHistory();
+}
+
+function updateHistoryBadges() {
+    const completedBadge = document.getElementById('historyCompletedCountBadge');
+    const scrappedBadge = document.getElementById('historyScrappedCountBadge');
+    const navHistoryBadge = document.getElementById('navHistoryBadge');
+    const navQueueBadge = document.getElementById('navQueueBadge');
+
+    const completedDocs = state.completedItems || [];
+    const completedCount = completedDocs.filter(it => it && it.status !== 'scrapped' && it.status !== 'skipped').length;
+    const scrappedCount = completedDocs.filter(it => it && (it.status === 'scrapped' || it.status === 'skipped')).length;
+
+    const completedText = (typeof _t === 'function' && _t('fk_status_completed')) || '完了';
+    const scrappedText = (typeof _t === 'function' && _t('fk2_btn_scrap')) || '破棄/スキップ';
+    const rollCountUnit = (typeof _t === 'function' && _t('fk_roll_count')) || '巻';
+
+    if (completedBadge) completedBadge.textContent = `${completedText}: ${completedCount} ${rollCountUnit}`;
+    if (scrappedBadge) scrappedBadge.textContent = `${scrappedText}: ${scrappedCount} ${rollCountUnit}`;
+
+    if (navHistoryBadge) {
+        navHistoryBadge.textContent = String(completedDocs.length);
+        navHistoryBadge.style.display = completedDocs.length > 0 ? 'inline-block' : 'none';
+    }
+
+    const waitingCount = (state.waitingItems || []).length + (state.activeItem ? 1 : 0);
+    if (navQueueBadge) {
+        navQueueBadge.textContent = String(waitingCount);
+        navQueueBadge.style.display = waitingCount > 0 ? 'inline-block' : 'none';
+    }
+}
+
+function renderHistory() {
+    const container = document.getElementById('historyListContainer');
+    if (!container) return;
+
+    updateHistoryBadges();
+
+    if (state.historyView === 'list') {
+        container.classList.remove('history-flat-list');
+        container.innerHTML = renderHistoryTableView();
+    } else {
+        container.classList.add('history-flat-list');
+        container.innerHTML = renderHistoryCardView();
+    }
+}
+
+function renderHistoryCardView() {
+    const completedDocs = state.completedItems || [];
+    if (completedDocs.length === 0) {
+        const emptyText = (typeof _t === 'function' && _t('fk_history_empty')) || '完了した履歴項目がありません (No completed history)';
+        return `
+            <div class="staging-queue-empty">
+                ${emptyText}
+            </div>
+        `;
+    }
+
+    const items = completedDocs.map((doc, qIdx) => {
+        let matchedSched = null;
+        if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
+            matchedSched = scheduleCache.scheduleOrder.find(s =>
+                (doc.itemId && s.id === doc.itemId) ||
+                (doc._id && s.id === doc._id) ||
+                (doc.groupId && s.groupId === doc.groupId && Number(s.rollIndex) === Number(doc.rollIndex)) ||
+                (s.hinban === doc.hinban && (Number(s.rollIndex) === Number(doc.rollIndex) || Number(s.orderIndex) === Number(doc.orderIndex))) ||
+                (s.kizai === doc.kizai && Number(s.orderIndex) === Number(doc.orderIndex))
+            );
+        }
+
+        let orderIndex = doc.orderIndex;
+        if (!orderIndex || isNaN(Number(orderIndex))) {
+            if (matchedSched && matchedSched.orderIndex) {
+                orderIndex = matchedSched.orderIndex;
+            } else if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
+                const foundIdx = scheduleCache.scheduleOrder.findIndex(s => s.hinban === doc.hinban || s.kizai === doc.kizai);
+                if (foundIdx !== -1) orderIndex = foundIdx + 1;
+            }
+        }
+        if (!orderIndex) orderIndex = doc.queuePosition || (qIdx + 1);
+
+        const curRoll = Number(doc.currentRollIndex || doc.rollIndex || 1);
+        const totalRolls = Number(doc.totalRolls) || 1;
+        const hinban = (matchedSched && (matchedSched.kizai || matchedSched.hinban)) || getTablet1Hinban(doc) || doc.kizai || doc.hinban || '品番未設定';
+        const color = doc.color || matchedSched?.color || '標準';
+        const meters = doc.metersPerRoll || doc.rollMeters || doc.meters || doc.bicho || matchedSched?.meters || 0;
+        const photoUrl = doc.imageUrl || doc.photoUrl || '';
+        const status = doc.status || 'completed';
+        const completedAt = doc.completedAt || doc.actualEndTime || doc.updatedAt || doc.createdAt;
+        const worker = doc.wrapperWorker || doc.worker || '';
+        const docId = String(doc._id || doc.queueId || doc.itemId || qIdx);
+
+        return {
+            doc,
+            docId,
+            orderIndex: Number(orderIndex) || (qIdx + 1),
+            curRoll,
+            totalRolls,
+            hinban,
+            color,
+            meters,
+            photoUrl,
+            status,
+            completedAt,
+            worker
+        };
+    });
+
+    // Sort by orderIndex ascending
+    items.sort((a, b) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
+
+    const photoCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票写真';
+    const tapToEnlarge = (typeof _t === 'function' && _t('fk2_tap_to_enlarge')) || 'タップで拡大';
+    const reprintText = (typeof _t === 'function' && _t('fk2_btn_reprint')) || '再印刷';
+
+    return items.map(it => {
+        let timeStr = '—';
+        if (it.completedAt) {
+            const d = new Date(it.completedAt);
+            if (!isNaN(d.getTime())) {
+                timeStr = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+            } else if (typeof it.completedAt === 'string') {
+                timeStr = it.completedAt;
+            }
+        }
+
+        const isScrapped = it.status === 'scrapped' || it.status === 'skipped';
+        const statusPill = isScrapped
+            ? `<span class="history-type-badge history-type-excluded" style="background:#FEE2E2; color:#DC2626; border-color:#FCA5A5;">破棄/スキップ</span>`
+            : `<span class="history-type-badge history-type-enqueued" style="background:#ECFDF5; color:#059669; border-color:#A7F3D0;">包装完了・印刷済</span>`;
+
+        return `
+            <div class="history-row ${isScrapped ? 'status-excluded' : 'status-enqueued'}" onclick="handleHistoryItemClick('${escapeHtml(it.docId)}')">
+                <div class="history-left">
+                    <div class="history-pos-badge" style="font-size: 0.95rem; font-weight: 800; color: #1E293B; background: #F1F5F9; border: 1px solid #CBD5E1; padding: 4px 10px; border-radius: 8px; flex-shrink: 0;">#${it.orderIndex}</div>
+
+                    ${it.photoUrl ? `
+                        <img src="${it.photoUrl}" class="history-thumb" alt="Photo" onclick="event.stopPropagation(); openPhotoModal('${it.photoUrl}', '${escapeHtml(it.hinban)} - ${escapeHtml(photoCaption)}')" title="${escapeHtml(tapToEnlarge)}">
+                    ` : `
+                        <div class="history-thumb-placeholder">📷</div>
+                    `}
+
+                    <div style="display: flex; flex-direction: column; gap: 3px;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <span class="history-title">${escapeHtml(it.hinban)}</span>
+                            ${statusPill}
+                        </div>
+                        <div class="history-meta">
+                            <span>Roll <strong>${it.curRoll}</strong> / ${it.totalRolls} 巻</span>
+                            <span>•</span>
+                            <span><strong>${it.meters}</strong> m</span>
+                            <span>•</span>
+                            <span>${escapeHtml(it.color)}</span>
+                            ${timeStr !== '—' ? `<span>•</span><span>完了: <strong>${escapeHtml(timeStr)}</strong></span>` : ''}
+                            ${it.worker ? `<span>•</span><span>担当: <strong>${escapeHtml(it.worker)}</strong></span>` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="history-right" onclick="event.stopPropagation();">
+                    <button type="button" class="btn-edge reprint-btn" onclick="handleHistoryReprint('${escapeHtml(it.docId)}', ${it.curRoll}, ${it.totalRolls})" style="padding: 6px 14px; font-size: 0.825rem; font-weight: 700;" title="このロールのラベルをBrotherプリンターで再印刷">
+                        <span>🔄</span>
+                        <span>${escapeHtml(reprintText)}</span>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderHistoryTableView() {
+    const completedDocs = state.completedItems || [];
+
+    if (completedDocs.length === 0) {
+        const emptyText = (typeof _t === 'function' && _t('fk_history_empty')) || '完了した履歴項目がありません (No completed history)';
+        return `
+            <div class="staging-queue-empty">
+                ${emptyText}
+            </div>
+        `;
+    }
+
+    const historyItems = [];
+    completedDocs.forEach((doc, qIdx) => {
+        let matchedSched = null;
+        if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
+            matchedSched = scheduleCache.scheduleOrder.find(s =>
+                (doc.itemId && s.id === doc.itemId) ||
+                (doc._id && s.id === doc._id) ||
+                (doc.groupId && s.groupId === doc.groupId && Number(s.rollIndex) === Number(doc.rollIndex)) ||
+                (s.hinban === doc.hinban && (Number(s.rollIndex) === Number(doc.rollIndex) || Number(s.orderIndex) === Number(doc.orderIndex))) ||
+                (s.kizai === doc.kizai && Number(s.orderIndex) === Number(doc.orderIndex))
+            );
+        }
+
+        let orderIndex = doc.orderIndex;
+        if (!orderIndex || isNaN(Number(orderIndex))) {
+            if (matchedSched && matchedSched.orderIndex) {
+                orderIndex = matchedSched.orderIndex;
+            } else if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
+                const foundIdx = scheduleCache.scheduleOrder.findIndex(s => s.hinban === doc.hinban || s.kizai === doc.kizai);
+                if (foundIdx !== -1) orderIndex = foundIdx + 1;
+            }
+        }
+        if (!orderIndex) orderIndex = doc.queuePosition || (qIdx + 1);
+
+        const kizaiName = (matchedSched && (matchedSched.kizai || matchedSched.hinban)) || getTablet1Hinban(doc) || doc.kizai || doc.hinban || '材料';
+
+        historyItems.push({
+            itemId: doc.itemId || doc._id || doc.queueId || String(qIdx + 1),
+            mongoId: doc._id,
+            orderIndex: Number(orderIndex) || (qIdx + 1),
+            startTime: doc.actualStartTime || matchedSched?.startTime || '',
+            endTime: doc.actualEndTime || matchedSched?.endTime || '',
+            completedAt: doc.completedAt || doc.updatedAt || doc.createdAt || '',
+            shippingDest: (matchedSched && matchedSched.shippingDest) || doc.shippingDest || '—',
+            kizai: kizaiName,
+            shori: (matchedSched && matchedSched.shori) || doc.shori || '—',
+            color: doc.color || (matchedSched && matchedSched.color) || '—',
+            habanaga: (matchedSched && matchedSched.habanaga) || doc.habanaga || '—',
+            kataban: (matchedSched && matchedSched.kataban) || doc.kataban || '—',
+            timeOption: matchedSched?.timeOption || doc.timeOption || '',
+            rollIndex: doc.currentRollIndex || doc.rollIndex || matchedSched?.rollIndex || 1,
+            totalRolls: doc.totalRolls || matchedSched?.totalRolls || 1,
+            meters: doc.metersPerRoll || doc.rollMeters || doc.meters || doc.bicho || matchedSched?.meters || 0,
+            unit: doc.unit || matchedSched?.unit || 'm',
+            status: doc.status || 'completed',
+            rawDoc: doc
+        });
+    });
+
+    // Sort by orderIndex ascending
+    historyItems.sort((a, b) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
+
+    let totalMeters = 0;
+    let totalPieces = 0;
+    let lastKizai = null;
+    const rows = [];
+
+    historyItems.forEach((item) => {
+        const qtyVal = Number(item.meters) || 0;
+        if (item.unit === '枚') {
+            totalPieces += qtyVal;
+        } else {
+            totalMeters += qtyVal;
+        }
+
+        const cmVal = qtyVal * 100;
+        const currentKizai = item.kizai;
+
+        // If 基材コード changes, insert black separator row
+        if (lastKizai !== null && lastKizai !== currentKizai) {
+            rows.push(`
+                <tr class="separator-black-row">
+                    <td colspan="10"></td>
+                </tr>
+            `);
+        }
+        lastKizai = currentKizai;
+
+        const formattedDest = escapeHtml(item.shippingDest).replace(/\n/g, '<br>');
+
+        const katabanDisplay = (item.kataban && item.kataban !== '—')
+            ? `${escapeHtml(item.kataban)}${item.timeOption ? `<br><span class="text-sub">(${escapeHtml(item.timeOption)})</span>` : ''}`
+            : '—';
+
+        const qtyDisplay = item.unit === '枚'
+            ? `${qtyVal.toLocaleString()} 枚`
+            : `${cmVal.toLocaleString()} cm (${qtyVal}m)`;
+
+        let timeDisplay = '—';
+        if (item.startTime && item.endTime) {
+            timeDisplay = `<strong>${escapeHtml(item.startTime)}</strong><br><span class="text-sub">～ ${escapeHtml(item.endTime)}</span>`;
+        } else if (item.completedAt) {
+            const d = new Date(item.completedAt);
+            if (!isNaN(d.getTime())) {
+                timeDisplay = `<strong>${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</strong>`;
+            }
+        }
+
+        const isScrapped = item.status === 'scrapped' || item.status === 'skipped';
+
+        rows.push(`
+            <tr class="item-row ${isScrapped ? 'scrapped-row' : ''}" style="cursor: pointer;" onclick="handleHistoryItemClick('${escapeHtml(String(item.itemId))}')" title="クリックでロール詳細・再印刷">
+                <td class="center font-bold">${item.orderIndex}</td>
+                <td class="center time-cell">${timeDisplay}</td>
+                <td class="center dest-cell">${formattedDest}</td>
+                <td class="left kizai-cell">${escapeHtml(item.kizai)}${isScrapped ? ' <span style="color:var(--red); font-size:0.75rem;">(破棄)</span>' : ''}</td>
+                <td class="center shori-cell">${escapeHtml(item.shori)}</td>
+                <td class="center color-cell">${escapeHtml(item.color)}</td>
+                <td class="center habanaga-cell">${escapeHtml(item.habanaga)}</td>
+                <td class="center kataban-cell">${katabanDisplay}</td>
+                <td class="center roll-cell font-bold">${item.rollIndex}/${item.totalRolls}</td>
+                <td class="right qty-cell font-bold">${qtyDisplay}</td>
+            </tr>
+        `);
+    });
+
+    const firstTime = historyItems.find(it => it.startTime)?.startTime || '';
+    const lastTime = [...historyItems].reverse().find(it => it.endTime)?.endTime || '';
+    const timeSpan = (firstTime && lastTime) ? `${firstTime} ～ ${lastTime}` : (historyItems[0]?.completedAt ? new Date(historyItems[0].completedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '本日');
+
+    const totalProdFormatted = `${totalMeters > 0 ? `${totalMeters.toLocaleString()} m` : ''}${totalMeters > 0 && totalPieces > 0 ? ' / ' : ''}${totalPieces > 0 ? `${totalPieces.toLocaleString()} 枚` : ''}${totalMeters > 0 ? ` (${(totalMeters * 100).toLocaleString()} cm)` : ''}`;
+
+    return `
+        <div class="history-sheet">
+            <div class="history-summary-strip">
+                <span>実績時: <strong>${escapeHtml(timeSpan)}</strong></span>
+                <span>完了総数: <strong>${historyItems.length} 巻/束</strong></span>
+                <span>完了総生産量: <strong>${totalProdFormatted}</strong></span>
+            </div>
+
+            <table class="history-schedule-table">
+                <thead>
+                    <tr>
+                        <th style="width: 4%;">No.</th>
+                        <th style="width: 8%;">時間</th>
+                        <th style="width: 14%;">出荷先名</th>
+                        <th style="width: 22%;">基材コード</th>
+                        <th style="width: 8%;">処理コード</th>
+                        <th style="width: 9%;">色コード</th>
+                        <th style="width: 9%;">幅長コード</th>
+                        <th style="width: 9%;">型番</th>
+                        <th style="width: 6%;">巻数</th>
+                        <th style="width: 11%;">生産数量</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+async function handleHistoryReprint(itemId, rollIndex, totalRolls) {
+    const item = (state.completedItems || []).find(d =>
+        String(d._id) === String(itemId) ||
+        String(d.queueId) === String(itemId) ||
+        String(d.itemId) === String(itemId)
+    );
+    if (!item) {
+        showToast('履歴データが見つかりません', 'warning');
+        return;
+    }
+
+    const curRoll = Number(rollIndex) || Number(item.currentRollIndex || item.rollIndex || 1);
+    const total = Number(totalRolls) || Number(item.totalRolls || 1);
+    const hinban = getTablet1Hinban(item) || item.hinban || '品番';
+
+    const confirmed = confirm(
+        `【ラベル再印刷の確認】\n\n品番: ${hinban}\nRoll: ${curRoll} / ${total}\n\nこの完了済みロールのラベルをプリンターへ送信しますか？`
+    );
+    if (!confirmed) return;
+
+    const fields = buildBrotherPrintFields(item, curRoll, total);
+    showPrintProgressModal('再印刷中...', `【${hinban}】Roll ${curRoll} / ${total}`);
+
+    try {
+        const result = await executeBrotherPrint(fields);
+        if (!result.success && !result.isConnectionRefused) {
+            updatePrintProgressError(result.error || '再印刷エラー');
+            return;
+        }
+
+        playChime('success');
+        updatePrintProgressSuccess('再印刷完了', `Roll ${curRoll} / ${total}`);
+        showToast(`🔄 [${hinban}] Roll ${curRoll} を再印刷しました`, 'success');
+    } catch (err) {
+        updatePrintProgressError(err.message || '再印刷に失敗しました');
+    }
+}
+
+function handleHistoryItemClick(itemId) {
+    const item = (state.completedItems || []).find(d =>
+        String(d._id) === String(itemId) ||
+        String(d.queueId) === String(itemId) ||
+        String(d.itemId) === String(itemId)
+    );
+    if (!item) return;
+
+    let matchedSched = null;
+    if (scheduleCache && Array.isArray(scheduleCache.scheduleOrder)) {
+        matchedSched = scheduleCache.scheduleOrder.find(s =>
+            (item.itemId && s.id === item.itemId) ||
+            (item._id && s.id === item._id) ||
+            (item.groupId && s.groupId === item.groupId && Number(s.rollIndex) === Number(item.rollIndex)) ||
+            (s.hinban === item.hinban && (Number(s.rollIndex) === Number(item.rollIndex) || Number(s.orderIndex) === Number(item.orderIndex))) ||
+            (s.kizai === item.kizai && Number(s.orderIndex) === Number(item.orderIndex))
+        );
+    }
+
+    const orderIndex = item.orderIndex || matchedSched?.orderIndex || item.queuePosition || 1;
+    const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
+    const totalRolls = Number(item.totalRolls || 1);
+    const hinban = (matchedSched && (matchedSched.kizai || matchedSched.hinban)) || getTablet1Hinban(item) || item.kizai || item.hinban || '品番未設定';
+    const color = item.color || matchedSched?.color || '標準';
+    const dest = (matchedSched && matchedSched.shippingDest) || item.shippingDest || '—';
+    const meters = item.metersPerRoll || item.rollMeters || item.meters || item.bicho || matchedSched?.meters || 0;
+    const photoUrl = item.imageUrl || item.photoUrl || '';
+    const completedAt = item.completedAt || item.actualEndTime || item.updatedAt || '';
+    const worker = item.wrapperWorker || item.worker || '包装担当';
+    const status = item.status || 'completed';
+
+    let timeStr = '—';
+    if (completedAt) {
+        const d = new Date(completedAt);
+        if (!isNaN(d.getTime())) {
+            timeStr = `${d.toLocaleDateString('ja-JP')} ${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}`;
+        } else {
+            timeStr = String(completedAt);
+        }
+    }
+
+    const modal = document.getElementById('historyDetailModal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('histModalTitle');
+    const subEl = document.getElementById('histModalSubtitle');
+    const bodyEl = document.getElementById('histModalBody');
+    const reprintBtn = document.getElementById('btnHistModalReprint');
+
+    if (titleEl) titleEl.textContent = `${hinban} (#${orderIndex})`;
+    if (subEl) subEl.textContent = `Roll ${curRoll} / ${totalRolls} 巻 · ${meters}m · ${color}`;
+
+    if (bodyEl) {
+        const photoCaption = (typeof _t === 'function' && _t('fk2_photo_modal_caption')) || '現品票写真';
+        const tapToEnlarge = (typeof _t === 'function' && _t('fk2_tap_to_enlarge')) || 'タップで拡大';
+
+        bodyEl.innerHTML = `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--btn-radius); padding: 12px 14px; font-size: 0.85rem;">
+                <div><span style="color: var(--text-soft); font-weight: 700;">状態:</span> <strong style="color: ${status === 'scrapped' ? 'var(--red)' : 'var(--brand)'};">${status === 'scrapped' ? '破棄/スキップ' : '包装完了・印刷済'}</strong></div>
+                <div><span style="color: var(--text-soft); font-weight: 700;">出荷先:</span> <strong>${escapeHtml(dest)}</strong></div>
+                <div><span style="color: var(--text-soft); font-weight: 700;">完了日時:</span> <strong>${escapeHtml(timeStr)}</strong></div>
+                <div><span style="color: var(--text-soft); font-weight: 700;">作業担当:</span> <strong>${escapeHtml(worker)}</strong></div>
+                ${item.uniqueID ? `<div style="grid-column: 1 / -1;"><span style="color: var(--text-soft); font-weight: 700;">固有ID (UID):</span> <code style="font-size: 0.9rem; font-weight: 800; color: #1E293B; background: #E2E8F0; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.5px;">${escapeHtml(item.uniqueID)}</code></div>` : ''}
+            </div>
+
+            ${photoUrl ? `
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <span style="font-size: 0.825rem; font-weight: 700; color: var(--text-soft);">${escapeHtml(photoCaption)}:</span>
+                    <div style="position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); max-height: 180px; cursor: pointer;" onclick="openPhotoModal('${photoUrl}', '${escapeHtml(hinban)} - ${escapeHtml(photoCaption)}')">
+                        <img src="${photoUrl}" alt="Photo" style="width: 100%; height: 180px; object-fit: cover;">
+                        <div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: var(--r-pill);">
+                            🔍 ${escapeHtml(tapToEnlarge)}
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+        `;
+    }
+
+    if (reprintBtn) {
+        reprintBtn.onclick = () => {
+            closeHistoryDetailModal();
+            handleHistoryReprint(itemId, curRoll, totalRolls);
+        };
+    }
+
+    modal.classList.add('open');
+}
+
+function closeHistoryDetailModal() {
+    const modal = document.getElementById('historyDetailModal');
+    if (modal) modal.classList.remove('open');
+}
+
+// -----------------------------------------------------
 // Print Action: Primary
 // -----------------------------------------------------
 async function handlePrintRollLabel() {
@@ -878,6 +1673,26 @@ async function handlePrintRollLabel() {
     state.isPrinting = true;
 
     const item = state.activeItem;
+
+    // Ensure item has a uniqueID before printing
+    if (!item.uniqueID && (item._id || item.queueId || item.itemId)) {
+        try {
+            const res = await fetch(`${serverURL}/api/production/queue/ensure-unique-id`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ _id: item._id, queueId: item.queueId, itemId: item.itemId })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.uniqueID) {
+                    item.uniqueID = data.uniqueID;
+                }
+            }
+        } catch (e) {
+            console.warn('Could not ensure uniqueID from server:', e);
+        }
+    }
+
     const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
     const totalRolls = Number(item.totalRolls) || 1;
 
@@ -890,26 +1705,16 @@ async function handlePrintRollLabel() {
     try {
         const printResult = await executeBrotherPrint(fields);
 
+        // Strictly check for print success - DO NOT ADVANCE if printing failed
         if (!printResult.success) {
             console.warn('Printer warning/error:', printResult.error);
-            // If connection refused (test/browser without brother client), ask if user wants to advance anyway
-            if (printResult.isConnectionRefused) {
-                const advanceAnyway = confirm(
-                    `【プリンター未検出】\n${printResult.error}\n\nBrother Web Print または プリンタークライアントが未起動です。\n\nテストまたは手動印刷として、キューの巻番号を進めますか？`
-                );
-                if (!advanceAnyway) {
-                    updatePrintProgressError(printResult.error);
-                    state.isPrinting = false;
-                    return;
-                }
-            } else {
-                updatePrintProgressError(printResult.error || 'プリンターエラー');
-                state.isPrinting = false;
-                return;
-            }
+            updatePrintProgressError(printResult.error || 'プリンターエラー (印刷未完了)');
+            state.isPrinting = false;
+            showToast('❌ 印刷に失敗しました。プリンターを確認してください。（障害時は「印刷不可・次へ」ボタンで進めます）', 'error', 6000);
+            return;
         }
 
-        // On success:
+        // On confirmed print success:
         playChime('success');
         updatePrintProgressSuccess('印刷完了！', `Roll ${curRoll} / ${totalRolls} を発行しました`);
 
@@ -921,16 +1726,27 @@ async function handlePrintRollLabel() {
             hinban: item.hinban,
             rollIndex: curRoll,
             totalRolls: totalRolls,
+            uniqueID: item.uniqueID || '',
             timestamp: now.toISOString(),
             timeStr
         };
         localStorage.setItem('firstkojo2_last_printed', JSON.stringify(state.lastPrinted));
 
-        // Call advance & print-log API
-        await Promise.allSettled([
-            advanceQueueRoll(item, curRoll, totalRolls),
-            logPrintToServer(item, curRoll, totalRolls, fields, timeStr)
-        ]);
+        // Call advance API with print log details
+        const printLogPayload = {
+            rollIndex: curRoll,
+            totalRolls: totalRolls,
+            lotNo: item.lotNo || fields.txtLotNo || '',
+            barcode: fields.barcode_barcode || fields.txtBarcode || '',
+            uniqueID: item.uniqueID || '',
+            worker: state.workerName || '包装作業者',
+            machine: state.machineName,
+            timestamp: now.toISOString(),
+            timeStr,
+            printSuccess: true
+        };
+
+        await advanceQueueRoll(item, curRoll, totalRolls, { printLog: printLogPayload });
 
         showToast(`✅ Roll ${curRoll}/${totalRolls} のラベルを発行しました`, 'success');
     } catch (err) {
@@ -941,22 +1757,74 @@ async function handlePrintRollLabel() {
     }
 }
 
-async function advanceQueueRoll(item, curRoll, totalRolls) {
+// -----------------------------------------------------
+// Manual Advance when Printer is Broken / Unavailable
+// -----------------------------------------------------
+async function handleCantPrintAdvance() {
+    if (!state.activeItem) {
+        showToast('包装対象のロットがありません', 'warning');
+        return;
+    }
+    if (state.isPrinting) return;
+
+    const item = state.activeItem;
+    const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
+    const totalRolls = Number(item.totalRolls) || 1;
+
+    const confirmed = confirm(
+        `【印刷不可の確認】\n\nプリンター障害・用紙切れ等でラベル印刷ができませんか？\n\nRoll ${curRoll} / ${totalRolls} の印刷をスキップして「完了」にし、次の巻へ進めますか？`
+    );
+    if (!confirmed) return;
+
+    showPrintProgressModal('手動進行中...', `【${item.hinban}】Roll ${curRoll} / ${totalRolls} (印刷不可・進行)`);
+
+    try {
+        await advanceQueueRoll(item, curRoll, totalRolls, {
+            manualAdvance: true,
+            reason: '印刷不可による手動進行'
+        });
+        updatePrintProgressSuccess('完了！', `Roll ${curRoll} / ${totalRolls} を印刷不可として完了しました`);
+        showToast(`⚠️ Roll ${curRoll}/${totalRolls} を印刷不可として完了し、次へ進めました`, 'warning', 4000);
+    } catch (err) {
+        console.error('Error during manual advance:', err);
+        updatePrintProgressError(err.message || '進行エラー');
+    }
+}
+
+async function advanceQueueRoll(item, curRoll, totalRolls, options = {}) {
     const queueId = item._id || item.queueId;
     const groupId = item.groupId;
 
+    // Pre-fetch live temperatures from Mini PC for the next roll transitioning to in-progress
+    let nextTemps = null;
     try {
+        nextTemps = await fetchLiveTemperaturesFromMiniPC();
+    } catch (e) {
+        console.warn('Could not fetch live temps during advance:', e);
+    }
+
+    try {
+        const payload = {
+            _id: queueId,
+            queueId: queueId,
+            groupId,
+            date: state.selectedDate,
+            machine: state.machineName,
+            worker: state.workerName || '包装作業者',
+            rollIndex: curRoll,
+            totalRolls,
+            manualAdvance: Boolean(options.manualAdvance),
+            reason: options.reason || '',
+            printLog: options.printLog || null,
+            nextRollTemperatures: nextTemps || null,
+            meters: options.meters !== undefined ? options.meters : (item.meters || item.rollMeters),
+            finishedEarly: Boolean(options.finishedEarly)
+        };
+
         const res = await fetch(`${serverURL}/api/production/queue/advance`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                date: state.selectedDate,
-                machine: state.machineName,
-                queueId,
-                groupId,
-                rollIndex: curRoll,
-                totalRolls
-            })
+            body: JSON.stringify(payload)
         });
 
         if (!res.ok) {
@@ -964,14 +1832,22 @@ async function advanceQueueRoll(item, curRoll, totalRolls) {
         } else {
             const data = await res.json();
             console.log('⏩ Queue advanced:', data);
+
+            // If nextActiveItem was activated and we have temps, ensure it's saved to the document
+            if (data.nextActiveItem && nextTemps && !data.nextActiveItem.temperatures) {
+                await saveRollTemperatureSnapshot(data.nextActiveItem, nextTemps, false);
+            }
         }
     } catch (e) {
         console.warn('Could not advance queue on server, updating locally:', e);
         // Local update
-        if (curRoll >= totalRolls) {
-            item.status = 'completed';
-        } else {
-            item.currentRollIndex = curRoll + 1;
+        item.status = 'completed';
+        if (options.meters !== undefined) {
+            item.meters = options.meters;
+            item.rollMeters = options.meters;
+        }
+        if (options.finishedEarly) {
+            item.finishedEarly = true;
         }
         saveLocalQueue();
     }
@@ -1089,49 +1965,128 @@ async function submitScrapRoll() {
 }
 
 // -----------------------------------------------------
-// Edge Case 3: Finish Lot Early
+// Edge Case 3: Finish Lot Early (Meter Adjustment)
 // -----------------------------------------------------
-async function submitFinishEarly() {
+async function submitFinishEarly(shouldPrint = true) {
     if (!state.activeItem) return;
+    if (state.isPrinting) return;
 
     const item = state.activeItem;
-    const inputActual = document.getElementById('inputActualRolls');
-    const selectReason = document.getElementById('selectFinishReason');
+    const inputActual = document.getElementById('inputActualMeters');
+    const actualMeters = parseFloat(inputActual?.value);
 
-    const actualRolls = Number(inputActual?.value || 0);
-    const reason = selectReason?.value || '材料短尺・原反不足';
+    if (isNaN(actualMeters) || actualMeters <= 0) {
+        showToast('⚠️ 有効なメーター数を入力してください', 'warning');
+        return;
+    }
 
     closeFinishEarlyModal();
-    playChime('warning');
 
-    try {
-        const res = await fetch(`${serverURL}/api/production/queue/finish-early`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                date: state.selectedDate,
-                machine: state.machineName,
-                queueId: item._id || item.queueId,
-                groupId: item.groupId,
-                actualRollsProduced: actualRolls,
-                reason
-            })
-        });
+    // Update activeItem meters to the actual finished meters
+    item.meters = actualMeters;
+    item.rollMeters = actualMeters;
+    item.finishedEarly = true;
 
-        if (!res.ok) {
-            throw new Error(`Server finish-early failed: HTTP ${res.status}`);
+    const curRoll = Number(item.currentRollIndex || item.rollIndex || 1);
+    const totalRolls = Number(item.totalRolls) || 1;
+
+    if (shouldPrint) {
+        state.isPrinting = true;
+
+        // Ensure uniqueID exists
+        if (!item.uniqueID && (item._id || item.queueId || item.itemId)) {
+            try {
+                const res = await fetch(`${serverURL}/api/production/queue/ensure-unique-id`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ _id: item._id, queueId: item.queueId, itemId: item.itemId })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.uniqueID) item.uniqueID = data.uniqueID;
+                }
+            } catch (e) {
+                console.warn('Could not ensure uniqueID from server:', e);
+            }
         }
 
-        showToast(`🏁 ロット中途完了: 実 ${actualRolls} 巻で完了しました`, 'info');
-        await fetchProductionQueue();
-    } catch (err) {
-        console.warn('Finish early API error, advancing locally:', err);
-        item.status = 'completed';
-        item.actualRollsProduced = actualRolls;
-        item.finishedEarly = true;
-        saveLocalQueue();
-        await fetchProductionQueue();
-        showToast(`🏁 ロットを中途完了しました (実 ${actualRolls} 巻)`, 'info');
+        // Build brother print fields with updated actual meters
+        const fields = buildBrotherPrintFields(item, curRoll, totalRolls);
+        showPrintProgressModal('ラベル印刷中...', `【${item.hinban}】Roll ${curRoll} / ${totalRolls} (実 ${actualMeters}m)`);
+
+        try {
+            const printResult = await executeBrotherPrint(fields);
+            if (!printResult.success) {
+                console.warn('Printer warning/error:', printResult.error);
+                updatePrintProgressError(printResult.error || 'プリンターエラー (印刷未完了)');
+                state.isPrinting = false;
+                showToast('❌ 印刷に失敗しました。プリンターを確認してください。（障害時は「印刷スキップして完了」で進めます）', 'error', 6000);
+                return;
+            }
+
+            playChime('success');
+            updatePrintProgressSuccess('印刷完了！', `Roll ${curRoll} / ${totalRolls} (実 ${actualMeters}m) を発行しました`);
+
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+            state.lastPrinted = {
+                fields,
+                hinban: item.hinban,
+                rollIndex: curRoll,
+                totalRolls: totalRolls,
+                uniqueID: item.uniqueID || '',
+                meters: actualMeters,
+                timestamp: now.toISOString(),
+                timeStr
+            };
+            localStorage.setItem('firstkojo2_last_printed', JSON.stringify(state.lastPrinted));
+
+            const printLogPayload = {
+                rollIndex: curRoll,
+                totalRolls: totalRolls,
+                lotNo: item.lotNo || fields.txtLotNo || '',
+                barcode: fields.barcode_barcode || fields.txtBarcode || '',
+                uniqueID: item.uniqueID || '',
+                meters: actualMeters,
+                worker: state.workerName || '包装作業者',
+                machine: state.machineName,
+                timestamp: now.toISOString(),
+                timeStr,
+                printSuccess: true,
+                finishedEarly: true
+            };
+
+            await advanceQueueRoll(item, curRoll, totalRolls, {
+                meters: actualMeters,
+                finishedEarly: true,
+                printLog: printLogPayload
+            });
+
+            showToast(`✅ Roll ${curRoll}/${totalRolls} を実 ${actualMeters}m でラベル発行・完了しました`, 'success');
+        } catch (err) {
+            console.error('Error during finish early print:', err);
+            updatePrintProgressError(err.message || '印刷エラー');
+        } finally {
+            state.isPrinting = false;
+        }
+    } else {
+        // Skip printing & complete
+        playChime('warning');
+        showPrintProgressModal('中途完了 進行中...', `【${item.hinban}】Roll ${curRoll} / ${totalRolls} (実 ${actualMeters}m · 印刷スキップ)`);
+
+        try {
+            await advanceQueueRoll(item, curRoll, totalRolls, {
+                manualAdvance: true,
+                reason: `中途完了 (実 ${actualMeters}m · 印刷スキップ)`,
+                meters: actualMeters,
+                finishedEarly: true
+            });
+            updatePrintProgressSuccess('完了！', `Roll ${curRoll} / ${totalRolls} (実 ${actualMeters}m) を印刷スキップで完了しました`);
+            showToast(`⚠️ Roll ${curRoll}/${totalRolls} を実 ${actualMeters}m で完了しました (印刷スキップ)`, 'warning', 4000);
+        } catch (err) {
+            console.error('Error during skip print advance:', err);
+            updatePrintProgressError(err.message || '進行エラー');
+        }
     }
 }
 
@@ -1161,6 +2116,14 @@ async function handleSelectQueueItem(queueId, hinban) {
 
         playChime('beep');
         showToast(`🎯 包装対象を「${hinban}」に切り替えました`, 'info');
+
+        // Capture temperature snapshot for newly selected in-progress roll
+        fetchLiveTemperaturesFromMiniPC().then(temps => {
+            if (temps) {
+                saveRollTemperatureSnapshot({ _id: queueId }, temps, true);
+            }
+        });
+
         await fetchProductionQueue();
     } catch (err) {
         console.warn('Queue select API error, switching locally:', err);
@@ -1168,11 +2131,11 @@ async function handleSelectQueueItem(queueId, hinban) {
         const found = state.queue.find(i => (i._id === queueId || i.queueId === queueId));
         if (found) {
             state.queue.forEach(i => {
-                if (i.status === 'active') i.status = 'queued';
+                if (i.status === 'active' || i.status === 'in-progress') i.status = 'queued';
             });
             found.status = 'active';
             state.activeItem = found;
-            state.waitingItems = state.queue.filter(i => i !== found && i.status !== 'completed');
+            state.waitingItems = state.queue.filter(i => i !== found && i.status !== 'completed' && i.status !== 'scrapped');
             saveLocalQueue();
             renderApp();
         }
@@ -1358,10 +2321,12 @@ function setSseBadgeStatus(connected) {
 
     if (connected) {
         badge.className = 'sse-badge connected';
-        text.textContent = '接続中 (Live)';
+        const liveText = (typeof _t === 'function' && _t('sse_connected')) || '接続中';
+        text.textContent = `${liveText} (Live)`;
     } else {
         badge.className = 'sse-badge disconnected';
-        text.textContent = '切断中 (Offline)';
+        const offlineText = (typeof _t === 'function' && _t('sse_disconnected')) || '切断中';
+        text.textContent = `${offlineText} (Offline)`;
     }
 }
 
@@ -1369,6 +2334,13 @@ function setSseBadgeStatus(connected) {
 // Event Listeners & Initialization
 // -----------------------------------------------------
 function setupEventListeners() {
+    // Listen for language changes from i18n
+    document.addEventListener('languageChanged', () => {
+        renderMachineTag();
+        setSseBadgeStatus(state.sseConnected);
+        renderApp();
+    });
+
     // Date Navigation
     const btnPrev = document.getElementById('btnPrevDay');
     const btnNext = document.getElementById('btnNextDay');
@@ -1407,8 +2379,10 @@ function setupEventListeners() {
         btnRefresh.addEventListener('click', () => {
             btnRefresh.style.transform = 'rotate(180deg)';
             setTimeout(() => { btnRefresh.style.transform = ''; }, 300);
+            // Re-fetch fresh Mini PC IP on reload / manual refresh
+            resolvePsaMiniPcIP(true);
             fetchProductionQueue(true);
-            showToast('キューを更新しました', 'info', 1800);
+            showToast('キューと設備IPを更新しました', 'info', 1800);
         });
     }
 
@@ -1430,9 +2404,9 @@ function setupEventListeners() {
     if (btnFull) {
         btnFull.addEventListener('click', () => {
             if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen?.().catch(() => {});
+                document.documentElement.requestFullscreen?.().catch(() => { });
             } else {
-                document.exitFullscreen?.().catch(() => {});
+                document.exitFullscreen?.().catch(() => { });
             }
         });
     }
@@ -1444,6 +2418,7 @@ function setupEventListeners() {
             closePrintProgressModal();
             closeScrapModal();
             closeFinishEarlyModal();
+            closeHistoryDetailModal();
         }
     });
 
@@ -1485,6 +2460,8 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 firstKojoNippo2 initialized (Tablet 2 Wrapping & Label Printing)');
     parseUrlParams();
     setupEventListeners();
+    // Always fetch fresh Mini PC IP from Google Sheets on page load / reload
+    resolvePsaMiniPcIP(true);
     fetchProductionQueue(true);
     initEventSource();
 
