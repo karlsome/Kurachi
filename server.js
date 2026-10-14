@@ -13465,6 +13465,214 @@ function toDigitalTwinNumber(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function timeToDigitalTwinMinutes(t) {
+  if (!t || typeof t !== 'string') return null;
+  const m = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
+function minutesToDigitalTwinTime(mins) {
+  if (mins === null || mins === undefined) return '';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function buildDigitalTwinTimelineSegments({
+  runs = [],
+  activeRun = null,
+  currentStatus = 'off',
+  dayStartMin = 480,
+  dayEndMin = 1140,
+}) {
+  const segments = [];
+  const addSegment = (type, sMin, eMin, meta = {}) => {
+    if (eMin <= sMin) return;
+    const last = segments[segments.length - 1];
+    if (
+      last &&
+      last.type === type &&
+      last.sebanggo === (meta.sebanggo || '') &&
+      last.label === (meta.label || '')
+    ) {
+      last.endMin = eMin;
+      last.end = minutesToDigitalTwinTime(eMin);
+      last.durationMin = last.endMin - last.startMin;
+      return;
+    }
+    segments.push({
+      type,
+      startMin: sMin,
+      endMin: eMin,
+      start: minutesToDigitalTwinTime(sMin),
+      end: minutesToDigitalTwinTime(eMin),
+      durationMin: eMin - sMin,
+      sebanggo: meta.sebanggo || '',
+      hinban: meta.hinban || '',
+      worker: meta.worker || '',
+      pieces: meta.pieces || 0,
+      shots: meta.shots || 0,
+      label: meta.label || '',
+    });
+  };
+
+  let minShiftStart = dayStartMin;
+  let maxShiftEnd = dayEndMin;
+  runs.forEach((r) => {
+    if (r.startMin !== null && r.startMin < minShiftStart) minShiftStart = Math.floor(r.startMin / 30) * 30;
+    if (r.endMin !== null && r.endMin > maxShiftEnd) maxShiftEnd = Math.ceil(r.endMin / 30) * 30;
+  });
+  if (activeRun && activeRun.startMin !== null && activeRun.startMin < minShiftStart) {
+    minShiftStart = Math.floor(activeRun.startMin / 30) * 30;
+  }
+  if (activeRun && activeRun.endMin !== null && activeRun.endMin > maxShiftEnd) {
+    maxShiftEnd = Math.ceil(activeRun.endMin / 30) * 30;
+  }
+
+  let cursor = minShiftStart;
+
+  for (const r of runs) {
+    if (r.startMin === null || r.endMin === null) continue;
+    if (r.startMin > cursor) {
+      const gap = r.startMin - cursor;
+      addSegment(gap <= 15 ? 'setup' : 'idle', cursor, r.startMin, {
+        label: gap <= 15 ? '段取・切替' : 'アイドル',
+      });
+      cursor = r.startMin;
+    }
+
+    const subEvents = [];
+    (r.breaks || []).forEach((b) => {
+      if (b.startMin >= r.startMin && b.endMin <= r.endMin && b.endMin > b.startMin) {
+        subEvents.push({ type: 'break', startMin: b.startMin, endMin: b.endMin, label: '休憩' });
+      }
+    });
+    (r.stopCalls || []).forEach((s) => {
+      const sMin = timeToDigitalTwinMinutes(s.start || s.time);
+      const eMin = timeToDigitalTwinMinutes(s.end || s.resolvedAt);
+      if (sMin !== null && eMin !== null && sMin >= r.startMin && eMin <= r.endMin && eMin > sMin) {
+        subEvents.push({ type: 'stopCall', startMin: sMin, endMin: eMin, label: '呼出・停止' });
+      }
+    });
+    (r.maintenances || []).forEach((m) => {
+      const sMin = timeToDigitalTwinMinutes(m.start);
+      const eMin = timeToDigitalTwinMinutes(m.end);
+      if (sMin !== null && eMin !== null && sMin >= r.startMin && eMin <= r.endMin && eMin > sMin) {
+        subEvents.push({ type: 'maintenance', startMin: sMin, endMin: eMin, label: 'メンテナンス' });
+      }
+    });
+    subEvents.sort((a, b) => a.startMin - b.startMin);
+
+    let runCursor = r.startMin;
+    for (const sub of subEvents) {
+      if (sub.startMin > runCursor) {
+        addSegment('running', runCursor, sub.startMin, {
+          sebanggo: r.sebanggo,
+          hinban: r.hinban,
+          worker: r.worker,
+          label: r.sebanggo || '稼働',
+        });
+      }
+      addSegment(sub.type, Math.max(runCursor, sub.startMin), sub.endMin, {
+        label: sub.label,
+      });
+      runCursor = Math.max(runCursor, sub.endMin);
+    }
+    if (runCursor < r.endMin) {
+      addSegment('running', runCursor, r.endMin, {
+        sebanggo: r.sebanggo,
+        hinban: r.hinban,
+        worker: r.worker,
+        label: r.sebanggo || '稼働',
+      });
+    }
+    cursor = Math.max(cursor, r.endMin);
+  }
+
+  if (activeRun && activeRun.startMin !== null && activeRun.endMin !== null && activeRun.endMin > cursor) {
+    if (activeRun.startMin > cursor) {
+      const gap = activeRun.startMin - cursor;
+      addSegment(gap <= 15 ? 'setup' : 'idle', cursor, activeRun.startMin, {
+        label: gap <= 15 ? '段取・切替' : 'アイドル',
+      });
+      cursor = activeRun.startMin;
+    }
+    const actType = currentStatus === 'break' ? 'break'
+      : currentStatus === 'stopCall' ? 'stopCall'
+      : currentStatus === 'maintenance' ? 'maintenance'
+      : currentStatus === 'idle' ? 'idle'
+      : 'running';
+    addSegment(actType, cursor, activeRun.endMin, {
+      sebanggo: activeRun.sebanggo,
+      hinban: activeRun.hinban,
+      worker: activeRun.worker,
+      label: activeRun.sebanggo || (actType === 'running' ? '稼働中' : actType),
+    });
+    cursor = activeRun.endMin;
+  }
+
+  if (cursor < maxShiftEnd) {
+    addSegment(currentStatus === 'off' ? 'off' : 'idle', cursor, maxShiftEnd, {
+      label: currentStatus === 'off' ? '停止' : '待機',
+    });
+  }
+
+  const summary = {
+    runningMin: 0,
+    idleMin: 0,
+    setupMin: 0,
+    breakMin: 0,
+    stopCallMin: 0,
+    maintenanceMin: 0,
+    offMin: 0,
+    totalShiftMin: maxShiftEnd - minShiftStart,
+    shiftStart: minutesToDigitalTwinTime(minShiftStart),
+    shiftEnd: minutesToDigitalTwinTime(maxShiftEnd),
+    uptimePercent: 0,
+  };
+  segments.forEach((s) => {
+    if (s.type === 'running') summary.runningMin += s.durationMin;
+    else if (s.type === 'idle') summary.idleMin += s.durationMin;
+    else if (s.type === 'setup') summary.setupMin += s.durationMin;
+    else if (s.type === 'break') summary.breakMin += s.durationMin;
+    else if (s.type === 'stopCall') summary.stopCallMin += s.durationMin;
+    else if (s.type === 'maintenance') summary.maintenanceMin += s.durationMin;
+    else if (s.type === 'off') summary.offMin += s.durationMin;
+  });
+  const operatingMin = summary.runningMin + summary.idleMin + summary.setupMin + summary.stopCallMin + summary.maintenanceMin;
+  summary.uptimePercent = operatingMin > 0 ? Math.round((summary.runningMin / operatingMin) * 100) : 0;
+
+  return { segments, summary };
+}
+
+// Factories that can be shown on the dashboard: any factory with recent press records or a cycle sensor.
+app.get('/api/digital-twin-factories', async (req, res) => {
+  try {
+    const since = new Date(Date.now() + DIGITAL_TWIN_JST_OFFSET_MS - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const masterDb = client.db(DB_NAME);
+    const submittedDb = client.db('submittedDB');
+    const distinctField = (collection, field, match) => collection
+      .aggregate([{ $match: match }, { $group: { _id: `$${field}` } }])
+      .toArray()
+      .then((rows) => rows.map((r) => r._id));
+    const [pressFactories, sensorFactories] = await Promise.all([
+      distinctField(submittedDb.collection('pressDB'), '工場', { Date: { $gte: since } }),
+      distinctField(masterDb.collection('cycleCountDB'), 'factory', {}),
+    ]);
+    const sensorSet = new Set(sensorFactories.map((f) => String(f || '').trim()));
+    const names = [...new Set([...pressFactories, ...sensorFactories].map((f) => String(f || '').trim()))]
+      .filter((f) => f && !f.endsWith('工場') || ['第一工場', '第二工場'].includes(f));
+    const factories = names
+      .map((factory) => ({ factory, hasCycleSensors: sensorSet.has(factory) }))
+      .sort((a, b) => Number(b.hasCycleSensors) - Number(a.hasCycleSensors) || a.factory.localeCompare(b.factory, 'ja'));
+    res.json({ success: true, factories });
+  } catch (error) {
+    console.error('Error listing digital twin factories:', error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
 app.get('/api/digital-twin/:factoryName', async (req, res) => {
   try {
     const factory = String(req.params.factoryName || '').trim();
@@ -13472,10 +13680,11 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
 
     const nowMs = Date.now();
     const { cutoffMs, productionDate, calendarDate } = getDigitalTwinProductionDay(nowMs);
+    const recentSince = new Date(cutoffMs + DIGITAL_TWIN_JST_OFFSET_MS - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const masterDb = client.db(DB_NAME);
     const submittedDb = client.db('submittedDB');
 
-    const [cycleDocs, setsubiDocs, logDocs, goalRows] = await Promise.all([
+    const [cycleDocs, setsubiDocs, logDocs, pressDocs, goalRows, recentEquipment] = await Promise.all([
       masterDb.collection('cycleCountDB').find({ factory }).toArray(),
       masterDb.collection(CHECK_FORM_EQUIPMENT_COLLECTION)
         .find({ 工場: factory, _archived: { $ne: true } })
@@ -13485,11 +13694,21 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         .find({ 工場: factory, Date: { $in: [...new Set([productionDate, calendarDate])] } })
         .project({ 設備: 1, sessionID: 1, 背番号: 1, 品番: 1, Worker_Name: 1, Action: 1, Status: 1, Timestamp: 1 })
         .toArray(),
+      submittedDb.collection('pressDB')
+        .find({ 工場: factory, Date: { $in: [...new Set([productionDate, calendarDate])] } })
+        .sort({ Time_start: 1 })
+        .toArray(),
       submittedDb.collection('productionGoalsDB').aggregate([
         { $match: { factory, date: productionDate } },
         { $group: { _id: null, target: { $sum: { $convert: { input: '$targetQuantity', to: 'double', onError: 0, onNull: 0 } } } } },
       ]).toArray(),
+      // Machines used in the last 30 days (for factories without a fixed floor map)
+      submittedDb.collection('pressDB')
+        .aggregate([{ $match: { 工場: factory, Date: { $gte: recentSince } } }, { $group: { _id: '$設備' } }])
+        .toArray()
+        .then((rows) => rows.map((r) => r._id).filter(Boolean)),
     ]);
+    const recentlyUsedIds = new Set(recentEquipment.flatMap((e) => splitDigitalTwinEquipment(e)));
 
     // ── Machines + pairs from setsubiDB ──
     const machines = new Map();
@@ -13501,6 +13720,8 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
           stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null,
           lastLogMs: null, lastLogStatus: null, sessionEquipment: '',
           worker: '', sebanggo: '', hinban: '', sebanggoAt: 0,
+          // Tablet session: 'Start time set' opens it, 'End time set' marks wrap-up, Submit/Reset closes it
+          sessionStartMs: null, endTimeSet: false,
         });
       }
       return machines.get(id);
@@ -13561,15 +13782,40 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         else if (action === 'Maintenance ended') m.maintenanceAt = null;
         else if (action === 'Break started') m.breakAt = log.ms;
         else if (action === 'Break ended') m.breakAt = null;
-        else if (action === 'Submit button pressed' || action === 'Reset button pressed') {
+        else if (action === 'Start time set') {
+          m.sessionStartMs = log.ms;
+          m.endTimeSet = false;
+        } else if (action === 'End time set') {
+          if (m.sessionStartMs) m.endTimeSet = true;
+        } else if (action === 'Submit button pressed' || action === 'Reset button pressed') {
           m.breakAt = null;
           m.maintenanceAt = null;
+          m.sessionStartMs = null;
+          m.endTimeSet = false;
+        }
+        if (log.Status === 'Completed' || log.Status === 'Reset') {
+          m.sessionStartMs = null;
+          m.endTimeSet = false;
         }
       });
     });
 
-    // ── pcPerCycle from masterDB for active 背番号 ──
-    const sebanggoList = [...new Set([...machines.values()].map((m) => m.sebanggo).filter(Boolean))];
+    // ── Group completed pressDB runs by machine ──
+    const pressByMachine = new Map();
+    pressDocs.forEach((doc) => {
+      splitDigitalTwinEquipment(doc.設備).forEach((id) => {
+        if (!pressByMachine.has(id)) pressByMachine.set(id, []);
+        pressByMachine.get(id).push(doc);
+      });
+    });
+
+    // ── pcPerCycle from masterDB for active + completed 背番号 ──
+    const sebanggoList = [
+      ...new Set([
+        ...[...machines.values()].map((m) => m.sebanggo),
+        ...pressDocs.map((d) => d.背番号),
+      ].filter(Boolean)),
+    ];
     const products = sebanggoList.length
       ? await masterDb.collection('masterDB')
         .find({ 背番号: { $in: sebanggoList } })
@@ -13587,7 +13833,7 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       return toDigitalTwinNumber(config?.[machineId]?.pcPerCycle) ?? toDigitalTwinNumber(product.pcPerCycle);
     };
 
-    // ── Per-machine status ──
+    // ── Per-machine status, accurate piece counts, and timeline ──
     const results = new Map();
     machines.forEach((m) => {
       const cycleIsToday = m.lastCycleMs !== null && m.lastCycleMs >= cutoffMs;
@@ -13600,29 +13846,147 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       else if (m.maintenanceAt) status = 'maintenance';
       else if (m.breakAt) status = 'break';
       else if (cycleIsToday && nowMs - m.lastCycleMs < DIGITAL_TWIN_IDLE_MS) status = 'running';
-      else if (!m.hasCycleSensor && m.lastLogMs && nowMs - m.lastLogMs < DIGITAL_TWIN_IDLE_MS && m.lastLogStatus === 'in-progress') status = 'running';
+      // No cycle sensor: tablet logs go quiet during a run, so an open session (start set, end not yet set) = running
+      else if (!m.hasCycleSensor && m.sessionStartMs && !m.endTimeSet) status = 'running';
       else if (lastActivityMs && nowMs - lastActivityMs < DIGITAL_TWIN_OFF_MS) status = 'idle';
+      else if (!m.hasCycleSensor && m.sessionStartMs) status = 'idle'; // wrap-up left open
 
-      const pcPerCycle = resolvePcPerCycle(productBySebanggo.get(m.sebanggo), m.id);
+      // Parse completed runs for this machine
+      const mPressDocs = pressByMachine.get(m.id) || [];
+      const completedRuns = mPressDocs.map((d) => {
+        const startMin = timeToDigitalTwinMinutes(d.Time_start);
+        const endMin = timeToDigitalTwinMinutes(d.Time_end);
+        const shots = Number(d.ショット数) || 0;
+        const pieces = Number(d.Total_Pieces || d.Process_Quantity) || 0;
+        const breaks = Object.values(d.Break_Time_Data || {})
+          .filter((b) => b && b.start && b.end)
+          .map((b) => ({
+            start: b.start,
+            end: b.end,
+            startMin: timeToDigitalTwinMinutes(b.start),
+            endMin: timeToDigitalTwinMinutes(b.end),
+          }))
+          .filter((b) => b.startMin !== null && b.endMin !== null && b.endMin > b.startMin);
+
+        return {
+          sebanggo: d.背番号 || '',
+          hinban: d.品番 || '',
+          start: d.Time_start || '',
+          end: d.Time_end || '',
+          startMin,
+          endMin,
+          shots,
+          pieces,
+          worker: d.Worker_Name || '',
+          breaks,
+          stopCalls: Array.isArray(d.StopCall?.records) ? d.StopCall.records : [],
+          maintenances: Array.isArray(d.Maintenance_Data?.records) ? d.Maintenance_Data.records : [],
+        };
+      }).sort((a, b) => (a.startMin || 0) - (b.startMin || 0));
+
+      const totalCompletedPieces = completedRuns.reduce((sum, r) => sum + r.pieces, 0);
+      const totalCompletedShots = completedRuns.reduce((sum, r) => sum + r.shots, 0);
+
+      // Active / in-progress run calculation
+      const activeCycles = (cycleIsToday && m.hasCycleSensor)
+        ? Math.max(0, todayCycles - totalCompletedShots)
+        : 0;
+      const activePcPerCycle = resolvePcPerCycle(productBySebanggo.get(m.sebanggo), m.id);
+      const activePieces = activeCycles > 0 && activePcPerCycle ? activeCycles * activePcPerCycle : 0;
+
+      let pieces = null;
+      if (totalCompletedPieces > 0 || activePieces > 0) {
+        pieces = totalCompletedPieces + activePieces;
+      } else if (todayCycles > 0 && activePcPerCycle) {
+        pieces = todayCycles * activePcPerCycle;
+      }
+
+      // Display cycles: sensor count if available, otherwise total shots from press records
+      const displayCycles = m.hasCycleSensor ? todayCycles : totalCompletedShots;
+
+      // Active run object (if currently in progress)
+      let activeRun = null;
+      if ((m.lastLogStatus === 'in-progress' || m.sessionStartMs) && status !== 'off') {
+        let activeStartMin = 480;
+        if (m.sessionStartMs) {
+          const d = new Date(m.sessionStartMs + DIGITAL_TWIN_JST_OFFSET_MS);
+          activeStartMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+        } else if (completedRuns.length > 0 && completedRuns[completedRuns.length - 1].endMin) {
+          activeStartMin = completedRuns[completedRuns.length - 1].endMin;
+        } else if (m.sebanggoAt) {
+          const d = new Date(m.sebanggoAt + DIGITAL_TWIN_JST_OFFSET_MS);
+          activeStartMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+        }
+        const jstNow = new Date(nowMs + DIGITAL_TWIN_JST_OFFSET_MS);
+        const nowMin = jstNow.getUTCHours() * 60 + jstNow.getUTCMinutes();
+        const activeEndMin = Math.max(activeStartMin, nowMin);
+
+        activeRun = {
+          sebanggo: m.sebanggo || '',
+          hinban: m.hinban || '',
+          worker: m.worker || '',
+          start: minutesToDigitalTwinTime(activeStartMin),
+          end: minutesToDigitalTwinTime(activeEndMin),
+          startMin: activeStartMin,
+          endMin: activeEndMin,
+          shots: activeCycles,
+          pieces: activePieces,
+          status,
+        };
+      }
+
+      // Build timeline segments and summary
+      const { segments: timeline, summary: timelineSummary } = buildDigitalTwinTimelineSegments({
+        runs: completedRuns,
+        activeRun,
+        currentStatus: status,
+        dayStartMin: 480,
+        dayEndMin: 1140,
+      });
+
+      // Clean runs for frontend response
+      const cleanRuns = completedRuns.map(({ sebanggo, hinban, start, end, shots, pieces: rPieces, worker }) => ({
+        sebanggo,
+        hinban,
+        start,
+        end,
+        shots,
+        pieces: rPieces,
+        worker,
+        durationMin: (timeToDigitalTwinMinutes(end) || 0) - (timeToDigitalTwinMinutes(start) || 0),
+      }));
+
+      // Worker and product fallback from latest run if idle/off
+      const fallbackWorker = m.worker || (cleanRuns.length > 0 ? cleanRuns[cleanRuns.length - 1].worker : '');
+      const fallbackSebanggo = m.sebanggo || (cleanRuns.length > 0 ? cleanRuns[cleanRuns.length - 1].sebanggo : '');
+      const fallbackHinban = m.hinban || (cleanRuns.length > 0 ? cleanRuns[cleanRuns.length - 1].hinban : '');
+
       results.set(m.id, {
         id: m.id,
         noOfHead: m.noOfHead,
         tableLength: m.tableLength,
         hasCycleSensor: m.hasCycleSensor,
+        statusSource: m.hasCycleSensor ? 'sensor' : 'tablet',
+        recentlyUsed: m.hasCycleSensor || recentlyUsedIds.has(m.id) || m.lastLogMs !== null || mPressDocs.length > 0,
+        sessionStartedAt: m.sessionStartMs ? new Date(m.sessionStartMs).toISOString() : null,
         status,
         cycle: m.cycleRaw,
-        todayCycles,
+        todayCycles: displayCycles,
         lastCycleAt: m.lastCycleMs ? new Date(m.lastCycleMs).toISOString() : null,
         secondsSinceCycle: cycleIsToday ? Math.max(0, Math.round((nowMs - m.lastCycleMs) / 1000)) : null,
         lastActivityAt: lastActivityMs ? new Date(lastActivityMs).toISOString() : null,
-        worker: m.worker || '',
-        sebanggo: m.sebanggo || '',
-        hinban: m.hinban || '',
-        pcPerCycle,
-        pieces: pcPerCycle ? todayCycles * pcPerCycle : null,
+        worker: fallbackWorker,
+        sebanggo: fallbackSebanggo,
+        hinban: fallbackHinban,
+        pcPerCycle: activePcPerCycle,
+        pieces,
         alertSince: m.stopCallAt || m.cncCancelAt || m.maintenanceAt || m.breakAt
           ? new Date(m.stopCallAt || m.cncCancelAt || m.maintenanceAt || m.breakAt).toISOString()
           : null,
+        completedRuns: cleanRuns,
+        activeRun,
+        timeline,
+        timelineSummary,
         pair: null,
         _sessionEquipment: m.sessionEquipment,
       });
@@ -13635,19 +13999,27 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       const partner = results.get(partnerId);
       const together = splitDigitalTwinEquipment(r._sessionEquipment).length === 2
         || (partner && splitDigitalTwinEquipment(partner._sessionEquipment).length === 2
-          && splitDigitalTwinEquipment(partner._sessionEquipment).includes(r.id));
+          && splitDigitalTwinEquipment(partner._sessionEquipment).includes(r.id))
+        || (r.completedRuns.length > 0 && partner && partner.completedRuns.length > 0
+          && r.completedRuns[0].start === partner.completedRuns[0]?.start
+          && r.completedRuns[0].sebanggo === partner.completedRuns[0]?.sebanggo);
+
       r.pair = { partner: partnerId, together: Boolean(together) };
     });
+
     results.forEach((r) => {
       if (!r.pair?.together) return;
       const partner = results.get(r.pair.partner);
       if (!partner) return;
       const statuses = [r.status, partner.status];
       r.pair.status = DIGITAL_TWIN_STATUS_PRIORITY.find((s) => statuses.includes(s)) || r.status;
-      r.pair.sharedCycles = (r.todayCycles || 0) + (partner.todayCycles || 0);
-      r.pair.sharedPieces = (r.pieces ?? 0) + (partner.pieces ?? 0);
+      r.pair.sharedCycles = r.hasCycleSensor && partner.hasCycleSensor
+        ? (r.todayCycles || 0) + (partner.todayCycles || 0)
+        : Math.max(r.todayCycles || 0, partner.todayCycles || 0);
+      r.pair.sharedPieces = Math.max(r.pieces ?? 0, partner.pieces ?? 0);
       r.pair.worker = r.worker || partner.worker;
       r.pair.sebanggo = r.sebanggo || partner.sebanggo;
+      r.pair.completedRuns = r.completedRuns.length >= partner.completedRuns.length ? r.completedRuns : partner.completedRuns;
     });
 
     const machineList = [...results.values()]
@@ -13660,12 +14032,108 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       generatedAt: new Date(nowMs).toISOString(),
       productionDate,
       idleThresholdMinutes: DIGITAL_TWIN_IDLE_MS / 60000,
+      hasCycleSensors: machineList.some((m) => m.hasCycleSensor),
       goal: goalRows[0]?.target || 0,
       machines: machineList,
     });
   } catch (error) {
     console.error(`Error building digital twin for ${req.params.factoryName}:`, error);
     res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// ── DIGITAL TWIN ANNOTATIONS (Permanent 3D sensor & camera spatial coordinates) ──
+app.get('/api/digital-twin/:factoryName/annotations', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    try { await client.connect(); } catch (_) {}
+    const masterDb = client.db(DB_NAME);
+    const doc = await masterDb.collection('twinAnnotations').findOne({ factory });
+
+    if (!doc) {
+      return res.json({
+        success: true,
+        factory,
+        sensors: null,
+        cameras: null,
+        updatedAt: null,
+      });
+    }
+
+    res.json({
+      success: true,
+      factory,
+      sensors: Array.isArray(doc.sensors) ? doc.sensors : [],
+      cameras: Array.isArray(doc.cameras) ? doc.cameras : [],
+      updatedAt: doc.updatedAt || null,
+      updatedBy: doc.updatedBy || null,
+    });
+  } catch (error) {
+    console.error(`Error fetching annotations for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/digital-twin/:factoryName/annotations', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    const { sensors, cameras, updatedBy } = req.body || {};
+    try { await client.connect(); } catch (_) {}
+    const masterDb = client.db(DB_NAME);
+    const now = new Date();
+
+    const updateDoc = {
+      $set: {
+        factory,
+        sensors: Array.isArray(sensors) ? sensors : [],
+        cameras: Array.isArray(cameras) ? cameras : [],
+        updatedAt: now,
+        updatedBy: String(updatedBy || 'admin').trim(),
+      },
+      $setOnInsert: {
+        createdAt: now,
+      },
+    };
+
+    await masterDb.collection('twinAnnotations').updateOne(
+      { factory },
+      updateDoc,
+      { upsert: true }
+    );
+
+    res.json({
+      success: true,
+      factory,
+      updatedAt: now,
+      message: 'Annotations saved permanently to MongoDB',
+    });
+  } catch (error) {
+    console.error(`Error saving annotations for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/digital-twin/:factoryName/annotations', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    try { await client.connect(); } catch (_) {}
+    const masterDb = client.db(DB_NAME);
+    await masterDb.collection('twinAnnotations').deleteOne({ factory });
+
+    res.json({
+      success: true,
+      factory,
+      message: 'Annotations reset to default',
+    });
+  } catch (error) {
+    console.error(`Error resetting annotations for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
