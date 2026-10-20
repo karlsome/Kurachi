@@ -5877,6 +5877,10 @@
 
     <!-- Core application dependencies -->
     <script src="i18n.js"></script>
+    <script>
+        // SCNA add-on: loaded ONLY for ?filter=SCNA, and before the backend so it can normalise the machine param.
+        if (new URLSearchParams(location.search).get('filter') === 'SCNA') document.write('<script src="DCP interactive SCNA.js"><\/script>');
+    </script>
     <script src="DCP interactive backend.js"></script>
     <script src="html5-qrcode.min.js"></script>
 

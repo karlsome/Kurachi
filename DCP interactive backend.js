@@ -13128,7 +13128,7 @@ if (manualSendModal) {
       const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
       const missingPc = machines.some(m => resolveFeed(m).pcPerCycle == null);
 
-      if (!missingPc && payload.Total_Pieces != null) {
+      if (!missingPc && payload.Total_Pieces != null && !window.__scnaManualQty) { // SCNA keeps Process Quantity manual
         pqEl.value = String(payload.Total_Pieces);
         pqEl.readOnly = true;
         pqEl.style.backgroundColor = '#f3f4f6';
