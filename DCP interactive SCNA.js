@@ -33,21 +33,30 @@
   /* 1. Machines + tablet home (runs immediately, before the backend)    */
   /* ------------------------------------------------------------------ */
 
-  // "AOL 2,3" | "AOL-2,AOL-3" | "AOL-1" -> ["AOL-2","AOL-3"]. [] if not AOL.
+  // "AOL 2,3" | "AOL-2,AOL-3" | "AOL-1" -> ["AOL-2","AOL-3"]; other machines
+  // (MANAS, SCNA-PSA) are kept as-is, upper-cased.
   function parseMachines(str) {
-    var nums = String(str || '').match(/\d+/g);
-    if (!nums || !/AOL/i.test(String(str))) return [];
-    var out = [];
-    nums.forEach(function (n) {
-      var m = 'AOL-' + parseInt(n, 10);
-      if (out.indexOf(m) < 0) out.push(m);
+    var out = [], inAol = false;
+    function add(m) { if (out.indexOf(m) < 0) out.push(m); }
+    String(str || '').split(',').forEach(function (tok) {
+      tok = tok.trim();
+      if (!tok) return;
+      var m = /^AOL[\s-]*(\d+)$/i.exec(tok);
+      if (m) { inAol = true; add('AOL-' + parseInt(m[1], 10)); return; }
+      if (inAol && /^\d+$/.test(tok)) { add('AOL-' + parseInt(tok, 10)); return; }   // "AOL 2,3" -> the "3"
+      inAol = false;
+      add(tok.toUpperCase());
     });
     return out;
   }
-  // ["AOL-2","AOL-3"] -> "AOL 2,3" (legacy 設備 string)
+  // ["AOL-2","AOL-3"] -> "AOL 2,3" (legacy 設備 string); other machines by name
   function legacyLabel(list) {
     if (!list || !list.length) return '';
-    return 'AOL ' + list.map(function (m) { return m.replace('AOL-', ''); }).join(',');
+    var aol = list.filter(function (m) { return /^AOL-\d+$/.test(m); });
+    var rest = list.filter(function (m) { return !/^AOL-\d+$/.test(m); });
+    var parts = [];
+    if (aol.length) parts.push('AOL ' + aol.map(function (m) { return m.replace('AOL-', ''); }).join(','));
+    return parts.concat(rest).join(',');
   }
   function sameList(a, b) {
     return a.length === b.length && a.every(function (x, i) { return x === b[i]; });
@@ -64,7 +73,6 @@
     } catch (e) { /* non-fatal */ }
     try { localStorage.setItem(HOME_KEY, home.join(',')); } catch (e) { }
   } else {
-    // Not an AOL machine string: leave everything alone.
     home = [];
   }
 
@@ -86,12 +94,15 @@
   /* 2. Network hooks (fetch / window.open)                              */
   /* ------------------------------------------------------------------ */
 
-  // The AOL mini-PCs were only ever sent ?filename=...pce. Keep that exact shape.
+  // The AOL mini-PCs were only ever sent ?filename=...pce. Keep that exact shape
+  // (other SCNA machines, MANAS / SCNA-PSA, are left untouched).
   function stripNcParams(url) {
     try {
       var u = new URL(url, window.location.href);
-      u.searchParams.delete('mode');
-      u.searchParams.delete('machine');
+      if (/^AOL/i.test(u.searchParams.get('machine') || '')) {
+        u.searchParams.delete('mode');
+        u.searchParams.delete('machine');
+      }
       return u.toString();
     } catch (e) { return url; }
   }

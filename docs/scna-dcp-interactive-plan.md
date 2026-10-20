@@ -1,6 +1,9 @@
 # SCNA on DCP Interactive: Agreed Plan
 
-Status: PLAN ONLY, nothing built yet. Agreed in conversation, 2026-10-20.
+Status: FIRST BUILD DONE (uncommitted, headless-tested with mocked network; not yet tried on a real tablet).
+Agreed in conversation, 2026-10-20.
+Built: `DCP interactive SCNA.js` plus a 5-line loader/guard in the shared files, the SCNA roster in `factory-stopcall-tv.html`, and the machine list in `chooseMachine.html`.
+Not done yet: `chooseMachine.html` / `SCNA DCP.html` still route to the OLD page.
 
 ## Goal
 
@@ -27,7 +30,8 @@ Starting state: `freyaAdmin-dynamicDash-b` already contains all of `origin/main`
 
 ## Machines and tablets
 
-Machines: AOL-1 to AOL-5 (the old code pre-caches IPs for AOL-1 to AOL-8).
+Machines: AOL-1 to AOL-5, MANAS, SCNA-PSA (the old code pre-caches IPs for AOL-1 to AOL-8).
+AOL machines are normalized to `AOL-n`; MANAS and SCNA-PSA are single machines kept by name (the mode/machine strip on the NC request URL applies only to AOL).
 
 | Tablet link | Meaning |
 |---|---|
@@ -140,3 +144,8 @@ Doc fields used: `Number` (WO-xxxxxx), `Status`, `P_SKU-Custom fields` (e.g. `P7
 - Does an SCNA stop-call TV view exist (`factory-stopcall-tv.html`)?
 - Confirm that SCNA check-form template names use `AOL-n`.
 - Test on a copy of the page before any real tablet uses it.
+
+## Stop-call TV (built)
+
+`factory-stopcall-tv.html?filter=SCNA` has an SCNA roster: AOL-1, MANAS, SCNA-PSA, then AOL-2|AOL-3 and AOL-4|AOL-5 side by side.
+A roster shorter than 6 rows gets fewer, taller rows (小瀬 still has 6, unchanged). The server already splits grouped machine ids (`AOL-2,AOL-3`) for stop-call and machine-assert.

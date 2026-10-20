@@ -954,6 +954,12 @@
                 'OZNC07', 'OZNC08', 'GAP', 'OZNC16', 'SPACER',
                 'OZNC09', 'OZNC10', 'GAP', 'SPACER', 'SPACER',
                 'OZNC18', 'OZNC17', 'GAP', 'SPACER', 'SPACER'
+            ],
+            // AOL-2/3 and AOL-4/5 are the paired tablets (shown side by side).
+            'SCNA': [
+                'AOL-1', 'SPACER', 'GAP', 'MANAS', 'SCNA-PSA',
+                'AOL-2', 'AOL-3', 'GAP', 'SPACER', 'SPACER',
+                'AOL-4', 'AOL-5', 'GAP', 'SPACER', 'SPACER'
             ]
         };
 
@@ -977,6 +983,9 @@
         function renderRoster() {
             grid.innerHTML = '';
             tileByMachine.clear();
+            // Short rosters (SCNA) get fewer, taller rows; a full 6-row roster keeps the CSS layout.
+            const rosterRows = Math.ceil(roster.length / 5);
+            grid.style.gridTemplateRows = rosterRows < 6 ? 'repeat(' + Math.max(rosterRows, 1) + ', 1fr)' : '';
             roster.forEach(m => {
                 if (m === 'GAP' || m === 'SPACER') {
                     const spacer = document.createElement('div');
