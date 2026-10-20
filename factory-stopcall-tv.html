@@ -955,13 +955,21 @@
                 'OZNC09', 'OZNC10', 'GAP', 'SPACER', 'SPACER',
                 'OZNC18', 'OZNC17', 'GAP', 'SPACER', 'SPACER'
             ],
-            // AOL-2/3 and AOL-4/5 are the paired tablets (shown side by side).
+            // Mirrors the SCNA floor plan: 2 columns (left: SCNA-PSA beside roll storage/office,
+            // right: MANAS then AOL-1..5 top to bottom). Office/roll storage/SRS are not machines.
             'SCNA': [
-                'AOL-1', 'SPACER', 'GAP', 'MANAS', 'SCNA-PSA',
-                'AOL-2', 'AOL-3', 'GAP', 'SPACER', 'SPACER',
-                'AOL-4', 'AOL-5', 'GAP', 'SPACER', 'SPACER'
+                'SPACER',   'GAP', 'MANAS',
+                'SCNA-PSA', 'GAP', 'AOL-1',
+                'SPACER',   'GAP', 'AOL-2',
+                'SPACER',   'GAP', 'AOL-3',
+                'SPACER',   'GAP', 'AOL-4',
+                'SPACER',   'GAP', 'AOL-5'
             ]
         };
+
+        // Grid columns per factory (default 5: 2 tiles, GAP, 2 tiles).
+        const FACTORY_COLS = { 'SCNA': 3 };
+        const GRID_COLS = FACTORY_COLS[FACTORY] || 5;
 
         document.title = (FACTORY || '工場') + ' 呼び出しモニター / Call Monitor';
 
@@ -983,9 +991,10 @@
         function renderRoster() {
             grid.innerHTML = '';
             tileByMachine.clear();
-            // Short rosters (SCNA) get fewer, taller rows; a full 6-row roster keeps the CSS layout.
-            const rosterRows = Math.ceil(roster.length / 5);
-            grid.style.gridTemplateRows = rosterRows < 6 ? 'repeat(' + Math.max(rosterRows, 1) + ', 1fr)' : '';
+            // Non-default column counts (SCNA) set the grid inline; 小瀬 keeps the CSS layout.
+            const rosterRows = Math.ceil(roster.length / GRID_COLS);
+            if (GRID_COLS !== 5) grid.style.gridTemplateColumns = '1fr 3vw 1fr';
+            grid.style.gridTemplateRows = (GRID_COLS !== 5 || rosterRows < 6) ? 'repeat(' + Math.max(rosterRows, 1) + ', 1fr)' : '';
             roster.forEach(m => {
                 if (m === 'GAP' || m === 'SPACER') {
                     const spacer = document.createElement('div');
