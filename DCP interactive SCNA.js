@@ -240,14 +240,28 @@
     }
   }
 
+  // The page holds the Send buttons for 17 s because a send gives no reply. The program send does
+  // (the mini-PC answers), so once it has answered - success or failure - free the button right away.
+  // The shared "send to all" clock is only freed when no other machine's send is still waiting.
+  var ncInFlight = 0;
+  function releaseSendCooldown(machine) {
+    try {
+      if (machine && typeof machineSendCooldownEndTime !== 'undefined') machineSendCooldownEndTime[machine] = 0;
+      if (ncInFlight === 0 && typeof sendToMachineCooldownEndTime !== 'undefined') sendToMachineCooldownEndTime = 0;
+      if (typeof updateSendToMachineCooldownUI === 'function') updateSendToMachineCooldownUI();
+    } catch (e) { console.warn('SCNA: could not release send cooldown', e); }
+  }
+
   var origFetch = window.fetch.bind(window);
   window.fetch = async function (input, init) {
     try {
       var url = (typeof input === 'string') ? input : (input && input.url) || '';
       if (NC_RE.test(url) && typeof input === 'string') {
         var sb = sebanggoOfNcUrl(input);
+        var ncMachine = '';
+        try { ncMachine = new URL(input, window.location.href).searchParams.get('machine') || ''; } catch (e) { }
         var prog = sb ? await chooseNcProgram(sb) : null;
-        if (prog === false) return new Response('', { status: 499 });   // operator cancelled
+        if (prog === false) { releaseSendCooldown(ncMachine); return new Response('', { status: 499 }); }   // operator cancelled
         if (prog && prog._id) {
           var u = new URL(input, window.location.href);
           u.searchParams.delete('filename');
@@ -255,7 +269,9 @@
           u.searchParams.delete('machine');
           u.searchParams.set('program_id', prog._id);
           input = u.toString();
-          return await sendNcProgram(input, init, prog, sb);
+          ncInFlight++;
+          try { return await sendNcProgram(input, init, prog, sb); }
+          finally { ncInFlight--; releaseSendCooldown(ncMachine); }
         } else if (sb) {
           // No uploaded program (or lookup failed): the old request. Its reply can't be read
           // (no-cors), so say so instead of the original's "sent" confirmation.
