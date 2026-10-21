@@ -165,42 +165,62 @@
   }
 
   var ncResultSeq = 0;
-  function ncResultCard(id, ok, title, detail) {
+  function ncResultCard(id, ok, title, detail, onLegacy) {
     var el = overlay(id,
       '<div style="text-align:center;">' +
       '<div style="font-size:3rem;line-height:1;">' + (ok ? '✅' : '❌') + '</div>' +
       '<h3 style="margin:8px 0 4px;font-size:1.25rem;color:' + (ok ? '#047857' : '#B91C1C') + ';">' + esc(title) + '</h3>' +
       '<p style="margin:0;color:#4B5563;font-size:.9rem;word-break:break-word;">' + detail + '</p></div>' +
-      '<button type="button" style="' + btnCss(ok ? '#059669' : '#DC2626', '#fff') + '">OK</button>');
-    el.querySelector('button').addEventListener('click', function () { el.remove(); });
+      '<button type="button" data-ok="1" style="' + btnCss(ok ? '#059669' : '#DC2626', '#fff') + '">OK</button>' +
+      (onLegacy ? '<button type="button" data-legacy="1" style="' + btnCss('#F3F4F6', '#374151', '#D1D5DB') +
+        '">従来の送信 / Legacy send to machine</button>' : ''));
+    el.addEventListener('click', function (ev) {
+      var b = ev.target.closest('button'); if (!b) return;
+      el.remove();
+      if (b.getAttribute('data-legacy') && onLegacy) onLegacy();
+    });
     if (ok) setTimeout(function () { if (el.parentNode) el.remove(); }, 6000);
   }
 
+  // Old way of sending (?filename=<sebanggo>.pce). Offered only after the new send failed or
+  // could not be confirmed. The response cannot be read (no-cors), so no result is shown.
+  function legacySend(url, sebanggo) {
+    try {
+      var u = new URL(url);
+      var legacyUrl = u.origin + '/request?filename=' + encodeURIComponent(sebanggo + '.pce');
+      origFetch(legacyUrl, { method: 'GET', mode: 'no-cors' }).catch(function () { });
+      toast('従来の方法で送信しました / Sent with the legacy method');
+    } catch (e) { console.error('SCNA legacy send failed:', e); }
+  }
+
   // Sends ?program_id= with a readable (CORS) response so the operator sees the real result.
+  // Success = the listener says ok AND the machine confirmed. An old listener (no program_id
+  // support, or no machine_confirmed) is treated as "not confirmed" -> legacy button.
   async function sendNcProgram(url, init, prog, sebanggo) {
     var machineLabel = '';
     try { machineLabel = new URL(url).hostname; } catch (e) { }
     var id = 'scnaNcResult' + (++ncResultSeq);
-    var body = null, httpOk = false;
+    var legacy = function () { legacySend(url, sebanggo); };
     try {
       var res = await origFetch(url, Object.assign({}, init, { mode: 'cors' }));
-      httpOk = res.ok;
+      var body = null;
       try { body = await res.json(); } catch (e) { body = null; }
-      if (httpOk && body && body.ok) {
+      if (res.ok && body && body.ok && body.upload && body.upload.machine_confirmed === true) {
         ncResultCard(id, true, '送信完了 / Sent to machine',
-          esc(prog.displayName) + '<br>' + esc(machineLabel) +
-          (body.upload ? '<br>' + esc(body.upload.points) + ' pts' : ''));
+          esc(prog.displayName) + '<br>' + esc(machineLabel) + '<br>' + esc(body.upload.points) + ' pts');
         return res;
       }
-      var why = body && (body.status === 'machine_busy' || body.status === 'busy')
-        ? '機械が動作中です / Machine is busy' : '送信失敗 / Send failed';
-      ncResultCard(id, false, why,
+      var busy = body && (body.status === 'machine_busy' || body.status === 'busy');
+      var title = busy ? '機械が動作中です / Machine is busy'
+        : (res.ok && body && body.ok) ? '機械の確認が取れませんでした / Not confirmed by the machine'
+        : '送信失敗 / Send failed';
+      ncResultCard(id, false, title,
         esc(prog.displayName) + '<br>' + esc((body && (body.error || body.failed_step)) || ('HTTP ' + res.status)) +
-        '<br><small>' + esc(machineLabel) + '</small>');
+        '<br><small>' + esc(machineLabel) + '</small>', busy ? null : legacy);
       return res;
     } catch (e) {
       ncResultCard(id, false, '送信失敗 / Send failed',
-        esc(prog.displayName) + '<br>ミニPCに接続できません / Cannot reach the mini PC<br><small>' + esc(machineLabel) + '</small>');
+        esc(prog.displayName) + '<br>ミニPCに接続できません / Cannot reach the mini PC<br><small>' + esc(machineLabel) + '</small>', legacy);
       return new Response('', { status: 502 });
     }
   }
