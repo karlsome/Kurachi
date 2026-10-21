@@ -27046,9 +27046,12 @@ function _validateScnaNcPoints(points) {
 
 app.post("/api/scna-nc-programs", async (req, res) => {
   try {
-    const { sebanggo, displayName, fileName, pltBase64, points, uploadedBy } = req.body;
-    if (!sebanggo || !displayName || !String(displayName).trim() || !fileName || !pltBase64) {
-      return res.status(400).json({ error: "sebanggo, displayName, fileName and pltBase64 are required" });
+    const { sebanggo, displayName, fileName, pltBase64, pceBase64, points, uploadedBy } = req.body;
+    // The browser sends either the exported .plt (pltBase64) or the Xiao .pce (pceBase64)
+    const sourceType = pceBase64 ? "pce" : "plt";
+    const sourceBase64 = pceBase64 || pltBase64;
+    if (!sebanggo || !displayName || !String(displayName).trim() || !fileName || !sourceBase64) {
+      return res.status(400).json({ error: "sebanggo, displayName, fileName and pltBase64 (or pceBase64) are required" });
     }
     const pointsError = _validateScnaNcPoints(points);
     if (pointsError) return res.status(400).json({ error: pointsError });
@@ -27070,8 +27073,8 @@ app.post("/api/scna-nc-programs", async (req, res) => {
     }
 
     const docId = new ObjectId();
-    const buffer = Buffer.from(String(pltBase64).split(',')[1] || pltBase64, 'base64');
-    const storagePath = `scnaNC/${sebanggo}/${docId}_${Date.now()}.plt`;
+    const buffer = Buffer.from(String(sourceBase64).split(',')[1] || sourceBase64, 'base64');
+    const storagePath = `scnaNC/${sebanggo}/${docId}_${Date.now()}.${sourceType}`;
     const file = admin.storage().bucket().file(storagePath);
     await file.save(buffer, {
       metadata: {
@@ -27080,7 +27083,7 @@ app.post("/api/scna-nc-programs", async (req, res) => {
       },
       public: true
     });
-    const pltURL = `https://storage.googleapis.com/${file.bucket.name}/${encodeURIComponent(file.name)}?alt=media&token=masterDBToken69`;
+    const sourceURL = `https://storage.googleapis.com/${file.bucket.name}/${encodeURIComponent(file.name)}?alt=media&token=masterDBToken69`;
 
     const nowIso = new Date().toISOString();
     const cleanPoints = points.map((p, i) => ({
@@ -27099,7 +27102,9 @@ app.post("/api/scna-nc-programs", async (req, res) => {
       工場: "SCNA",
       displayName: name,
       fileName,
-      pltURL,
+      sourceType,
+      // pltURL is kept for PLT uploads as before; a PCE upload stores its original under pceURL
+      ...(sourceType === "pce" ? { pceURL: sourceURL } : { pltURL: sourceURL }),
       points: cleanPoints,
       pointCount: cleanPoints.length,
       uploadedBy: uploadedBy || 'admin',
@@ -27108,7 +27113,7 @@ app.post("/api/scna-nc-programs", async (req, res) => {
       isActive: true
     });
 
-    res.status(201).json({ success: true, documentId: docId, pointCount: cleanPoints.length, pltURL });
+    res.status(201).json({ success: true, documentId: docId, pointCount: cleanPoints.length, sourceType, sourceURL });
   } catch (error) {
     console.error("❌ Error uploading SCNA NC program:", error);
     res.status(500).json({ error: "Failed to upload NC program", details: error.message });
