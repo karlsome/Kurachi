@@ -164,6 +164,47 @@
     return promise;
   }
 
+  var ncResultSeq = 0;
+  function ncResultCard(id, ok, title, detail) {
+    var el = overlay(id,
+      '<div style="text-align:center;">' +
+      '<div style="font-size:3rem;line-height:1;">' + (ok ? '✅' : '❌') + '</div>' +
+      '<h3 style="margin:8px 0 4px;font-size:1.25rem;color:' + (ok ? '#047857' : '#B91C1C') + ';">' + esc(title) + '</h3>' +
+      '<p style="margin:0;color:#4B5563;font-size:.9rem;word-break:break-word;">' + detail + '</p></div>' +
+      '<button type="button" style="' + btnCss(ok ? '#059669' : '#DC2626', '#fff') + '">OK</button>');
+    el.querySelector('button').addEventListener('click', function () { el.remove(); });
+    if (ok) setTimeout(function () { if (el.parentNode) el.remove(); }, 6000);
+  }
+
+  // Sends ?program_id= with a readable (CORS) response so the operator sees the real result.
+  async function sendNcProgram(url, init, prog, sebanggo) {
+    var machineLabel = '';
+    try { machineLabel = new URL(url).hostname; } catch (e) { }
+    var id = 'scnaNcResult' + (++ncResultSeq);
+    var body = null, httpOk = false;
+    try {
+      var res = await origFetch(url, Object.assign({}, init, { mode: 'cors' }));
+      httpOk = res.ok;
+      try { body = await res.json(); } catch (e) { body = null; }
+      if (httpOk && body && body.ok) {
+        ncResultCard(id, true, '送信完了 / Sent to machine',
+          esc(prog.displayName) + '<br>' + esc(machineLabel) +
+          (body.upload ? '<br>' + esc(body.upload.points) + ' pts' : ''));
+        return res;
+      }
+      var why = body && (body.status === 'machine_busy' || body.status === 'busy')
+        ? '機械が動作中です / Machine is busy' : '送信失敗 / Send failed';
+      ncResultCard(id, false, why,
+        esc(prog.displayName) + '<br>' + esc((body && (body.error || body.failed_step)) || ('HTTP ' + res.status)) +
+        '<br><small>' + esc(machineLabel) + '</small>');
+      return res;
+    } catch (e) {
+      ncResultCard(id, false, '送信失敗 / Send failed',
+        esc(prog.displayName) + '<br>ミニPCに接続できません / Cannot reach the mini PC<br><small>' + esc(machineLabel) + '</small>');
+      return new Response('', { status: 502 });
+    }
+  }
+
   var origFetch = window.fetch.bind(window);
   window.fetch = async function (input, init) {
     try {
@@ -179,6 +220,7 @@
           u.searchParams.delete('machine');
           u.searchParams.set('program_id', prog._id);
           input = u.toString();
+          return await sendNcProgram(input, init, prog, sb);
         } else {
           input = stripNcParams(input);
         }
