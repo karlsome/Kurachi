@@ -241,6 +241,12 @@
           u.searchParams.set('program_id', prog._id);
           input = u.toString();
           return await sendNcProgram(input, init, prog, sb);
+        } else if (sb) {
+          // No uploaded program (or lookup failed): the old request. Its reply can't be read
+          // (no-cors), so say so instead of the original's "sent" confirmation.
+          var legacyRes = await origFetch(stripNcParams(input), init);
+          toast('従来の方法で送信しました(確認なし) / Sent with the legacy method (not confirmed)');
+          return legacyRes;
         } else {
           input = stripNcParams(input);
         }
@@ -251,6 +257,19 @@
     } catch (e) { console.error('SCNA fetch hook failed (sending original):', e); }
     return origFetch(input, init);
   };
+  // The original shows "Sent to AOL-2" / "送信完了" the moment a request is fired, before any reply
+  // exists. On AOL machines the NC send reports its real result (card / legacy toast), so drop those.
+  var FALSE_SENT_RE = /に送信しました|Sent to |Enviado para |送信完了|Send to machine completed/;
+  function wrapSentToast() {
+    var orig = window.showAppToast;
+    if (typeof orig !== 'function' || orig.__scna) return;
+    var wrapped = function (msg) {
+      if (SCNA.machines.some(function (m) { return /^AOL/i.test(m); }) && FALSE_SENT_RE.test(String(msg || ''))) return;
+      return orig.apply(this, arguments);
+    };
+    wrapped.__scna = true;
+    window.showAppToast = wrapped;
+  }
   var origOpen = window.open.bind(window);
   window.open = function (url) {
     var args = Array.prototype.slice.call(arguments);
@@ -947,15 +966,14 @@
   /* 10c. Always-available Reset on the scan page                        */
   /* ------------------------------------------------------------------ */
 
-  // The reset buttons live inside the step modals, so they vanish whenever a modal is hidden
-  // (machine chooser, work order picked, etc.). This one is visible on the whole scan page,
-  // above the step modals but below the pickers / leader dialogs.
+  // Steps 1-3 have their own Reset button; worker select and Scan completed have none, so this
+  // floating one covers those two. It sits below the pickers / leader dialogs.
   function injectGlobalReset() {
     if ($('scnaResetBtn')) return;
     var b = document.createElement('button');
     b.type = 'button'; b.id = 'scnaResetBtn';
     b.textContent = '↺ リセット / Reset';
-    b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:100050;display:none;padding:10px 16px;' +
+    b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:64px;z-index:100050;display:none;padding:10px 16px;' +
       'border-radius:999px;border:1.5px solid #DC2626;background:#fff;color:#DC2626;font-weight:800;' +
       'font-size:.9rem;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25);font-family:inherit;';
     b.onclick = function () {
@@ -968,8 +986,13 @@
     };
     document.body.appendChild(b);
     setInterval(function () {
+      // Only where the page has no reset of its own: worker select (Step 0) and Scan completed.
       var p = $('panel-0');
-      b.style.display = p && p.offsetParent !== null ? '' : 'none';
+      var s0 = $('step0Modal'), done = $('scanCompletedCard');
+      var show = p && p.offsetParent !== null &&
+        ((s0 && s0.style.display !== 'none' && s0.offsetParent !== null) ||
+         (done && done.style.display !== 'none' && done.offsetParent !== null));
+      b.style.display = show ? '' : 'none';
     }, 500);
   }
 
@@ -982,9 +1005,13 @@
 
   window.addEventListener('load', function () {
     try {
+      // Worker names are saved by the original on pick but only reloaded on pages with pre-checklists;
+      // reload them here so Step 0 asks "same worker?" after a refresh instead of starting empty.
+      if (typeof window.loadWorkerNamesFromStorage === 'function') window.loadWorkerNamesFromStorage();
       relabelLotStep();
       injectWoButton();
       injectGlobalReset();
+      wrapSentToast();
       wrapStep1Scanner();
       injectPartialSpare();
       updateTwoHourDisplay();
