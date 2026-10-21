@@ -41,7 +41,7 @@ const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5
 
 const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.1.176:3000";
+//const serverURL = "http://192.168.0.20:3000";
 window.serverURL = serverURL;
 
 // Global variable to track if sendtoNC button has been pressed
@@ -13071,7 +13071,7 @@ if (manualSendModal) {
   refreshLots();
   function save() { try { localStorage.setItem(LOTS_KEY, JSON.stringify(lotsByMachine)); } catch (e) { } }
 
-  const round1 = n => Math.round(n * 10) / 10;
+  const round2 = n => Math.round(n * 100) / 100;
   function num(v) { if (v === '' || v == null) return null; const n = parseFloat(v); return isFinite(n) ? n : null; }
 
   function getMaster() {
@@ -13274,7 +13274,7 @@ if (manualSendModal) {
 
     const applyShots = (t) => {
       t.shots = shots;
-      t.meters = (t.feedPitch != null) ? round1(shots * t.feedPitch / 1000) : null;
+      t.meters = (t.feedPitch != null) ? round2(shots * t.feedPitch / 1000) : null;
       t.pieces = (t.pcPerCycle != null) ? shots * t.pcPerCycle : null;
       t.open = false;
     };
@@ -13323,7 +13323,7 @@ if (manualSendModal) {
       if (r.image != null) o.image = r.image;
       return o;
     });
-    const Total_Meters = round1(recs.reduce((s, r) => s + (r.meters || 0), 0));
+    const Total_Meters = round2(recs.reduce((s, r) => s + (r.meters || 0), 0));
     const Total_Pieces = recs.filter(r => r.pieces != null).reduce((s, r) => s + r.pieces, 0);
     return { Lot_Details: Lot_Details, Total_Meters: Total_Meters, Total_Pieces: Total_Pieces, totalShots: totalShots() };
   }
