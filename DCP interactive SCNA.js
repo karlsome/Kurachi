@@ -810,6 +810,35 @@
     openWorkerListEditor();
   }, true);
 
+  // Kensa (inspection toggle + tab). The page hides both on a grouped (comma) machine link, and
+  // every AOL tablet is grouped now that a solo link is expanded to its pair. SCNA uses the toggle
+  // on pair tablets too (the legacy page did), so redo the non-grouped logic of syncKensaTab here.
+  function scnaSyncKensa() {
+    var card = $('kensaCard'), tabBtn = $('kensaTabBtn'), kPanel = $('panel-kensa'), pPanel = $('panel-2');
+    var fields = $('kensa-fields-container'), cb = $('enable-inputs'), home = $('kensaCardHome');
+    if (!card || !tabBtn || !kPanel || !pPanel || !cb) return;
+    if (card.style.display === 'none') card.style.display = '';
+    if (fields) fields.style.display = cb.checked ? 'flex' : 'none';
+    if (cb.checked) {
+      if (card.parentElement !== kPanel) kPanel.insertBefore(card, kPanel.firstChild);
+      if (tabBtn.style.display === 'none') tabBtn.style.display = '';
+    } else {
+      if (home && card.parentElement !== pPanel) pPanel.insertBefore(card, home);
+      if (tabBtn.style.display !== 'none') tabBtn.style.display = 'none';
+    }
+  }
+  function wireKensa() {
+    window.onKensaToggleClicked = function (checked) {
+      scnaSyncKensa();
+      if (typeof updateTabIndicator === 'function') { try { updateTabIndicator(currentTabIndex); } catch (e) { } }
+      if (typeof goToTab !== 'function') return;
+      if (checked) goToTab(3); else if (currentTabIndex === 3) goToTab(2);   // same targets as the page's own handler
+    };
+    // the page re-hides the card/tab on its own timers (restore, 800 ms sync): put them back
+    setInterval(scnaSyncKensa, 500);
+    scnaSyncKensa();
+  }
+
   function relabelLotStep() {
     var b = $('startStep2Scan');
     if (b) b.textContent = '⌨ ロット番号を入力 / Enter lot number';
@@ -968,11 +997,31 @@
     var list = checks();
     var last = list.length ? list[list.length - 1] : null;
     card.innerHTML = '<h3>2時間品質チェック / 2-Hour Quality Check</h3>' +
-      '<div style="font-size:.95rem;line-height:1.7;">実施回数 / Done: <b>' + list.length + '</b>' +
+      '<div style="font-size:.95rem;line-height:1.7;">実施回数 / Done: ' +
+      '<button type="button" id="scnaTwoHourList" style="border:0;background:#E8F0FE;color:#1D4ED8;font-weight:800;font-size:1rem;' +
+      'padding:2px 14px;border-radius:999px;cursor:pointer;text-decoration:underline;">' + list.length + '</button>' +
       (last ? '<br>最終 / Last: ' + esc(last.checkTime) + ' · ' + esc(last.inspectorName) : '') +
       (typeof workingMin === 'number' ? '<br><span style="color:#6B7280;font-size:.82rem;">次回まで約 ' +
         Math.max(0, Math.round(CHECK_MIN - workingMin)) + ' 分 / next in ~' + Math.max(0, Math.round(CHECK_MIN - workingMin)) + ' min</span>' : '') +
       '</div>';
+    var lb = $('scnaTwoHourList');
+    if (lb) lb.onclick = showTwoHourHistory;
+  }
+
+  function showTwoHourHistory() {
+    var list = checks();
+    var rows = list.length ? list.map(function (c, i) {
+      return '<div style="display:flex;gap:12px;align-items:center;padding:12px 4px;border-bottom:1px solid #E5E7EB;">' +
+        '<span style="min-width:28px;height:28px;border-radius:50%;background:#16A34A;color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;">' + (i + 1) + '</span>' +
+        '<div><div style="font-weight:700;font-size:1.05rem;">' + esc(c.inspectorName) + '</div>' +
+        '<div style="color:#6B7280;font-size:.88rem;">' + esc(c.checkTime) + '</div></div></div>';
+    }).join('') : '<p style="text-align:center;color:#6B7280;margin:16px 0;">まだ実施されていません / No checks yet</p>';
+    var el = overlay('scnaTwoHourHistory',
+      '<h3 style="margin:0 0 6px;text-align:center;">2時間品質チェック履歴 / Quality check history</h3>' + rows +
+      '<button type="button" data-close="1" style="' + btnCss('#2E6FF2', '#fff') + '">閉じる / Close</button>');
+    el.addEventListener('click', function (ev) {
+      if (ev.target === el || ev.target.closest('[data-close]')) el.remove();
+    });
   }
 
   /* ------------------------------------------------------------------ */
@@ -1123,6 +1172,7 @@
       // reload them here so Step 0 asks "same worker?" after a refresh instead of starting empty.
       if (typeof window.loadWorkerNamesFromStorage === 'function') window.loadWorkerNamesFromStorage();
       relabelLotStep();
+      wireKensa();
       injectWoButton();
       injectGlobalReset();
       wrapSentToast();
