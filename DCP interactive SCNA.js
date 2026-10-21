@@ -102,8 +102,8 @@
   SCNA.isAtHome = function () { return !new URLSearchParams(window.location.search).get('home'); };
   SCNA.goHome = function () { window.location.replace(SCNA.homeUrl()); };
 
-  // SCNA keeps Process Quantity manual: block the interactive auto-calculation.
-  window.__scnaManualQty = true;
+  // Process Quantity is auto-calculated (shots x pcPerCycle per lot), as on the other factories.
+  window.__scnaManualQty = false;
 
   /* ------------------------------------------------------------------ */
   /* 2. Network hooks (fetch / window.open)                              */
