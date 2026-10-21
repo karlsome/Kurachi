@@ -869,6 +869,111 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* 10b. Close button on the machine chooser (#lpModal)                 */
+  /* ------------------------------------------------------------------ */
+
+  // The backend only offers ✕ on the chooser during a production material scan; SCNA's
+  // keypad lot entry opens it without one, leaving the operator stuck.
+  function addChooserClose() {
+    var ov = $('lpModal');
+    var card = ov && ov.firstElementChild;
+    if (!card || card.__scnaClose || !card.querySelector('[data-m]')) return;
+    card.__scnaClose = true;
+    if (card.querySelector('button[aria-label="Close"]')) return;
+    card.style.position = 'relative';
+    var x = document.createElement('button');
+    x.type = 'button'; x.innerHTML = '✕'; x.setAttribute('aria-label', 'Close');
+    x.style.cssText = 'position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.4rem;' +
+      'font-weight:bold;color:#667085;cursor:pointer;padding:0;line-height:1;z-index:10;';
+    // The original hides Step 2 while the lot chooser is open: bring it back on close.
+    var isLotChooser = (card.textContent || '').indexOf('Machine for this lot') >= 0;
+    function close() {
+      ov.remove();
+      var s2 = $('step2Modal');
+      if (isLotChooser && s2 && s2.style.display === 'none' && typeof showStep2Modal === 'function') showStep2Modal();
+    }
+    x.onclick = function (e) { e.stopPropagation(); close(); };
+    card.appendChild(x);
+    ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 10d. Step 1 scan accepts a work order QR (WO-xxxxxx)                */
+  /* ------------------------------------------------------------------ */
+
+  // The original Step 1 scan only accepts values that are in the 背番号 dropdown. Wrap the
+  // scanner so a WO-number QR is handled as a work order; every other QR goes to the original code.
+  function wrapStep1Scanner() {
+    var Real = window.Html5Qrcode;
+    if (!Real || Real.__scna) return;
+    var Wrapped = class extends Real {
+      constructor(id, cfg) { super(id, cfg); this.__scnaId = id; }
+      start(cam, cfg, ok, err) {
+        var self = this, handling = false, orig = ok;
+        if (self.__scnaId === 'step1QrReader' && typeof ok === 'function') {
+          ok = function (text) {
+            var wo = /^WO-\d+$/i.exec(String(text || '').trim());
+            if (!wo) return orig.apply(this, arguments);
+            if (handling) return;
+            handling = true;
+            handleScannedWorkOrder(self, wo[0].toUpperCase());
+          };
+        }
+        return super.start(cam, cfg, ok, err);
+      }
+    };
+    Wrapped.__scna = true;
+    window.Html5Qrcode = Wrapped;
+  }
+
+  async function handleScannedWorkOrder(scanner, number) {
+    try { await scanner.stop(); } catch (e) { }
+    try { step1Scanner = null; } catch (e) { }
+    var sc = $('step1Scanner'), ct = $('step1Content');
+    if (sc) sc.style.display = 'none';
+    if (ct) ct.style.display = 'flex';
+    var wo = null;
+    try {
+      wo = (await fetchWorkOrders() || []).filter(function (w) { return String(w.Number).toUpperCase() === number; })[0];
+    } catch (e) { console.error('SCNA: work order scan lookup failed', e); }
+    if (!wo) {
+      toast('❌ ワークオーダーが見つかりません / Work order not found: ' + number);
+      return;
+    }
+    selectWorkOrder(wo);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 10c. Always-available Reset on the scan page                        */
+  /* ------------------------------------------------------------------ */
+
+  // The reset buttons live inside the step modals, so they vanish whenever a modal is hidden
+  // (machine chooser, work order picked, etc.). This one is visible on the whole scan page,
+  // above the step modals but below the pickers / leader dialogs.
+  function injectGlobalReset() {
+    if ($('scnaResetBtn')) return;
+    var b = document.createElement('button');
+    b.type = 'button'; b.id = 'scnaResetBtn';
+    b.textContent = '↺ リセット / Reset';
+    b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:100050;display:none;padding:10px 16px;' +
+      'border-radius:999px;border:1.5px solid #DC2626;background:#fff;color:#DC2626;font-weight:800;' +
+      'font-size:.9rem;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25);font-family:inherit;';
+    b.onclick = function () {
+      var msg = 'リセットして最初からやり直しますか？ / Reset and start over?';
+      if (!window.confirm(msg)) return;
+      currentWO = null;
+      if (typeof window.resetAllSteps === 'function') window.resetAllSteps();
+      else if (typeof resetAllSteps === 'function') resetAllSteps();
+      else window.location.reload();
+    };
+    document.body.appendChild(b);
+    setInterval(function () {
+      var p = $('panel-0');
+      b.style.display = p && p.offsetParent !== null ? '' : 'none';
+    }, 500);
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 11. Init                                                            */
   /* ------------------------------------------------------------------ */
 
@@ -879,6 +984,8 @@
     try {
       relabelLotStep();
       injectWoButton();
+      injectGlobalReset();
+      wrapStep1Scanner();
       injectPartialSpare();
       updateTwoHourDisplay();
 
@@ -888,6 +995,7 @@
 
       if (!twoHourTimer) twoHourTimer = setInterval(twoHourTick, 10000);
       resumePendingWO();
+      new MutationObserver(addChooserClose).observe(document.body, { childList: true });
     } catch (e) { console.error('SCNA init failed:', e); }
   });
 })();
