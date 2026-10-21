@@ -108,12 +108,80 @@
   }
   var NC_RE = /:5000\/request\?/;
 
+  // NC programs (admin SCNA page -> scnaNCProgramsDB). When the item has uploaded
+  // programs the operator picks one and the request becomes ?program_id=<id> (JSON sent
+  // straight to the machine). With none uploaded, the legacy ?filename=<sebanggo>.pce stays.
+  var ncChoice = {};   // sebanggo -> { promise, at } shared by all machines of one send
+  var NC_CHOICE_TTL_MS = 20000;
+
+  function sebanggoOfNcUrl(url) {
+    try {
+      var u = new URL(url, window.location.href);
+      var f = u.searchParams.get('filename') || '';
+      if (!/^AOL/i.test(u.searchParams.get('machine') || '')) return null;
+      return f.replace(/\.pce$/i, '') || null;
+    } catch (e) { return null; }
+  }
+
+  function pickNcProgram(sebanggo, programs) {
+    return new Promise(function (resolve) {
+      var rows = programs.map(function (p, i) {
+        return '<button type="button" data-i="' + i + '" style="' + btnCss('#fff', '#111827', '#9CA3AF') + 'text-align:left;">' +
+          esc(p.displayName) + '<span style="font-weight:400;color:#6B7280;font-size:.8rem;"> &nbsp;' +
+          (p.pointCount || 0) + ' pts</span></button>';
+      }).join('');
+      var el = overlay('scnaNcModal',
+        '<h3 style="margin:0 0 4px;font-size:1.2rem;">NCプログラム選択 / Select NC program</h3>' +
+        '<p style="margin:0 0 8px;color:#6B7280;font-size:.85rem;">' + esc(sebanggo) + '</p>' + rows +
+        '<button type="button" data-cancel="1" style="' + btnCss('#F3F4F6', '#374151', '#D1D5DB') + '">キャンセル / Cancel</button>');
+      el.addEventListener('click', function (ev) {
+        var b = ev.target.closest('button'); if (!b) return;
+        el.remove();
+        resolve(b.getAttribute('data-cancel') ? false : programs[parseInt(b.getAttribute('data-i'), 10)]);
+      });
+    });
+  }
+
+  // -> program object | null (none uploaded: use legacy .pce) | false (operator cancelled)
+  function chooseNcProgram(sebanggo) {
+    var c = ncChoice[sebanggo];
+    if (c && Date.now() - c.at < NC_CHOICE_TTL_MS) return c.promise;
+    var promise = (async function () {
+      var programs = [];
+      try {
+        var res = await origFetch(window.serverURL + '/api/scna-nc-programs/by-sebanggo/' + encodeURIComponent(sebanggo));
+        if (res.ok) {
+          var j = await res.json();
+          programs = (j.programs || j || []).filter(function (p) { return p && p.isActive !== false; });
+        }
+      } catch (e) { console.warn('SCNA NC program lookup failed, using .pce:', e); }
+      if (!programs.length) return null;
+      if (programs.length === 1) return programs[0];
+      return await pickNcProgram(sebanggo, programs);
+    })();
+    ncChoice[sebanggo] = { promise: promise, at: Date.now() };
+    promise.then(function (r) { if (r === false) delete ncChoice[sebanggo]; });
+    return promise;
+  }
+
   var origFetch = window.fetch.bind(window);
-  window.fetch = function (input, init) {
+  window.fetch = async function (input, init) {
     try {
       var url = (typeof input === 'string') ? input : (input && input.url) || '';
       if (NC_RE.test(url) && typeof input === 'string') {
-        input = stripNcParams(input);
+        var sb = sebanggoOfNcUrl(input);
+        var prog = sb ? await chooseNcProgram(sb) : null;
+        if (prog === false) return new Response('', { status: 499 });   // operator cancelled
+        if (prog && prog._id) {
+          var u = new URL(input, window.location.href);
+          u.searchParams.delete('filename');
+          u.searchParams.delete('mode');
+          u.searchParams.delete('machine');
+          u.searchParams.set('program_id', prog._id);
+          input = u.toString();
+        } else {
+          input = stripNcParams(input);
+        }
       } else if (/\/submitToDCP(\?|$)/.test(url) && init && String(init.method || '').toUpperCase() === 'POST' &&
         typeof init.body === 'string') {
         init = Object.assign({}, init, { body: SCNA.patchSubmit(init.body) });

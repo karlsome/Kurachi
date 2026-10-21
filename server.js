@@ -27028,6 +27028,179 @@ app.get('/api/factory-overview/env', async (req, res) => {
 
 // ==================== END FACTORY OVERVIEW ENDPOINTS ====================
 
+// ==================== SCNA NC PROGRAMS (PLT -> JSON points) ====================
+// Admin uploads a .plt for a masterDB item (工場: SCNA only); the browser converts it to points.
+// The miniPC listener fetches the points by program id and sends them to the CNC directly.
+
+function _validateScnaNcPoints(points) {
+  if (!Array.isArray(points) || points.length === 0) return "points must be a non-empty array";
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (!p || ![0, 1].includes(Number(p.flag)) || !Number.isInteger(Number(p.layer))
+      || !Number.isFinite(Number(p.x)) || !Number.isFinite(Number(p.y))) {
+      return `invalid point at position ${i}`;
+    }
+  }
+  return null;
+}
+
+app.post("/api/scna-nc-programs", async (req, res) => {
+  try {
+    const { sebanggo, displayName, fileName, pltBase64, points, uploadedBy } = req.body;
+    if (!sebanggo || !displayName || !String(displayName).trim() || !fileName || !pltBase64) {
+      return res.status(400).json({ error: "sebanggo, displayName, fileName and pltBase64 are required" });
+    }
+    const pointsError = _validateScnaNcPoints(points);
+    if (pointsError) return res.status(400).json({ error: pointsError });
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+
+    // Strictly SCNA items only
+    const item = await database.collection("masterDB").findOne({ 背番号: sebanggo, 工場: "SCNA" });
+    if (!item) {
+      return res.status(400).json({ error: `背番号 ${sebanggo} is not an SCNA (工場: SCNA) item` });
+    }
+
+    const programs = database.collection("scnaNCProgramsDB");
+    const name = String(displayName).trim();
+    const dup = await programs.findOne({ 背番号: sebanggo, displayName: name, isActive: true });
+    if (dup) {
+      return res.status(409).json({ error: `A program named "${name}" already exists for ${sebanggo}` });
+    }
+
+    const docId = new ObjectId();
+    const buffer = Buffer.from(String(pltBase64).split(',')[1] || pltBase64, 'base64');
+    const storagePath = `scnaNC/${sebanggo}/${docId}_${Date.now()}.plt`;
+    const file = admin.storage().bucket().file(storagePath);
+    await file.save(buffer, {
+      metadata: {
+        contentType: 'application/octet-stream',
+        metadata: { firebaseStorageDownloadTokens: 'masterDBToken69' }
+      },
+      public: true
+    });
+    const pltURL = `https://storage.googleapis.com/${file.bucket.name}/${encodeURIComponent(file.name)}?alt=media&token=masterDBToken69`;
+
+    const nowIso = new Date().toISOString();
+    const cleanPoints = points.map((p, i) => ({
+      index: i,
+      flag: Number(p.flag),
+      layer: Number(p.layer),
+      x: Number(p.x),
+      y: Number(p.y),
+      value: p.value === undefined ? 1.0 : Number(p.value)
+    }));
+
+    await programs.insertOne({
+      _id: docId,
+      背番号: sebanggo,
+      品番: item.品番 || "",
+      工場: "SCNA",
+      displayName: name,
+      fileName,
+      pltURL,
+      points: cleanPoints,
+      pointCount: cleanPoints.length,
+      uploadedBy: uploadedBy || 'admin',
+      uploadedAt: nowIso,
+      updatedAt: nowIso,
+      isActive: true
+    });
+
+    res.status(201).json({ success: true, documentId: docId, pointCount: cleanPoints.length, pltURL });
+  } catch (error) {
+    console.error("❌ Error uploading SCNA NC program:", error);
+    res.status(500).json({ error: "Failed to upload NC program", details: error.message });
+  }
+});
+
+// List programs for one 背番号 (no points payload — used by admin and the tablet picker)
+app.get("/api/scna-nc-programs/by-sebanggo/:sebanggo", async (req, res) => {
+  try {
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const list = await programs.find({ 背番号: req.params.sebanggo, isActive: true })
+      .project({ points: 0 })
+      .sort({ displayName: 1 })
+      .toArray();
+    res.json(list);
+  } catch (error) {
+    console.error("❌ Error listing SCNA NC programs:", error);
+    res.status(500).json({ error: "Failed to list NC programs", details: error.message });
+  }
+});
+
+// Which SCNA 背番号 already have programs (for the admin table badge)
+app.get("/api/scna-nc-programs/counts", async (req, res) => {
+  try {
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const rows = await programs.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: "$背番号", count: { $sum: 1 } } }
+    ]).toArray();
+    res.json(Object.fromEntries(rows.map(r => [r._id, r.count])));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to count NC programs", details: error.message });
+  }
+});
+
+// Points for the miniPC listener
+app.get("/api/scna-nc-programs/:id/points", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const doc = await programs.findOne(
+      { _id: new ObjectId(req.params.id), isActive: true },
+      { projection: { displayName: 1, 背番号: 1, points: 1 } }
+    );
+    if (!doc) return res.status(404).json({ error: "Program not found" });
+    res.json({ id: doc._id, 背番号: doc.背番号, displayName: doc.displayName, points: doc.points });
+  } catch (error) {
+    console.error("❌ Error fetching SCNA NC program points:", error);
+    res.status(500).json({ error: "Failed to fetch NC program", details: error.message });
+  }
+});
+
+app.patch("/api/scna-nc-programs/:id", async (req, res) => {
+  try {
+    const name = String(req.body?.displayName || "").trim();
+    if (!name) return res.status(400).json({ error: "displayName is required" });
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const current = await programs.findOne({ _id: new ObjectId(req.params.id), isActive: true }, { projection: { 背番号: 1 } });
+    if (!current) return res.status(404).json({ error: "Program not found" });
+    const dup = await programs.findOne({ 背番号: current.背番号, displayName: name, isActive: true, _id: { $ne: current._id } });
+    if (dup) return res.status(409).json({ error: `A program named "${name}" already exists for ${current.背番号}` });
+    await programs.updateOne({ _id: current._id }, { $set: { displayName: name, updatedAt: new Date().toISOString() } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to rename NC program", details: error.message });
+  }
+});
+
+// Soft delete (keeps the PLT and points for audit/recovery)
+app.delete("/api/scna-nc-programs/:id", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const result = await programs.updateOne(
+      { _id: new ObjectId(req.params.id), isActive: true },
+      { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+    );
+    if (!result.matchedCount) return res.status(404).json({ error: "Program not found" });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete NC program", details: error.message });
+  }
+});
+
+// ==================== END SCNA NC PROGRAMS ====================
+
 // Get unique machine names for filter dropdown
 app.get('/api/scna/machines', async (req, res) => {
     let client;
