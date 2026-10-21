@@ -710,6 +710,34 @@
     manualLotEntry();
   }, true);
 
+  // The page's "Scan material" buttons refuse to run when the product's material code is empty,
+  // and SCNA products have none (lots are typed, never validated). Same flow, guarded on the 背番号.
+  function scnaMaterialScan() {
+    var seb = (typeof currentProductDetails !== 'undefined' && currentProductDetails && currentProductDetails.sebanggo) ||
+      ($('sub-dropdown') && $('sub-dropdown').value) || '';
+    if (!seb) { toast('先に製品をスキャンしてください / Scan the product first'); return; }
+    window.__materialScanMode = 'production';
+    window.__lotScanEpoch = (window.__lotScanEpoch || 0) + 1;
+    if (window.__lotCycleMachinesDone) window.__lotCycleMachinesDone = [];
+    window.__lotSendMachines = [];
+    var go = function () {
+      if (typeof showStep2Modal !== 'function') return;
+      showStep2Modal();
+      setTimeout(function () { var b = $('startStep2Scan'); if (b) b.click(); }, 250);
+    };
+    if (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1 && typeof window.chooseScanMachine === 'function') {
+      window.chooseScanMachine(go);
+    } else go();
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target && e.target.closest && e.target.closest('#prodScanMaterialButton, #kensaScanMaterialButton');
+    if (!t) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    scnaMaterialScan();
+  }, true);
+
   function relabelLotStep() {
     var b = $('startStep2Scan');
     if (b) b.textContent = '⌨ ロット番号を入力 / Enter lot number';
