@@ -288,7 +288,7 @@
       var active = SCNA.activeMachines();
 
       // 設備 stays in the legacy "AOL 4,5" form
-      b.設備 = currentWO && currentWO.assignedTo ? currentWO.assignedTo : legacyLabel(active);
+      b.設備 = currentWO && currentWO.assignedTo && !currentWO.overridden ? currentWO.assignedTo : legacyLabel(active);
       b.Tablet_Home = legacyLabel(SCNA.home.length ? SCNA.home : SCNA.machines);
 
       // shot1 / shot2 = shots per machine, in WO / tablet order (legacy fields)
@@ -335,6 +335,7 @@
       isWorkOrder: true,
       workOrderNumber: currentWO.number,
       assignedTo: currentWO.assignedTo,
+      overridden: !!currentWO.overridden,
       status: currentWO.status,
       sku: currentWO.sku,
       targetMachines: currentWO.targetMachines,
@@ -373,9 +374,30 @@
   /* 6. Work orders                                                      */
   /* ------------------------------------------------------------------ */
 
+  // AOL machines that always run as a pair. A tablet opened for one of them (machine=AOL-2)
+  // belongs to the whole pair. Machines not listed here are a unit of their own.
+  var AOL_PAIRS = [['AOL-2', 'AOL-3'], ['AOL-4', 'AOL-5']];
+
+  // Machines this tablet physically serves: the opened machines plus their pair partners.
+  function tabletUnit() {
+    var out = [];
+    pageMachines.forEach(function (m) {
+      var pair = AOL_PAIRS.filter(function (p) { return p.indexOf(m) >= 0; })[0] || [m];
+      pair.forEach(function (x) { if (out.indexOf(x) < 0) out.push(x); });
+    });
+    return out;
+  }
+
   function woFits(woMachines) {
-    // A WO fits when all of its machines belong to the machines this page was opened with.
-    return woMachines.length > 0 && woMachines.every(function (m) { return pageMachines.indexOf(m) >= 0; });
+    // A WO fits when all of its machines belong to this tablet (its machine, or that machine's pair).
+    var unit = tabletUnit();
+    return woMachines.length > 0 && woMachines.every(function (m) { return unit.indexOf(m) >= 0; });
+  }
+
+  // Machines a leader-approved foreign WO runs on: this tablet's own machines, as many as the WO has.
+  function overrideTargets(woMachines) {
+    var unit = tabletUnit();
+    return woMachines.length && woMachines.length < unit.length ? unit.slice(0, woMachines.length) : unit;
   }
 
   async function fetchWorkOrders() {
@@ -388,7 +410,7 @@
     var el = overlay('scnaWoModal',
       '<h3 style="margin:0 0 4px;font-size:1.2rem;">作業指示 / Work Order</h3>' +
       '<p style="margin:0 0 12px;color:#6B7280;font-size:.85rem;">このタブレット / This tablet: <b>' +
-      esc(legacyLabel(pageMachines)) + '</b></p>' +
+      esc(legacyLabel(tabletUnit())) + '</b></p>' +
       '<input id="scnaWoSearch" type="text" placeholder="WO / SKU / Customer" ' +
       'style="width:100%;padding:12px;border:1.5px solid #D1D5DB;border-radius:10px;font-size:1rem;box-sizing:border-box;">' +
       '<div id="scnaWoList" style="margin-top:12px;color:#6B7280;">読み込み中... / Loading...</div>' +
@@ -447,13 +469,18 @@
     return applyWorkOrder(wo, assigned, ms);
   }
 
+  // Leader approved a WO meant for other machines: run it on this tablet's own machines.
+  function applyOverriddenWorkOrder(wo, assigned, ms) {
+    return applyWorkOrder(wo, assigned, overrideTargets(ms), true);
+  }
+
   function showWrongTablet(wo, assigned, ms) {
     var el = overlay('scnaWrongTablet',
       '<div style="font-size:42px;text-align:center;">⚠️</div>' +
       '<h3 style="text-align:center;margin:6px 0 10px;">このワークオーダーはこの機械用ではありません<br>' +
       '<span style="font-size:.9rem;font-weight:600;">This work order is not for this machine</span></h3>' +
       '<p style="text-align:center;margin:0;">' + esc(wo.Number) + ' → <b>' + esc(assigned) + '</b><br>' +
-      'タブレット / Tablet: <b>' + esc(legacyLabel(pageMachines)) + '</b></p>' +
+      'タブレット / Tablet: <b>' + esc(legacyLabel(tabletUnit())) + '</b></p>' +
       '<button type="button" id="scnaWtOk" style="' + btnCss('#2E6FF2', '#fff') + '">OK</button>' +
       '<button type="button" id="scnaWtOverride" style="' + btnCss('#fff', '#6B7280', '#D1D5DB') +
       'font-size:.85rem;padding:9px;">リーダー承認で切り替え / Override (leader)</button>');
@@ -462,15 +489,10 @@
       if (typeof window.verifyLeaderUI !== 'function') { toast('Leader verification unavailable'); return; }
       el.remove();
       window.verifyLeaderUI(function () {
-        try { localStorage.setItem(PENDING_WO_KEY, wo.Number); } catch (e) { }
-        var u = new URLSearchParams();
-        u.set('filter', 'SCNA');
-        u.set('machine', ms.join(','));
-        u.set('home', (SCNA.home.length ? SCNA.home : pageMachines).join(','));
-        window.location.href = PAGE_PATH + '?' + u.toString();
+        applyOverriddenWorkOrder(wo, assigned, ms);
       },
         'リーダー承認 / Leader approval',
-        'このワークオーダーを別の機械で行うにはリーダーQRをスキャン<br>Scan leader QR to run this work order on another machine');
+        'このワークオーダーをこのタブレットの機械で行うにはリーダーQRをスキャン<br>Scan leader QR to run this work order on this tablet\'s machines');
     };
   }
 
@@ -488,7 +510,7 @@
     return true;
   }
 
-  async function applyWorkOrder(wo, assigned, ms) {
+  async function applyWorkOrder(wo, assigned, ms, overridden) {
     var sku = String(wo['P_SKU-Custom fields'] || '').trim();
     var clean = sku.charAt(0).toUpperCase() === 'P' ? sku.slice(1) : sku;
     var rec = null;
@@ -514,6 +536,7 @@
       customer: wo['Customer-Custom fields'],
       deadline: wo.Deadline,
       targetMachines: ms.length ? ms : pageMachines.slice(),
+      overridden: !!overridden,
       sebanggo: rec.背番号
     };
     lsSet('scnaWO', currentWO);
@@ -554,7 +577,8 @@
     }
     if (!currentWO) { host.style.display = 'none'; return; }
     host.style.display = '';
-    host.innerHTML = '📋 ' + esc(currentWO.number) + ' · ' + esc(currentWO.assignedTo) + '<br>' +
+    host.innerHTML = '📋 ' + esc(currentWO.number) + ' · ' + esc(currentWO.assignedTo) +
+      (currentWO.overridden ? ' → ' + esc(legacyLabel(currentWO.targetMachines)) : '') + '<br>' +
       '<span style="font-weight:600;font-size:.82rem;">' + esc(currentWO.sku) + ' · ' + esc(currentWO.customer || '') +
       ' · ' + esc(currentWO.status || '') + '</span>';
   }
