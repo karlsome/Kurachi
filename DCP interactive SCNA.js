@@ -754,6 +754,62 @@
     scnaMaterialScan();
   }, true);
 
+  // Submit tab "Edit" on the worker row: the original opens the picker for slot 0 only, so a second
+  // worker can't be added there. Show the whole worker list (change / remove / add) instead.
+  function openWorkerListEditor() {
+    var render = function () {
+      var names = (window.selectedWorkerNames || []).filter(function (n) { return (n || '').trim(); });
+      var rows = names.map(function (n, i) {
+        return '<div style="display:flex;gap:8px;margin-top:10px;">' +
+          '<button type="button" data-edit="' + i + '" style="' + btnCss('#F8F9FA', '#101828', '#E6E8EF') + 'margin:0;flex:1;text-align:left;">' + esc(n) + '</button>' +
+          (names.length > 1 ? '<button type="button" data-del="' + i + '" style="' + btnCss('#FEE4E2', '#B42318', '#FDA29B') + 'margin:0;width:56px;">✕</button>' : '') +
+          '</div>';
+      }).join('');
+      return { names: names, html: rows || '<p style="color:#6B7280;margin:10px 0;">作業者が未選択です / No worker selected</p>' };
+    };
+    var el = overlay('scnaWorkerEditor',
+      '<h3 style="margin:0;font-size:1.2rem;text-align:center;">作業者 / Workers</h3>' +
+      '<div id="scnaWorkerRows"></div>' +
+      '<button type="button" data-add="1" style="' + btnCss('#fff', '#2E6FF2', '#2E6FF2') + '">＋ 作業者を追加 / Add worker</button>' +
+      '<button type="button" data-done="1" style="' + btnCss('#2E6FF2', '#fff') + '">完了 / Done</button>');
+    el.style.zIndex = '99990';   // the page's worker picker (#workerNameModal, 100000) must open above this
+    var last = '';
+    var draw = function () {
+      var r = render();
+      var key = r.names.join('|');
+      if (key === last) return;
+      last = key;
+      $('scnaWorkerRows').innerHTML = r.html;
+    };
+    draw();
+    var iv = setInterval(function () { if (!document.body.contains(el)) { clearInterval(iv); return; } draw(); }, 300);
+    var close = function () {
+      clearInterval(iv); el.remove();
+      if (typeof window.renderWorkerListUI === 'function') window.renderWorkerListUI();
+      if (typeof updateSubmitSummary === 'function') updateSubmitSummary();
+    };
+    el.addEventListener('click', function (ev) {
+      var b = ev.target.closest('button');
+      if (!b) { if (ev.target === el) close(); return; }
+      var names = (window.selectedWorkerNames || []).filter(function (n) { return (n || '').trim(); });
+      if (b.hasAttribute('data-done')) { close(); return; }
+      if (b.hasAttribute('data-add')) { window.selectedWorkerNames = names; window.addWorkerSlot(); return; }
+      if (b.hasAttribute('data-del')) {
+        window.selectedWorkerNames = names; window.removeWorkerSlot(parseInt(b.getAttribute('data-del'), 10));
+        last = ''; draw(); return;
+      }
+      if (b.hasAttribute('data-edit')) { window.selectedWorkerNames = names; window.openWorkerModal(parseInt(b.getAttribute('data-edit'), 10)); }
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target && e.target.closest && e.target.closest('.row-edit-btn');
+    if (!t || !/openWorkerModal/.test(t.getAttribute('onclick') || '')) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    openWorkerListEditor();
+  }, true);
+
   function relabelLotStep() {
     var b = $('startStep2Scan');
     if (b) b.textContent = '⌨ ロット番号を入力 / Enter lot number';
