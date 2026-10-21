@@ -62,7 +62,22 @@
     return a.length === b.length && a.every(function (x, i) { return x === b[i]; });
   }
 
-  var machines = parseMachines(qs.get('machine'));
+  // AOL machines that always run as a pair. A tablet opened for one of them (machine=AOL-2)
+  // belongs to the whole pair. Machines not listed here are a unit of their own.
+  var AOL_PAIRS = [['AOL-2', 'AOL-3'], ['AOL-4', 'AOL-5']];
+
+  // Opened for one machine of a pair -> treat the page as the pair, so the original's grouped-machine
+  // code (IP lookup per machine, per-machine send buttons, chooser, checklists) covers both.
+  function expandPairs(list) {
+    var out = [];
+    list.forEach(function (m) {
+      var pair = AOL_PAIRS.filter(function (p) { return p.indexOf(m) >= 0; })[0] || [m];
+      pair.forEach(function (x) { if (out.indexOf(x) < 0) out.push(x); });
+    });
+    return out;
+  }
+
+  var machines = expandPairs(parseMachines(qs.get('machine')));
   var home = parseMachines(qs.get('home'));
   if (machines.length) {
     if (!home.length) home = machines.slice();
@@ -392,10 +407,6 @@
   /* ------------------------------------------------------------------ */
   /* 6. Work orders                                                      */
   /* ------------------------------------------------------------------ */
-
-  // AOL machines that always run as a pair. A tablet opened for one of them (machine=AOL-2)
-  // belongs to the whole pair. Machines not listed here are a unit of their own.
-  var AOL_PAIRS = [['AOL-2', 'AOL-3'], ['AOL-4', 'AOL-5']];
 
   // Machines this tablet physically serves: the opened machines plus their pair partners.
   function tabletUnit() {
@@ -989,7 +1000,10 @@
       // Only where the page has no reset of its own: worker select (Step 0) and Scan completed.
       var p = $('panel-0');
       var s0 = $('step0Modal'), done = $('scanCompletedCard');
-      var show = p && p.offsetParent !== null &&
+      // Tabs are panels in a sliding strip, so "on screen" means the panel sits over the viewport centre.
+      var r = p && p.getBoundingClientRect();
+      var onScanTab = !!r && r.left < window.innerWidth / 2 && r.right > window.innerWidth / 2;
+      var show = onScanTab &&
         ((s0 && s0.style.display !== 'none' && s0.offsetParent !== null) ||
          (done && done.style.display !== 'none' && done.offsetParent !== null));
       b.style.display = show ? '' : 'none';
