@@ -27221,6 +27221,11 @@ function _validateLabelLayout(layout) {
   for (let i = 0; i < layout.elements.length; i++) {
     const el = layout.elements[i];
     if (!el || !LABEL_ELEMENT_TYPES.includes(el.type)) return `invalid element type at position ${i}`;
+    // Optional element ID: the key the tablet uses to set a value at print time (see print_DBprinter.py overrides).
+    // Not unique on purpose: every element with the same ID receives the same value.
+    if (el.name !== undefined && el.name !== "") {
+      if (typeof el.name !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(el.name)) return `element ${i}: ID may only use letters, numbers, _ and - (max 64)`;
+    }
     for (const k of ["x", "y", "w", "h"]) {
       if (!Number.isFinite(Number(el[k]))) return `element ${i}: ${k} must be a number`;
     }
