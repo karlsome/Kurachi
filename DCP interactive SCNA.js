@@ -359,6 +359,7 @@
 
       b['スペアからの部分数'] = spareTotal();
       b.Spare_Lots = SCNA.sparePayload();
+      Object.assign(b, SCNA.runPayload());
       b['2HourQualityCheck'] = SCNA.twoHourPayload();
       b.WorkOrder_Info = SCNA.workOrderPayload();
 
@@ -703,6 +704,7 @@
       }
       if (!ok) { if (typeof showStep2Modal === 'function') showStep2Modal(); return; }
 
+      getRun();
       markLotStart(machine, lot);   // reading of the listener's cycles_total at this lot change
       var next = function () {
         var after = function () {
@@ -1146,7 +1148,7 @@
     var wrapped = function () {
       var r;
       try {
-        lsDel('scnaWO'); lsDel(CYCLE_MARKS_KEY); lsDel('scnaTwoHourChecks'); lsDel('scnaTwoHourSnooze'); lsDel('partial-from-spare'); lsDel(SPARE_KEY);
+        lsDel('scnaWO'); lsDel(CYCLE_MARKS_KEY); lsDel(RUN_KEY); lsDel('scnaTwoHourChecks'); lsDel('scnaTwoHourSnooze'); lsDel('partial-from-spare'); lsDel(SPARE_KEY);
       } catch (e) { }
       r = orig.apply(this, arguments);
       return Promise.resolve(r).then(function (v) {
@@ -1401,16 +1403,19 @@
       if (!sebanggo) return origPrintLabel.apply(this, arguments);
       var machine = (($('process') || {}).value || '').trim();
 
+      var boxId = await prepareBox();   // server-issued box ID (blocks the print when the server is unreachable)
+      if (!boxId) return;
       var copies = await window.promptLaptopAutoPrintCopies();   // layout choice (if several), then copies
       if (copies === null) return;
 
       if (typeof window.setPrintBtnState === 'function') window.setPrintBtnState('printing');
       try {
         var r = await window.request047JAutoPrint(machine, sebanggo, copies);
+        markBoxPrinted();
         if (typeof window.setPrintBtnState === 'function') window.setPrintBtnState('success');
         if (typeof window.logTabletAction === 'function') {
           window.logTabletAction('SCNA label print success', 'Completed', {
-            machine: machine, 背番号: sebanggo, copies: copies, printerIP: r.printerIP,
+            machine: machine, 背番号: sebanggo, copies: copies, boxId: boxId, printerIP: r.printerIP,
             productNumber: (r.payload && r.payload.productNumber) || '', lotNumber: (r.payload && r.payload.lotNumber) || ''
           });
         }
@@ -1423,6 +1428,162 @@
       }
     };
   }
+
+  /* ------------------------------------------------------------------ */
+  /* 10f. Run + box flow (unique box ID per printed box)                 */
+  /* ------------------------------------------------------------------ */
+
+  // Run = one session from the first scan to data submission (cleared by Reset / after submit). A box = the production
+  // between two prints: the cycles_total difference since the previous box, split by lot, plus unused spare entries.
+  // The server issues the box ID; no print without it (D4). Stored payload + boxUid make a retry or reload safe.
+  var RUN_KEY = 'scnaRun';
+  function newUid(prefixStr) {
+    var a = new Uint8Array(8);
+    try { crypto.getRandomValues(a); } catch (e) { for (var i = 0; i < 8; i++) a[i] = Math.floor(Math.random() * 256); }
+    return prefixStr + Date.now().toString(36) + Array.prototype.map.call(a, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+  }
+  function getRun() {
+    var run = lsGet(RUN_KEY, null);
+    if (!run || !run.runId) {
+      run = { runId: newUid('run-'), startedAt: new Date().toISOString(), lastSnapshot: { perMachine: {} }, pendingBox: null, lastPrinted: null, boxIds: [] };
+      lsSet(RUN_KEY, run);
+    }
+    return run;
+  }
+  function saveRun(run) { lsSet(RUN_KEY, run); }
+  SCNA.getRun = getRun;
+
+  function lotPcPerCycle(machine, lot) {
+    try {
+      var list = (typeof lotsByMachine !== 'undefined' && lotsByMachine[machine]) || [];
+      for (var i = list.length - 1; i >= 0; i--) if (list[i].lotNumber === lot && list[i].pcPerCycle != null) return list[i].pcPerCycle;
+    } catch (e) { }
+    return null;
+  }
+
+  // Build the box record from the cycle marks and the previous snapshot. Never throws: whatever cannot be counted
+  // becomes an `approximate` box with the lot listed but no pieces.
+  async function buildBoxPayload(run, spare) {
+    var machines = SCNA.activeMachines();
+    var marks = cycleMarks();
+    var lots = [], notes = [], approximate = false, nextSnap = {};
+    for (var mi = 0; mi < machines.length; mi++) {
+      var m = machines[mi];
+      var list = marks[m] || [];
+      var st = await fetchCycleState(m);
+      var prev = run.lastSnapshot.perMachine[m];
+      var prevTotal = prev ? prev.total : (list.length && list[0].start != null ? list[0].start : null);
+      if (!list.length) { approximate = true; notes.push(m + ': no lot recorded'); continue; }
+      if (!st.auto || prevTotal == null || list.some(function (l) { return l.start == null; })) {
+        approximate = true; notes.push(m + ': count not available (manual)');
+        var open = list[list.length - 1];
+        lots.push({ source: 'machine', lotNumber: open.lotNumber, machine: m, shots: null, pieces: null, countSource: 'unknown' });
+        if (st.auto) nextSnap[m] = { total: st.total };
+        continue;
+      }
+      for (var i = 0; i < list.length; i++) {
+        var from = Math.max(list[i].start, prevTotal);
+        var to = Math.min(i + 1 < list.length ? list[i + 1].start : st.total, st.total);
+        var cyc = to - from;
+        if (!(cyc > 0)) continue;
+        var pc = lotPcPerCycle(m, list[i].lotNumber);
+        lots.push({ source: 'machine', lotNumber: list[i].lotNumber, machine: m, shots: cyc, pieces: pc != null ? cyc * pc : null, countSource: 'auto' });
+      }
+      nextSnap[m] = { total: st.total };
+    }
+    spare.forEach(function (e) { lots.push({ source: 'spare', lotNumber: e.lotNumber, pieces: e.pieces, machine: null, shots: null, countSource: 'spare' }); });
+    var measured = lots.reduce(function (n, l) { return n + (l.pieces || 0); }, 0);
+    var hinban = (($('product-number') || {}).value || '') || (typeof currentProductDetails !== 'undefined' && currentProductDetails && currentProductDetails.hinban) || '';
+    var workers = (window.selectedWorkerNames || []).filter(function (n) { return (n || '').trim(); });
+    return {
+      payload: {
+        boxUid: newUid('box-'), runId: run.runId,
+        workOrderNumber: currentWO ? currentWO.number : '',
+        背番号: (($('sub-dropdown') || {}).value || '').trim(), 品番: hinban,
+        machines: machines, Tablet_Home: legacyLabel(SCNA.home.length ? SCNA.home : SCNA.machines), worker: workers.join(','),
+        startedAt: run.lastPrinted ? run.lastPrinted.printedAt : run.startedAt, finishedAt: new Date().toISOString(),
+        qtyLabel: parseInt((($('収容数') || {}).value || ''), 10) || null, qtyMeasured: measured,
+        lots: lots, snapshot: nextSnap, approximate: approximate, notes: notes
+      },
+      nextSnap: nextSnap, spareIds: spare.map(function (e) { return e.id; })
+    };
+  }
+
+  async function postBox(payload) {
+    var res = await fetch(window.serverURL + '/api/scna-boxes', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(8000)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }
+
+  function askBoxChoice(lastId, printed) {
+    return new Promise(function (resolve) {
+      var el = overlay('scnaBoxChoice',
+        '<h3 style="margin:0;font-size:1.2rem;text-align:center;">' + esc(lastId) + (printed ? ' は印刷済み / already printed' : ' (印刷未完了 / print not finished)') + '</h3>' +
+        '<button type="button" data-r="1" style="' + btnCss('#fff', '#2E6FF2', '#2E6FF2') + '">同じ箱を再印刷 / Reprint ' + esc(lastId) + '</button>' +
+        '<button type="button" data-n="1" style="' + btnCss('#2E6FF2', '#fff') + '">新しい箱 / New box</button>' +
+        '<button type="button" data-x="1" style="' + btnCss('#fff', '#344054', '#D0D5DD') + '">キャンセル / Cancel</button>');
+      el.style.zIndex = '100300';
+      el.addEventListener('click', function (ev) {
+        var b = ev.target.closest && ev.target.closest('button');
+        if (!b) return;
+        el.remove();
+        resolve(b.hasAttribute('data-r') ? 'reprint' : b.hasAttribute('data-n') ? 'new' : null);
+      });
+    });
+  }
+
+  // -> box ID to print, or null (cancelled / blocked). Sets SCNA.boxId.
+  async function prepareBox() {
+    var run = getRun();
+    var choice = 'new';
+    if (!run.pendingBox && run.lastPrinted) {
+      choice = await askBoxChoice(run.lastPrinted.boxId, run.lastPrinted.printed);
+      if (!choice) return null;
+    }
+    if (choice === 'reprint') { SCNA.boxId = run.lastPrinted.boxId; return SCNA.boxId; }
+
+    var pending = run.pendingBox;
+    if (!pending) {
+      var built;
+      try { built = await buildBoxPayload(run, SCNA.pendingSpare()); }
+      catch (e) {
+        console.error('SCNA box build failed:', e);
+        built = { payload: { boxUid: newUid('box-'), runId: run.runId, workOrderNumber: currentWO ? currentWO.number : '',
+          背番号: (($('sub-dropdown') || {}).value || '').trim(), lots: [], approximate: true, notes: ['box build failed: ' + e.message],
+          finishedAt: new Date().toISOString() }, nextSnap: {}, spareIds: [] };
+      }
+      pending = run.pendingBox = built;
+      saveRun(run);   // reload / retry reuses this exact box
+    }
+    var box;
+    try { box = await postBox(pending.payload); }
+    catch (e) {
+      toast('サーバーに接続できないため印刷できません / Cannot print: server unreachable (' + e.message + ')');
+      return null;
+    }
+    // accepted: the slice is now committed, so the next box starts from here
+    run = getRun();
+    Object.keys(pending.nextSnap || {}).forEach(function (m) { run.lastSnapshot.perMachine[m] = pending.nextSnap[m]; });
+    SCNA.consumeSpare(pending.spareIds || [], pending.payload.boxUid);
+    run.boxIds = (run.boxIds || []).concat([box.boxId]);
+    run.lastPrinted = { boxId: box.boxId, boxUid: pending.payload.boxUid, printedAt: new Date().toISOString(), printed: false };
+    run.pendingBox = null;
+    saveRun(run);
+    SCNA.boxId = box.boxId;
+    return box.boxId;
+  }
+
+  function markBoxPrinted() {
+    var run = getRun();
+    if (run.lastPrinted) { run.lastPrinted.printed = true; saveRun(run); }
+  }
+
+  SCNA.runPayload = function () {
+    var run = lsGet(RUN_KEY, null);
+    return run && run.runId ? { Run_ID: run.runId, Box_IDs: run.boxIds || [] } : {};
+  };
 
   /* ------------------------------------------------------------------ */
   /* 10e. Live cycle count (listener cycles_total) at lot change         */

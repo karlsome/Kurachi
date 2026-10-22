@@ -138,11 +138,11 @@ Assumption (confirm in Phase 4): prefix = work order number; if none, `<背番�
 - [ ] Deploy `server.js` before any tablet change that calls it
 
 ### Phase 5 — Tablet run + box flow (`DCP interactive SCNA.js`)
-- [ ] `runId` created at scan start, persisted, cleared at submit (D1)
-- [ ] Print press: block if server unreachable → (reprint / new box prompt) → snapshot difference → `POST /api/scna-boxes` → `SCNA.boxId = boxId` → print (the tablet sends override `qr_1` = `{品番},{収容数},{lotNumber},<boxId>`; the layout itself stays `{品番},{収容数},{lotNumber}`; the print server fills the `{fields}` in overrides)
-- [ ] After the server accepts the box: mark spare entries consumed, store `lastPrinted`
-- [ ] Retry safety: same `boxUid` and stored payload after failure / reload
-- [ ] `Run_ID` + `Box_IDs` added to the submit payload
+- [x] `runId` created at scan start, persisted, cleared at submit (D1)
+- [x] Print press: block if server unreachable → (reprint / new box prompt) → snapshot difference → `POST /api/scna-boxes` → `SCNA.boxId = boxId` → print (the tablet sends override `qr_1` = `{品番},{収容数},{lotNumber},<boxId>`; the layout itself stays `{品番},{収容数},{lotNumber}`; the print server fills the `{fields}` in overrides)
+- [x] After the server accepts the box: mark spare entries consumed, store `lastPrinted`
+- [x] Retry safety: same `boxUid` and stored payload after failure / reload
+- [x] `Run_ID` + `Box_IDs` added to the submit payload
 - [ ] Test: 3-box scenario (lot 1 only → lot 1+2 → lot 2 only), spare in box 1, reprint, reload between boxes, server down at print
 
 ### Phase 6 — Labels, rollout, wrap-up
@@ -177,3 +177,4 @@ Assumption (confirm in Phase 4): prefix = work order number; if none, `<背番�
 | 2026-10-22 | 2 | `DCP interactive SCNA.js` section 10e: `fetchCycleState` (:5000 then :8766, capability + `cnc_online` check), `markLotStart` at keypad lot entry, shots-prompt banner (Confirm / Manual entry) via MutationObserver on `#lpModal`, `Lot_Details` gets `shotsAuto/countSource/cyclesTotalStart/End`, badge "Auto count / Manual count". Marks cleared on reset. Syntax-checked only; live Process Quantity and the test matrix still open. Listener capability string aligned to `live_cycle_count_v1`. |
 | 2026-10-22 | 3 | Partial from spare: the field opens a manager (list, ✕ on unconsumed entries, ＋ Add = quantity keypad → lot keypad, own overlay keypad so the page's fields are untouched). Entries in localStorage `scnaSpareEntries`; field + `スペアからの部分数` = their sum; `Spare_Lots` in the submit payload; Process Quantity/Total untouched. Helpers for Phase 5: `SCNA.pendingSpare()`, `SCNA.consumeSpare(ids, boxUid)`. Syntax-checked only; the "goes into the next box" part is wired in Phase 5. |
 | 2026-10-22 | 4 | `server.js` (additive, not deployed): `/submitToDCP` already spreads `formData` and each `Lot_Details` entry into pressDB, so `Run_ID`, `Box_IDs`, `Spare_Lots` and the new lot fields are kept with no change. New `POST /api/scna-boxes` (idempotent on `boxUid`, issues `<key>-B<seq>` from `scnaBoxCounters`), `GET /api/scna-boxes/:boxId`, `GET /api/scna-boxes?runId=`; unique indexes on `boxUid` and `boxId` created on first use. Key = work order number, else `<背番号>-<YYYYMMDD>` (JST) (4.3.1 assumption adopted). Syntax-checked; not run against Mongo. |
+| 2026-10-22 | 5 | `DCP interactive SCNA.js` section 10f: `getRun` (runId at first lot entry, key `scnaRun`, cleared on Reset), `buildBoxPayload` (per machine cycles_total difference split by lot + unused spare; unknown counts => `approximate`, lot listed without pieces), `prepareBox` (Reprint/New prompt after a box, POST with stored payload + `boxUid`, snapshot advanced and spare consumed only after the server accepted, no print if the server is unreachable), `SCNA.boxId` => `qr_1` override, `Run_ID`/`Box_IDs` in the submit. Box counts fall back to approximate (no cloud `cycleCountDB` fallback yet). Syntax-checked + slice math checked; not run on a tablet. |
