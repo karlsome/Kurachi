@@ -433,6 +433,26 @@
             }
         }
 
+        .tile.calling[data-primary-call="quality"] {
+            background: #7C3AED;
+            border-color: #fff;
+            animation: tileBlinkPurple 0.9s steps(1) infinite;
+        }
+
+        @keyframes tileBlinkPurple {
+
+            0%,
+            100% {
+                background: #8B5CF6;
+                box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.0), 0 0 40px rgba(139, 92, 246, 0.6);
+            }
+
+            50% {
+                background: #4C1D95;
+                box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.0), 0 0 10px rgba(139, 92, 246, 0.2);
+            }
+        }
+
         .tile.calling .name {
             color: #fff;
             white-space: nowrap;
@@ -646,6 +666,23 @@
 
             50% {
                 background: radial-gradient(circle at 50% 40%, #1D4ED8, #172554 80%);
+            }
+        }
+
+        .takeover[data-type="quality"] {
+            background: radial-gradient(circle at 50% 40%, #7C3AED, #3B0764 80%);
+            animation: takeoverBlinkPurple 0.7s steps(1) infinite;
+        }
+
+        @keyframes takeoverBlinkPurple {
+
+            0%,
+            100% {
+                background: radial-gradient(circle at 50% 40%, #8B5CF6, #3B0764 80%);
+            }
+
+            50% {
+                background: radial-gradient(circle at 50% 40%, #5B21B6, #2E1065 80%);
             }
         }
 
@@ -1063,10 +1100,11 @@
         const audioBox = new Audio('src/box.mp3');
         const audioRoll = new Audio('src/roll.mp3');
         const audioStop = new Audio('src/STOP.mp3');
+        const audioQuality = new Audio('src/2hourReminder.mp3');
 
         // Optional: unlock audio on first interaction if autoplay is blocked
         function unlockMp3s() {
-            [audioLeader, audioBox, audioRoll, audioStop].forEach(a => {
+            [audioLeader, audioBox, audioRoll, audioStop, audioQuality].forEach(a => {
                 a.muted = true;
                 a.play().then(() => {
                     a.pause();
@@ -1088,6 +1126,7 @@
                 if (type === 'stop') a = audioStop;
                 else if (type === 'box') a = audioBox;
                 else if (type === 'material') a = audioRoll;
+                else if (type === 'quality') a = audioQuality;
                 else a = audioLeader;
 
                 a.currentTime = 0;
@@ -1222,7 +1261,8 @@
                 if (item.leader) tile.dataset.primaryCall = 'leader';
                 else if (item.stop) tile.dataset.primaryCall = 'stop';
                 else if (item.box) tile.dataset.primaryCall = 'box';
-                else tile.dataset.primaryCall = 'material';
+                else if (item.material) tile.dataset.primaryCall = 'material';
+                else tile.dataset.primaryCall = 'quality';
 
                 let typeHtml = '';
                 if (item.leader) {
@@ -1233,6 +1273,7 @@
                 }
                 if (item.box) typeHtml += '<div>BOX</div>';
                 if (item.material) typeHtml += '<div>ROLL</div>';
+                if (item.quality) typeHtml += '<div>QC</div>';
                 tile.querySelector('.type-display').innerHTML = typeHtml;
 
                 const matSebEl = tile.querySelector('.mat-seb');
@@ -1382,8 +1423,11 @@
                 if (it.material && !prevTypes.material) {
                     newlyAddedEvents.push({ machine: it.machine, title: '部材リクエスト / MATERIAL REQUEST', type: 'material', since: it.since });
                 }
+                if (it.quality && !prevTypes.quality) {
+                    newlyAddedEvents.push({ machine: it.machine, title: '2時間品質チェック / 2-HOUR QUALITY CHECK', type: 'quality', since: it.since });
+                }
 
-                nextMachineCallTypes.set(it.machine, { leader: !!it.leader, stop: !!it.stop, box: !!it.box, material: !!it.material });
+                nextMachineCallTypes.set(it.machine, { leader: !!it.leader, stop: !!it.stop, box: !!it.box, material: !!it.material, quality: !!it.quality });
             });
 
             lastMachineCallTypes = nextMachineCallTypes;

@@ -1063,6 +1063,15 @@
     updateTwoHourDisplay(workingMin);
   }
 
+  // Tell the factory stop-call TV that this machine needs its 2-hour quality check (purple blink + sound).
+  // Same path the other calls use (window.notifyStopCall -> POST /api/stop-call); never blocks the tablet.
+  function notifyQualityCall(action) {
+    try {
+      if (typeof window.notifyStopCall === 'function') window.notifyStopCall(action, 'quality');
+    } catch (e) { }
+  }
+  SCNA.clearQualityCall = function () { notifyQualityCall('clear'); };
+
   function showTwoHourModal() {
     var names = (typeof workerNamesData !== 'undefined' && Array.isArray(workerNamesData)) ? workerNamesData : [];
     var field = names.length
@@ -1080,6 +1089,7 @@
       '<button type="button" id="scnaThSnooze" style="' + btnCss('#fff', '#B45309', '#F59E0B') + '">😴 ' + SNOOZE_MIN +
       '分後に再通知 / Snooze ' + SNOOZE_MIN + ' min</button>');
     el.style.zIndex = '100250';
+    notifyQualityCall('activate');
     $('scnaThDone').onclick = function () {
       var name = ($('scnaThInspector').value || '').trim();
       if (!name) { toast('検査者名を選択してください / Please select an inspector'); return; }
@@ -1092,11 +1102,13 @@
       lsSet('scnaTwoHourChecks', list);
       lsDel('scnaTwoHourSnooze');
       el.remove();
+      notifyQualityCall('clear');
       updateTwoHourDisplay();
     };
     $('scnaThSnooze').onclick = function () {
       lsSet('scnaTwoHourSnooze', Date.now() + SNOOZE_MIN * 60000);
       el.remove();
+      notifyQualityCall('clear');   // the call comes back when the reminder reappears
     };
   }
 
@@ -1150,6 +1162,7 @@
       try {
         lsDel('scnaWO'); lsDel(CYCLE_MARKS_KEY); lsDel(RUN_KEY); lsDel('scnaTwoHourChecks'); lsDel('scnaTwoHourSnooze'); lsDel('partial-from-spare'); lsDel(SPARE_KEY);
       } catch (e) { }
+      notifyQualityCall('clear');
       r = orig.apply(this, arguments);
       return Promise.resolve(r).then(function (v) {
         // The original ends with location.reload(); when the URL is not the home link, go home instead.

@@ -212,6 +212,7 @@ function buildStopCallPayload(factoryId) {
     if (info.stop && info.stop.since < earliest) earliest = info.stop.since;
     if (info.box && info.box.since < earliest) earliest = info.box.since;
     if (info.material && info.material.since < earliest) earliest = info.material.since;
+    if (info.quality && info.quality.since < earliest) earliest = info.quality.since;
     
     if (earliest !== Infinity) {
       active.push({
@@ -221,6 +222,7 @@ function buildStopCallPayload(factoryId) {
         stop: !!info.stop,
         box: !!info.box,
         material: !!info.material,
+        quality: !!info.quality,
         zairyoSebanggo: info.material ? info.material.zairyoSebanggo : undefined
       });
     }
