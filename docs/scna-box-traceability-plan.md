@@ -121,7 +121,7 @@ Assumption (confirm in Phase 4): prefix = work order number; if none, `<背番�
 - [x] Record `cyclesTotalStart` when a lot is entered with the SCNA keypad (per target machine)
 - [x] Watch for the shots prompt (`#lpModal`): prefill auto value, **Confirm** / **Manual entry**, record offered vs confirmed + source (fail-safe: plain prompt on any error)
 - [x] Join `shotsAuto`, `countSource`, `cyclesTotal*` into the submit payload (`patchSubmit`)
-- [ ] Live Process Quantity (poll-based)
+- [x] Live Process Quantity (poll-based, every 5 s; written to the field while a lot is open)
 - [ ] Test matrix: new+new pair, new+legacy pair, listener down at lot change, CNC offline, page reload mid-lot
 
 ### Phase 3 — Partial from spare
@@ -180,3 +180,4 @@ Assumption (confirm in Phase 4): prefix = work order number; if none, `<背番�
 | 2026-10-22 | 5 | `DCP interactive SCNA.js` section 10f: `getRun` (runId at first lot entry, key `scnaRun`, cleared on Reset), `buildBoxPayload` (per machine cycles_total difference split by lot + unused spare; unknown counts => `approximate`, lot listed without pieces), `prepareBox` (Reprint/New prompt after a box, POST with stored payload + `boxUid`, snapshot advanced and spare consumed only after the server accepted, no print if the server is unreachable), `SCNA.boxId` => `qr_1` override, `Run_ID`/`Box_IDs` in the submit. Box counts fall back to approximate (no cloud `cycleCountDB` fallback yet). Syntax-checked + slice math checked; not run on a tablet. |
 | 2026-10-22 | 6 | Tablet sends override `box_id` = box ID with every print (a text element with that Element ID shows it). Remaining Phase 6 items are on-site: layout edit in admin, pilot, rollout, later lookup UI. |
 | 2026-10-22 | 5b | Box capped at 収容数 (option 1): `sliceBox` splits machine pieces in proportion to each machine's production, oldest cycles first inside a machine, tops up with whole cycles; leftover cycles stay in the counter (snapshot advances only by what was used). Spare pieces count against the capacity. Box record gets `capped`, `producedSinceLastBox`, `carriedOverPieces`. Tablet shows a live "Next box: ... = n / 収容数" line (15 s poll). Cap uses whole cycles, so a box can be a few pieces under 収容数 when pcPerCycle does not divide evenly. `server.js` whitelist extended (not deployed). Logic checked in node with 2 machines; not run on a tablet. |
+| 2026-10-22 | 2b | Live Process Quantity was NOT built in Phase 2 (only listed); added now: `updateLiveQty` writes closed-lot pieces + open lots (cycles since lot entry x pcPerCycle) into `#ProcessQuantity` every 5 s poll. Page recalculates from confirmed shots at lot close / final shots as before. Syntax-checked only. |

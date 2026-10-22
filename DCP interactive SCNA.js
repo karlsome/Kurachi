@@ -1455,9 +1455,12 @@
   function saveRun(run) { lsSet(RUN_KEY, run); }
   SCNA.getRun = getRun;
 
+  // The page keeps its lot records in localStorage (its own variable is private to its script)
+  function readLots() { var l = lsGet('lotsByMachine', {}); return (l && typeof l === 'object') ? l : {}; }
+
   function lotPcPerCycle(machine, lot) {
     try {
-      var list = (typeof lotsByMachine !== 'undefined' && lotsByMachine[machine]) || [];
+      var list = readLots()[machine] || [];
       for (var i = list.length - 1; i >= 0; i--) if (list[i].lotNumber === lot && list[i].pcPerCycle != null) return list[i].pcPerCycle;
     } catch (e) { }
     return null;
@@ -1792,52 +1795,88 @@
     return info;
   };
 
-  // Live line: what the next box holds right now, from the last poll ("since last print")
-  function updateBoxLine(list) {
-    var el = $('scnaBoxLine');
-    var run = lsGet(RUN_KEY, null);
-    if (!run || !run.runId || !Object.keys(cycleMarks()).length) { if (el) el.remove(); return; }
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'scnaBoxLine';
-      el.style.cssText = 'position:fixed;left:10px;bottom:44px;z-index:90000;max-width:calc(100vw - 20px);padding:6px 12px;border-radius:12px;' +
-        'background:#EFF4FF;color:#1D3F9C;font-size:.8rem;font-weight:700;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.2);';
-      document.body.appendChild(el);
+  // Live Process Quantity: pieces of the closed lots (what the page already sums) + the open lot of each machine
+  // measured from the listener count (cycles since the lot was typed in x pcPerCycle). When a lot is closed or the
+  // final shots are confirmed, the page recalculates the field from the confirmed shots as before.
+  function updateLiveQty(list) {
+    var pq = $('ProcessQuantity');
+    if (!pq || document.activeElement === pq) return;
+    var marks = cycleMarks(), openPieces = 0, any = false, complete = true;
+    list.forEach(function (m) {
+      var ms = marks[m] || [];
+      var cur = ms[ms.length - 1];
+      var st = SCNA.cycleStatus[m];
+      if (!cur || cur.end != null || cur.start == null || !st || !st.auto) { if (cur && cur.end == null) complete = false; return; }
+      var pc = lotPcPerCycle(m, cur.lotNumber);
+      if (pc == null) { complete = false; return; }
+      var cycles = st.total - cur.start;
+      if (!(cycles >= 0)) { complete = false; return; }
+      openPieces += cycles * pc; any = true;
+    });
+    if (!any || !complete) return;
+    var closed = 0;
+    try {
+      var lotsAll = readLots();
+      Object.keys(lotsAll).forEach(function (m) {
+        (lotsAll[m] || []).forEach(function (r) { if (r.shots != null && r.pieces != null) closed += r.pieces; });
+      });
+    } catch (e) { return; }
+    var v = String(closed + openPieces);
+    if (pq.value === v) return;
+    pq.value = v;
+    pq.readOnly = true;
+    try { pq.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { }
+  }
+
+  // Compact counts in the production tab's product card (right of 背番号 / 品番):
+  //   AOL-8: 80 S: 5 To: 85    machine pieces since the last box, S = pending spare pieces, To = going in the box
+  //   Pair (AOL-2/3):  AOL-2: 60 / AOL-3: 40 / S: 5 To: 105      (spare is not tied to a machine)
+  //   AOL-9: manual    only machines that are NOT on auto count; nothing is shown when all are auto
+  // Shows everything produced since the last print; the box itself is capped at 収容数 when printed, so after a print
+  // the cell shows what was left over (e.g. box 75: 10 S: 0 To: 10).
+  function updateCountCell(list) {
+    var card = $('prodInfoCard');
+    var cell = $('scnaCountCell');
+    if (!card) return;
+    if (!cell) {
+      cell = document.createElement('div');
+      cell.id = 'scnaCountCell';
+      cell.style.cssText = 'display:flex;flex-direction:column;justify-content:space-between;align-self:stretch;gap:6px;' +
+        'text-align:right;font-size:.8rem;font-weight:800;line-height:1.35;white-space:nowrap;';
+      cell.innerHTML = '<div id="scnaCountRows" style="color:#101828;"></div><div id="scnaManualRows" style="color:#B54708;"></div>';
+      card.appendChild(cell);
     }
+    var run = lsGet(RUN_KEY, null);
+    var haveLots = run && run.runId && Object.keys(cycleMarks()).length;
     var totals = {};
     list.forEach(function (m) { totals[m] = SCNA.cycleStatus[m] || { auto: false, total: null }; });
     var spareSum = SCNA.pendingSpare().reduce(function (n, e) { return n + (e.pieces || 0); }, 0);
+    var r = haveLots ? sliceBox(run, totals, 0) : { lots: [] };
+    var autoMachines = list.filter(function (m) { return totals[m].auto; });
+    var manual = list.filter(function (m) { return !totals[m].auto; }).map(function (m) { return m + ': manual'; });
+    var pcsOf = function (m) { return r.lots.filter(function (l) { return l.machine === m && l.pieces != null; }).reduce(function (n, l) { return n + l.pieces; }, 0); };
+    var total = autoMachines.reduce(function (n, m) { return n + pcsOf(m); }, 0) + spareSum;
     var cap = boxCapacity();
-    var r = sliceBox(run, totals, cap ? Math.max(0, cap - spareSum) : 0);
-    var parts = r.lots.filter(function (l) { return l.pieces != null; }).map(function (l) { return l.machine + ' ' + l.lotNumber + ' ' + l.pieces; });
-    SCNA.pendingSpare().forEach(function (e) { parts.push('スペア ' + (e.lotNumber || '') + ' ' + e.pieces); });
-    var have = r.machinePieces + spareSum;
-    var txt = '次の箱 / Next box: ' + (parts.length ? parts.join(' · ') : '—') + ' = ' + have + (cap ? ' / ' + cap : '');
-    if (r.carriedPieces > 0) txt += '  (+' + r.carriedPieces + ' 次の箱へ / carried over)';
-    else if (cap && have >= cap) txt += '  満杯 / FULL';
-    if (r.approximate) txt += '  ≈';
-    el.textContent = txt;
+    var rows = [];
+    if (haveLots && autoMachines.length) {
+      if (list.length === 1) rows.push(autoMachines[0] + ': ' + pcsOf(autoMachines[0]) + ' S: ' + spareSum + ' To: ' + total);
+      else {
+        autoMachines.forEach(function (m) { rows.push(m + ': ' + pcsOf(m)); });
+        rows.push('S: ' + spareSum + ' To: ' + total);
+      }
+    }
+    var html = rows.map(esc).join('<br>');
+    if (cap && haveLots && total > cap) html = html.replace(/(To: \d+)/, '<span style="color:#B42318;">$1</span>');   // more than fits: the rest goes to the next box
+    $('scnaCountRows').innerHTML = html;
+    $('scnaManualRows').innerHTML = manual.map(esc).join('<br>');
   }
 
-  // Small badge: which machines are on auto count right now
   function updateCountBadge() {
     var list = SCNA.activeMachines();
     Promise.all(list.map(function (m) { return fetchCycleState(m).then(function (st) { SCNA.cycleStatus[m] = { auto: st.auto, total: st.total, at: Date.now() }; }); }))
       .then(function () {
-        var b = $('scnaCountBadge');
-        if (!b) {
-          b = document.createElement('div');
-          b.id = 'scnaCountBadge';
-          b.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:90000;padding:5px 10px;border-radius:999px;' +
-            'font-size:.75rem;font-weight:700;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.2);';
-          document.body.appendChild(b);
-        }
-        var allAuto = list.length && list.every(function (m) { return SCNA.cycleStatus[m] && SCNA.cycleStatus[m].auto; });
-        b.style.background = allAuto ? '#ECFDF3' : '#FFFAEB';
-        b.style.color = allAuto ? '#027A48' : '#B54708';
-        b.textContent = (allAuto ? '自動カウント / Auto count' : '手入力 / Manual count') + ' · ' +
-          list.map(function (m) { return m + (SCNA.cycleStatus[m] && SCNA.cycleStatus[m].auto ? ' ✓' : ' –'); }).join('  ');
-        updateBoxLine(list);
+        updateCountCell(list);
+        updateLiveQty(list);
       }).catch(function () { });
   }
 
@@ -1872,7 +1911,7 @@
       new MutationObserver(addChooserClose).observe(document.body, { childList: true });
       new MutationObserver(function () { try { enhanceShotsPrompt(); } catch (e) { } }).observe(document.body, { childList: true });
       updateCountBadge();
-      setInterval(updateCountBadge, 15000);
+      setInterval(updateCountBadge, 5000);
     } catch (e) { console.error('SCNA init failed:', e); }
   });
 })();
