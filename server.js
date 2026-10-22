@@ -25724,7 +25724,9 @@ app.get('/api/freya-tablet-data', async (req, res) => {
                 { "背番号": searchRegex },
                 { "Worker_Name": searchRegex },
                 { "材料ロット": searchRegex },
-                { "Comment": searchRegex }
+                { "Comment": searchRegex },
+                { "Run_ID": searchRegex },
+                { "Box_IDs": searchRegex }
             ];
             
             // If we already have an $or condition for dates, we need to use $and
