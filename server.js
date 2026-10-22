@@ -27206,6 +27206,366 @@ app.delete("/api/scna-nc-programs/:id", async (req, res) => {
 
 // ==================== END SCNA NC PROGRAMS ====================
 
+// ==================== SCNA LABEL LAYOUTS ====================
+// Layouts drawn in freyaAdmin2 (SCNA > Label Designer). The miniPC print server
+// (print_DBprinter.py) reads them straight from the `labelLayouts` collection via /queries:
+//   { layoutId, name, customers: [..], isDefault, layout: { widthMm, heightMm, elements: [..] } }
+const LABEL_ELEMENT_TYPES = ["text", "barcode128", "qr", "line", "rect"];
+
+function _validateLabelLayout(layout) {
+  if (!layout || typeof layout !== "object") return "layout is required";
+  const w = Number(layout.widthMm), h = Number(layout.heightMm);
+  if (!(w > 0 && w <= 500) || !(h > 0 && h <= 500)) return "widthMm / heightMm must be between 0 and 500";
+  if (!Array.isArray(layout.elements)) return "layout.elements must be an array";
+  if (layout.elements.length > 200) return "too many elements (max 200)";
+  for (let i = 0; i < layout.elements.length; i++) {
+    const el = layout.elements[i];
+    if (!el || !LABEL_ELEMENT_TYPES.includes(el.type)) return `invalid element type at position ${i}`;
+    for (const k of ["x", "y", "w", "h"]) {
+      if (!Number.isFinite(Number(el[k]))) return `element ${i}: ${k} must be a number`;
+    }
+  }
+  return null;
+}
+
+// Hash of the drawn layout. The Firebase thumbnail records the hash it was rendered from, so the admin page
+// only trusts the stored image while it still matches the layout (otherwise it draws a preview on the spot).
+function _layoutHash(layout) {
+  return require("crypto").createHash("sha1").update(JSON.stringify(layout || {})).digest("hex").slice(0, 16);
+}
+
+function _cleanCustomers(customers) {
+  if (!Array.isArray(customers)) return [];
+  return [...new Set(customers.map(c => String(c || "").trim()).filter(Boolean))];
+}
+
+// A customer maps to one layout, and only one layout can be the default.
+async function _applyLabelLayoutExclusivity(col, layoutId, customers, isDefault) {
+  if (customers.length) {
+    await col.updateMany({ layoutId: { $ne: layoutId } }, { $pull: { customers: { $in: customers } } });
+  }
+  if (isDefault) {
+    await col.updateMany({ layoutId: { $ne: layoutId } }, { $set: { isDefault: false } });
+  }
+}
+
+app.get("/api/scna-label-layouts", async (req, res) => {
+  try {
+    await client.connect();
+    const list = await client.db(DB_NAME).collection("labelLayouts")
+      .find({}).sort({ name: 1 }).toArray();
+    res.json(list);
+  } catch (error) {
+    console.error("❌ Error listing label layouts:", error);
+    res.status(500).json({ error: "Failed to list label layouts", details: error.message });
+  }
+});
+
+app.post("/api/scna-label-layouts", async (req, res) => {
+  try {
+    const { name, customers, isDefault, layout, username } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: "name is required" });
+    const err = _validateLabelLayout(layout);
+    if (err) return res.status(400).json({ error: err });
+
+    await client.connect();
+    const col = client.db(DB_NAME).collection("labelLayouts");
+    const trimmed = String(name).trim();
+    if (await col.findOne({ name: trimmed })) {
+      return res.status(409).json({ error: `A layout named "${trimmed}" already exists` });
+    }
+    const layoutId = `lbl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const cleanCustomers = _cleanCustomers(customers);
+    const now = new Date().toISOString();
+    await _applyLabelLayoutExclusivity(col, layoutId, cleanCustomers, !!isDefault);
+    await col.insertOne({
+      layoutId, name: trimmed, customers: cleanCustomers, isDefault: !!isDefault, layout, layoutHash: _layoutHash(layout),
+      createdBy: username || null, createdAt: now, updatedAt: now,
+    });
+    res.json({ success: true, layoutId });
+  } catch (error) {
+    console.error("❌ Error creating label layout:", error);
+    res.status(500).json({ error: "Failed to create label layout", details: error.message });
+  }
+});
+
+app.put("/api/scna-label-layouts/:layoutId", async (req, res) => {
+  try {
+    const { name, customers, isDefault, layout, username } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: "name is required" });
+    const err = _validateLabelLayout(layout);
+    if (err) return res.status(400).json({ error: err });
+
+    await client.connect();
+    const col = client.db(DB_NAME).collection("labelLayouts");
+    const layoutId = req.params.layoutId;
+    const trimmed = String(name).trim();
+    if (!(await col.findOne({ layoutId }))) return res.status(404).json({ error: "Layout not found" });
+    if (await col.findOne({ name: trimmed, layoutId: { $ne: layoutId } })) {
+      return res.status(409).json({ error: `A layout named "${trimmed}" already exists` });
+    }
+    // Items are bound via masterDB.labelLayoutId now; `customers` is only touched when a caller still sends it,
+    // so saving a layout never wipes customer bindings that have not been migrated yet.
+    const cleanCustomers = _cleanCustomers(customers);
+    await _applyLabelLayoutExclusivity(col, layoutId, cleanCustomers, !!isDefault);
+    const $set = {
+      name: trimmed, isDefault: !!isDefault, layout, layoutHash: _layoutHash(layout),
+      updatedBy: username || null, updatedAt: new Date().toISOString(),
+    };
+    if (Array.isArray(customers)) $set.customers = cleanCustomers;
+    await col.updateOne({ layoutId }, { $set });
+    res.json({ success: true, layoutId });
+  } catch (error) {
+    console.error("❌ Error updating label layout:", error);
+    res.status(500).json({ error: "Failed to update label layout", details: error.message });
+  }
+});
+
+// Preview image rendered by the admin page when a layout is saved (kept in Firebase Storage so the explorer
+// never has to draw every layout on the fly).
+app.put("/api/scna-label-layouts/:layoutId/thumbnail", async (req, res) => {
+  try {
+    const imageBase64 = String(req.body?.imageBase64 || "");
+    const m = /^data:image\/png;base64,(.+)$/.exec(imageBase64);
+    if (!m) return res.status(400).json({ error: "imageBase64 must be a PNG data URL" });
+    const buffer = Buffer.from(m[1], "base64");
+    if (!buffer.length || buffer.length > 4 * 1024 * 1024) return res.status(400).json({ error: "thumbnail is empty or too large (max 4MB)" });
+
+    await client.connect();
+    const col = client.db(DB_NAME).collection("labelLayouts");
+    const layoutId = req.params.layoutId;
+    const doc = await col.findOne({ layoutId });
+    if (!doc) return res.status(404).json({ error: "Layout not found" });
+    const hash = doc.layoutHash || _layoutHash(doc.layout);
+
+    const file = admin.storage().bucket().file(`labelLayoutThumbnails/${layoutId}.png`);
+    await file.save(buffer, {
+      metadata: { contentType: "image/png", cacheControl: "public, max-age=31536000", metadata: { firebaseStorageDownloadTokens: "labelLayoutThumbToken" } },
+      public: true,
+    });
+    const thumbnailUrl = `https://storage.googleapis.com/${file.bucket.name}/${encodeURIComponent(file.name)}?alt=media&token=labelLayoutThumbToken&v=${hash}`;
+    await col.updateOne({ layoutId }, { $set: { layoutHash: hash, thumbnailUrl, thumbnailHash: hash, thumbnailAt: new Date().toISOString() } });
+    res.json({ success: true, thumbnailUrl });
+  } catch (error) {
+    console.error("❌ Error saving label layout thumbnail:", error);
+    res.status(500).json({ error: "Failed to save thumbnail", details: error.message });
+  }
+});
+
+app.delete("/api/scna-label-layouts/:layoutId", async (req, res) => {
+  try {
+    await client.connect();
+    const result = await client.db(DB_NAME).collection("labelLayouts")
+      .deleteOne({ layoutId: req.params.layoutId });
+    if (!result.deletedCount) return res.status(404).json({ error: "Layout not found" });
+    admin.storage().bucket().file(`labelLayoutThumbnails/${req.params.layoutId}.png`).delete().catch(() => {});
+    await _normalizeItemLayouts(client.db(DB_NAME));
+    await client.db(DB_NAME).collection("masterDB").updateMany(
+      { 工場: "SCNA", labelLayoutIds: req.params.layoutId },
+      { $pull: { labelLayoutIds: req.params.layoutId } }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete label layout", details: error.message });
+  }
+});
+
+
+// Item binding: masterDB.labelLayoutIds (array, SCNA items only) - an item can have several layouts and the
+// tablet operator picks one when printing. The old single `labelLayoutId` string is folded into the array the
+// first time anything writes (see _normalizeItemLayouts). The print server resolves, in order: the layoutId the
+// tablet asked for, labelLayoutIds[0], the old customer rule, then the default layout.
+async function _normalizeItemLayouts(database) {
+  await database.collection("masterDB").updateMany(
+    { 工場: "SCNA", labelLayoutId: { $exists: true } },
+    [
+      { $set: { labelLayoutIds: { $setUnion: [
+        { $ifNull: ["$labelLayoutIds", []] },
+        { $cond: [{ $in: [{ $ifNull: ["$labelLayoutId", ""] }, ["", null]] }, [], ["$labelLayoutId"]] },
+      ] } } },
+      { $unset: "labelLayoutId" },
+    ]
+  );
+}
+
+function _itemLayoutIds(item) {
+  const ids = Array.isArray(item.labelLayoutIds) ? item.labelLayoutIds.slice() : [];
+  if (item.labelLayoutId && !ids.includes(item.labelLayoutId)) ids.push(item.labelLayoutId);
+  return ids;
+}
+
+// Lightweight list for the label explorer / assign modal, so paging and search work client-side.
+app.get("/api/scna-label-layouts/items", async (req, res) => {
+  try {
+    await client.connect();
+    const rows = await client.db(DB_NAME).collection("masterDB").find(
+      { 工場: "SCNA" },
+      { projection: { _id: 0, 背番号: 1, 品番: 1, 品名: 1, "顧客/納入先": 1, labelLayoutIds: 1, labelLayoutId: 1 } }
+    ).sort({ 背番号: 1 }).toArray();
+    res.json(rows.map(({ labelLayoutIds, labelLayoutId, ...rest }) => ({
+      ...rest, layoutIds: _itemLayoutIds({ labelLayoutIds, labelLayoutId }),
+    })));
+  } catch (error) {
+    console.error("❌ Error listing label layout items:", error);
+    res.status(500).json({ error: "Failed to list items", details: error.message });
+  }
+});
+
+// Layouts the tablet can offer for one item. Same order the print server uses, so the list never disagrees
+// with what would print: assigned layouts, else the old customer rule, else the default layout.
+app.get("/api/scna-label-layouts/for-item", async (req, res) => {
+  try {
+    const sebanggo = String(req.query.sebanggo || "").trim();
+    if (!sebanggo) return res.status(400).json({ error: "sebanggo is required" });
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const item = await database.collection("masterDB").findOne({ 工場: "SCNA", 背番号: sebanggo });
+    if (!item) return res.status(404).json({ error: "Item not found" });
+    const layoutsCol = database.collection("labelLayouts");
+    const pick = (d) => ({ layoutId: d.layoutId, name: d.name });
+    const sortByName = (a, b) => String(a.name).localeCompare(String(b.name), "ja");
+
+    const ids = _itemLayoutIds(item);
+    if (ids.length) {
+      const docs = await layoutsCol.find({ layoutId: { $in: ids } }).toArray();
+      if (docs.length) return res.json({ source: "assigned", layouts: docs.map(pick).sort(sortByName) });
+    }
+    const customer = String(item["顧客/納入先"] || "").trim();
+    if (customer) {
+      const docs = await layoutsCol.find({ customers: customer }).toArray();
+      if (docs.length) return res.json({ source: "customer", layouts: docs.map(pick).sort(sortByName) });
+    }
+    const def = await layoutsCol.findOne({ isDefault: true });
+    if (def) return res.json({ source: "default", layouts: [pick(def)] });
+    res.json({ source: "none", layouts: [] });
+  } catch (error) {
+    console.error("❌ Error resolving item label layouts:", error);
+    res.status(500).json({ error: "Failed to resolve layouts", details: error.message });
+  }
+});
+
+app.put("/api/scna-label-layouts/:layoutId/assign", async (req, res) => {
+  try {
+    const clean = (a) => (Array.isArray(a) ? [...new Set(a.map(v => String(v || "").trim()).filter(Boolean))] : []);
+    const add = clean(req.body?.add);
+    const remove = clean(req.body?.remove);
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const layoutId = req.params.layoutId;
+    if (!(await database.collection("labelLayouts").findOne({ layoutId }))) {
+      return res.status(404).json({ error: "Layout not found" });
+    }
+    await _normalizeItemLayouts(database);
+    const items = database.collection("masterDB");
+    let assigned = 0, removed = 0;
+    if (add.length) {
+      const r = await items.updateMany({ 工場: "SCNA", 背番号: { $in: add } }, { $addToSet: { labelLayoutIds: layoutId } });
+      assigned = r.modifiedCount;
+    }
+    if (remove.length) {
+      const r = await items.updateMany({ 工場: "SCNA", 背番号: { $in: remove } }, { $pull: { labelLayoutIds: layoutId } });
+      removed = r.modifiedCount;
+    }
+    res.json({ success: true, assigned, removed });
+  } catch (error) {
+    console.error("❌ Error assigning label layout items:", error);
+    res.status(500).json({ error: "Failed to assign items", details: error.message });
+  }
+});
+
+// One-time migration of the old customer binding: items whose 顧客/納入先 is listed on a layout get that layout
+// added to labelLayoutIds (items that already have a layout are left alone). The customer list moves to
+// `legacyCustomers` as a record, so layouts no longer carry a live customer rule. { dryRun: true } only counts.
+app.post("/api/scna-label-layouts/migrate-customers", async (req, res) => {
+  try {
+    const dryRun = !!req.body?.dryRun;
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const layoutsCol = database.collection("labelLayouts");
+    const items = database.collection("masterDB");
+    if (!dryRun) await _normalizeItemLayouts(database);
+    const withCustomers = await layoutsCol.find({ "customers.0": { $exists: true } }).toArray();
+    const report = [];
+    for (const l of withCustomers) {
+      const filter = {
+        工場: "SCNA",
+        "顧客/納入先": { $in: l.customers },
+        $or: [{ labelLayoutIds: { $exists: false } }, { labelLayoutIds: { $size: 0 } }],
+        labelLayoutId: { $in: [null, ""] },
+      };
+      let matched;
+      if (dryRun) {
+        matched = await items.countDocuments({ ...filter, labelLayoutId: { $in: [null, ""] } });
+      } else {
+        matched = (await items.updateMany(filter, { $addToSet: { labelLayoutIds: l.layoutId } })).modifiedCount;
+        await layoutsCol.updateOne({ layoutId: l.layoutId }, {
+          $set: { legacyCustomers: l.customers, customers: [], migratedAt: new Date().toISOString() },
+        });
+      }
+      report.push({ layoutId: l.layoutId, name: l.name, customers: l.customers, items: matched });
+    }
+    res.json({ success: true, dryRun, layouts: report });
+  } catch (error) {
+    console.error("❌ Error migrating label layout customers:", error);
+    res.status(500).json({ error: "Failed to migrate customers", details: error.message });
+  }
+});
+
+// Field display names for the label designer. The script and layouts use the real masterDB
+// field names; this collection only holds the English/Japanese names the editor shows.
+//   labelFieldNames: { field, labelEn, labelJa, updatedAt }
+// GET returns every field found on SCNA masterDB items (so new columns appear automatically)
+// together with whatever names have been saved for them.
+app.get("/api/scna-label-fields", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const factory = String(req.query.factory || "SCNA").trim() || "SCNA";
+    const rows = await database.collection("masterDB").aggregate([
+      { $match: { 工場: factory } },
+      { $project: { kv: { $objectToArray: "$$ROOT" } } },
+      { $unwind: "$kv" },
+      { $group: { _id: "$kv.k" } },
+    ]).toArray();
+    const fields = rows.map(r => r._id).filter(k => k !== "_id").sort();
+    const names = await database.collection("labelFieldNames").find({}).toArray();
+    res.json({ fields, names });
+  } catch (error) {
+    console.error("❌ Error listing label fields:", error);
+    res.status(500).json({ error: "Failed to list label fields", details: error.message });
+  }
+});
+
+app.put("/api/scna-label-fields", async (req, res) => {
+  try {
+    const { names, username } = req.body || {};
+    if (!Array.isArray(names) || names.length > 500) {
+      return res.status(400).json({ error: "names must be an array (max 500)" });
+    }
+    const now = new Date().toISOString();
+    const ops = [];
+    for (const n of names) {
+      const field = String(n?.field || "").trim();
+      if (!field || field === "_id") continue;
+      const labelEn = String(n?.labelEn || "").trim();
+      const labelJa = String(n?.labelJa || "").trim();
+      ops.push(labelEn || labelJa
+        ? { updateOne: { filter: { field }, update: { $set: { field, labelEn, labelJa, updatedAt: now, updatedBy: username || null } }, upsert: true } }
+        : { deleteOne: { filter: { field } } });
+    }
+    if (ops.length) {
+      await client.connect();
+      await client.db(DB_NAME).collection("labelFieldNames").bulkWrite(ops);
+    }
+    res.json({ success: true, saved: ops.length });
+  } catch (error) {
+    console.error("❌ Error saving label field names:", error);
+    res.status(500).json({ error: "Failed to save label field names", details: error.message });
+  }
+});
+
+// ==================== END SCNA LABEL LAYOUTS ====================
+
 // Get unique machine names for filter dropdown
 app.get('/api/scna/machines', async (req, res) => {
     let client;
