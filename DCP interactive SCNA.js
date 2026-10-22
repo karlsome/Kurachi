@@ -1495,8 +1495,10 @@
         var cyc = to - from;
         if (!(cyc > 0)) continue;
         var pc = lotPcPerCycle(m, list[i].lotNumber);
-        segs.push({ lotNumber: list[i].lotNumber, cycles: cyc, pc: pc });
-        produced += cyc * (pc || 0);
+        // pieces of the first cycle already went into the previous box (split cycle)
+        var less = (!segs.length && prev && prev.partial && from === prevTotal) ? prev.partial : 0;
+        segs.push({ lotNumber: list[i].lotNumber, cycles: cyc, pc: pc, less: less });
+        produced += cyc * (pc || 0) - less;
       }
       per.push({ machine: m, prevTotal: prevTotal, now: st.total, segs: segs, produced: produced, take: null });
     });
@@ -1537,9 +1539,12 @@
       x.segs.forEach(function (g, j) {
         var c = capped ? x.take[j] : g.cycles;
         consumed += c;
-        if (c > 0) lots.push({ source: 'machine', lotNumber: g.lotNumber, machine: x.machine, shots: c, pieces: g.pc != null ? c * g.pc : null, countSource: 'auto' });
+        if (c > 0) {
+          var pcs = g.pc != null ? c * g.pc - (capped ? 0 : g.less) : null;
+          lots.push({ source: 'machine', lotNumber: g.lotNumber, machine: x.machine, shots: (pcs != null && g.pc) ? Math.round(pcs / g.pc * 100) / 100 : c, pieces: pcs, countSource: 'auto' });
+        }
       });
-      nextSnap[x.machine] = { total: capped ? x.prevTotal + consumed : x.now };
+      nextSnap[x.machine] = { total: capped ? x.prevTotal + consumed : x.now, partial: 0 };
     });
     var machinePieces = lots.reduce(function (n, l) { return n + (l.pieces || 0); }, 0);
     return { lots: lots, nextSnap: nextSnap, approximate: approximate, notes: notes, capped: capped,
@@ -1554,7 +1559,7 @@
   function sliceBoxTimed(run, totals, logs, cap) {
     var machines = SCNA.activeMachines();
     var marks = cycleMarks();
-    var cycles = [], notes = [], approximate = false, prevOf = {}, lotsInfo = {};
+    var cycles = [], notes = [], approximate = false, prevOf = {}, partialOf = {};
     for (var mi = 0; mi < machines.length; mi++) {
       var m = machines[mi];
       var list = marks[m] || [];
@@ -1569,30 +1574,46 @@
       if (mine.length !== need) return null;                    // gap in the log: do not guess
       mine.sort(function (a, b) { return a.n - b.n; });
       prevOf[m] = prevTotal;
+      var prevPartial = (prev && prev.partial) || 0;   // pieces of the next cycle that already went into the previous box
+      partialOf[m] = prevPartial;
       mine.forEach(function (c) {
         var idx = -1;
         for (var i = 0; i < list.length; i++) if (c.n > list[i].start) idx = i;   // cycle belongs to the last lot started before it
         if (idx < 0) return;
         var pc = lotPcPerCycle(m, list[idx].lotNumber);
-        cycles.push({ machine: m, n: c.n, ts: c.ts, t: Date.parse(c.ts) || 0, lot: list[idx].lotNumber, pc: pc });
+        var pre = (prevPartial && c.n === prevTotal + 1) ? prevPartial : 0;
+        cycles.push({ machine: m, n: c.n, ts: c.ts, t: Date.parse(c.ts) || 0, lot: list[idx].lotNumber, pc: pc, pre: pre, avail: pc - pre });
       });
     }
     if (cycles.some(function (c) { return c.pc == null; })) return null;
     cycles.sort(function (a, b) { return (a.t - b.t) || (a.n - b.n); });
+    // oldest first; the cycle that does not fit whole is split: only the pieces that fit go in, the rest stays for the next box
     var taken = [], sum = 0;
     for (var k = 0; k < cycles.length; k++) {
-      if (cap && cap > 0 && sum + cycles[k].pc > cap) break;
-      taken.push(cycles[k]); sum += cycles[k].pc;
+      var c = cycles[k];
+      if (cap && cap > 0 && sum + c.avail > cap) {
+        var room = cap - sum;
+        if (room > 0) { taken.push({ c: c, pieces: room, full: false }); sum += room; }
+        break;
+      }
+      taken.push({ c: c, pieces: c.avail, full: true }); sum += c.avail;
     }
-    var producedAll = cycles.reduce(function (n, c) { return n + c.pc; }, 0);
+    var producedAll = cycles.reduce(function (n, c) { return n + c.avail; }, 0);
     var byKey = {}, lots = [], nextSnap = {};
-    machines.forEach(function (m) { nextSnap[m] = { total: prevOf[m] + taken.filter(function (c) { return c.machine === m; }).length }; });
-    taken.forEach(function (c) {
-      var key = c.machine + '|' + c.lot;
+    machines.forEach(function (m) {
+      var mine = taken.filter(function (t) { return t.c.machine === m; });
+      var fullCount = mine.filter(function (t) { return t.full; }).length;
+      var last = mine[mine.length - 1];
+      var partial = !mine.length ? partialOf[m] : (last && !last.full ? last.c.pre + last.pieces : 0);
+      nextSnap[m] = { total: prevOf[m] + fullCount, partial: partial };
+    });
+    taken.forEach(function (t) {
+      var c = t.c, key = c.machine + '|' + c.lot;
       var l = byKey[key];
       if (!l) { l = byKey[key] = { source: 'machine', lotNumber: c.lot, machine: c.machine, shots: 0, pieces: 0, countSource: 'auto', firstCycleAt: c.ts, lastCycleAt: c.ts }; lots.push(l); }
-      l.shots++; l.pieces += c.pc; l.lastCycleAt = c.ts;
+      l.shots += t.pieces / c.pc; l.pieces += t.pieces; l.lastCycleAt = c.ts;
     });
+    lots.forEach(function (l) { l.shots = Math.round(l.shots * 100) / 100; });
     var capped = cap > 0 && producedAll > sum;
     if (capped) notes.push('exact fill by cycle time: produced ' + producedAll + ', carried over ' + (producedAll - sum));
     return { lots: lots, nextSnap: nextSnap, approximate: approximate, notes: notes, capped: capped, fillMethod: 'timed',
@@ -1762,6 +1783,8 @@
     var ip = listenerIP(machine);
     if (!ip) return { auto: false, total: null, log: false };
     var ports = [5000, 8766];
+    // Test setups with two listeners on one PC: localStorage scnaListenerPorts = {"AOL-9": 5002} (used for the count/cycle log only)
+    try { var po = JSON.parse(localStorage.getItem('scnaListenerPorts') || '{}'); if (po && po[machine]) ports = [parseInt(po[machine], 10)]; } catch (e) { }
     for (var i = 0; i < ports.length; i++) {
       try {
         var res = await fetch('http://' + ip + ':' + ports[i] + '/state', { cache: 'no-store', signal: AbortSignal.timeout(2000) });
@@ -1909,8 +1932,8 @@
   }
 
   // Compact counts in the production tab's product card (right of 背番号 / 品番):
-  //   AOL-8: 80 S: 5 To: 85    machine pieces since the last box, S = pending spare pieces, To = going in the box
-  //   Pair (AOL-2/3):  AOL-2: 60 / AOL-3: 40 / S: 5 To: 105      (spare is not tied to a machine)
+  //   AOL-8: 24 cc: 6          machine pieces since the last box, cc = cycle count behind them
+  //   S: 5 To: 29              pending spare pieces, To = going in the box (machines + spare); one line for all machines
   //   AOL-9: manual    only machines that are NOT on auto count; nothing is shown when all are auto
   // Shows everything produced since the last print; the box itself is capped at 収容数 when printed, so after a print
   // the cell shows what was left over (e.g. box 75: 10 S: 0 To: 10).
@@ -1934,16 +1957,14 @@
     var r = haveLots ? sliceBox(run, totals, 0) : { lots: [] };
     var autoMachines = list.filter(function (m) { return totals[m].auto; });
     var manual = list.filter(function (m) { return !totals[m].auto; }).map(function (m) { return m + ': manual'; });
+    var ccOf = function (m) { return r.lots.filter(function (l) { return l.machine === m && l.pieces != null; }).reduce(function (n, l) { return n + (l.shots || 0); }, 0); };
     var pcsOf = function (m) { return r.lots.filter(function (l) { return l.machine === m && l.pieces != null; }).reduce(function (n, l) { return n + l.pieces; }, 0); };
     var total = autoMachines.reduce(function (n, m) { return n + pcsOf(m); }, 0) + spareSum;
     var cap = boxCapacity();
     var rows = [];
     if (haveLots && autoMachines.length) {
-      if (list.length === 1) rows.push(autoMachines[0] + ': ' + pcsOf(autoMachines[0]) + ' S: ' + spareSum + ' To: ' + total);
-      else {
-        autoMachines.forEach(function (m) { rows.push(m + ': ' + pcsOf(m)); });
-        rows.push('S: ' + spareSum + ' To: ' + total);
-      }
+      autoMachines.forEach(function (m) { rows.push(m + ': ' + pcsOf(m) + ' cc: ' + ccOf(m)); });
+      rows.push('S: ' + spareSum + ' To: ' + total);
     }
     var html = rows.map(esc).join('<br>');
     if (cap && haveLots && total > cap) html = html.replace(/(To: \d+)/, '<span style="color:#B42318;">$1</span>');   // more than fits: the rest goes to the next box
