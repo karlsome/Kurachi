@@ -1173,6 +1173,7 @@
   //   SCNA.labelValues.text_2 = function () { return ... }; // evaluated at print time
   // The element with that ID prints the value instead of what the designer shows. An ID that is not in the
   // chosen layout is ignored by the print server (it logs a warning).
+  SCNA.boxId = '';   // set by the box flow (plan Phase 5) before each print; appended to the qr_1 value
   SCNA.labelValues = {};
   SCNA.setLabelValue = function (id, value) { SCNA.labelValues[id] = value; };
   SCNA.clearLabelValues = function () { SCNA.labelValues = {}; };
@@ -1251,6 +1252,11 @@
       var layoutId = printLayoutId;
       printLayoutId = null;
       var overrides = collectLabelValues();
+      // Box traceability: the layout's qr_1 stays {品番},{収容数},{lotNumber}; the tablet sends that same text
+      // with the box ID appended. The print server fills the {fields}. An explicit qr_1 value is left alone.
+      if (SCNA.boxId && !('qr_1' in overrides)) {
+        overrides.qr_1 = '{品番},{収容数},{lotNumber},' + String(SCNA.boxId);
+      }
       var params = { filename: sebanggo, qty: String(copies) };
       if (layoutId) params.layoutId = layoutId;
       if (Object.keys(overrides).length) params.overrides = JSON.stringify(overrides);
