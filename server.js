@@ -27349,9 +27349,12 @@ app.get("/api/scna-boxes/:boxId", async (req, res) => {
 app.get("/api/scna-boxes", async (req, res) => {
   try {
     const runId = String(req.query.runId || "").trim();
-    if (!runId) return res.status(400).json({ error: "runId is required" });
+    const lotNumber = String(req.query.lotNumber || "").trim();
+    if (!runId && !lotNumber) return res.status(400).json({ error: "runId or lotNumber is required" });
     await client.connect();
-    const list = await client.db(DB_NAME).collection("scnaBoxDB").find({ runId }).sort({ seq: 1 }).toArray();
+    // lotNumber: every box that contains this material lot (exact match, spare lines included)
+    const filter = runId ? { runId } : { "lots.lotNumber": lotNumber };
+    const list = await client.db(DB_NAME).collection("scnaBoxDB").find(filter).sort(runId ? { seq: 1 } : { printedAt: -1 }).limit(500).toArray();
     res.json(list);
   } catch (error) {
     console.error("❌ Error listing SCNA boxes:", error);
