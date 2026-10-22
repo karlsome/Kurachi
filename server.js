@@ -27281,7 +27281,8 @@ function _scnaBoxKey(workOrderNumber, sebanggo) {
 
 const _SCNA_BOX_FIELDS = [
   "runId", "workOrderNumber", "背番号", "品番", "machines", "Tablet_Home", "worker", "startedAt", "finishedAt",
-  "printedAt", "printedBy", "copies", "layoutId", "qtyLabel", "qtyMeasured", "lots", "snapshot", "approximate", "notes"
+  "printedAt", "printedBy", "copies", "layoutId", "qtyLabel", "qtyMeasured", "lots", "snapshot", "approximate", "notes",
+  "capped", "producedSinceLastBox", "carriedOverPieces"
 ];
 
 app.post("/api/scna-boxes", async (req, res) => {

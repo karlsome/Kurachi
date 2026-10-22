@@ -1463,38 +1463,100 @@
     return null;
   }
 
-  // Build the box record from the cycle marks and the previous snapshot. Never throws: whatever cannot be counted
-  // becomes an `approximate` box with the lot listed but no pieces.
-  async function buildBoxPayload(run, spare) {
+  // Machine part of a box, from the cycles_total readings. Pure: no network.
+  //   totals: { machine: { auto, total } }   cap: 収容数 minus spare pieces (0 / null = no cap)
+  // Without a cap the box is everything since the previous box. With one, machines are scaled in proportion to what
+  // each produced (so the faster machine puts in more), within a machine the oldest cycles go first, and the cycles
+  // left over stay in the counter for the next box (nextSnap only advances by what was used).
+  function sliceBox(run, totals, cap) {
     var machines = SCNA.activeMachines();
     var marks = cycleMarks();
-    var lots = [], notes = [], approximate = false, nextSnap = {};
-    for (var mi = 0; mi < machines.length; mi++) {
-      var m = machines[mi];
+    var per = [], lots = [], notes = [], approximate = false, nextSnap = {};
+    machines.forEach(function (m) {
       var list = marks[m] || [];
-      var st = await fetchCycleState(m);
+      var st = totals[m] || { auto: false, total: null };
       var prev = run.lastSnapshot.perMachine[m];
       var prevTotal = prev ? prev.total : (list.length && list[0].start != null ? list[0].start : null);
-      if (!list.length) { approximate = true; notes.push(m + ': no lot recorded'); continue; }
+      if (!list.length) { approximate = true; notes.push(m + ': no lot recorded'); return; }
       if (!st.auto || prevTotal == null || list.some(function (l) { return l.start == null; })) {
         approximate = true; notes.push(m + ': count not available (manual)');
         var open = list[list.length - 1];
         lots.push({ source: 'machine', lotNumber: open.lotNumber, machine: m, shots: null, pieces: null, countSource: 'unknown' });
         if (st.auto) nextSnap[m] = { total: st.total };
-        continue;
+        return;
       }
+      var segs = [], produced = 0;
       for (var i = 0; i < list.length; i++) {
         var from = Math.max(list[i].start, prevTotal);
         var to = Math.min(i + 1 < list.length ? list[i + 1].start : st.total, st.total);
         var cyc = to - from;
         if (!(cyc > 0)) continue;
         var pc = lotPcPerCycle(m, list[i].lotNumber);
-        lots.push({ source: 'machine', lotNumber: list[i].lotNumber, machine: m, shots: cyc, pieces: pc != null ? cyc * pc : null, countSource: 'auto' });
+        segs.push({ lotNumber: list[i].lotNumber, cycles: cyc, pc: pc });
+        produced += cyc * (pc || 0);
       }
-      nextSnap[m] = { total: st.total };
+      per.push({ machine: m, prevTotal: prevTotal, now: st.total, segs: segs, produced: produced, take: null });
+    });
+
+    var allKnown = per.every(function (x) { return x.segs.every(function (g) { return g.pc != null; }); });
+    var producedAll = per.reduce(function (n, x) { return n + x.produced; }, 0);
+    var capped = !!(cap && cap > 0 && allKnown && producedAll > cap);
+    if (capped) {
+      // proportional share per machine, oldest cycles first inside it
+      per.forEach(function (x) {
+        var share = cap * x.produced / producedAll, left = share, used = 0;
+        x.take = x.segs.map(function (g) {
+          var c = Math.min(g.cycles, Math.floor(left / g.pc));
+          left -= c * g.pc; used += c * g.pc;
+          return c;
+        });
+        x.used = used;
+      });
+      // top up with whole cycles while they still fit (rounding), the machine with the most left over first
+      var usedAll = per.reduce(function (n, x) { return n + x.used; }, 0), moved = true;
+      while (moved) {
+        moved = false;
+        var order = per.slice().sort(function (p, q) { return (q.produced - q.used) - (p.produced - p.used); });
+        for (var k = 0; k < order.length; k++) {
+          var x = order[k];
+          for (var j = 0; j < x.segs.length; j++) {
+            if (x.take[j] < x.segs[j].cycles && usedAll + x.segs[j].pc <= cap) {
+              x.take[j]++; x.used += x.segs[j].pc; usedAll += x.segs[j].pc; moved = true; break;
+            }
+          }
+          if (moved) break;
+        }
+      }
+      notes.push('capped to ' + cap + ' machine pieces: produced ' + producedAll + ', carried over ' + (producedAll - usedAll));
     }
+    per.forEach(function (x) {
+      var consumed = 0;
+      x.segs.forEach(function (g, j) {
+        var c = capped ? x.take[j] : g.cycles;
+        consumed += c;
+        if (c > 0) lots.push({ source: 'machine', lotNumber: g.lotNumber, machine: x.machine, shots: c, pieces: g.pc != null ? c * g.pc : null, countSource: 'auto' });
+      });
+      nextSnap[x.machine] = { total: capped ? x.prevTotal + consumed : x.now };
+    });
+    var machinePieces = lots.reduce(function (n, l) { return n + (l.pieces || 0); }, 0);
+    return { lots: lots, nextSnap: nextSnap, approximate: approximate, notes: notes, capped: capped,
+      producedPieces: producedAll, machinePieces: machinePieces, carriedPieces: capped ? producedAll - machinePieces : 0 };
+  }
+
+  function boxCapacity() { return parseInt((($('収容数') || {}).value || ''), 10) || 0; }
+
+  // Build the box record from the cycle marks and the previous snapshot. Never throws: whatever cannot be counted
+  // becomes an `approximate` box with the lot listed but no pieces.
+  async function buildBoxPayload(run, spare) {
+    var machines = SCNA.activeMachines();
+    var totals = {};
+    for (var mi = 0; mi < machines.length; mi++) totals[machines[mi]] = await fetchCycleState(machines[mi]);
+    var spareSum = spare.reduce(function (n, e) { return n + (e.pieces || 0); }, 0);
+    var qtyLabel = boxCapacity();
+    var r = sliceBox(run, totals, qtyLabel ? Math.max(0, qtyLabel - spareSum) : 0);
+    var lots = r.lots;
     spare.forEach(function (e) { lots.push({ source: 'spare', lotNumber: e.lotNumber, pieces: e.pieces, machine: null, shots: null, countSource: 'spare' }); });
-    var measured = lots.reduce(function (n, l) { return n + (l.pieces || 0); }, 0);
+    var measured = r.machinePieces + spareSum;
     var hinban = (($('product-number') || {}).value || '') || (typeof currentProductDetails !== 'undefined' && currentProductDetails && currentProductDetails.hinban) || '';
     var workers = (window.selectedWorkerNames || []).filter(function (n) { return (n || '').trim(); });
     return {
@@ -1504,10 +1566,12 @@
         背番号: (($('sub-dropdown') || {}).value || '').trim(), 品番: hinban,
         machines: machines, Tablet_Home: legacyLabel(SCNA.home.length ? SCNA.home : SCNA.machines), worker: workers.join(','),
         startedAt: run.lastPrinted ? run.lastPrinted.printedAt : run.startedAt, finishedAt: new Date().toISOString(),
-        qtyLabel: parseInt((($('収容数') || {}).value || ''), 10) || null, qtyMeasured: measured,
-        lots: lots, snapshot: nextSnap, approximate: approximate, notes: notes
+        qtyLabel: qtyLabel || null, qtyMeasured: measured,
+        lots: lots, snapshot: r.nextSnap, approximate: r.approximate, notes: r.notes.concat(
+          r.capped ? [] : (qtyLabel && measured < qtyLabel ? ['under 収容数: ' + measured + ' of ' + qtyLabel] : [])),
+        capped: r.capped, producedSinceLastBox: r.producedPieces + spareSum, carriedOverPieces: r.carriedPieces
       },
-      nextSnap: nextSnap, spareIds: spare.map(function (e) { return e.id; })
+      nextSnap: r.nextSnap, spareIds: spare.map(function (e) { return e.id; })
     };
   }
 
@@ -1728,6 +1792,33 @@
     return info;
   };
 
+  // Live line: what the next box holds right now, from the last poll ("since last print")
+  function updateBoxLine(list) {
+    var el = $('scnaBoxLine');
+    var run = lsGet(RUN_KEY, null);
+    if (!run || !run.runId || !Object.keys(cycleMarks()).length) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'scnaBoxLine';
+      el.style.cssText = 'position:fixed;left:10px;bottom:44px;z-index:90000;max-width:calc(100vw - 20px);padding:6px 12px;border-radius:12px;' +
+        'background:#EFF4FF;color:#1D3F9C;font-size:.8rem;font-weight:700;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.2);';
+      document.body.appendChild(el);
+    }
+    var totals = {};
+    list.forEach(function (m) { totals[m] = SCNA.cycleStatus[m] || { auto: false, total: null }; });
+    var spareSum = SCNA.pendingSpare().reduce(function (n, e) { return n + (e.pieces || 0); }, 0);
+    var cap = boxCapacity();
+    var r = sliceBox(run, totals, cap ? Math.max(0, cap - spareSum) : 0);
+    var parts = r.lots.filter(function (l) { return l.pieces != null; }).map(function (l) { return l.machine + ' ' + l.lotNumber + ' ' + l.pieces; });
+    SCNA.pendingSpare().forEach(function (e) { parts.push('スペア ' + (e.lotNumber || '') + ' ' + e.pieces); });
+    var have = r.machinePieces + spareSum;
+    var txt = '次の箱 / Next box: ' + (parts.length ? parts.join(' · ') : '—') + ' = ' + have + (cap ? ' / ' + cap : '');
+    if (r.carriedPieces > 0) txt += '  (+' + r.carriedPieces + ' 次の箱へ / carried over)';
+    else if (cap && have >= cap) txt += '  満杯 / FULL';
+    if (r.approximate) txt += '  ≈';
+    el.textContent = txt;
+  }
+
   // Small badge: which machines are on auto count right now
   function updateCountBadge() {
     var list = SCNA.activeMachines();
@@ -1746,6 +1837,7 @@
         b.style.color = allAuto ? '#027A48' : '#B54708';
         b.textContent = (allAuto ? '自動カウント / Auto count' : '手入力 / Manual count') + ' · ' +
           list.map(function (m) { return m + (SCNA.cycleStatus[m] && SCNA.cycleStatus[m].auto ? ' ✓' : ' –'); }).join('  ');
+        updateBoxLine(list);
       }).catch(function () { });
   }
 
