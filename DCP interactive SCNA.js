@@ -1168,6 +1168,26 @@
   // one, then send it as &layoutId=. One layout (or none) keeps the old behaviour: the server picks it.
   var printLayoutId = null;
 
+  // Values for named label elements (admin SCNA > Label Designer > Element ID), sent with every print:
+  //   SCNA.labelValues.text_1 = 'hello';                  // fixed value
+  //   SCNA.labelValues.text_2 = function () { return ... }; // evaluated at print time
+  // The element with that ID prints the value instead of what the designer shows. An ID that is not in the
+  // chosen layout is ignored by the print server (it logs a warning).
+  SCNA.labelValues = {};
+  SCNA.setLabelValue = function (id, value) { SCNA.labelValues[id] = value; };
+  SCNA.clearLabelValues = function () { SCNA.labelValues = {}; };
+
+  function collectLabelValues() {
+    var out = {};
+    var src = SCNA.labelValues || {};
+    Object.keys(src).forEach(function (id) {
+      var v = src[id];
+      if (typeof v === 'function') { try { v = v(); } catch (e) { console.warn('SCNA.labelValues.' + id + ' failed:', e); return; } }
+      if (v !== undefined && v !== null) out[id] = String(v);
+    });
+    return out;
+  }
+
   async function fetchPrintLayouts(sebanggo) {
     try {
       var res = await fetch(window.serverURL + '/api/scna-label-layouts/for-item?sebanggo=' + encodeURIComponent(sebanggo));
@@ -1224,17 +1244,18 @@
         if (!chosen) return null;   // cancelled
         printLayoutId = chosen;
       }
-      return origPrompt.apply(this, arguments);
+      return origPrompt.call(this, 1);   // SCNA default is 1 copy (the shared default is 3)
     };
 
     window.request047JAutoPrint = async function (machineName, sebanggo, copies) {
-      if (!printLayoutId) return origRequest.apply(this, arguments);
       var layoutId = printLayoutId;
       printLayoutId = null;
+      var overrides = collectLabelValues();
+      var params = { filename: sebanggo, qty: String(copies) };
+      if (layoutId) params.layoutId = layoutId;
+      if (Object.keys(overrides).length) params.overrides = JSON.stringify(overrides);
       var printerIP = await resolveEquipmentPrinterIP(machineName);
-      var url = 'http://' + printerIP + ':5001/request?' + new URLSearchParams({
-        filename: sebanggo, qty: String(copies), layoutId: layoutId
-      }).toString();
+      var url = 'http://' + printerIP + ':5001/request?' + new URLSearchParams(params).toString();
       var controller = new AbortController();
       var timer = setTimeout(function () { controller.abort(); }, 10000);
       try {
