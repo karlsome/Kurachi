@@ -1373,6 +1373,8 @@
       }
       // A text element with Element ID box_id prints the box ID as readable text (ignored if the layout has none)
       if (SCNA.boxId && !('box_id' in overrides)) overrides.box_id = String(SCNA.boxId);
+      // text_9 shows the date (the print server's {lotNumber}, yyyymmdd) followed by the box ID: 20261022 - WO-9999-B001
+      if (SCNA.boxId && !('text_9' in overrides)) overrides.text_9 = '{lotNumber} - ' + String(SCNA.boxId);
       var params = { filename: sebanggo, qty: String(copies) };
       if (layoutId) params.layoutId = layoutId;
       if (Object.keys(overrides).length) params.overrides = JSON.stringify(overrides);
