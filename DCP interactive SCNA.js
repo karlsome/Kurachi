@@ -283,7 +283,7 @@
         }
       } else if (/\/submitToDCP(\?|$)/.test(url) && init && String(init.method || '').toUpperCase() === 'POST' &&
         typeof init.body === 'string') {
-        init = Object.assign({}, init, { body: SCNA.patchSubmit(init.body) });
+        init = Object.assign({}, init, { body: await SCNA.addCycleTimes(SCNA.patchSubmit(init.body)) });
       }
     } catch (e) { console.error('SCNA fetch hook failed (sending original):', e); }
     return origFetch(input, init);
@@ -1430,6 +1430,71 @@
       }
     };
   }
+
+  // Cycle times per machine and lot for analytics (submit only): from the listener's timestamped cycle log, for the
+  // cycles between each lot's cyclesTotalStart and cyclesTotalEnd. A cycle time is the gap between two finished cuts
+  // (feed and short pauses included); the median is used so a break or a stop does not skew it.
+  function median(a) {
+    if (!a.length) return null;
+    var b = a.slice().sort(function (x, y) { return x - y; }), h = b.length >> 1;
+    return b.length % 2 ? b[h] : (b[h - 1] + b[h]) / 2;
+  }
+  var round2 = function (v) { return v == null ? null : Math.round(v * 100) / 100; };
+
+  // cycles: [{ n, ts }] ; the lot owns cycles start < n <= end. Intervals only between consecutive numbers inside it.
+  function cycleTimeStats(cycles, start, end) {
+    var mine = cycles.filter(function (c) { return c.n > start && c.n <= end; }).sort(function (a, b) { return a.n - b.n; });
+    if (!mine.length) return null;
+    var gaps = [];
+    for (var i = 1; i < mine.length; i++) {
+      if (mine[i].n !== mine[i - 1].n + 1) continue;
+      var dt = (Date.parse(mine[i].ts) - Date.parse(mine[i - 1].ts)) / 1000;
+      if (dt > 0) gaps.push(dt);
+    }
+    return { firstCycleAt: mine[0].ts, lastCycleAt: mine[mine.length - 1].ts, cycles: mine.length, gaps: gaps };
+  }
+
+  SCNA.addCycleTimes = async function (bodyStr) {
+    try {
+      var b = JSON.parse(bodyStr);
+      var lots = (b.Lot_Details || []).filter(function (l) { return l.cyclesTotalStart != null && l.cyclesTotalEnd != null; });
+      if (!lots.length) return bodyStr;
+      var machines = [];
+      lots.forEach(function (l) { if (machines.indexOf(l.machine) < 0) machines.push(l.machine); });
+      var logs = {};
+      await Promise.all(machines.map(async function (m) {
+        var minStart = Math.min.apply(null, lots.filter(function (l) { return l.machine === m; }).map(function (l) { return l.cyclesTotalStart; }));
+        var st = await fetchCycleState(m);
+        if (st.auto && st.log) logs[m] = await fetchCycleLog(st, minStart);
+      }));
+      var perMachine = {};
+      lots.forEach(function (l) {
+        var log = logs[l.machine];
+        if (!log) return;
+        var st = cycleTimeStats(log, l.cyclesTotalStart, l.cyclesTotalEnd);
+        if (!st) return;
+        l.firstCycleAt = st.firstCycleAt; l.lastCycleAt = st.lastCycleAt;
+        l.cycleSecMedian = round2(median(st.gaps));
+        l.cycleSecMin = st.gaps.length ? round2(Math.min.apply(null, st.gaps)) : null;
+        l.cycleSecMax = st.gaps.length ? round2(Math.max.apply(null, st.gaps)) : null;
+        l.cycleIntervals = st.gaps.length;
+        var pm = perMachine[l.machine] || (perMachine[l.machine] = { machine: l.machine, cycles: 0, pieces: 0, firstCycleAt: st.firstCycleAt, lastCycleAt: st.lastCycleAt, gaps: [] });
+        pm.cycles += st.cycles; pm.pieces += (l.pieces || 0); pm.gaps = pm.gaps.concat(st.gaps);
+        if (st.firstCycleAt < pm.firstCycleAt) pm.firstCycleAt = st.firstCycleAt;
+        if (st.lastCycleAt > pm.lastCycleAt) pm.lastCycleAt = st.lastCycleAt;
+      });
+      var summary = Object.keys(perMachine).map(function (m) {
+        var x = perMachine[m];
+        return { machine: x.machine, cycles: x.cycles, pieces: x.pieces, firstCycleAt: x.firstCycleAt, lastCycleAt: x.lastCycleAt,
+          cycleSecMedian: round2(median(x.gaps)), cycleIntervals: x.gaps.length };
+      });
+      if (summary.length) b.Machine_Summary = summary;
+      return JSON.stringify(b);
+    } catch (e) {
+      console.warn('SCNA cycle times skipped:', e);
+      return bodyStr;
+    }
+  };
 
   /* ------------------------------------------------------------------ */
   /* 10f. Run + box flow (unique box ID per printed box)                 */
