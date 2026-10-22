@@ -1546,6 +1546,59 @@
       producedPieces: producedAll, machinePieces: machinePieces, carriedPieces: capped ? producedAll - machinePieces : 0 };
   }
 
+  // Exact box fill from the listener's timestamped cycle log (cycle_log_v1): all cycles since each machine's last box are
+  // merged by time and the OLDEST are taken until the box is full (spare first). Each machine's snapshot then moves to the
+  // last of its cycles that went in; the rest stay for the next box. Pure function of its inputs.
+  //   logs: { machine: [ { n, ts } ] } (cycles after the machine's last snapshot)   cap: machine pieces that fit (0 = all)
+  // Returns null when a machine's log is incomplete (cycle numbers missing): the caller then falls back to sliceBox.
+  function sliceBoxTimed(run, totals, logs, cap) {
+    var machines = SCNA.activeMachines();
+    var marks = cycleMarks();
+    var cycles = [], notes = [], approximate = false, prevOf = {}, lotsInfo = {};
+    for (var mi = 0; mi < machines.length; mi++) {
+      var m = machines[mi];
+      var list = marks[m] || [];
+      var st = totals[m] || { auto: false, total: null };
+      var prev = run.lastSnapshot.perMachine[m];
+      var prevTotal = prev ? prev.total : (list.length && list[0].start != null ? list[0].start : null);
+      if (!list.length || !st.auto || prevTotal == null || list.some(function (l) { return l.start == null; })) return null;
+      var log = logs[m];
+      if (!log) return null;
+      var need = st.total - prevTotal;
+      var mine = log.filter(function (c) { return c.n > prevTotal && c.n <= st.total; });
+      if (mine.length !== need) return null;                    // gap in the log: do not guess
+      mine.sort(function (a, b) { return a.n - b.n; });
+      prevOf[m] = prevTotal;
+      mine.forEach(function (c) {
+        var idx = -1;
+        for (var i = 0; i < list.length; i++) if (c.n > list[i].start) idx = i;   // cycle belongs to the last lot started before it
+        if (idx < 0) return;
+        var pc = lotPcPerCycle(m, list[idx].lotNumber);
+        cycles.push({ machine: m, n: c.n, ts: c.ts, t: Date.parse(c.ts) || 0, lot: list[idx].lotNumber, pc: pc });
+      });
+    }
+    if (cycles.some(function (c) { return c.pc == null; })) return null;
+    cycles.sort(function (a, b) { return (a.t - b.t) || (a.n - b.n); });
+    var taken = [], sum = 0;
+    for (var k = 0; k < cycles.length; k++) {
+      if (cap && cap > 0 && sum + cycles[k].pc > cap) break;
+      taken.push(cycles[k]); sum += cycles[k].pc;
+    }
+    var producedAll = cycles.reduce(function (n, c) { return n + c.pc; }, 0);
+    var byKey = {}, lots = [], nextSnap = {};
+    machines.forEach(function (m) { nextSnap[m] = { total: prevOf[m] + taken.filter(function (c) { return c.machine === m; }).length }; });
+    taken.forEach(function (c) {
+      var key = c.machine + '|' + c.lot;
+      var l = byKey[key];
+      if (!l) { l = byKey[key] = { source: 'machine', lotNumber: c.lot, machine: c.machine, shots: 0, pieces: 0, countSource: 'auto', firstCycleAt: c.ts, lastCycleAt: c.ts }; lots.push(l); }
+      l.shots++; l.pieces += c.pc; l.lastCycleAt = c.ts;
+    });
+    var capped = cap > 0 && producedAll > sum;
+    if (capped) notes.push('exact fill by cycle time: produced ' + producedAll + ', carried over ' + (producedAll - sum));
+    return { lots: lots, nextSnap: nextSnap, approximate: approximate, notes: notes, capped: capped, fillMethod: 'timed',
+      producedPieces: producedAll, machinePieces: sum, carriedPieces: producedAll - sum };
+  }
+
   function boxCapacity() { return parseInt((($('収容数') || {}).value || ''), 10) || 0; }
 
   // Build the box record from the cycle marks and the previous snapshot. Never throws: whatever cannot be counted
@@ -1556,7 +1609,24 @@
     for (var mi = 0; mi < machines.length; mi++) totals[machines[mi]] = await fetchCycleState(machines[mi]);
     var spareSum = spare.reduce(function (n, e) { return n + (e.pieces || 0); }, 0);
     var qtyLabel = boxCapacity();
-    var r = sliceBox(run, totals, qtyLabel ? Math.max(0, qtyLabel - spareSum) : 0);
+    var capMachine = qtyLabel ? Math.max(0, qtyLabel - spareSum) : 0;
+    var r = null;
+    var allLog = machines.length > 0 && machines.every(function (m) { return totals[m].auto && totals[m].log; });
+    if (allLog) {
+      var logs = {};
+      for (var li = 0; li < machines.length; li++) {
+        var mm = machines[li], pv = run.lastSnapshot.perMachine[mm];
+        var mk = (cycleMarks()[mm] || [])[0];
+        var after = pv ? pv.total : (mk && mk.start != null ? mk.start : 0);
+        logs[mm] = await fetchCycleLog(totals[mm], after);
+      }
+      r = sliceBoxTimed(run, totals, logs, capMachine);
+    }
+    if (!r) {
+      r = sliceBox(run, totals, capMachine);
+      r.fillMethod = 'proportional';
+      r.notes.push('cycle log not available: box split in proportion (not exact)');
+    }
     var lots = r.lots;
     spare.forEach(function (e) { lots.push({ source: 'spare', lotNumber: e.lotNumber, pieces: e.pieces, machine: null, shots: null, countSource: 'spare' }); });
     var measured = r.machinePieces + spareSum;
@@ -1572,7 +1642,7 @@
         qtyLabel: qtyLabel || null, qtyMeasured: measured,
         lots: lots, snapshot: r.nextSnap, approximate: r.approximate, notes: r.notes.concat(
           r.capped ? [] : (qtyLabel && measured < qtyLabel ? ['under 収容数: ' + measured + ' of ' + qtyLabel] : [])),
-        capped: r.capped, producedSinceLastBox: r.producedPieces + spareSum, carriedOverPieces: r.carriedPieces
+        fillMethod: r.fillMethod, capped: r.capped, producedSinceLastBox: r.producedPieces + spareSum, carriedOverPieces: r.carriedPieces
       },
       nextSnap: r.nextSnap, spareIds: spare.map(function (e) { return e.id; })
     };
@@ -1690,7 +1760,7 @@
   // -> { auto, total } ; auto only for a new listener that is online with a numeric cycles_total
   async function fetchCycleState(machine) {
     var ip = listenerIP(machine);
-    if (!ip) return { auto: false, total: null };
+    if (!ip) return { auto: false, total: null, log: false };
     var ports = [5000, 8766];
     for (var i = 0; i < ports.length; i++) {
       try {
@@ -1699,10 +1769,20 @@
         var st = await res.json();
         var ok = Array.isArray(st.capabilities) && st.capabilities.indexOf(CYCLE_CAP) >= 0 &&
           st.cnc_online === true && typeof st.cycles_total === 'number' && isFinite(st.cycles_total);
-        return { auto: ok, total: ok ? st.cycles_total : null };
+        return { auto: ok, total: ok ? st.cycles_total : null, log: ok && st.capabilities.indexOf('cycle_log_v1') >= 0, ip: ip, port: ports[i] };
       } catch (e) { /* try the mirror port */ }
     }
-    return { auto: false, total: null };
+    return { auto: false, total: null, log: false };
+  }
+
+  // Timestamped cycles of one machine after a given cycles_total: [{ n, ts }] or null (old listener / error)
+  async function fetchCycleLog(st, afterN) {
+    try {
+      var res = await fetch('http://' + st.ip + ':' + st.port + '/cycles?after=' + afterN, { cache: 'no-store', signal: AbortSignal.timeout(4000) });
+      if (!res.ok) return null;
+      var body = await res.json();
+      return Array.isArray(body.cycles) ? body.cycles : null;
+    } catch (e) { return null; }
   }
 
   // Called when a lot is typed in on a machine: remember the reading at that moment (null = manual lot)
