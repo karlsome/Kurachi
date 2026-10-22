@@ -355,6 +355,8 @@
         b.shot2 = 0;
       }
 
+      (b.Lot_Details || []).forEach(function (l) { Object.assign(l, SCNA.cycleLotInfo(l.machine, l.lotNumber)); });
+
       b['スペアからの部分数'] = parseInt(($('partial-from-spare') || {}).value, 10) || 0;
       b['2HourQualityCheck'] = SCNA.twoHourPayload();
       b.WorkOrder_Info = SCNA.workOrderPayload();
@@ -700,6 +702,7 @@
       }
       if (!ok) { if (typeof showStep2Modal === 'function') showStep2Modal(); return; }
 
+      markLotStart(machine, lot);   // reading of the listener's cycles_total at this lot change
       var next = function () {
         var after = function () {
           if (typeof window.proceedAfterMachineDone === 'function') window.proceedAfterMachineDone();
@@ -1034,7 +1037,7 @@
     var wrapped = function () {
       var r;
       try {
-        lsDel('scnaWO'); lsDel('scnaTwoHourChecks'); lsDel('scnaTwoHourSnooze'); lsDel('partial-from-spare');
+        lsDel('scnaWO'); lsDel(CYCLE_MARKS_KEY); lsDel('scnaTwoHourChecks'); lsDel('scnaTwoHourSnooze'); lsDel('partial-from-spare');
       } catch (e) { }
       r = orig.apply(this, arguments);
       return Promise.resolve(r).then(function (v) {
@@ -1313,6 +1316,168 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* 10e. Live cycle count (listener cycles_total) at lot change         */
+  /* ------------------------------------------------------------------ */
+
+  // Needs the new listener (capabilities has live_cycle_count_v1). Anything else (old listener, offline, no IP,
+  // error) leaves the page's plain shots keypad untouched. The cycle_total reading is taken when a lot is typed in;
+  // the shots prompt later offers (reading at the next lot's entry - reading at this lot's entry) to Confirm.
+  var CYCLE_MARKS_KEY = 'scnaCycleMarks';   // { machine: [ { lotNumber, start, end, offered, source, at } ] }
+  var CYCLE_CAP = 'live_cycle_count_v1';
+  SCNA.cycleStatus = {};                    // machine -> { auto, total, at } from the last poll
+
+  function cycleMarks() { return lsGet(CYCLE_MARKS_KEY, {}) || {}; }
+  function lastMark(marks, machine, lot) {
+    var list = marks[machine] || [];
+    for (var i = list.length - 1; i >= 0; i--) if (list[i].lotNumber === lot) return { list: list, i: i };
+    return null;
+  }
+
+  function listenerIP(machine) {
+    try {
+      if (typeof groupedMachineIPs !== 'undefined' && groupedMachineIPs[machine]) return groupedMachineIPs[machine];
+      var m = ($('process') || {}).value, ip = ($('ipInfo') || {}).value;
+      if (m && ip) {
+        var ms = m.split(',').map(function (x) { return x.trim(); });
+        var ips = ip.split(',').map(function (x) { return x.replace(/"/g, '').trim(); });
+        var idx = ms.indexOf(machine);
+        if (idx >= 0 && ips[idx]) return ips[idx];
+        if (ms.length === 1 && ips[0]) return ips[0];
+      }
+    } catch (e) { }
+    return '';
+  }
+
+  // -> { auto, total } ; auto only for a new listener that is online with a numeric cycles_total
+  async function fetchCycleState(machine) {
+    var ip = listenerIP(machine);
+    if (!ip) return { auto: false, total: null };
+    var ports = [5000, 8766];
+    for (var i = 0; i < ports.length; i++) {
+      try {
+        var res = await fetch('http://' + ip + ':' + ports[i] + '/state', { cache: 'no-store', signal: AbortSignal.timeout(2000) });
+        if (!res.ok) continue;
+        var st = await res.json();
+        var ok = Array.isArray(st.capabilities) && st.capabilities.indexOf(CYCLE_CAP) >= 0 &&
+          st.cnc_online === true && typeof st.cycles_total === 'number' && isFinite(st.cycles_total);
+        return { auto: ok, total: ok ? st.cycles_total : null };
+      } catch (e) { /* try the mirror port */ }
+    }
+    return { auto: false, total: null };
+  }
+
+  // Called when a lot is typed in on a machine: remember the reading at that moment (null = manual lot)
+  async function markLotStart(machine, lot) {
+    try {
+      var st = await fetchCycleState(machine);
+      var marks = cycleMarks();
+      var list = marks[machine] || (marks[machine] = []);
+      var last = list[list.length - 1];
+      if (last && last.lotNumber === lot && last.end == null) return;
+      list.push({ lotNumber: lot, start: st.auto ? st.total : null, end: null, offered: null, source: null, at: new Date().toISOString() });
+      lsSet(CYCLE_MARKS_KEY, marks);
+    } catch (e) { console.warn('SCNA markLotStart failed:', e); }
+  }
+
+  // The end reading of a lot: stored end > next lot's start > a fresh reading (last lot of the machine)
+  async function lotEndReading(machine, lot) {
+    var found = lastMark(cycleMarks(), machine, lot);
+    if (!found || found.list[found.i].start == null) return null;
+    var m = found.list[found.i];
+    if (m.end != null) return m.end;
+    var next = found.list[found.i + 1];
+    if (next) return next.start;           // may be null -> manual
+    var st = await fetchCycleState(machine);
+    return st.auto ? st.total : null;
+  }
+
+  function enhanceShotsPrompt() {
+    var ov = $('lpModal');
+    var card = ov && ov.firstElementChild;
+    var disp = card && card.querySelector('#lpDisplay');
+    var okBtn = card && card.querySelector('#lpOk');
+    if (!disp || !okBtn || card.__scnaCount) return;
+    card.__scnaCount = true;
+    var divs = card.querySelectorAll('div');
+    var machine = '', lot = '';
+    for (var i = 0; i < divs.length; i++) {
+      var t = (divs[i].textContent || '').trim();
+      if (!machine && t && divs[i].children.length === 0 && !/^Lot:/.test(t)) machine = t;
+      var lm = /^Lot:\s*(.+)$/.exec(t);
+      if (lm && divs[i].children.length === 0) lot = lm[1].trim();
+    }
+    if (!machine || !lot) return;
+
+    lotEndReading(machine, lot).then(function (end) {
+      if (end == null || !document.body.contains(card)) return;
+      var found = lastMark(cycleMarks(), machine, lot);
+      if (!found) return;
+      var offered = end - found.list[found.i].start;
+      if (!(offered >= 0)) return;   // counter went backwards (listener reset): manual
+      var keys = card.querySelector('#lpKeys');
+      var confirmed = false;
+      var bar = document.createElement('div');
+      bar.style.cssText = 'margin-bottom:12px;padding:12px;border:2px solid #29C36A;border-radius:12px;background:#ECFDF3;text-align:center;';
+      bar.innerHTML = '<div style="font-size:.85rem;font-weight:700;color:#027A48;">自動カウント / Auto count</div>' +
+        '<div style="font-size:2.4rem;font-weight:900;color:#101828;line-height:1.2;">' + offered + '</div>' +
+        '<button type="button" data-c="1" style="' + btnCss('#29C36A', '#fff') + '">確定 / Confirm</button>' +
+        '<button type="button" data-m="1" style="' + btnCss('#fff', '#344054', '#D0D5DD') + '">手入力 / Manual entry</button>';
+      disp.parentNode.insertBefore(bar, disp);
+      disp.style.display = 'none'; keys.style.display = 'none'; okBtn.style.display = 'none';
+      bar.querySelector('[data-c]').onclick = function () { confirmed = true; disp.value = String(offered); okBtn.click(); };
+      bar.querySelector('[data-m]').onclick = function () {
+        bar.remove(); disp.style.display = ''; keys.style.display = ''; okBtn.style.display = ''; disp.value = '';
+      };
+      // record what was offered and how the value was finalised (capture: runs before the page's own OK handler)
+      okBtn.addEventListener('click', function () {
+        try {
+          var v = parseInt(disp.value, 10) || 0;
+          var marks = cycleMarks();
+          var f = lastMark(marks, machine, lot);
+          if (!f) return;
+          var m = f.list[f.i];
+          m.end = end; m.offered = offered;
+          m.source = (confirmed && v === offered) ? 'auto-confirmed' : 'manual';
+          lsSet(CYCLE_MARKS_KEY, marks);
+        } catch (e) { }
+      }, true);
+    }).catch(function (e) { console.warn('SCNA shots prompt enhancement skipped:', e); });
+  }
+
+  // Lot_Details of the submit payload get the count info
+  SCNA.cycleLotInfo = function (machine, lot) {
+    var f = lastMark(cycleMarks(), machine, lot);
+    if (!f) return { countSource: 'manual' };
+    var m = f.list[f.i];
+    var info = { countSource: m.source || 'manual' };
+    if (m.offered != null) info.shotsAuto = m.offered;
+    if (m.start != null) info.cyclesTotalStart = m.start;
+    if (m.end != null) info.cyclesTotalEnd = m.end;
+    return info;
+  };
+
+  // Small badge: which machines are on auto count right now
+  function updateCountBadge() {
+    var list = SCNA.activeMachines();
+    Promise.all(list.map(function (m) { return fetchCycleState(m).then(function (st) { SCNA.cycleStatus[m] = { auto: st.auto, total: st.total, at: Date.now() }; }); }))
+      .then(function () {
+        var b = $('scnaCountBadge');
+        if (!b) {
+          b = document.createElement('div');
+          b.id = 'scnaCountBadge';
+          b.style.cssText = 'position:fixed;left:10px;bottom:10px;z-index:90000;padding:5px 10px;border-radius:999px;' +
+            'font-size:.75rem;font-weight:700;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.2);';
+          document.body.appendChild(b);
+        }
+        var allAuto = list.length && list.every(function (m) { return SCNA.cycleStatus[m] && SCNA.cycleStatus[m].auto; });
+        b.style.background = allAuto ? '#ECFDF3' : '#FFFAEB';
+        b.style.color = allAuto ? '#027A48' : '#B54708';
+        b.textContent = (allAuto ? '自動カウント / Auto count' : '手入力 / Manual count') + ' · ' +
+          list.map(function (m) { return m + (SCNA.cycleStatus[m] && SCNA.cycleStatus[m].auto ? ' ✓' : ' –'); }).join('  ');
+      }).catch(function () { });
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 11. Init                                                            */
   /* ------------------------------------------------------------------ */
 
@@ -1341,6 +1506,9 @@
       if (!twoHourTimer) twoHourTimer = setInterval(twoHourTick, 10000);
       resumePendingWO();
       new MutationObserver(addChooserClose).observe(document.body, { childList: true });
+      new MutationObserver(function () { try { enhanceShotsPrompt(); } catch (e) { } }).observe(document.body, { childList: true });
+      updateCountBadge();
+      setInterval(updateCountBadge, 15000);
     } catch (e) { console.error('SCNA init failed:', e); }
   });
 })();
