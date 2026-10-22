@@ -1251,6 +1251,38 @@
         throw e;
       } finally { clearTimeout(timer); }
     };
+
+    // SCNA always prints through the mini-PC print server (:5001): the original printLabel only does that
+    // for 047J items and sends everything else to the Brother app. With no 背番号 selected the original
+    // runs unchanged, so its "Sebanggo is required" alert still shows.
+    var origPrintLabel = window.printLabel;
+    if (typeof origPrintLabel !== 'function') return;
+    window.printLabel = async function () {
+      var sebanggo = (($('sub-dropdown') || {}).value || '').trim();
+      if (!sebanggo) return origPrintLabel.apply(this, arguments);
+      var machine = (($('process') || {}).value || '').trim();
+
+      var copies = await window.promptLaptopAutoPrintCopies();   // layout choice (if several), then copies
+      if (copies === null) return;
+
+      if (typeof window.setPrintBtnState === 'function') window.setPrintBtnState('printing');
+      try {
+        var r = await window.request047JAutoPrint(machine, sebanggo, copies);
+        if (typeof window.setPrintBtnState === 'function') window.setPrintBtnState('success');
+        if (typeof window.logTabletAction === 'function') {
+          window.logTabletAction('SCNA label print success', 'Completed', {
+            machine: machine, 背番号: sebanggo, copies: copies, printerIP: r.printerIP,
+            productNumber: (r.payload && r.payload.productNumber) || '', lotNumber: (r.payload && r.payload.lotNumber) || ''
+          });
+        }
+      } catch (e) {
+        console.error('SCNA label print failed:', e);
+        if (typeof window.setPrintBtnState === 'function') window.setPrintBtnState('error', e.message);
+        if (typeof window.logTabletAction === 'function') {
+          window.logTabletAction('SCNA label print failed', 'in-progress', { machine: machine, 背番号: sebanggo, copies: copies, error: e.message });
+        }
+      }
+    };
   }
 
   /* ------------------------------------------------------------------ */
