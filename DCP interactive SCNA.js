@@ -357,7 +357,8 @@
 
       (b.Lot_Details || []).forEach(function (l) { Object.assign(l, SCNA.cycleLotInfo(l.machine, l.lotNumber)); });
 
-      b['スペアからの部分数'] = parseInt(($('partial-from-spare') || {}).value, 10) || 0;
+      b['スペアからの部分数'] = spareTotal();
+      b.Spare_Lots = SCNA.sparePayload();
       b['2HourQualityCheck'] = SCNA.twoHourPayload();
       b.WorkOrder_Info = SCNA.workOrderPayload();
 
@@ -853,6 +854,114 @@
   /* 8. Partial from Spare                                               */
   /* ------------------------------------------------------------------ */
 
+  // Spare entries live in the run (localStorage) so a reload keeps them: { id, lotNumber, pieces, at, worker, consumedByBoxUid }.
+  // The field shows their sum (legacy スペアからの部分数); spare is NOT part of Process Quantity / Total (it was recorded earlier).
+  var SPARE_KEY = 'scnaSpareEntries';
+  SCNA.spareEntries = function () { var l = lsGet(SPARE_KEY, []); return Array.isArray(l) ? l : []; };
+  // Entries not yet put into a box (the box flow takes these, then calls SCNA.consumeSpare after the server accepted the box)
+  SCNA.pendingSpare = function () { return SCNA.spareEntries().filter(function (e) { return !e.consumedByBoxUid; }); };
+  SCNA.consumeSpare = function (ids, boxUid) {
+    var list = SCNA.spareEntries();
+    list.forEach(function (e) { if (ids.indexOf(e.id) >= 0 && !e.consumedByBoxUid) e.consumedByBoxUid = boxUid; });
+    lsSet(SPARE_KEY, list);
+  };
+  SCNA.sparePayload = function () {
+    return SCNA.spareEntries().map(function (e) {
+      return { lotNumber: e.lotNumber, pieces: e.pieces, at: e.at, worker: e.worker, consumedByBoxUid: e.consumedByBoxUid || null };
+    });
+  };
+
+  function spareTotal() { return SCNA.spareEntries().reduce(function (n, e) { return n + (e.pieces || 0); }, 0); }
+  function refreshSpareField() {
+    var inp = $('partial-from-spare');
+    if (!inp) return;
+    var n = spareTotal();
+    inp.value = n > 0 ? String(n) : '';
+    lsSet('partial-from-spare', inp.value);
+    var cnt = SCNA.spareEntries().length;
+    inp.placeholder = cnt ? '' : 'タップして追加 / Tap to add';
+  }
+
+  // Small self-contained keypad (digits, optional hyphen): does not touch the page's keypad or its fields
+  function spareKeypad(title, sub, allowHyphen, cb) {
+    var el = overlay('scnaSpareKeypad',
+      '<h3 style="margin:0;font-size:1.2rem;text-align:center;">' + esc(title) + '</h3>' +
+      '<div style="text-align:center;color:#475467;font-weight:600;margin:4px 0 10px;">' + esc(sub) + '</div>' +
+      '<input id="scnaSpareDisp" type="text" readonly inputmode="none" style="width:100%;box-sizing:border-box;font-size:2.2rem;font-weight:900;text-align:center;padding:10px;border:3px solid #2E6FF2;border-radius:10px;">' +
+      '<div id="scnaSpareKeys" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;"></div>' +
+      '<button type="button" data-ok="1" style="' + btnCss('#2E6FF2', '#fff') + '">OK</button>' +
+      '<button type="button" data-cancel="1" style="' + btnCss('#fff', '#344054', '#D0D5DD') + '">キャンセル / Cancel</button>');
+    el.style.zIndex = '100300';
+    var disp = $('scnaSpareDisp');
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', allowHyphen ? '-' : 'C', '0', '⌫'].forEach(function (k) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = k;
+      b.style.cssText = 'padding:16px;font-size:1.3rem;font-weight:800;border:1px solid #D0D5DD;border-radius:10px;background:#F9FAFB;color:#101828;cursor:pointer;';
+      b.onclick = function () { if (k === '⌫') disp.value = disp.value.slice(0, -1); else if (k === 'C') disp.value = ''; else disp.value += k; };
+      $('scnaSpareKeys').appendChild(b);
+    });
+    el.addEventListener('click', function (ev) {
+      var b = ev.target.closest && ev.target.closest('button');
+      if (!b) return;
+      if (b.hasAttribute('data-cancel')) { el.remove(); return; }
+      if (b.hasAttribute('data-ok')) {
+        var v = disp.value.trim();
+        if (!v) return;
+        el.remove(); cb(v);
+      }
+    });
+  }
+
+  function addSpareEntry(onDone) {
+    spareKeypad('スペアの数量 / Spare quantity', '手で戻す数 (個) / Pieces taken from spare', false, function (qty) {
+      var pieces = parseInt(qty, 10);
+      if (!(pieces > 0)) { toast('数量を入力してください / Enter a quantity'); return; }
+      spareKeypad('スペアのロット番号 / Spare lot number', pieces + ' 個 / pcs', true, function (lot) {
+        var list = SCNA.spareEntries();
+        var workers = (window.selectedWorkerNames || []).filter(function (n) { return (n || '').trim(); });
+        list.push({
+          id: 'sp' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          lotNumber: lot, pieces: pieces, at: new Date().toISOString(), worker: workers.join(','), consumedByBoxUid: null
+        });
+        lsSet(SPARE_KEY, list);
+        refreshSpareField();
+        if (onDone) onDone();
+      });
+    });
+  }
+
+  function openSpareManager() {
+    var el = overlay('scnaSpareManager', '<div id="scnaSpareBody"></div>');
+    var draw = function () {
+      var list = SCNA.spareEntries();
+      var rows = list.map(function (e) {
+        var used = !!e.consumedByBoxUid;
+        return '<div style="display:flex;align-items:center;gap:8px;margin-top:10px;padding:10px;border:1px solid #E4E7EC;border-radius:10px;' + (used ? 'background:#F2F4F7;color:#667085;' : '') + '">' +
+          '<div style="flex:1;"><div style="font-weight:800;">' + esc(e.lotNumber || '—') + '</div>' +
+          '<div style="font-size:.85rem;">' + e.pieces + ' pcs' + (used ? ' · 箱に反映済み / in a box' : ' · 次の箱に入ります / goes in the next box') + '</div></div>' +
+          (used ? '' : '<button type="button" data-del="' + esc(e.id) + '" style="' + btnCss('#FEE4E2', '#B42318', '#FDA29B') + 'margin:0;width:56px;">✕</button>') + '</div>';
+      }).join('');
+      $('scnaSpareBody').innerHTML =
+        '<h3 style="margin:0;font-size:1.2rem;text-align:center;">スペアからの部分数 / Partial from Spare</h3>' +
+        (rows || '<p style="color:#6B7280;margin:12px 0;text-align:center;">なし / None</p>') +
+        '<div style="text-align:right;font-weight:800;margin-top:10px;">合計 / Total: ' + spareTotal() + '</div>' +
+        '<button type="button" data-add="1" style="' + btnCss('#fff', '#2E6FF2', '#2E6FF2') + '">＋ 追加 / Add</button>' +
+        '<button type="button" data-done="1" style="' + btnCss('#2E6FF2', '#fff') + '">完了 / Done</button>';
+    };
+    draw();
+    el.addEventListener('click', function (ev) {
+      var b = ev.target.closest && ev.target.closest('button');
+      if (!b) { if (ev.target === el) el.remove(); return; }
+      if (b.hasAttribute('data-done')) { el.remove(); return; }
+      if (b.hasAttribute('data-add')) { addSpareEntry(draw); return; }
+      if (b.hasAttribute('data-del')) {
+        var id = b.getAttribute('data-del');
+        lsSet(SPARE_KEY, SCNA.spareEntries().filter(function (e) { return e.id !== id || e.consumedByBoxUid; }));
+        refreshSpareField(); draw();
+      }
+    });
+  }
+
   function injectPartialSpare() {
     var pq = $('ProcessQuantity');
     if (!pq || $('partial-from-spare')) return;
@@ -861,15 +970,15 @@
     box.className = 'form-group';
     box.innerHTML = '<label for="partial-from-spare">スペアからの部分数 / Partial from Spare</label>' +
       '<input type="text" name="partial-from-spare" id="partial-from-spare" class="tap-field" ' +
-      'placeholder="Partial from Spare" readonly>';
+      'placeholder="タップして追加 / Tap to add" readonly>';
     grp.parentNode.insertBefore(box, grp.nextSibling);
-    var inp = $('partial-from-spare');
-    var saved = lsGet('partial-from-spare', '');
-    if (saved !== '' && saved != null) inp.value = saved;
-    inp.addEventListener('click', function () {
-      if (typeof window.openDirectNumericKeypad === 'function') window.openDirectNumericKeypad('partial-from-spare', false);
-    });
-    inp.addEventListener('input', function () { lsSet('partial-from-spare', inp.value); });
+    // A number typed with the old single box (mid-run upgrade) becomes one entry without a lot number
+    var old = parseInt(lsGet('partial-from-spare', ''), 10) || 0;
+    if (old > 0 && !SCNA.spareEntries().length) {
+      lsSet(SPARE_KEY, [{ id: 'sp-legacy', lotNumber: '', pieces: old, at: new Date().toISOString(), worker: '', consumedByBoxUid: null }]);
+    }
+    refreshSpareField();
+    $('partial-from-spare').addEventListener('click', openSpareManager);
   }
 
   /* ------------------------------------------------------------------ */
@@ -1037,7 +1146,7 @@
     var wrapped = function () {
       var r;
       try {
-        lsDel('scnaWO'); lsDel(CYCLE_MARKS_KEY); lsDel('scnaTwoHourChecks'); lsDel('scnaTwoHourSnooze'); lsDel('partial-from-spare');
+        lsDel('scnaWO'); lsDel(CYCLE_MARKS_KEY); lsDel('scnaTwoHourChecks'); lsDel('scnaTwoHourSnooze'); lsDel('partial-from-spare'); lsDel(SPARE_KEY);
       } catch (e) { }
       r = orig.apply(this, arguments);
       return Promise.resolve(r).then(function (v) {

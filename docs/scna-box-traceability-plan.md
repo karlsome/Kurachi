@@ -125,9 +125,9 @@ Assumption (confirm in Phase 4): prefix = work order number; if none, `<背番�
 - [ ] Test matrix: new+new pair, new+legacy pair, listener down at lot change, CNC offline, page reload mid-lot
 
 ### Phase 3 — Partial from spare
-- [ ] Replace the number box with the flow: quantity keypad → lot-number keypad → entry saved in the run (localStorage)
-- [ ] List with remove (only unconsumed entries); sum feeds the legacy `スペアからの部分数`
-- [ ] `Spare_Lots` in the submit payload; totals unchanged (D13)
+- [x] Replace the number box with the flow: quantity keypad → lot-number keypad → entry saved in the run (localStorage)
+- [x] List with remove (only unconsumed entries); sum feeds the legacy `スペアからの部分数`
+- [x] `Spare_Lots` in the submit payload; totals unchanged (D13)
 - [ ] Test: several entries, reload, remove, entry after the first box is printed (goes to the next box)
 
 ### Phase 4 — Server (`Kurachi/server.js`, additive)
@@ -175,3 +175,4 @@ Assumption (confirm in Phase 4): prefix = work order number; if none, `<背番�
 | 2026-10-22 | 0 | Plan created, decisions D1–D14 agreed |
 | 2026-10-22 | 1 | Listener: `cycles_total` (file `cycles_total_<machine>.json`), `cnc_online`, `capabilities` in `/state` (:5000/:8766) and SSE status; `cycle_completed` carries `cycles_total`. Helper logic unit-tested; CNC-offline and 02:00 paths not run on a real machine (test box still open). |
 | 2026-10-22 | 2 | `DCP interactive SCNA.js` section 10e: `fetchCycleState` (:5000 then :8766, capability + `cnc_online` check), `markLotStart` at keypad lot entry, shots-prompt banner (Confirm / Manual entry) via MutationObserver on `#lpModal`, `Lot_Details` gets `shotsAuto/countSource/cyclesTotalStart/End`, badge "Auto count / Manual count". Marks cleared on reset. Syntax-checked only; live Process Quantity and the test matrix still open. Listener capability string aligned to `live_cycle_count_v1`. |
+| 2026-10-22 | 3 | Partial from spare: the field opens a manager (list, ✕ on unconsumed entries, ＋ Add = quantity keypad → lot keypad, own overlay keypad so the page's fields are untouched). Entries in localStorage `scnaSpareEntries`; field + `スペアからの部分数` = their sum; `Spare_Lots` in the submit payload; Process Quantity/Total untouched. Helpers for Phase 5: `SCNA.pendingSpare()`, `SCNA.consumeSpare(ids, boxUid)`. Syntax-checked only; the "goes into the next box" part is wired in Phase 5. |
