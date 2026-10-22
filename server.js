@@ -27254,6 +27254,108 @@ async function _applyLabelLayoutExclusivity(col, layoutId, customers, isDefault)
   }
 }
 
+// ---------------------------------------------------------------------------
+// SCNA box traceability (docs/scna-box-traceability-plan.md): one record per printed box in scnaBoxDB.
+// The server issues the box ID (<work order>-B<seq>, serial from an atomic counter). boxUid is made by the tablet
+// up front, so a retry or reload of the same box never creates a second one.
+// ---------------------------------------------------------------------------
+let _scnaBoxIndexesReady = false;
+async function _ensureScnaBoxIndexes() {
+  if (_scnaBoxIndexesReady) return;
+  const col = client.db(DB_NAME).collection("scnaBoxDB");
+  await col.createIndex({ boxUid: 1 }, { unique: true });
+  await col.createIndex({ boxId: 1 }, { unique: true });
+  await col.createIndex({ runId: 1 });
+  _scnaBoxIndexesReady = true;
+}
+
+// Counter key: the work order number; without one, <背番号>-<YYYYMMDD> (JST). Letters, numbers, . _ - only.
+function _scnaBoxKey(workOrderNumber, sebanggo) {
+  let key = String(workOrderNumber || "").trim();
+  if (!key) {
+    const ymd = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+    key = `${String(sebanggo || "").trim()}-${ymd}`;
+  }
+  return key.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+}
+
+const _SCNA_BOX_FIELDS = [
+  "runId", "workOrderNumber", "背番号", "品番", "machines", "Tablet_Home", "worker", "startedAt", "finishedAt",
+  "printedAt", "printedBy", "copies", "layoutId", "qtyLabel", "qtyMeasured", "lots", "snapshot", "approximate", "notes"
+];
+
+app.post("/api/scna-boxes", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const boxUid = String(body.boxUid || "").trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(boxUid)) return res.status(400).json({ error: "boxUid is required (8-64 letters, numbers, _ or -)" });
+    if (!String(body.背番号 || "").trim() && !String(body.workOrderNumber || "").trim()) {
+      return res.status(400).json({ error: "背番号 or workOrderNumber is required" });
+    }
+    if (body.lots !== undefined && !Array.isArray(body.lots)) return res.status(400).json({ error: "lots must be an array" });
+
+    await client.connect();
+    await _ensureScnaBoxIndexes();
+    const db = client.db(DB_NAME);
+    const col = db.collection("scnaBoxDB");
+
+    const existing = await col.findOne({ boxUid });
+    if (existing) return res.json({ ...existing, existing: true });
+
+    const key = _scnaBoxKey(body.workOrderNumber, body.背番号);
+    const counter = await db.collection("scnaBoxCounters").findOneAndUpdate(
+      { _id: key }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" }
+    );
+    const seq = (counter && (counter.value ? counter.value.seq : counter.seq)) || 1;
+
+    const doc = { boxId: `${key}-B${String(seq).padStart(3, "0")}`, boxUid, seq, factory: "SCNA" };
+    for (const f of _SCNA_BOX_FIELDS) if (body[f] !== undefined) doc[f] = body[f];
+    doc.lots = Array.isArray(doc.lots) ? doc.lots : [];
+    doc.approximate = !!doc.approximate;
+    doc.pressId = null;
+    doc.createdAt = new Date().toISOString();
+
+    try {
+      await col.insertOne(doc);
+    } catch (e) {
+      if (e && e.code === 11000) {   // same boxUid arrived twice at once: return the first
+        const again = await col.findOne({ boxUid });
+        if (again) return res.json({ ...again, existing: true });
+      }
+      throw e;
+    }
+    res.status(201).json(doc);
+  } catch (error) {
+    console.error("❌ Error saving SCNA box:", error);
+    res.status(500).json({ error: "Failed to save box", details: error.message });
+  }
+});
+
+app.get("/api/scna-boxes/:boxId", async (req, res) => {
+  try {
+    await client.connect();
+    const doc = await client.db(DB_NAME).collection("scnaBoxDB").findOne({ boxId: req.params.boxId });
+    if (!doc) return res.status(404).json({ error: "Box not found" });
+    res.json(doc);
+  } catch (error) {
+    console.error("❌ Error reading SCNA box:", error);
+    res.status(500).json({ error: "Failed to read box", details: error.message });
+  }
+});
+
+app.get("/api/scna-boxes", async (req, res) => {
+  try {
+    const runId = String(req.query.runId || "").trim();
+    if (!runId) return res.status(400).json({ error: "runId is required" });
+    await client.connect();
+    const list = await client.db(DB_NAME).collection("scnaBoxDB").find({ runId }).sort({ seq: 1 }).toArray();
+    res.json(list);
+  } catch (error) {
+    console.error("❌ Error listing SCNA boxes:", error);
+    res.status(500).json({ error: "Failed to list boxes", details: error.message });
+  }
+});
+
 app.get("/api/scna-label-layouts", async (req, res) => {
   try {
     await client.connect();
