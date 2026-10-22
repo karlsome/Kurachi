@@ -1160,6 +1160,100 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* 10b. Label layout choice for the mini-PC print server               */
+  /* ------------------------------------------------------------------ */
+
+  // An item can have several label layouts (admin SCNA > Label Designer). When the print button goes to
+  // the mini-PC print server (printLabel's :5001 path), ask which layout to print if there is more than
+  // one, then send it as &layoutId=. One layout (or none) keeps the old behaviour: the server picks it.
+  var printLayoutId = null;
+
+  async function fetchPrintLayouts(sebanggo) {
+    try {
+      var res = await fetch(window.serverURL + '/api/scna-label-layouts/for-item?sebanggo=' + encodeURIComponent(sebanggo));
+      if (!res.ok) return [];
+      var body = await res.json();
+      return Array.isArray(body.layouts) ? body.layouts : [];
+    } catch (e) { return []; }   // offline: let the print server choose
+  }
+
+  function chooseLabelLayout(layouts) {
+    return new Promise(function (resolve) {
+      var overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:10002;padding:20px;';
+      var box = document.createElement('div');
+      box.style.cssText = 'background:#fff;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.3);width:min(420px,100%);max-height:80vh;display:flex;flex-direction:column;padding:24px;';
+      box.innerHTML = '<h3 style="margin:0 0 6px;font-size:22px;text-align:center;">ラベルを選択 / Select label</h3>' +
+        '<p style="margin:0 0 14px;color:#555;text-align:center;">どのラベルを印刷しますか？ / Which label do you want to print?</p>';
+      var list = document.createElement('div');
+      list.style.cssText = 'display:flex;flex-direction:column;gap:10px;overflow-y:auto;';
+      function done(v) { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); resolve(v); }
+      layouts.forEach(function (l) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = l.name;
+        b.style.cssText = 'padding:16px;font-size:20px;font-weight:700;border:none;border-radius:8px;background:#0d6efd;color:#fff;cursor:pointer;';
+        b.onclick = function () { done(l.layoutId); };
+        list.appendChild(b);
+      });
+      var cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.textContent = 'Cancel';
+      cancel.style.cssText = 'margin-top:14px;padding:12px 20px;border:none;border-radius:8px;background:#adb5bd;color:#fff;cursor:pointer;';
+      cancel.onclick = function () { done(null); };
+      box.appendChild(list);
+      box.appendChild(cancel);
+      overlay.appendChild(box);
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) done(null); });
+      document.body.appendChild(overlay);
+    });
+  }
+
+  function wrapLabelPrint() {
+    var origPrompt = window.promptLaptopAutoPrintCopies;
+    var origRequest = window.request047JAutoPrint;
+    if (typeof origPrompt !== 'function' || typeof origRequest !== 'function') return;
+
+    // Runs first inside printLabel's printer-server branch: layout choice, then the copies dialog.
+    window.promptLaptopAutoPrintCopies = async function () {
+      printLayoutId = null;
+      var sebanggo = (($('sub-dropdown') || {}).value || '').trim();
+      var layouts = sebanggo ? await fetchPrintLayouts(sebanggo) : [];
+      if (layouts.length > 1) {
+        var chosen = await chooseLabelLayout(layouts);
+        if (!chosen) return null;   // cancelled
+        printLayoutId = chosen;
+      }
+      return origPrompt.apply(this, arguments);
+    };
+
+    window.request047JAutoPrint = async function (machineName, sebanggo, copies) {
+      if (!printLayoutId) return origRequest.apply(this, arguments);
+      var layoutId = printLayoutId;
+      printLayoutId = null;
+      var printerIP = await resolveEquipmentPrinterIP(machineName);
+      var url = 'http://' + printerIP + ':5001/request?' + new URLSearchParams({
+        filename: sebanggo, qty: String(copies), layoutId: layoutId
+      }).toString();
+      var controller = new AbortController();
+      var timer = setTimeout(function () { controller.abort(); }, 10000);
+      try {
+        var response = await fetch(url, { method: 'GET', signal: controller.signal });
+        var text = await response.text();
+        var payload = {};
+        if (text) { try { payload = JSON.parse(text); } catch (e) { payload = { success: response.ok, error: text }; } }
+        if (!response.ok || payload.success === false) {
+          throw new Error('HTTP ' + response.status + ': ' + (payload.error || 'Printer server returned HTTP ' + response.status));
+        }
+        return { printerIP: printerIP, payload: payload };
+      } catch (e) {
+        if (e.name === 'AbortError') throw new Error('Label print request timed out / ラベル印刷リクエストがタイムアウトしました');
+        throw e;
+      } finally { clearTimeout(timer); }
+    };
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 11. Init                                                            */
   /* ------------------------------------------------------------------ */
 
@@ -1177,6 +1271,7 @@
       injectGlobalReset();
       wrapSentToast();
       wrapStep1Scanner();
+      wrapLabelPrint();
       injectPartialSpare();
       updateTwoHourDisplay();
 
