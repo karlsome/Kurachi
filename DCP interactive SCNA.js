@@ -1371,6 +1371,8 @@
       if (SCNA.boxId && !('qr_1' in overrides)) {
         overrides.qr_1 = '{品番},{収容数},{lotNumber},' + String(SCNA.boxId);
       }
+      // A text element with Element ID box_id prints the box ID as readable text (ignored if the layout has none)
+      if (SCNA.boxId && !('box_id' in overrides)) overrides.box_id = String(SCNA.boxId);
       var params = { filename: sebanggo, qty: String(copies) };
       if (layoutId) params.layoutId = layoutId;
       if (Object.keys(overrides).length) params.overrides = JSON.stringify(overrides);
