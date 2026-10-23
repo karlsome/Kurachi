@@ -284,6 +284,9 @@
       } else if (/\/submitToDCP(\?|$)/.test(url) && init && String(init.method || '').toUpperCase() === 'POST' &&
         typeof init.body === 'string') {
         init = Object.assign({}, init, { body: await SCNA.addCycleTimes(SCNA.patchSubmit(init.body)) });
+      } else if (SCNA.isKuntai && /\/queries(\?|$)/.test(url) && init && typeof init.body === 'string') {
+        // KUNTAI: the shared OZMANAS 背番号 list asks masterDB for 加工設備 = OZMANAS. Ask for ours.
+        init = Object.assign({}, init, { body: SCNA.kuntaiQueryBody(init.body) });
       }
     } catch (e) { console.error('SCNA fetch hook failed (sending original):', e); }
     return origFetch(input, init);
@@ -2059,6 +2062,43 @@
         updateCountCell(list);
         updateLiveQty(list);
       }).catch(function () { });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 10b. KUNTAI: same flow as OZMANAS (no send to machine)         */
+  /* ------------------------------------------------------------------ */
+
+  // Step 1 scan 看板, Step 2 lot (keypad), Step 3 scan トムソンボード (must equal the product's 型番).
+  // Nothing is sent to the machine. The backend already does all of this for OZMANAS behind
+  // isOZMANASMachine(); here that check is widened to KUNTAI. Only active for ?filter=SCNA&machine=KUNTAI.
+  SCNA.isKuntai = SCNA.machines.indexOf('KUNTAI') >= 0;
+
+  SCNA.kuntaiQueryBody = function (bodyStr) {
+    try {
+      var b = JSON.parse(bodyStr);
+      if (b && b.collectionName === 'masterDB' && b.query && b.query.加工設備 === 'OZMANAS') {
+        b.query.加工設備 = 'KUNTAI';
+        return JSON.stringify(b);
+      }
+    } catch (e) { }
+    return bodyStr;
+  };
+
+  if (SCNA.isKuntai) {
+    // The backend declares isOZMANASMachine() after this file loads, so widen it once the page is parsed
+    // (still before any of the backend's DOMContentLoaded handlers run).
+    document.addEventListener('DOMContentLoaded', function () {
+      var orig = window.isOZMANASMachine;
+      if (typeof orig !== 'function' || orig.__scnaKuntai) return;
+      var widened = function () { return true; };
+      widened.__scnaKuntai = true;
+      window.isOZMANASMachine = widened;
+    });
+
+    // The completed card also offers 「Send to Machine」: not for this machine.
+    var kuntaiCss = document.createElement('style');
+    kuntaiCss.textContent = '#sendtoNC, #completedSendPanel { display: none !important; }';
+    document.head.appendChild(kuntaiCss);
   }
 
   /* ------------------------------------------------------------------ */
