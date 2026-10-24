@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <title>SRS 日報 (Girasol) - インタラクティブ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800;900&family=Nunito+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* ============================================================
+           Same design system as DCP interactive (flat, light-gray canvas,
+           white cards, 1px borders, 10" tablet first).
+           ============================================================ */
+        :root {
+            --bg-app: #F4F6FA;
+            --bg-surface: #FFFFFF;
+            --bg-subtle: #F7F8FB;
+            --bg-inset: #EEF1F6;
+            --border: #E6E8EF;
+            --border-strong: #D6DAE3;
+            --text-main: #0F172A;
+            --text-muted: #475569;
+            --text-soft: #64748B;
+            --brand: #1F9D6B;
+            --brand-hover: #178A5C;
+            --brand-soft: #E7F5EF;
+            --blue: #2E6FF2;
+            --blue-hover: #1F5DD8;
+            --blue-soft: #E8F0FE;
+            --red: #E5484D;
+            --red-hover: #CE3B40;
+            --red-soft: #FCEBEC;
+            --amber: #E0900E;
+            --amber-soft: #FBF0DC;
+            --card-radius: 12px;
+            --btn-radius: 8px;
+            --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.06);
+            --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.14);
+            --header-height: 64px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: 'Nunito Sans', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif;
+            background: var(--bg-app);
+            color: var(--text-main);
+            height: 100vh;
+            height: 100dvh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        input, select, textarea, button { font-family: inherit; }
+
+        /* ---------------- Header ---------------- */
+        header {
+            height: var(--header-height);
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .header-title-section { display: flex; align-items: center; gap: 12px; }
+        header h1 { font-size: 1.125rem; font-weight: 800; }
+        .status-tag {
+            font-size: 0.8125rem; font-weight: 700; padding: 5px 12px; border-radius: 6px;
+            background: var(--blue-soft); color: var(--blue);
+        }
+        .freya-center-mark {
+            position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+            font-size: 0.625rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-soft);
+            text-transform: uppercase; pointer-events: none; white-space: nowrap;
+        }
+        .clock { font-size: 0.9375rem; font-weight: 700; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+        /* ---------------- Shared bar (operator + breaks) ---------------- */
+        .shared-bar {
+            display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+            padding: 10px 20px; background: var(--bg-surface); border-bottom: 1px solid var(--border); flex-shrink: 0;
+        }
+        .shared-bar label { font-size: 0.75rem; font-weight: 700; color: var(--text-soft); margin-right: 6px; }
+        .shared-bar select { min-width: 200px; }
+        .pill-info { font-size: 0.8125rem; font-weight: 700; color: var(--text-muted); }
+
+        /* ---------------- Lane switcher (narrow screens only) ---------------- */
+        .lane-switch { display: none; gap: 8px; padding: 10px 20px 0; flex-shrink: 0; }
+        .lane-switch button {
+            flex: 1; height: 48px; border-radius: var(--btn-radius); border: 1px solid var(--border-strong);
+            background: var(--bg-surface); font-size: 1rem; font-weight: 800; color: var(--text-muted); cursor: pointer;
+        }
+        .lane-switch button.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+        .lane-switch button .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--border-strong); margin-left: 8px; }
+        .lane-switch button.busy .dot { background: var(--brand); }
+
+        /* ---------------- Lanes ---------------- */
+        main {
+            flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px 20px;
+        }
+        .lane {
+            background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--card-radius);
+            box-shadow: var(--shadow-card); display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+        }
+        .lane-head {
+            display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
+            border-bottom: 1px solid var(--border); flex-shrink: 0;
+        }
+        .lane-badge { font-size: 1.125rem; font-weight: 900; padding: 4px 14px; border-radius: 6px; color: #fff; }
+        .lane[data-lane="LH"] .lane-badge { background: var(--blue); }
+        .lane[data-lane="RH"] .lane-badge { background: var(--brand); }
+        .lane-state { font-size: 0.8125rem; font-weight: 700; color: var(--text-soft); }
+        .lane-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+        .empty {
+            flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+            color: var(--text-soft); text-align: center; padding: 24px;
+        }
+        .empty .big { font-size: 1.0625rem; font-weight: 700; color: var(--text-muted); }
+
+        .product {
+            background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+        }
+        .product .name { font-size: 1rem; font-weight: 800; }
+        .product .meta { font-size: 0.8125rem; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+        .box-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .chip {
+            font-size: 0.75rem; font-weight: 700; background: var(--blue-soft); color: var(--blue);
+            padding: 4px 10px; border-radius: 6px;
+        }
+
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .field label { display: block; font-size: 0.75rem; font-weight: 700; color: var(--text-soft); margin-bottom: 4px; }
+        .field input, .field textarea, .field select, .shared-bar select, .modal input {
+            width: 100%; height: 46px; border: 1px solid var(--border-strong); border-radius: var(--btn-radius);
+            padding: 0 12px; font-size: 1rem; background: var(--bg-surface); color: var(--text-main);
+        }
+        .shared-bar select { width: auto; }
+        .field textarea { height: 64px; padding: 8px 12px; resize: none; }
+        .field input[readonly] { background: var(--bg-inset); }
+
+        .section-title { font-size: 0.75rem; font-weight: 800; letter-spacing: 0.06em; color: var(--text-soft); text-transform: uppercase; }
+
+        .ng-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .ng-item {
+            border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--bg-surface);
+            display: flex; align-items: center; justify-content: space-between; gap: 6px;
+        }
+        .ng-item .lbl { font-size: 0.8125rem; font-weight: 700; flex: 1; line-height: 1.2; }
+        .stepper { display: flex; align-items: center; gap: 4px; }
+        .stepper button {
+            width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--border-strong);
+            background: var(--bg-subtle); font-size: 1.25rem; font-weight: 800; cursor: pointer;
+        }
+        .stepper button:active { background: var(--bg-inset); }
+        .stepper input {
+            width: 52px; height: 40px; text-align: center; font-size: 1rem; font-weight: 800;
+            border: 1px solid var(--border-strong); border-radius: 8px; padding: 0;
+        }
+
+        .totals {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+        }
+        .total-box { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; text-align: center; }
+        .total-box .k { font-size: 0.6875rem; font-weight: 700; color: var(--text-soft); }
+        .total-box .v { font-size: 1.375rem; font-weight: 900; font-variant-numeric: tabular-nums; }
+        .total-box.good .v { color: var(--brand); }
+        .total-box.ng .v { color: var(--red); }
+
+        .photo-row { display: flex; align-items: center; gap: 10px; }
+        .photo-row img { width: 72px; height: 54px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+
+        .lane-foot {
+            display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--border); flex-shrink: 0;
+            background: var(--bg-surface);
+        }
+
+        /* ---------------- Buttons ---------------- */
+        .btn {
+            height: 48px; padding: 0 20px; border-radius: var(--btn-radius); border: 1px solid transparent;
+            font-size: 0.9375rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center;
+            justify-content: center; gap: 8px; white-space: nowrap;
+        }
+        a.btn { text-decoration: none; }
+        .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .btn-primary { background: var(--blue); color: #fff; }
+        .btn-primary:active { background: var(--blue-hover); }
+        .btn-success { background: var(--brand); color: #fff; }
+        .btn-success:active { background: var(--brand-hover); }
+        .btn-danger { background: var(--red-soft); color: var(--red); border-color: var(--red-soft); }
+        .btn-ghost { background: var(--bg-surface); color: var(--text-muted); border-color: var(--border-strong); }
+        .btn-sm { height: 38px; padding: 0 14px; font-size: 0.8125rem; }
+        .btn-grow { flex: 1; }
+
+        /* ---------------- Modals / toast ---------------- */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); display: none; align-items: center;
+            justify-content: center; z-index: 5000; padding: 20px;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: var(--bg-surface); border-radius: 14px; box-shadow: var(--shadow-pop); width: 100%;
+            max-width: 480px; max-height: 90vh; overflow-y: auto; padding: 20px;
+        }
+        .modal h3 { font-size: 1.0625rem; font-weight: 800; margin-bottom: 12px; }
+        .modal p { white-space: pre-line; font-size: 0.9375rem; color: var(--text-muted); line-height: 1.5; }
+        .modal .actions { display: flex; gap: 10px; margin-top: 16px; }
+        .modal.alert { border: 3px solid var(--red); }
+        .modal.alert h3 { color: var(--red); }
+        body.flash-red { animation: flash 0.6s ease-in-out infinite alternate; }
+        @keyframes flash { from { background: var(--bg-app); } to { background: var(--red-soft); } }
+
+        #qrReader { width: 100%; min-height: 260px; border-radius: 10px; overflow: hidden; background: #000; }
+        .manual-row { display: flex; gap: 8px; margin-top: 12px; }
+
+        .break-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 8px; align-items: end; }
+        .break-row input { height: 44px; }
+
+        .toast {
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--text-main);
+            color: #fff; padding: 12px 20px; border-radius: 10px; font-weight: 700; font-size: 0.9375rem;
+            z-index: 6000; display: none; max-width: 90vw;
+        }
+        .toast.show { display: block; }
+
+        /* ---------------- Narrow screens: one lane at a time ---------------- */
+        @media (max-width: 860px) {
+            .lane-switch { display: flex; }
+            main { grid-template-columns: 1fr; padding-top: 10px; }
+            .lane { display: none; }
+            .lane.active { display: flex; }
+            .freya-center-mark { display: none; }
+        }
+    </style>
+</head>
+
+<body>
+    <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
+
+    <header>
+        <div class="header-title-section">
+            <h1>SRS日報</h1>
+            <span class="status-tag" id="headerMachineTag">設備: --</span>
+        </div>
+        <span class="freya-center-mark">Freya System v4</span>
+        <span class="clock" id="clock">--:--</span>
+    </header>
+
+    <!-- Operator and breaks are shared by the LH and RH lanes -->
+    <div class="shared-bar">
+        <div><label for="workerSelect">作業者 / Operator</label>
+            <select id="workerSelect"><option value="">-- 選択 --</option></select></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="breakBtn">休憩 / Breaks</button>
+        <span class="pill-info" id="breakSummary">休憩 0分</span>
+    </div>
+
+    <div class="lane-switch" id="laneSwitch">
+        <button type="button" data-lane="LH">LH<span class="dot"></span></button>
+        <button type="button" data-lane="RH">RH<span class="dot"></span></button>
+    </div>
+
+    <main id="lanes"></main>
+
+    <!-- Scan modal -->
+    <div class="modal-overlay" id="scanModal">
+        <div class="modal">
+            <h3>WIPラベルをスキャン / Scan WIP label</h3>
+            <div id="qrReader"></div>
+            <div class="manual-row">
+                <input type="text" id="manualBoxId" placeholder="例: WO-005460-B003" autocomplete="off">
+                <button type="button" class="btn btn-primary" id="manualBoxOk">OK</button>
+            </div>
+            <div class="actions"><button type="button" class="btn btn-ghost btn-grow" id="scanCancel">閉じる / Close</button></div>
+        </div>
+    </div>
+
+    <!-- Break modal -->
+    <div class="modal-overlay" id="breakModal">
+        <div class="modal">
+            <h3>休憩時間 / Break times</h3>
+            <div id="breakRows"></div>
+            <button type="button" class="btn btn-ghost btn-sm" id="breakAdd">＋ 追加 / Add</button>
+            <div class="actions"><button type="button" class="btn btn-primary btn-grow" id="breakDone">完了 / Done</button></div>
+        </div>
+    </div>
+
+    <!-- Blocking alert (wrong scan, duplicate, ...) -->
+    <div class="modal-overlay" id="alertModal">
+        <div class="modal alert">
+            <h3 id="alertTitle">エラー / Error</h3>
+            <p id="alertText"></p>
+            <div class="actions"><button type="button" class="btn btn-danger btn-grow" id="alertOk">OK</button></div>
+        </div>
+    </div>
+
+    <!-- Confirm modal (reset / submit) -->
+    <div class="modal-overlay" id="confirmModal">
+        <div class="modal">
+            <h3 id="confirmTitle"></h3>
+            <p id="confirmText"></p>
+            <div class="actions">
+                <button type="button" class="btn btn-ghost btn-grow" id="confirmNo">キャンセル / Cancel</button>
+                <button type="button" class="btn btn-primary btn-grow" id="confirmYes">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="html5-qrcode.min.js"></script>
+    <script src="SRS interactive SCNA.js"></script>
+</body>
+
+</html>
