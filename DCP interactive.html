@@ -3889,7 +3889,11 @@
             }
         }
 
+        // TEMP: set to false to restore the tab locks (checklist / scan / params)
+        const TEMP_TABS_UNLOCKED = false;
+
         function isChecklistLocked() {
+            if (TEMP_TABS_UNLOCKED) return false;
             if (!window.checklistState || !window.checklistState.queue || window.checklistState.queue.length === 0) return false;
             if (window.checklistState.isBypassed) return false;
             if (window.checklistState.hasOpenTickets) return true;
@@ -3902,8 +3906,8 @@
             if (bar) {
                 checkParamsLockState();
                 const checklistLocked = isChecklistLocked();
-                const scanIncomplete = !isScanComplete();
-                const paramsLocked = window.paramsLocked === true;
+                const scanIncomplete = !TEMP_TABS_UNLOCKED && !isScanComplete();
+                const paramsLocked = !TEMP_TABS_UNLOCKED && window.paramsLocked === true;
 
                 bar.classList.toggle('locked-checklist', checklistLocked);
                 bar.classList.toggle('locked-scan', !checklistLocked && scanIncomplete);
@@ -3941,7 +3945,7 @@
                 return;
             }
             // Lock: cannot leave the Scan tab (index 1) until the 3-step scan is complete
-            if (index > 1 && !isScanComplete() && !isRestore) {
+            if (index > 1 && !TEMP_TABS_UNLOCKED && !isScanComplete() && !isRestore) {
                 if (typeof window.showAppToast === 'function') {
                     window.showAppToast(_t('toast_complete_3steps'));
                 }
@@ -3950,7 +3954,7 @@
             }
             checkParamsLockState();
             // Lock: cannot visit pages beyond Scan (1) and Params (2) until "Values changed" is pressed
-            if (index > 2 && window.paramsLocked && !isRestore) {
+            if (index > 2 && !TEMP_TABS_UNLOCKED && window.paramsLocked && !isRestore) {
                 if (typeof window.showAppToast === 'function') {
                     window.showAppToast(_t('toast_press_values_changed'));
                 }
@@ -4371,6 +4375,7 @@
             html += row(_t('submit_lbl_shots'), values.shotCount, `<button type="button" class="row-edit-btn" onclick="if(window.openShotEditModal) window.openShotEditModal();">${_t('submit_edit_btn')}</button>`);
             html += row(_t('submit_lbl_material_lot'), (values.materialLot || '---'), edit(3, '材料ロット'));
             html += row(_t('submit_lbl_defects'), _t('submit_lbl_defect_pull') + ': ' + values.defectsPull + ' | ' + _t('submit_lbl_defect_process') + ': ' + values.defectsProcess + ' | ' + _t('submit_lbl_defect_other') + ': ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(3, 'counter-box-18'));
+            if (window.SCNA && SCNA.defectSummaryHtml) { const dh = SCNA.defectSummaryHtml(); if (dh) html += row('', '<div style="font-size:.85rem;">' + dh + '</div>'); }
             html += row(_t('submit_lbl_good_total'), '<span style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span>');
             html += row(_t('submit_lbl_cycle_check'), _t('submit_lbl_first_check') + ': ' + values.photosHatsumono + ' | ' + _t('submit_lbl_last_check') + ': ' + values.photosAtomono);
             html += row(_t('submit_lbl_label_photos'), values.photosMaterial + _t('submit_lbl_photos_unit'));
@@ -5925,6 +5930,7 @@
                     card.classList.toggle('has-count', v > 0);
                 });
             }
+            window.syncDefectDisplays = syncDefectDisplays;
             window.prodCounterTap = function (e, n) {
                 if (e && e.target && e.target.closest('.tap-minus')) return;
                 if (typeof incrementCounter === 'function') incrementCounter(n);

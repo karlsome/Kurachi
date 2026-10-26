@@ -360,6 +360,11 @@
 
       (b.Lot_Details || []).forEach(function (l) { Object.assign(l, SCNA.cycleLotInfo(l.machine, l.lotNumber)); });
 
+      var dbm = SCNA.defectPayload();
+      if (dbm) (b.Lot_Details || []).forEach(function (l) {
+        var d = dbm[l.machine] && dbm[l.machine].lots[l.lotNumber];
+        if (d) l.defects = d;
+      });
       b['スペアからの部分数'] = spareTotal();
       b.Spare_Lots = SCNA.sparePayload();
       Object.assign(b, SCNA.runPayload());
@@ -615,7 +620,7 @@
     } catch (e) { console.error('SCNA: could not set groupedMachines', e); }
     if (typeof window.buildCompletedSendPanel === 'function') {
       try { window.buildCompletedSendPanel(); } catch (e) { }
-    }
+    }    try { renderMachineDefects(); } catch (e) { console.error('SCNA: defect counters', e); }
   }
 
   function renderWoBanner() {
@@ -1163,7 +1168,7 @@
     var wrapped = function () {
       var r;
       try {
-        lsDel('scnaWO'); lsDel(CYCLE_MARKS_KEY); lsDel(RUN_KEY); lsDel('scnaTwoHourChecks'); lsDel('scnaTwoHourSnooze'); lsDel('partial-from-spare'); lsDel(SPARE_KEY);
+        lsDel(DEFECT_KEY); lsDel('scnaWO'); lsDel(CYCLE_MARKS_KEY); lsDel(RUN_KEY); lsDel('scnaTwoHourChecks'); lsDel('scnaTwoHourSnooze'); lsDel('partial-from-spare'); lsDel(SPARE_KEY);
       } catch (e) { }
       notifyQualityCall('clear');
       r = orig.apply(this, arguments);
@@ -2236,6 +2241,153 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* Per-machine, per-lot defect counters (grouped tablets, e.g. AOL-2 + AOL-3) */
+  /* ------------------------------------------------------------------ */
+
+  // The original 疵引不良 / 加工不良 / その他 counters (18/19/20) stay the run totals: Total_NG, the good
+  // quantity, the submit summary and the legacy payload fields keep reading them. For a grouped tablet each tap
+  // also lands in a tally keyed machine -> lot -> counter, against the lot that machine is currently running.
+  // A machine with no lot scanned yet is greyed out. Scanning its next lot shows that lot's counters (from 0);
+  // the earlier lots' counts stay saved.
+  var DEFECT_KEY = 'defectByMachineLot';   // { machine: { lotNumber: { 18: n, 19: n, 20: n } } }
+  var DEFECT_TYPES = [
+    { n: 18, i18n: 'defect_pull', ja: '疵引不良' },
+    { n: 19, i18n: 'processing_defect', ja: '加工不良' },
+    { n: 20, i18n: 'other', ja: 'その他' }
+  ];
+  function defectTr(key, ja) { try { var v = window._t && window._t(key); return v && v !== key ? v : ja; } catch (e) { return ja; } }
+  function defectState() { return lsGet(DEFECT_KEY, {}) || {}; }
+  function defectGet(st, m, lot, n) { return parseInt(st[m] && st[m][lot] && st[m][lot][n], 10) || 0; }
+
+  // The lot a machine is running now: its newest lot record (open or already closed for shots).
+  function currentLotOf(machine) {
+    try {
+      var recs = (window.getAllLotRecords ? window.getAllLotRecords() : []).filter(function (r) { return r && r.machine === machine && r.lotNumber; });
+      if (!recs.length) return '';
+      recs.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
+      return recs[recs.length - 1].lotNumber;
+    } catch (e) { return ''; }
+  }
+
+  function defectBump(m, n, delta) {
+    var lot = currentLotOf(m);
+    if (!lot) return;
+    var st = defectState();
+    var cur = defectGet(st, m, lot, n);
+    if (delta < 0 && cur <= 0) return;
+    st[m] = st[m] || {}; st[m][lot] = st[m][lot] || {};
+    st[m][lot][n] = cur + delta;
+    lsSet(DEFECT_KEY, st);
+    if (delta > 0 && typeof incrementCounter === 'function') incrementCounter(n);
+    if (delta < 0 && typeof decrementCounter === 'function') decrementCounter(n);
+    paintMachineDefects();
+    if (typeof assertMachineState === 'function') assertMachineState();
+  }
+
+  function paintMachineDefects() {
+    var st = defectState();
+    document.querySelectorAll('.scna-mdef-row').forEach(function (row) {
+      var m = row.dataset.machine, lot = currentLotOf(m);
+      var all = st[m] || {}, total = 0;
+      Object.keys(all).forEach(function (l) { DEFECT_TYPES.forEach(function (t) { total += defectGet(st, m, l, t.n); }); });
+      row.classList.toggle('scna-mdef-off', !lot);
+      row.querySelector('.scna-mdef-lot').textContent = lot ? lot : '— ' + defectTr('scna_scan_lot', 'ロット未スキャン / Scan a lot');
+      row.querySelector('.scna-mdef-total').textContent = lot && total ? 'Σ ' + total : '';
+      row.querySelectorAll('.scna-mdef-card').forEach(function (c) {
+        var v = lot ? defectGet(st, m, lot, c.dataset.n) : 0;
+        c.querySelector('.tap-count').textContent = v;
+        c.classList.toggle('has-count', v > 0);
+      });
+    });
+    if (typeof window.syncDefectDisplays === 'function') window.syncDefectDisplays();
+  }
+
+  function renderMachineDefects() {
+    var grid = document.querySelector('#counter-box-18') && document.querySelector('#counter-box-18').parentNode;
+    if (!grid) return;
+    var old = $('scnaMachineDefects');
+    if (old) old.remove();
+    var active = SCNA.activeMachines();
+    if (active.length < 2) { grid.style.display = ''; return; }
+    grid.style.display = 'none';
+
+    var wrap = document.createElement('div');
+    wrap.id = 'scnaMachineDefects';
+    var html = '<style>.scna-mdef-row{margin-bottom:14px}' +
+      '.scna-mdef-head{display:flex;align-items:baseline;gap:8px;margin:0 0 8px;flex-wrap:wrap}' +
+      '.scna-mdef-name{font-weight:800;font-size:1rem;color:var(--text-main)}' +
+      '.scna-mdef-lot{font-weight:700;font-size:.9rem;color:var(--text-muted)}' +
+      '.scna-mdef-total{margin-left:auto;font-weight:800;font-size:.9rem;color:var(--red)}' +
+      '.scna-mdef-off .tap-counter-grid{opacity:.4;filter:grayscale(1);pointer-events:none}' +
+      '.scna-mdef-photo{margin-top:4px}</style>';
+    active.forEach(function (m) {
+      html += '<div class="scna-mdef-row scna-mdef-off" data-machine="' + esc(m) + '"><div class="scna-mdef-head">' +
+        '<span class="scna-mdef-name">' + esc(m) + '</span><span class="scna-mdef-lot"></span><span class="scna-mdef-total"></span></div>' +
+        '<div class="tap-counter-grid">';
+      DEFECT_TYPES.forEach(function (t) {
+        html += '<div class="tap-counter scna-mdef-card" data-machine="' + esc(m) + '" data-n="' + t.n + '">' +
+          '<button type="button" class="tap-minus" aria-label="minus">&minus;</button>' +
+          '<div class="tap-count">0</div>' +
+          '<div class="tap-label" data-i18n="' + t.i18n + '">' + esc(defectTr(t.i18n, t.ja)) + '</div></div>';
+      });
+      html += '</div></div>';
+    });
+    html += '<button type="button" class="btn btn-secondary scna-mdef-photo" id="scnaDefectPhotoBtn">📷 ' +
+      '<span data-i18n="defect_photo">' + esc(defectTr('defect_photo', '写真')) + '</span></button>';
+    wrap.innerHTML = html;
+    grid.parentNode.insertBefore(wrap, grid);
+
+    wrap.addEventListener('click', function (e) {
+      var card = e.target.closest('.scna-mdef-card');
+      if (!card || card.closest('.scna-mdef-off')) return;
+      var minus = !!e.target.closest('.tap-minus');
+      defectBump(card.dataset.machine, parseInt(card.dataset.n, 10), minus ? -1 : 1);
+      if (!minus) {
+        card.classList.remove('bump'); void card.offsetWidth; card.classList.add('bump');
+      }
+    });
+    $('scnaDefectPhotoBtn').onclick = function () { if (window.startDefectPhotoFlow) window.startDefectPhotoFlow(); };
+    paintMachineDefects();
+  }
+
+  // Lots are scanned elsewhere on the page; repaint so a machine un-greys / switches lot as soon as that happens.
+  setInterval(function () { try { if ($('scnaMachineDefects')) paintMachineDefects(); } catch (e) { } }, 1000);
+
+  // Submit: per machine (totals across its lots) with the per-lot split. null when the page is a single machine.
+  SCNA.defectPayload = function () {
+    var active = SCNA.activeMachines();
+    if (active.length < 2) return null;
+    var st = defectState(), out = {};
+    active.forEach(function (m) {
+      var o = { lots: {} }, tot = 0;
+      DEFECT_TYPES.forEach(function (t) { o[t.ja] = 0; });
+      Object.keys(st[m] || {}).forEach(function (lot) {
+        var lo = {}, lt = 0;
+        DEFECT_TYPES.forEach(function (t) { var v = defectGet(st, m, lot, t.n); lo[t.ja] = v; lt += v; o[t.ja] += v; });
+        lo.Total_NG = lt; tot += lt;
+        o.lots[lot] = lo;
+      });
+      o.Total_NG = tot;
+      out[m] = o;
+    });
+    return out;
+  };
+
+  // One line per machine and lot for the submit summary, e.g. "AOL-2 · 888-1: 1/1/1 · 888-2: 0/2/0". '' when none.
+  SCNA.defectSummaryHtml = function () {
+    var p = SCNA.defectPayload();
+    if (!p) return '';
+    return Object.keys(p).map(function (m) {
+      var lots = Object.keys(p[m].lots);
+      if (!lots.length) return '';
+      return '<div><b>' + esc(m) + '</b> ' + lots.map(function (l) {
+        var x = p[m].lots[l];
+        return esc(l) + ': ' + x['疵引不良'] + '/' + x['加工不良'] + '/' + x['その他'];
+      }).join(' · ') + '</div>';
+    }).join('');
+  };
+
+  /* ------------------------------------------------------------------ */
   /* 11. Init                                                            */
   /* ------------------------------------------------------------------ */
 
@@ -2256,6 +2408,7 @@
       wrapLabelPrint();
       injectSettingsButton();
       injectPartialSpare();
+      renderMachineDefects();
       updateTwoHourDisplay();
 
       var saved = lsGet('scnaWO', null);
