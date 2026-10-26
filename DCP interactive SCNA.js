@@ -1302,6 +1302,8 @@
   // the mini-PC print server (printLabel's :5001 path), ask which layout to print if there is more than
   // one, then send it as &layoutId=. One layout (or none) keeps the old behaviour: the server picks it.
   var printLayoutId = null;
+  // Label layouts are designed per process in admin (SCNA > Label Designer). This page is the press process.
+  var LABEL_PROCESS = 'press';
 
   // Values for named label elements (admin SCNA > Label Designer > Element ID), sent with every print:
   //   SCNA.labelValues.text_1 = 'hello';                  // fixed value
@@ -1326,7 +1328,7 @@
 
   async function fetchPrintLayouts(sebanggo) {
     try {
-      var res = await fetch(window.serverURL + '/api/scna-label-layouts/for-item?sebanggo=' + encodeURIComponent(sebanggo));
+      var res = await fetch(window.serverURL + '/api/scna-label-layouts/for-item?sebanggo=' + encodeURIComponent(sebanggo) + '&process=' + LABEL_PROCESS);
       if (!res.ok) return [];
       var body = await res.json();
       return Array.isArray(body.layouts) ? body.layouts : [];
@@ -1396,7 +1398,7 @@
       if (SCNA.boxId && !('box_id' in overrides)) overrides.box_id = String(SCNA.boxId);
       // text_9 shows the date (the print server's {lotNumber}, yyyymmdd) followed by the box ID: 20261022 - WO-9999-B001
       if (SCNA.boxId && !('text_9' in overrides)) overrides.text_9 = '{lotNumber} - ' + String(SCNA.boxId);
-      var params = { filename: sebanggo, qty: String(copies) };
+      var params = { filename: sebanggo, qty: String(copies), process: LABEL_PROCESS };
       if (layoutId) params.layoutId = layoutId;
       if (Object.keys(overrides).length) params.overrides = JSON.stringify(overrides);
       var printerIP = await resolvePrinterIP(machineName);
