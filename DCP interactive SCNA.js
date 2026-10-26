@@ -1394,7 +1394,7 @@
       var params = { filename: sebanggo, qty: String(copies) };
       if (layoutId) params.layoutId = layoutId;
       if (Object.keys(overrides).length) params.overrides = JSON.stringify(overrides);
-      var printerIP = await resolveEquipmentPrinterIP(machineName);
+      var printerIP = await resolvePrinterIP(machineName);
       var url = 'http://' + printerIP + ':5001/request?' + new URLSearchParams(params).toString();
       var controller = new AbortController();
       var timer = setTimeout(function () { controller.abort(); }, 10000);
@@ -2102,6 +2102,140 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* 10b. Label printer choice (i sidebar > Settings)                    */
+  /* ------------------------------------------------------------------ */
+
+  // A tablet with several machines (AOL-4,AOL-5) prints on the printer PC of ONE of them. Without a choice the
+  // backend takes the first machine. The choice is kept in plain localStorage (not the prefixed lsGet/lsSet
+  // store) so a refresh, a reset or a new run does not clear it. One choice per tablet (its home machines).
+  function printerChoiceKey() { return 'scna_label_printer_' + (SCNA.home.length ? SCNA.home : SCNA.machines).join(','); }
+
+  SCNA.getPrinterMachine = function () {
+    var list = SCNA.machines;
+    var saved = '';
+    try { saved = localStorage.getItem(printerChoiceKey()) || ''; } catch (e) { }
+    return list.indexOf(saved) >= 0 ? saved : (list[0] || '');
+  };
+
+  SCNA.setPrinterMachine = function (machine) {
+    try { localStorage.setItem(printerChoiceKey(), machine); } catch (e) { }
+  };
+
+  // IP of the chosen machine's print server. A machine other than the first must not fall back to the
+  // backend's "first cached IP", so its own IP is looked up here.
+  async function resolvePrinterIP(machineName) {
+    var chosen = SCNA.getPrinterMachine();
+    var list = String(machineName || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+    if (!chosen || chosen === list[0]) return resolveEquipmentPrinterIP(machineName);
+    var ip = listenerIP(chosen);
+    if (!ip) {
+      var res = await fetch(ipURL + '?filter=' + encodeURIComponent(chosen));
+      if (res.ok) ip = (await res.text()).replace(/"/g, '').trim();
+    }
+    if (!ip) throw new Error(stx('noIp') + chosen);
+    return ip;
+  }
+
+  var PRINTER_SVG = '<svg viewBox="0 0 64 64" width="84" height="84" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">' +
+    '<rect x="16" y="6" width="32" height="16"/><rect x="6" y="22" width="52" height="24" rx="4"/>' +
+    '<rect x="16" y="38" width="32" height="20" fill="#fff"/><circle cx="48" cy="30" r="2" fill="currentColor"/></svg>';
+
+  // Settings modal: left column = the list of settings (only Printer for now; add an entry to SETTINGS_PAGES for more),
+  // right column = the options of the selected setting. A printer card saves the choice as soon as it is tapped.
+  // Only the language the user picked (ja / en / pt, same as the language selector) is shown.
+  var SET_TEXT = {
+    settings: { ja: '設定', en: 'Settings', pt: 'Configurações' },
+    close:    { ja: '閉じる', en: 'Close', pt: 'Fechar' },
+    printer:  { ja: 'プリンター', en: 'Printer', pt: 'Impressora' },
+    printerTitle: { ja: 'プリンター設定', en: 'Printer Settings', pt: 'Configurações da impressora' },
+    selected: { ja: '選択中', en: 'Selected', pt: 'Selecionada' },
+    noIp:     { ja: '設備IPが未設定です: ', en: 'No IP configured for ', pt: 'Nenhum IP configurado para ' }
+  };
+  function stx(key) {
+    var lang = 'ja';
+    try { lang = (typeof getCurrentLanguage === 'function' ? getCurrentLanguage() : localStorage.getItem('appLanguage')) || 'ja'; } catch (e) { }
+    var e = SET_TEXT[key];
+    return e[lang] || e.en;
+  }
+
+  function openPrinterSettings() {
+    var SETTINGS_PAGES = [
+      { id: 'printer', label: stx('printer'), title: stx('printerTitle'), render: renderPrinterPage }
+    ];
+    var activePage = SETTINGS_PAGES[0].id;
+
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(16,24,40,.45);display:flex;align-items:center;justify-content:center;z-index:10020;padding:20px;';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--card-radius);box-shadow:var(--shadow-pop);color:var(--text-main);width:min(820px,100%);height:min(520px,90vh);display:flex;flex-direction:column;padding:20px;gap:16px;';
+    box.innerHTML =
+      '<div style="display:flex;gap:16px;flex:1;min-height:0;">' +
+        '<div id="scnaSetNav" style="width:30%;min-width:150px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--card-radius);padding:10px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;"></div>' +
+        '<div style="flex:1;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--card-radius);padding:20px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;">' +
+          '<h3 id="scnaSetTitle" style="margin:0;font-size:1.0625rem;font-weight:800;letter-spacing:-0.01em;text-align:center;color:var(--text-main);border-bottom:1px solid var(--border);padding-bottom:12px;"></h3>' +
+          '<div id="scnaSetBody"></div>' +
+        '</div>' +
+      '</div>' +
+      '<button type="button" id="scnaSetClose" class="btn btn-secondary btn-full">' + esc(stx('close')) + '</button>';
+    overlay.appendChild(box);
+    function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+    $('scnaSetClose').onclick = close;
+
+    function renderPrinterPage(body) {
+      var current = SCNA.getPrinterMachine();
+      body.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;';
+      body.innerHTML = '';
+      SCNA.machines.forEach(function (m) {
+        var on = m === current;
+        var card = document.createElement('button');
+        card.type = 'button';
+        card.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:20px 10px;border-radius:var(--card-radius);cursor:pointer;font-family:inherit;' +
+          'min-height:210px;box-shadow:var(--shadow-card);transition:background var(--transition-smooth),border-color var(--transition-smooth);' +
+          (on ? 'background:var(--brand-soft);border:2px solid var(--brand);color:var(--brand-hover);' : 'background:var(--bg-surface);border:1px solid var(--border-strong);color:var(--text-main);');
+        card.innerHTML = PRINTER_SVG + '<span style="font-size:1.75rem;font-weight:800;letter-spacing:-0.01em;">' + esc(m.replace('-', ' ')) + '</span>' +
+          '<span style="font-size:.875rem;font-weight:700;min-height:1.2em;">' + (on ? stx('selected') : '') + '</span>';
+        card.onclick = function () { SCNA.setPrinterMachine(m); renderPrinterPage(body); };
+        body.appendChild(card);
+      });
+    }
+
+    function showPage(id) {
+      activePage = id;
+      var nav = $('scnaSetNav');
+      nav.innerHTML = '';
+      SETTINGS_PAGES.forEach(function (pg) {
+        var on = pg.id === activePage;
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = pg.label;
+        b.style.cssText = 'padding:14px 10px;border-radius:var(--btn-radius);font-size:1rem;font-weight:800;letter-spacing:-0.01em;cursor:pointer;font-family:inherit;transition:background var(--transition-smooth);' +
+          (on ? 'background:var(--brand);border:1px solid var(--brand);color:#fff;' : 'background:var(--bg-surface);border:1px solid var(--border-strong);color:var(--text-main);');
+        b.onclick = function () { showPage(pg.id); };
+        nav.appendChild(b);
+      });
+      var page = SETTINGS_PAGES.filter(function (pg) { return pg.id === activePage; })[0];
+      $('scnaSetTitle').textContent = page.title;
+      page.render($('scnaSetBody'));
+    }
+    showPage(activePage);
+  }
+
+  function injectSettingsButton() {
+    var side = document.querySelector('.info-sidebar');
+    if (!side || $('scnaSettingsBtn')) return;
+    var b = document.createElement('button');
+    b.type = 'button'; b.id = 'scnaSettingsBtn';
+    b.className = 'btn btn-secondary btn-full';
+    b.textContent = '⚙ ' + stx('settings');
+    document.addEventListener('languageChanged', function () { b.textContent = '⚙ ' + stx('settings'); });
+    b.style.cssText = 'margin-top:auto;';
+    b.onclick = openPrinterSettings;
+    side.appendChild(b);
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 11. Init                                                            */
   /* ------------------------------------------------------------------ */
 
@@ -2120,6 +2254,7 @@
       wrapSentToast();
       wrapStep1Scanner();
       wrapLabelPrint();
+      injectSettingsButton();
       injectPartialSpare();
       updateTwoHourDisplay();
 
