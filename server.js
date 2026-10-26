@@ -27248,13 +27248,52 @@ function _cleanCustomers(customers) {
   return [...new Set(customers.map(c => String(c || "").trim()).filter(Boolean))];
 }
 
-// A customer maps to one layout, and only one layout can be the default.
-async function _applyLabelLayoutExclusivity(col, layoutId, customers, isDefault) {
+// SCNA processes. Each label layout lists the processes it can be printed from (labelLayouts.processes) and each
+// item binds layouts per process (masterDB.labelLayoutByProcess.<process>). Layouts from before processes existed
+// were all press layouts; _ensureLabelProcesses backfills that.
+const SCNA_LABEL_PROCESSES = ["PSA", "press", "SRS", "kensa"];
+
+function _cleanProcesses(processes) {
+  if (!Array.isArray(processes)) return [];
+  return SCNA_LABEL_PROCESSES.filter(p => processes.includes(p));
+}
+
+// Process asked for by a caller; a missing value means press so tablets that do not send it yet keep working.
+function _requestedProcess(value) {
+  const p = String(value || "press").trim();
+  return SCNA_LABEL_PROCESSES.includes(p) ? p : null;
+}
+
+// Backfill, idempotent: layouts without processes become press layouts, and the old masterDB.labelLayoutIds
+// (and the older single labelLayoutId) folds into labelLayoutByProcess.press.
+async function _ensureLabelProcesses(database) {
+  await database.collection("labelLayouts").updateMany(
+    { processes: { $exists: false } },
+    { $set: { processes: ["press"] } }
+  );
+  await database.collection("masterDB").updateMany(
+    { 工場: "SCNA", $or: [{ labelLayoutIds: { $exists: true } }, { labelLayoutId: { $exists: true } }] },
+    [
+      { $set: { "labelLayoutByProcess.press": { $setUnion: [
+        { $ifNull: ["$labelLayoutByProcess.press", []] },
+        { $ifNull: ["$labelLayoutIds", []] },
+        { $cond: [{ $in: [{ $ifNull: ["$labelLayoutId", ""] }, ["", null]] }, [], ["$labelLayoutId"]] },
+      ] } } },
+      { $unset: ["labelLayoutIds", "labelLayoutId"] },
+    ]
+  );
+}
+
+// A customer maps to one layout per process, and only one layout can be the default for a process.
+async function _applyLabelLayoutExclusivity(col, layoutId, customers, isDefault, processes) {
   if (customers.length) {
-    await col.updateMany({ layoutId: { $ne: layoutId } }, { $pull: { customers: { $in: customers } } });
+    await col.updateMany(
+      { layoutId: { $ne: layoutId }, processes: { $in: processes } },
+      { $pull: { customers: { $in: customers } } }
+    );
   }
   if (isDefault) {
-    await col.updateMany({ layoutId: { $ne: layoutId } }, { $set: { isDefault: false } });
+    await col.updateMany({ layoutId: { $ne: layoutId }, processes: { $in: processes } }, { $set: { isDefault: false } });
   }
 }
 
@@ -27367,8 +27406,12 @@ app.get("/api/scna-boxes", async (req, res) => {
 app.get("/api/scna-label-layouts", async (req, res) => {
   try {
     await client.connect();
-    const list = await client.db(DB_NAME).collection("labelLayouts")
-      .find({}).sort({ name: 1 }).toArray();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const process = req.query.process ? _requestedProcess(req.query.process) : null;
+    if (req.query.process && !process) return res.status(400).json({ error: "unknown process" });
+    const list = await database.collection("labelLayouts")
+      .find(process ? { processes: process } : {}).sort({ name: 1 }).toArray();
     res.json(list);
   } catch (error) {
     console.error("❌ Error listing label layouts:", error);
@@ -27380,21 +27423,25 @@ app.post("/api/scna-label-layouts", async (req, res) => {
   try {
     const { name, customers, isDefault, layout, username } = req.body || {};
     if (!name || !String(name).trim()) return res.status(400).json({ error: "name is required" });
+    const processes = _cleanProcesses(req.body?.processes);
+    if (!processes.length) return res.status(400).json({ error: "at least one process is required" });
     const err = _validateLabelLayout(layout);
     if (err) return res.status(400).json({ error: err });
 
     await client.connect();
-    const col = client.db(DB_NAME).collection("labelLayouts");
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const col = database.collection("labelLayouts");
     const trimmed = String(name).trim();
-    if (await col.findOne({ name: trimmed })) {
-      return res.status(409).json({ error: `A layout named "${trimmed}" already exists` });
+    if (await col.findOne({ name: trimmed, processes: { $in: processes } })) {
+      return res.status(409).json({ error: `A layout named "${trimmed}" already exists in this process` });
     }
     const layoutId = `lbl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const cleanCustomers = _cleanCustomers(customers);
     const now = new Date().toISOString();
-    await _applyLabelLayoutExclusivity(col, layoutId, cleanCustomers, !!isDefault);
+    await _applyLabelLayoutExclusivity(col, layoutId, cleanCustomers, !!isDefault, processes);
     await col.insertOne({
-      layoutId, name: trimmed, customers: cleanCustomers, isDefault: !!isDefault, layout, layoutHash: _layoutHash(layout),
+      layoutId, name: trimmed, processes, customers: cleanCustomers, isDefault: !!isDefault, layout, layoutHash: _layoutHash(layout),
       createdBy: username || null, createdAt: now, updatedAt: now,
     });
     res.json({ success: true, layoutId });
@@ -27412,19 +27459,34 @@ app.put("/api/scna-label-layouts/:layoutId", async (req, res) => {
     if (err) return res.status(400).json({ error: err });
 
     await client.connect();
-    const col = client.db(DB_NAME).collection("labelLayouts");
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const col = database.collection("labelLayouts");
     const layoutId = req.params.layoutId;
     const trimmed = String(name).trim();
-    if (!(await col.findOne({ layoutId }))) return res.status(404).json({ error: "Layout not found" });
-    if (await col.findOne({ name: trimmed, layoutId: { $ne: layoutId } })) {
-      return res.status(409).json({ error: `A layout named "${trimmed}" already exists` });
+    const existing = await col.findOne({ layoutId });
+    if (!existing) return res.status(404).json({ error: "Layout not found" });
+    // processes is optional on save; omitted keeps what the layout has.
+    const processes = Array.isArray(req.body?.processes) ? _cleanProcesses(req.body.processes) : (existing.processes || ["press"]);
+    if (!processes.length) return res.status(400).json({ error: "at least one process is required" });
+    if (await col.findOne({ name: trimmed, layoutId: { $ne: layoutId }, processes: { $in: processes } })) {
+      return res.status(409).json({ error: `A layout named "${trimmed}" already exists in this process` });
     }
     // Items are bound via masterDB.labelLayoutId now; `customers` is only touched when a caller still sends it,
     // so saving a layout never wipes customer bindings that have not been migrated yet.
     const cleanCustomers = _cleanCustomers(customers);
-    await _applyLabelLayoutExclusivity(col, layoutId, cleanCustomers, !!isDefault);
+    await _applyLabelLayoutExclusivity(col, layoutId, cleanCustomers, !!isDefault, processes);
+    // A process taken off the layout also drops its item bindings, so the tablet never offers a layout the
+    // process no longer lists.
+    const removedProcesses = (existing.processes || ["press"]).filter(p => !processes.includes(p));
+    for (const p of removedProcesses) {
+      await database.collection("masterDB").updateMany(
+        { 工場: "SCNA", [`labelLayoutByProcess.${p}`]: layoutId },
+        { $pull: { [`labelLayoutByProcess.${p}`]: layoutId } }
+      );
+    }
     const $set = {
-      name: trimmed, isDefault: !!isDefault, layout, layoutHash: _layoutHash(layout),
+      name: trimmed, processes, isDefault: !!isDefault, layout, layoutHash: _layoutHash(layout),
       updatedBy: username || null, updatedAt: new Date().toISOString(),
     };
     if (Array.isArray(customers)) $set.customers = cleanCustomers;
@@ -27467,6 +27529,48 @@ app.put("/api/scna-label-layouts/:layoutId/thumbnail", async (req, res) => {
   }
 });
 
+// Copy a layout into other processes as an independent layout (own layoutId, own drawing). Body:
+// { processes: [...], name?, copyBindings?, fromProcess?, username }. With copyBindings the items bound to the
+// source in fromProcess (default: the source's first process) are bound to the copy in every target process.
+app.post("/api/scna-label-layouts/:layoutId/duplicate", async (req, res) => {
+  try {
+    const processes = _cleanProcesses(req.body?.processes);
+    if (!processes.length) return res.status(400).json({ error: "at least one target process is required" });
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const col = database.collection("labelLayouts");
+    const src = await col.findOne({ layoutId: req.params.layoutId });
+    if (!src) return res.status(404).json({ error: "Layout not found" });
+
+    let name = String(req.body?.name || "").trim() || `${src.name} (${processes.join(", ")})`;
+    const base = name;
+    for (let n = 2; await col.findOne({ name, processes: { $in: processes } }); n++) name = `${base} ${n}`;
+
+    const layoutId = `lbl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const now = new Date().toISOString();
+    await col.insertOne({
+      layoutId, name, processes, customers: [], isDefault: false, layout: src.layout, layoutHash: _layoutHash(src.layout),
+      copiedFrom: src.layoutId, createdBy: req.body?.username || null, createdAt: now, updatedAt: now,
+    });
+
+    let bound = 0;
+    if (req.body?.copyBindings) {
+      const fromProcess = _requestedProcess(req.body?.fromProcess || (src.processes || ["press"])[0]);
+      if (fromProcess) {
+        const itemsCol = database.collection("masterDB");
+        const filter = { 工場: "SCNA", [`labelLayoutByProcess.${fromProcess}`]: src.layoutId };
+        const $addToSet = Object.fromEntries(processes.map(p => [`labelLayoutByProcess.${p}`, layoutId]));
+        bound = (await itemsCol.updateMany(filter, { $addToSet })).modifiedCount;
+      }
+    }
+    res.json({ success: true, layoutId, name, bound });
+  } catch (error) {
+    console.error("❌ Error duplicating label layout:", error);
+    res.status(500).json({ error: "Failed to duplicate label layout", details: error.message });
+  }
+});
+
 app.delete("/api/scna-label-layouts/:layoutId", async (req, res) => {
   try {
     await client.connect();
@@ -27474,11 +27578,13 @@ app.delete("/api/scna-label-layouts/:layoutId", async (req, res) => {
       .deleteOne({ layoutId: req.params.layoutId });
     if (!result.deletedCount) return res.status(404).json({ error: "Layout not found" });
     admin.storage().bucket().file(`labelLayoutThumbnails/${req.params.layoutId}.png`).delete().catch(() => {});
-    await _normalizeItemLayouts(client.db(DB_NAME));
-    await client.db(DB_NAME).collection("masterDB").updateMany(
-      { 工場: "SCNA", labelLayoutIds: req.params.layoutId },
-      { $pull: { labelLayoutIds: req.params.layoutId } }
-    );
+    await _ensureLabelProcesses(client.db(DB_NAME));
+    for (const p of SCNA_LABEL_PROCESSES) {
+      await client.db(DB_NAME).collection("masterDB").updateMany(
+        { 工場: "SCNA", [`labelLayoutByProcess.${p}`]: req.params.layoutId },
+        { $pull: { [`labelLayoutByProcess.${p}`]: req.params.layoutId } }
+      );
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: "Failed to delete label layout", details: error.message });
@@ -27486,39 +27592,29 @@ app.delete("/api/scna-label-layouts/:layoutId", async (req, res) => {
 });
 
 
-// Item binding: masterDB.labelLayoutIds (array, SCNA items only) - an item can have several layouts and the
-// tablet operator picks one when printing. The old single `labelLayoutId` string is folded into the array the
-// first time anything writes (see _normalizeItemLayouts). The print server resolves, in order: the layoutId the
-// tablet asked for, labelLayoutIds[0], the old customer rule, then the default layout.
-async function _normalizeItemLayouts(database) {
-  await database.collection("masterDB").updateMany(
-    { 工場: "SCNA", labelLayoutId: { $exists: true } },
-    [
-      { $set: { labelLayoutIds: { $setUnion: [
-        { $ifNull: ["$labelLayoutIds", []] },
-        { $cond: [{ $in: [{ $ifNull: ["$labelLayoutId", ""] }, ["", null]] }, [], ["$labelLayoutId"]] },
-      ] } } },
-      { $unset: "labelLayoutId" },
-    ]
-  );
-}
-
-function _itemLayoutIds(item) {
-  const ids = Array.isArray(item.labelLayoutIds) ? item.labelLayoutIds.slice() : [];
-  if (item.labelLayoutId && !ids.includes(item.labelLayoutId)) ids.push(item.labelLayoutId);
-  return ids;
+// Item binding: masterDB.labelLayoutByProcess = { PSA: [ids], press: [ids], SRS: [ids], kensa: [ids] } (SCNA items
+// only). An item can have several layouts per process and the tablet operator picks one when printing. The old
+// labelLayoutIds / labelLayoutId fields are folded into `press` by _ensureLabelProcesses. The print server resolves,
+// in order: the layoutId the tablet asked for, the item's layouts for the process, the old customer rule, then the
+// process default layout.
+function _itemLayoutIds(item, process) {
+  const ids = item.labelLayoutByProcess && item.labelLayoutByProcess[process];
+  return Array.isArray(ids) ? ids.slice() : [];
 }
 
 // Lightweight list for the label explorer / assign modal, so paging and search work client-side.
 app.get("/api/scna-label-layouts/items", async (req, res) => {
   try {
     await client.connect();
-    const rows = await client.db(DB_NAME).collection("masterDB").find(
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const rows = await database.collection("masterDB").find(
       { 工場: "SCNA" },
-      { projection: { _id: 0, 背番号: 1, 品番: 1, 品名: 1, "顧客/納入先": 1, labelLayoutIds: 1, labelLayoutId: 1 } }
+      { projection: { _id: 0, 背番号: 1, 品番: 1, 品名: 1, "顧客/納入先": 1, labelLayoutByProcess: 1 } }
     ).sort({ 背番号: 1 }).toArray();
-    res.json(rows.map(({ labelLayoutIds, labelLayoutId, ...rest }) => ({
-      ...rest, layoutIds: _itemLayoutIds({ labelLayoutIds, labelLayoutId }),
+    res.json(rows.map(({ labelLayoutByProcess, ...rest }) => ({
+      ...rest,
+      layoutIdsByProcess: Object.fromEntries(SCNA_LABEL_PROCESSES.map(p => [p, _itemLayoutIds({ labelLayoutByProcess }, p)])),
     })));
   } catch (error) {
     console.error("❌ Error listing label layout items:", error);
@@ -27532,25 +27628,28 @@ app.get("/api/scna-label-layouts/for-item", async (req, res) => {
   try {
     const sebanggo = String(req.query.sebanggo || "").trim();
     if (!sebanggo) return res.status(400).json({ error: "sebanggo is required" });
+    const process = _requestedProcess(req.query.process);
+    if (!process) return res.status(400).json({ error: "unknown process" });
     await client.connect();
     const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
     const item = await database.collection("masterDB").findOne({ 工場: "SCNA", 背番号: sebanggo });
     if (!item) return res.status(404).json({ error: "Item not found" });
     const layoutsCol = database.collection("labelLayouts");
     const pick = (d) => ({ layoutId: d.layoutId, name: d.name });
     const sortByName = (a, b) => String(a.name).localeCompare(String(b.name), "ja");
 
-    const ids = _itemLayoutIds(item);
+    const ids = _itemLayoutIds(item, process);
     if (ids.length) {
-      const docs = await layoutsCol.find({ layoutId: { $in: ids } }).toArray();
+      const docs = await layoutsCol.find({ layoutId: { $in: ids }, processes: process }).toArray();
       if (docs.length) return res.json({ source: "assigned", layouts: docs.map(pick).sort(sortByName) });
     }
     const customer = String(item["顧客/納入先"] || "").trim();
     if (customer) {
-      const docs = await layoutsCol.find({ customers: customer }).toArray();
+      const docs = await layoutsCol.find({ customers: customer, processes: process }).toArray();
       if (docs.length) return res.json({ source: "customer", layouts: docs.map(pick).sort(sortByName) });
     }
-    const def = await layoutsCol.findOne({ isDefault: true });
+    const def = await layoutsCol.findOne({ isDefault: true, processes: process });
     if (def) return res.json({ source: "default", layouts: [pick(def)] });
     res.json({ source: "none", layouts: [] });
   } catch (error) {
@@ -27564,21 +27663,26 @@ app.put("/api/scna-label-layouts/:layoutId/assign", async (req, res) => {
     const clean = (a) => (Array.isArray(a) ? [...new Set(a.map(v => String(v || "").trim()).filter(Boolean))] : []);
     const add = clean(req.body?.add);
     const remove = clean(req.body?.remove);
+    const process = _requestedProcess(req.body?.process);
+    if (!process) return res.status(400).json({ error: "unknown process" });
     await client.connect();
     const database = client.db(DB_NAME);
     const layoutId = req.params.layoutId;
-    if (!(await database.collection("labelLayouts").findOne({ layoutId }))) {
-      return res.status(404).json({ error: "Layout not found" });
+    await _ensureLabelProcesses(database);
+    const layoutDoc = await database.collection("labelLayouts").findOne({ layoutId });
+    if (!layoutDoc) return res.status(404).json({ error: "Layout not found" });
+    if (add.length && !(layoutDoc.processes || []).includes(process)) {
+      return res.status(400).json({ error: `This layout is not enabled for ${process}` });
     }
-    await _normalizeItemLayouts(database);
     const items = database.collection("masterDB");
+    const path = `labelLayoutByProcess.${process}`;
     let assigned = 0, removed = 0;
     if (add.length) {
-      const r = await items.updateMany({ 工場: "SCNA", 背番号: { $in: add } }, { $addToSet: { labelLayoutIds: layoutId } });
+      const r = await items.updateMany({ 工場: "SCNA", 背番号: { $in: add } }, { $addToSet: { [path]: layoutId } });
       assigned = r.modifiedCount;
     }
     if (remove.length) {
-      const r = await items.updateMany({ 工場: "SCNA", 背番号: { $in: remove } }, { $pull: { labelLayoutIds: layoutId } });
+      const r = await items.updateMany({ 工場: "SCNA", 背番号: { $in: remove } }, { $pull: { [path]: layoutId } });
       removed = r.modifiedCount;
     }
     res.json({ success: true, assigned, removed });
@@ -27598,21 +27702,20 @@ app.post("/api/scna-label-layouts/migrate-customers", async (req, res) => {
     const database = client.db(DB_NAME);
     const layoutsCol = database.collection("labelLayouts");
     const items = database.collection("masterDB");
-    if (!dryRun) await _normalizeItemLayouts(database);
+    await _ensureLabelProcesses(database);
     const withCustomers = await layoutsCol.find({ "customers.0": { $exists: true } }).toArray();
     const report = [];
     for (const l of withCustomers) {
       const filter = {
         工場: "SCNA",
         "顧客/納入先": { $in: l.customers },
-        $or: [{ labelLayoutIds: { $exists: false } }, { labelLayoutIds: { $size: 0 } }],
-        labelLayoutId: { $in: [null, ""] },
+        $or: [{ "labelLayoutByProcess.press": { $exists: false } }, { "labelLayoutByProcess.press": { $size: 0 } }],
       };
       let matched;
       if (dryRun) {
-        matched = await items.countDocuments({ ...filter, labelLayoutId: { $in: [null, ""] } });
+        matched = await items.countDocuments(filter);
       } else {
-        matched = (await items.updateMany(filter, { $addToSet: { labelLayoutIds: l.layoutId } })).modifiedCount;
+        matched = (await items.updateMany(filter, { $addToSet: { "labelLayoutByProcess.press": l.layoutId } })).modifiedCount;
         await layoutsCol.updateOne({ layoutId: l.layoutId }, {
           $set: { legacyCustomers: l.customers, customers: [], migratedAt: new Date().toISOString() },
         });
