@@ -5073,13 +5073,20 @@ app.post("/submitToSRSDBiReporter", async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // SRS interactive (SCNA / Girasol): own route so the production "SRS Process iReporter" route above stays untouched.
-// Same save as /submitToSRSDBiReporter, plus box traceability: Box_IDs index, once-only box check (409),
-// and the SRS result written back onto each box in scnaBoxDB.
+// Same save as /submitToSRSDBiReporter, plus box traceability (docs/srs-interactive-label-plan.md):
+//  - Box_IDs index; the SRS result is written back onto each press box in scnaBoxDB (srs = latest, srsRuns = all)
+//  - Srs_Box_IDs: the SRS labels printed in this lane session. Each must exist, be complete/draft, not voided and not yet
+//    linked; they get srsRecordId set. Press boxes may now be used by several records (leftover pieces), so the old
+//    "box already submitted -> 409" check only applies to the old whole-box flow (no Srs_Box_IDs sent).
+//  - Submit_UID (optional): a retry of the same submit returns the saved record instead of a duplicate
+//  - Srs_Unlabelled_NG: [{ boxId, ng, ngTotal }] NG found after the last print; taken from the press box's remaining pieces
 // ---------------------------------------------------------------------------
 let _srsBoxIndexReady = false;
 async function _ensureSrsBoxIndex(SRSDB) {
   if (_srsBoxIndexReady) return;
   await SRSDB.createIndex({ Box_IDs: 1 });
+  await SRSDB.createIndex({ Srs_Box_IDs: 1 });
+  await SRSDB.createIndex({ Submit_UID: 1 }, { unique: true, partialFilterExpression: { Submit_UID: { $type: "string" } } });
   _srsBoxIndexReady = true;
 }
 
@@ -5090,13 +5097,35 @@ app.post("/submitToSRSDBInteractive", async (req, res) => {
     const database = client.db("submittedDB");
     const SRSDB = database.collection("SRSDB");
     const formData = req.body;
+    try { await _ensureSrsBoxIndex(SRSDB); } catch (e) { console.error("SRSDB indexes failed:", e.message); }
 
-    // A box is processed by SRS once. The tablet checks on scan; this is the server-side guard.
-    const srsBoxIds = Array.isArray(formData.Box_IDs)
-      ? [...new Set(formData.Box_IDs.map(x => String(x || "").trim()).filter(Boolean))]
-      : [];
-    if (srsBoxIds.length) {
-      try { await _ensureSrsBoxIndex(SRSDB); } catch (e) { console.error("SRSDB Box_IDs index failed:", e.message); }
+    // retry of a submit that already went through
+    const submitUid = String(formData.Submit_UID || "").trim();
+    if (submitUid) {
+      const done = await SRSDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+      if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+    }
+
+    const cleanIds = (v) => Array.isArray(v) ? [...new Set(v.map(x => String(x || "").trim()).filter(Boolean))] : [];
+    const srsBoxIds = cleanIds(formData.Box_IDs);
+    const srsLabelIds = cleanIds(formData.Srs_Box_IDs);
+
+    if (srsLabelIds.length) {
+      // labels printed in this session: valid, still open, not linked to another record
+      const labels = await client.db(DB_NAME).collection("srsBoxDB").find({ srsId: { $in: srsLabelIds } }).toArray();
+      const byId = new Map(labels.map(x => [x.srsId, x]));
+      const bad = srsLabelIds.filter(id => {
+        const x = byId.get(id);
+        return !x || (x.status !== "complete" && x.status !== "draft") || x.srsRecordId;
+      });
+      if (bad.length) {
+        return res.status(409).json({
+          error: `SRS label cannot be submitted: ${bad.map(id => `${id} (${byId.get(id) ? (byId.get(id).srsRecordId ? "already submitted" : byId.get(id).status) : "not found"})`).join(", ")}`,
+          srsIds: bad
+        });
+      }
+    } else if (srsBoxIds.length) {
+      // old whole-box flow: a box is processed by SRS once
       const used = await SRSDB.findOne({ Box_IDs: { $in: srsBoxIds } }, { projection: { Box_IDs: 1 } });
       if (used) {
         const dup = srsBoxIds.filter(id => (used.Box_IDs || []).includes(id));
@@ -5141,26 +5170,58 @@ app.post("/submitToSRSDBInteractive", async (req, res) => {
     // Add createdAt timestamp
     formData.createdAt = new Date().toISOString();
 
-    const result = await SRSDB.insertOne(formData);
+    let result;
+    try {
+      result = await SRSDB.insertOne(formData);
+    } catch (e) {
+      if (e && e.code === 11000 && submitUid) {   // the same submit arrived twice at once
+        const done = await SRSDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+        if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+      }
+      throw e;
+    }
     _invalidateFinancialsCache('SRSDB insert');
 
-    // Write the SRS result back onto each box so a box lookup shows who ran SRS, on which Girasol, under which work order.
-    // The SRS record is already saved, so a failure here is logged and not returned as a submit error.
-    if (srsBoxIds.length) {
+    // The SRS record is saved; what follows is bookkeeping, so a failure is logged and not returned as a submit error.
+    const boxDb = client.db(DB_NAME);
+    if (srsLabelIds.length) {
       try {
-        await client.db(DB_NAME).collection("scnaBoxDB").updateMany(
+        await boxDb.collection("srsBoxDB").updateMany(
+          { srsId: { $in: srsLabelIds } },
+          { $set: { srsRecordId: result.insertedId, submittedAt: formData.createdAt } }
+        );
+      } catch (e) { console.error("SRS label link failed (SRSDB record saved):", e.message); }
+    }
+    // NG found after the last print: those pieces are gone from the press box too
+    const lateNg = Array.isArray(formData.Srs_Unlabelled_NG) ? formData.Srs_Unlabelled_NG : [];
+    for (const x of lateNg) {
+      const boxId = String((x && x.boxId) || "").trim();
+      const ng = Number(x && x.ngTotal) || 0;
+      if (!boxId || ng <= 0) continue;
+      try {
+        await boxDb.collection("scnaBoxDB").updateOne({ boxId }, { $push: { srsConsumed: {
+          srsId: null, recordId: result.insertedId, good: 0, ng, pieces: ng, at: formData.createdAt
+        } } });
+      } catch (e) { console.error(`SRS late NG for ${boxId} failed:`, e.message); }
+    }
+    // Write the SRS result back onto each press box so a box lookup shows who ran SRS, on which Girasol, under which work order.
+    if (srsBoxIds.length) {
+      const run = {
+        srsRecordId: result.insertedId,
+        srsIds: srsLabelIds,
+        machine: formData.設備 || "",
+        lane: formData.Lane || formData["R/L"] || "",
+        workers: formData.Worker_Name || "",
+        workOrders: Array.isArray(formData.WorkOrders) ? formData.WorkOrders : [],
+        date: formData.Date || "",
+        timeStart: formData.Time_start || "",
+        timeEnd: formData.Time_end || "",
+        submittedAt: formData.createdAt
+      };
+      try {
+        await boxDb.collection("scnaBoxDB").updateMany(
           { boxId: { $in: srsBoxIds } },
-          { $set: { srs: {
-            srsRecordId: result.insertedId,
-            machine: formData.設備 || "",
-            lane: formData.Lane || formData["R/L"] || "",
-            workers: formData.Worker_Name || "",
-            workOrders: Array.isArray(formData.WorkOrders) ? formData.WorkOrders : [],
-            date: formData.Date || "",
-            timeStart: formData.Time_start || "",
-            timeEnd: formData.Time_end || "",
-            submittedAt: formData.createdAt
-          } } }
+          { $set: { srs: run }, $push: { srsRuns: run } }
         );
       } catch (e) {
         console.error("SRS box write-back failed (SRSDB record saved):", e.message);
@@ -5176,8 +5237,6 @@ app.post("/submitToSRSDBInteractive", async (req, res) => {
     res.status(500).json({ error: "Error saving data to SRSDB" });
   }
 });
-
-
 
 // This is for SRS LH
 // Route to fetch all 背番号 with R/L = "LH" from masterDB
@@ -27510,6 +27569,319 @@ app.get("/api/scna-boxes", async (req, res) => {
     res.status(500).json({ error: "Failed to list boxes", details: error.message });
   }
 });
+
+// ==== SRS BOXES START ====================================================
+// SRS WIP labels (Girasol). One printed label = one SRS box, ID `<WO>-S<seq>`. See docs/srs-interactive-label-plan.md.
+//   srsBoxDB     the label registry: status complete | draft | superseded | voided, the lines (which press box / legacy
+//                lot gave how many good + NG pieces), parent link for drafts that were finished later
+//   scnaBoxDB    press boxes get `srsConsumed: [{ srsId, good, ng, pieces, at, void? }]`; remaining = base - consumed
+// All routes are new; the DCP box routes and the legacy SRS routes are not touched.
+const _SRS_NG_FIELDS = ["くっつき・めくれ", "シワ", "転写位置ズレ", "転写不良", "文字欠け", "その他"];
+
+class _SrsError extends Error {
+  constructor(status, message, extra) { super(message); this.status = status; this.extra = extra || {}; }
+}
+function _srsSend(res, error, label) {
+  if (error instanceof _SrsError) return res.status(error.status).json({ error: error.message, ...error.extra });
+  console.error(`❌ ${label}:`, error);
+  return res.status(500).json({ error: `${label} failed`, details: error.message });
+}
+
+let _srsBoxDbIndexesReady = false;
+async function _ensureSrsBoxDbIndexes() {
+  if (_srsBoxDbIndexesReady) return;
+  const db = client.db(DB_NAME);
+  const col = db.collection("srsBoxDB");
+  await col.createIndex({ srsId: 1 }, { unique: true });
+  await col.createIndex({ boxUid: 1 }, { unique: true });
+  await col.createIndex({ parentSrsId: 1 });
+  await col.createIndex({ "lines.boxId": 1 });
+  await col.createIndex({ srsRecordId: 1 });
+  await db.collection("scnaBoxDB").createIndex({ "srsConsumed.srsId": 1 });
+  _srsBoxDbIndexesReady = true;
+}
+
+// Pieces of a press box: the measured quantity, else the label quantity (plan S5). Voided SRS boxes give their pieces back.
+function _pressBoxBase(doc) {
+  const m = Number(doc && doc.qtyMeasured);
+  if (m > 0) return m;
+  const l = Number(doc && doc.qtyLabel);
+  return l > 0 ? l : 0;
+}
+function _pressBoxConsumed(doc) {
+  return ((doc && doc.srsConsumed) || [])
+    .filter(e => e && e.void !== true)
+    .reduce((a, e) => a + (Number(e.pieces) || 0), 0);
+}
+function _pressBoxRemaining(doc) { return Math.max(0, _pressBoxBase(doc) - _pressBoxConsumed(doc)); }
+
+function _srsInt(v, what) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) throw new _SrsError(400, `${what} must be a whole number >= 0`);
+  return n;
+}
+function _srsNgObject(ng) {
+  const out = {};
+  _SRS_NG_FIELDS.forEach(f => { out[f] = _srsInt((ng && ng[f]) || 0, `ng.${f}`); });
+  return out;
+}
+function _normSku(v) { return String(v || "").trim().toUpperCase(); }
+
+function _cleanSrsLines(lines) {
+  if (!Array.isArray(lines) || !lines.length) throw new _SrsError(400, "lines is required (at least one input)");
+  const seen = new Set();
+  return lines.map((l, i) => {
+    l = l || {};
+    const boxId = String(l.boxId || "").trim().toUpperCase() || null;
+    if (boxId) {
+      if (seen.has(boxId)) throw new _SrsError(400, `lines[${i}]: press box ${boxId} appears twice`);
+      seen.add(boxId);
+    }
+    const ng = _srsNgObject(l.ng);
+    const ngTotal = _SRS_NG_FIELDS.reduce((a, f) => a + ng[f], 0);
+    const good = _srsInt(l.good || 0, `lines[${i}].good`);
+    const lotNumbers = (Array.isArray(l.lotNumbers) ? l.lotNumbers : (l.lotNumber ? [l.lotNumber] : []))
+      .map(x => String(x || "").trim()).filter(Boolean);
+    if (!boxId && !lotNumbers.length) throw new _SrsError(400, `lines[${i}]: a legacy input needs a lot number`);
+    return {
+      boxId, legacy: !boxId, 品番: String(l.品番 || "").trim(), lotNumbers,
+      machines: Array.isArray(l.machines) ? l.machines.map(x => String(x)).filter(Boolean) : [],
+      carried: !!l.carried, good, ng, ngTotal
+    };
+  });
+}
+
+// Read-only: can `need` pieces be taken from this press box? Throws the same 409s as _consumePressBox. Used before the
+// SRS ID is issued so a refused request does not burn a number.
+async function _checkPressBox(db, boxId, sku, need) {
+  const doc = await db.collection("scnaBoxDB").findOne({ boxId });
+  if (!doc) throw new _SrsError(409, `Press box not found: ${boxId}`, { boxId });
+  if (sku && doc.品番 && _normSku(doc.品番) !== _normSku(sku)) {
+    throw new _SrsError(409, `Press box ${boxId} is product ${doc.品番}, not ${sku}`, { boxId });
+  }
+  const base = _pressBoxBase(doc);
+  if (!base) throw new _SrsError(409, `Press box ${boxId} has no quantity`, { boxId });
+  const remaining = base - _pressBoxConsumed(doc);
+  if (need > remaining) {
+    throw new _SrsError(409, `Press box ${boxId} has only ${Math.max(0, remaining)} pieces left (needs ${need})`, { boxId, remaining: Math.max(0, remaining), need });
+  }
+  return { doc, remaining };
+}
+
+// Take `good + ng` pieces from a press box for srsId. Optimistic concurrency on the length of srsConsumed so two
+// tablets cannot both take the last pieces; returns the pieces left.
+async function _consumePressBox(db, boxId, sku, srsId, good, ngTotal) {
+  const need = good + ngTotal;
+  const col = db.collection("scnaBoxDB");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const doc = await col.findOne({ boxId });
+    if (!doc) throw new _SrsError(409, `Press box not found: ${boxId}`, { boxId });
+    if (sku && doc.品番 && _normSku(doc.品番) !== _normSku(sku)) {
+      throw new _SrsError(409, `Press box ${boxId} is product ${doc.品番}, not ${sku}`, { boxId });
+    }
+    const base = _pressBoxBase(doc);
+    if (!base) throw new _SrsError(409, `Press box ${boxId} has no quantity`, { boxId });
+    const remaining = base - _pressBoxConsumed(doc);
+    if (need > remaining) {
+      throw new _SrsError(409, `Press box ${boxId} has only ${Math.max(0, remaining)} pieces left (needs ${need})`, { boxId, remaining: Math.max(0, remaining), need });
+    }
+    const len = (doc.srsConsumed || []).length;
+    const filter = len === 0
+      ? { boxId, $or: [{ srsConsumed: { $exists: false } }, { srsConsumed: { $size: 0 } }] }
+      : { boxId, srsConsumed: { $size: len } };
+    const r = await col.updateOne(filter, { $push: { srsConsumed: { srsId, good, ng: ngTotal, pieces: need, at: new Date().toISOString() } } });
+    if (r.modifiedCount === 1) return remaining - need;
+  }
+  throw new _SrsError(409, `Press box ${boxId} is busy, try again`, { boxId });
+}
+async function _releasePressBoxes(db, boxIds, srsId) {
+  for (const boxId of boxIds) {
+    try { await db.collection("scnaBoxDB").updateOne({ boxId }, { $pull: { srsConsumed: { srsId } } }); }
+    catch (e) { console.error(`SRS rollback failed for ${boxId}:`, e.message); }
+  }
+}
+
+// POST /api/srs-boxes - issue an SRS ID and register the label. Idempotent on boxUid (a retry returns the first box).
+app.post("/api/srs-boxes", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const boxUid = String(b.boxUid || "").trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(boxUid)) throw new _SrsError(400, "boxUid is required (8-64 letters, numbers, _ or -)");
+    const status = String(b.status || "");
+    if (status !== "complete" && status !== "draft") throw new _SrsError(400, "status must be 'complete' or 'draft'");
+    const workOrder = String(b.workOrder || "").trim();
+    const sebanggo = String(b.背番号 || "").trim();
+    const hinban = String(b.品番 || "").trim();
+    if (!sebanggo || !hinban) throw new _SrsError(400, "背番号 and 品番 are required");
+    const lane = String(b.lane || "").trim().toUpperCase();
+    if (lane !== "LH" && lane !== "RH") throw new _SrsError(400, "lane must be LH or RH");
+    const machine = String(b.machine || "").trim();
+    if (!machine) throw new _SrsError(400, "machine is required");
+    const lines = _cleanSrsLines(b.lines).map(l => ({ ...l, 品番: l.品番 || hinban }));
+    const qtyLabel = _srsInt(b.qtyLabel, "qtyLabel");
+    if (qtyLabel <= 0) throw new _SrsError(400, "qtyLabel must be greater than 0");
+    const qtyMeasured = lines.reduce((a, l) => a + l.good, 0);
+    if (qtyMeasured <= 0) throw new _SrsError(400, "the lines contain no good pieces");
+    // a draft label shows exactly what was entered; a complete label shows 収容数 even if the measured total differs (flagged)
+    if (status === "draft" && qtyLabel !== qtyMeasured) throw new _SrsError(400, `draft qtyLabel (${qtyLabel}) must equal the sum of the lines (${qtyMeasured})`);
+    const parentSrsId = String(b.parentSrsId || "").trim() || null;
+    if (parentSrsId && !lines.some(l => l.carried)) throw new _SrsError(400, "a resumed box must carry the draft's lines (carried: true)");
+    if (!parentSrsId && lines.some(l => l.carried)) throw new _SrsError(400, "carried lines need parentSrsId");
+
+    await client.connect();
+    await _ensureSrsBoxDbIndexes();
+    const db = client.db(DB_NAME);
+    const col = db.collection("srsBoxDB");
+
+    const existing = await col.findOne({ boxUid });
+    if (existing) return res.json({ ...existing, existing: true });
+
+    // refuse before a number is issued (the checks are repeated atomically when the pieces are taken)
+    if (parentSrsId) {
+      const parent = await col.findOne({ srsId: parentSrsId });
+      if (!parent) throw new _SrsError(409, `Draft not found: ${parentSrsId}`);
+      if (_normSku(parent.品番) !== _normSku(hinban)) throw new _SrsError(409, `Draft ${parentSrsId} is product ${parent.品番}, not ${hinban}`);
+      if (parent.status !== "draft") throw new _SrsError(409, `Draft ${parentSrsId} is not an open draft (status ${parent.status})`, { parentSrsId, status: parent.status });
+    }
+    for (const l of lines) {
+      if (l.carried || !l.boxId || l.good + l.ngTotal === 0) continue;
+      await _checkPressBox(db, l.boxId, l.品番, l.good + l.ngTotal);
+    }
+
+    const key = _scnaBoxKey(workOrder, sebanggo);
+    const counter = await db.collection("scnaBoxCounters").findOneAndUpdate(
+      { _id: `${key}-S` }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" }
+    );
+    const seq = (counter && (counter.value ? counter.value.seq : counter.seq)) || 1;
+    const srsId = `${key}-S${String(seq).padStart(3, "0")}`;
+
+    // claim the draft first (atomic), so two tablets cannot both finish it
+    if (parentSrsId) {
+      const parent = await col.findOne({ srsId: parentSrsId });
+      if (!parent) throw new _SrsError(409, `Draft not found: ${parentSrsId}`);
+      if (_normSku(parent.品番) !== _normSku(hinban)) throw new _SrsError(409, `Draft ${parentSrsId} is product ${parent.品番}, not ${hinban}`);
+      const claim = await col.updateOne(
+        { srsId: parentSrsId, status: "draft" },
+        { $set: { status: "superseded", replacedBy: srsId, supersededAt: new Date().toISOString() } }
+      );
+      if (claim.modifiedCount !== 1) throw new _SrsError(409, `Draft ${parentSrsId} is not an open draft (status ${parent.status})`, { parentSrsId, status: parent.status });
+    }
+
+    const consumed = [];
+    try {
+      for (const l of lines) {
+        if (l.carried || !l.boxId || l.good + l.ngTotal === 0) continue;
+        await _consumePressBox(db, l.boxId, l.品番, srsId, l.good, l.ngTotal);
+        consumed.push(l.boxId);
+      }
+      const doc = {
+        srsId, boxUid, seq, factory: "SCNA", status,
+        workOrder, 背番号: sebanggo, 品番: hinban, machine, lane,
+        workers: String(b.workers || "").trim(),
+        qtyLabel, qtyMeasured, mismatch: qtyLabel !== qtyMeasured,
+        lines, parentSrsId, replacedBy: null,
+        printedAt: b.printedAt || new Date().toISOString(),
+        printedBy: b.printedBy || null, copies: Number(b.copies) || 1, layoutId: b.layoutId || null,
+        srsRecordId: null, void: null, createdAt: new Date().toISOString()
+      };
+      try {
+        await col.insertOne(doc);
+      } catch (e) {
+        if (e && e.code === 11000) {   // same boxUid arrived twice at once: give back and return the first
+          await _releasePressBoxes(db, consumed, srsId);
+          if (parentSrsId) await col.updateOne({ srsId: parentSrsId, replacedBy: srsId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } });
+          const again = await col.findOne({ boxUid });
+          if (again) return res.json({ ...again, existing: true });
+        }
+        throw e;
+      }
+      return res.status(201).json(doc);
+    } catch (e) {
+      await _releasePressBoxes(db, consumed, srsId);
+      if (parentSrsId) {
+        try { await col.updateOne({ srsId: parentSrsId, replacedBy: srsId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } }); }
+        catch (e2) { console.error("SRS draft revert failed:", e2.message); }
+      }
+      throw e;
+    }
+  } catch (error) {
+    _srsSend(res, error, "Saving SRS box");
+  }
+});
+
+// GET /api/srs-boxes/:srsId[?chain=1] - the label; chain=1 adds the drafts it replaced, the press boxes and the SRSDB records.
+app.get("/api/srs-boxes/:srsId", async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const box = await db.collection("srsBoxDB").findOne({ srsId: String(req.params.srsId || "").trim().toUpperCase() });
+    if (!box) return res.status(404).json({ error: "SRS box not found" });
+    if (!req.query.chain) return res.json(box);
+
+    const parents = [];
+    let cur = box;
+    for (let i = 0; i < 10 && cur.parentSrsId; i++) {
+      cur = await db.collection("srsBoxDB").findOne({ srsId: cur.parentSrsId });
+      if (!cur) break;
+      parents.push(cur);
+    }
+    const all = [box, ...parents];
+    const boxIds = [...new Set(all.flatMap(x => (x.lines || []).map(l => l.boxId).filter(Boolean)))];
+    const pressBoxes = boxIds.length ? await db.collection("scnaBoxDB").find({ boxId: { $in: boxIds } }).toArray() : [];
+    const srsIds = all.map(x => x.srsId);
+    const srsRecords = await client.db("submittedDB").collection("SRSDB").find({ Srs_Box_IDs: { $in: srsIds } }).toArray();
+    res.json({ box, parents, pressBoxes, srsRecords });
+  } catch (error) {
+    _srsSend(res, error, "Reading SRS box");
+  }
+});
+
+// GET /api/srs-press-boxes/:boxId - a press box with its remaining pieces (what the SRS tablet scans).
+app.get("/api/srs-press-boxes/:boxId", async (req, res) => {
+  try {
+    await client.connect();
+    const doc = await client.db(DB_NAME).collection("scnaBoxDB").findOne({ boxId: String(req.params.boxId || "").trim().toUpperCase() });
+    if (!doc) return res.status(404).json({ error: "Box not found" });
+    res.json({ ...doc, base: _pressBoxBase(doc), consumed: _pressBoxConsumed(doc), remaining: _pressBoxRemaining(doc) });
+  } catch (error) {
+    _srsSend(res, error, "Reading press box");
+  }
+});
+
+// POST /api/srs-boxes/:srsId/void - lane reset after printing (leader approved on the tablet). Gives the pieces back; a
+// draft that this box replaced becomes an open draft again. A box already linked to an SRSDB record cannot be voided.
+app.post("/api/srs-boxes/:srsId/void", async (req, res) => {
+  try {
+    const leader = (req.body && req.body.leader) || {};
+    const leaderUser = String(leader.username || "").trim();
+    if (!leaderUser) throw new _SrsError(400, "leader.username is required");
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const col = db.collection("srsBoxDB");
+    const srsId = String(req.params.srsId || "").trim().toUpperCase();
+    const box = await col.findOne({ srsId });
+    if (!box) throw new _SrsError(404, "SRS box not found");
+    if (box.srsRecordId) throw new _SrsError(409, "This SRS box is already part of a submitted SRS record");
+    if (box.status !== "complete" && box.status !== "draft") throw new _SrsError(409, `SRS box is ${box.status}`);
+    const r = await col.updateOne({ srsId, status: box.status, srsRecordId: null }, { $set: {
+      status: "voided",
+      void: { at: new Date().toISOString(), reason: String(req.body.reason || "reset"), previousStatus: box.status, leader: { username: leaderUser, name: String(leader.name || "") } }
+    } });
+    if (r.modifiedCount !== 1) throw new _SrsError(409, "SRS box changed, try again");
+    await db.collection("scnaBoxDB").updateMany(
+      { "srsConsumed.srsId": srsId },
+      { $set: { "srsConsumed.$[e].void": true } },
+      { arrayFilters: [{ "e.srsId": srsId }] }
+    );
+    if (box.parentSrsId) {
+      await col.updateOne({ srsId: box.parentSrsId, status: "superseded", replacedBy: srsId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } });
+    }
+    res.json({ ok: true, srsId, status: "voided" });
+  } catch (error) {
+    _srsSend(res, error, "Voiding SRS box");
+  }
+});
+// ==== SRS BOXES END ======================================================
 
 app.get("/api/scna-label-layouts", async (req, res) => {
   try {
