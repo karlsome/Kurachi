@@ -8,7 +8,7 @@
 // the lane. Then box QRs are scanned; a box goes to the lane whose WO has the same 品番. Box QR is either
 // the new "品番,収容数,lot,boxId" or the legacy "品番,収容数,lot" (no box ID). A lane is released only by
 // submit or reset of that lane. LH and RH are fully independent; only workers and breaks are shared.
-// Each lane submits its own SRSDB record (via /submitToSRSDBiReporter).
+// Each lane submits its own SRSDB record (via /submitToSRSDBInteractive, its own route; the legacy iReporter route is untouched).
 //
 // Same shell as DCP interactive: language picker (i18n.js + SRS interactive i18n.js), "i" product info sidebar,
 // Maintenance tab (machine trouble timer, shared by both lanes like breaks) and a call-leader button (hold 2s,
@@ -762,8 +762,11 @@ window.serverURL = serverURL;
           sebanggo: l.sebango, date: body.Date, worker: workerString(), factory: FACTORY, machine: MACHINE_LEGACY
         }];
       }
-      var r = await postJSON('/submitToSRSDBiReporter', body);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var r = await postJSON('/submitToSRSDBInteractive', body);
+      if (!r.ok) {
+        var detail = ''; try { detail = (await r.json()).error || ''; } catch (e) { }
+        throw new Error(detail || 'HTTP ' + r.status);
+      }
       state.stopCalls.splice(0, sentCalls);
       state.lanes[name] = emptyLane(); afterLaneCleared(name);
       toast('✅ ' + T('srs_t_submitted', name));

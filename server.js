@@ -5071,6 +5071,114 @@ app.post("/submitToSRSDBiReporter", async (req, res) => {
 });
 
 
+// ---------------------------------------------------------------------------
+// SRS interactive (SCNA / Girasol): own route so the production "SRS Process iReporter" route above stays untouched.
+// Same save as /submitToSRSDBiReporter, plus box traceability: Box_IDs index, once-only box check (409),
+// and the SRS result written back onto each box in scnaBoxDB.
+// ---------------------------------------------------------------------------
+let _srsBoxIndexReady = false;
+async function _ensureSrsBoxIndex(SRSDB) {
+  if (_srsBoxIndexReady) return;
+  await SRSDB.createIndex({ Box_IDs: 1 });
+  _srsBoxIndexReady = true;
+}
+
+app.post("/submitToSRSDBInteractive", async (req, res) => {
+  try {
+    await client.connect();
+
+    const database = client.db("submittedDB");
+    const SRSDB = database.collection("SRSDB");
+    const formData = req.body;
+
+    // A box is processed by SRS once. The tablet checks on scan; this is the server-side guard.
+    const srsBoxIds = Array.isArray(formData.Box_IDs)
+      ? [...new Set(formData.Box_IDs.map(x => String(x || "").trim()).filter(Boolean))]
+      : [];
+    if (srsBoxIds.length) {
+      try { await _ensureSrsBoxIndex(SRSDB); } catch (e) { console.error("SRSDB Box_IDs index failed:", e.message); }
+      const used = await SRSDB.findOne({ Box_IDs: { $in: srsBoxIds } }, { projection: { Box_IDs: 1 } });
+      if (used) {
+        const dup = srsBoxIds.filter(id => (used.Box_IDs || []).includes(id));
+        return res.status(409).json({ error: `Box already submitted to SRS: ${dup.join(", ")}`, boxIds: dup });
+      }
+    }
+
+    // Handle base64 images
+    const images = formData.images || [];
+    delete formData.images;
+
+    const labelToField = {
+      "初物チェック": "初物チェック画像",
+      // Add more labels if needed
+    };
+
+    for (const img of images) {
+      if (!img.base64 || !img.label) continue;
+
+      const buffer = Buffer.from(img.base64, 'base64');
+      const fileName = `${img.sebanggo}_${img.date}_${img.worker}_${img.factory}_${img.machine}_${img.label}.jpg`;
+      const filePath = `CycleCheck/SRS/${fileName}`;
+      const file = admin.storage().bucket().file(filePath);
+
+      const downloadToken = "masterDBToken69";
+
+      await file.save(buffer, {
+        metadata: {
+          contentType: "image/jpeg",
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken
+          }
+        }
+      });
+
+      const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+      const fieldName = labelToField[img.label] || `${img.label}画像`;
+
+      formData[fieldName] = publicUrl;
+    }
+
+    // Add createdAt timestamp
+    formData.createdAt = new Date().toISOString();
+
+    const result = await SRSDB.insertOne(formData);
+    _invalidateFinancialsCache('SRSDB insert');
+
+    // Write the SRS result back onto each box so a box lookup shows who ran SRS, on which Girasol, under which work order.
+    // The SRS record is already saved, so a failure here is logged and not returned as a submit error.
+    if (srsBoxIds.length) {
+      try {
+        await client.db(DB_NAME).collection("scnaBoxDB").updateMany(
+          { boxId: { $in: srsBoxIds } },
+          { $set: { srs: {
+            srsRecordId: result.insertedId,
+            machine: formData.設備 || "",
+            lane: formData.Lane || formData["R/L"] || "",
+            workers: formData.Worker_Name || "",
+            workOrders: Array.isArray(formData.WorkOrders) ? formData.WorkOrders : [],
+            date: formData.Date || "",
+            timeStart: formData.Time_start || "",
+            timeEnd: formData.Time_end || "",
+            submittedAt: formData.createdAt
+          } } }
+        );
+      } catch (e) {
+        console.error("SRS box write-back failed (SRSDB record saved):", e.message);
+      }
+    }
+
+    res.status(201).json({
+      message: "Data and images successfully saved to SRSDB",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error("Error saving data to SRSDB (interactive):", error);
+    res.status(500).json({ error: "Error saving data to SRSDB" });
+  }
+});
+
+
+
 // This is for SRS LH
 // Route to fetch all 背番号 with R/L = "LH" from masterDB
 app.get("/getSeBanggoListLH", async (req, res) => {

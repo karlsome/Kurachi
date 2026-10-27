@@ -993,12 +993,12 @@
                 'OZNC18', 'OZNC17', 'GAP', 'SPACER', 'SPACER'
             ],
             // Mirrors the SCNA floor plan: 2 columns (left: SCNA-PSA beside roll storage/office,
-            // right: MANAS then AOL-1..5 top to bottom). Office/roll storage/SRS are not machines.
+            // right: MANAS then AOL-1..5 top to bottom; Girasol 1/2 (SRS) sit in the left column). Office/roll storage are not machines.
             'SCNA': [
                 'SPACER',   'GAP', 'MANAS',
                 'SCNA-PSA', 'GAP', 'AOL-1',
-                'SPACER',   'GAP', 'AOL-2',
-                'SPACER',   'GAP', 'AOL-3',
+                'GIRASOL-1', 'GAP', 'AOL-2',
+                'GIRASOL-2', 'GAP', 'AOL-3',
                 'SPACER',   'GAP', 'AOL-4',
                 'SPACER',   'GAP', 'AOL-5'
             ]
@@ -1023,7 +1023,7 @@
         // Display-only shortening — the server/roster still identify machines by
         // their full equipment ID (e.g. "OZNC04"); only the on-screen label drops
         // the "OZ" prefix to free up cell width (e.g. "NC04").
-        function displayLabel(m) { return String(m).replace(/^OZ/, ''); }
+        function displayLabel(m) { return String(m).replace(/^OZ/, '').replace(/^GIRASOL-(\d+)$/i, 'Girasol $1'); }
 
         function renderRoster() {
             grid.innerHTML = '';
