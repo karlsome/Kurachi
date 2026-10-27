@@ -29,6 +29,19 @@
   var HOME_KEY = 'scna_home_machines';
   var PENDING_WO_KEY = 'scna_pending_wo';
 
+  // SCNA names the defect counters differently from the shared i18n.js (which every other factory uses), so the
+  // English text is overridden here only. Counter 18 (疵引不良, defect_pull) is the supplier NC and counter 19
+  // (加工不良, processing_defect) the internal NC. Other languages keep the shared text.
+  try {
+    if (typeof translations !== 'undefined' && translations.en) {
+      translations.en.defect_pull = 'Non Conforming (Supplier)';
+      translations.en.processing_defect = 'Non Conforming (Internal)';
+      translations.en.submit_lbl_defect_pull = 'Non Conforming (Supplier)';
+      translations.en.submit_lbl_defect_process = 'Non Conforming (Internal)';
+      if (document.readyState !== 'loading' && typeof applyTranslations === 'function') applyTranslations(getCurrentLanguage());
+    }
+  } catch (e) { console.warn('SCNA defect label override failed:', e); }
+
   /* ------------------------------------------------------------------ */
   /* 1. Machines + tablet home (runs immediately, before the backend)    */
   /* ------------------------------------------------------------------ */
