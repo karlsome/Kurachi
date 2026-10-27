@@ -944,8 +944,10 @@ window.serverURL = serverURL;
   (function bindHold() {
     var btn = $('stopCallMainToggle');
     btn.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (e.cancelable) e.preventDefault();
       if (state.activeStopCallStart || holdRAF) return;
+      try { btn.setPointerCapture(e.pointerId); } catch (_) { }   // keep the hold alive if the finger drifts, like DCP
       btn.classList.add('holding'); holdStart = Date.now(); $('stopHoldCountdown').classList.add('show');
       var last = 2; setHoldNum(2);
       var tick = function () {
@@ -957,7 +959,7 @@ window.serverURL = serverURL;
       };
       holdRAF = requestAnimationFrame(tick);
     });
-    ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { btn.addEventListener(ev, function () { if (holdRAF) endHold(); }); });
+    ['pointerup', 'pointercancel'].forEach(function (ev) { btn.addEventListener(ev, function () { if (holdRAF) endHold(); }); });
     btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   })();
 
