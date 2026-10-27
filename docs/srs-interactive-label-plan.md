@@ -102,9 +102,9 @@ Also `srs` (last result, written at submit — already implemented in `/submitTo
 - [x] Persisted `printed` state; reprint (pending request keeps its boxUid so a retry never double-consumes)
 
 ### Phase 4 — Draft resume, submit guard, reset guard
-- [ ] Scan draft label → carried lines, new ID with `parent`, old → `superseded`
-- [ ] Submit without a printed label → leader QR, stored in the record
-- [ ] Reset with printed labels → leader QR, void
+- [x] Scan draft label → carried lines, new ID with `parent`, old → `superseded`
+- [x] Submit without a printed label → leader QR, stored in the record
+- [x] Reset with printed labels → leader QR, void
 
 ### Phase 5 — Test on the real tablet / printer / server (nothing is verified until then)
 
@@ -121,3 +121,4 @@ Also `srs` (last result, written at submit — already implemented in `/submitTo
 | 2026-10-27 | 1 | Server routes + submit changes in `server.js`; fake-Mongo tests pass (36/36). IDs are not burned by refused requests. Not run against real MongoDB; not committed. |
 | 2026-10-27 | 2 | Tablet: press-box scan uses `/api/srs-press-boxes` (remaining > 0), input chips with remaining, per-input NG (shown vs real), SRS-label rejection, old drafts migrated. Checked in headless Chrome with mocked fetch; not committed. |
 | 2026-10-27 | 3 | Tablet print: layout + printer IP checks, allocation dialog, register then print, reprint, NG snapshot reset, submit sends `Srs_Box_IDs`/`Submit_UID`/`Srs_Unlabelled_NG`. Headless test with mocks only; real printer untested. Reset is blocked for printed lanes until Phase 4. |
+| 2026-10-27 | 4 | Draft resume (scan WO, then draft label; carried lines + `parentSrsId`), leader QR dialog, submit without label needs leader (`Srs_Label_Bypass`), reset of printed lane voids labels with leader. Headless test with mocks only. A registration whose response was lost and then reset cannot be voided (no ID known) - rare, noted. |

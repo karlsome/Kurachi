@@ -57,6 +57,8 @@ window.serverURL = serverURL;
       printed: [],          // registered SRS labels [{ srsId, status, qty, measured, mismatch, layoutId, printedOk, at }]
       pendingPrint: null,   // { boxUid, mode, payload, map } registered-but-unconfirmed label request (safe to retry)
       submitUid: '',
+      resume: null,         // draft label being finished: { srsId, qty, lines:[{boxId, legacy, 品番, lotNumbers, machines, good, ng}] }
+      bypass: null,         // leader approval to submit without a printed label { leader, at }
       spare: 0, srsCode: '', lotNumbers: '', comment: '', photo: null
     };
   }
@@ -322,7 +324,7 @@ window.serverURL = serverURL;
     scanBusy = true;
     try {
       if (WO_RE.test(t)) await acceptWorkOrder(t.toUpperCase());
-      else if (SRS_RE.test(t)) step1Error(T('srs_e_srs_label', t));
+      else if (SRS_RE.test(t)) await acceptSrsLabel(t);
       else {
         var q = parseBoxQr(t);
         if (!q) return step1Error(T('srs_e_not_label', t));
@@ -390,6 +392,32 @@ window.serverURL = serverURL;
     save();
     activeLane = lane; renderLane(lane); applyActiveLane(); updateBadge(); renderScanLanes(); renderSidebar(); assertMachineState();
     toast('✅ ' + T('srs_t_wo_ok', lane, number));
+  }
+
+  // Scanning a draft SRS label (after its work order) resumes it: its pieces are carried onto the next label
+  async function acceptSrsLabel(raw) {
+    var m = /(WO-\d+-S\d{3,})/i.exec(raw);
+    if (!m) return step1Error(T('srs_e_srs_bad', raw));
+    var id = m[1].toUpperCase(), box;
+    try {
+      var r = await fetch(serverURL + '/api/srs-boxes/' + encodeURIComponent(id));
+      if (r.status === 404) return step1Error(T('srs_e_srs_nf', id));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      box = await r.json();
+    } catch (e) { return step1Error(T('srs_e_server', e.message)); }
+    if (box.status !== 'draft') return step1Error(T('srs_e_srs_notdraft', id, box.status));
+    var key = normSku(box.品番), lane = '';
+    LANES.forEach(function (n) { var x = state.lanes[n]; if (!lane && laneOpen(x) && (normSku(x.hinban) === key || normSku(x.woSku) === key)) lane = n; });
+    if (!lane) return step1Error(T('srs_e_srs_nolane', id, box.品番));
+    var l = state.lanes[lane];
+    if (l.resume || l.printed.length || l.pendingPrint) return step1Error(T('srs_e_srs_already', lane));
+    l.resume = { srsId: id, qty: box.qtyLabel, lines: (box.lines || []).map(function (x) {
+      return { boxId: x.boxId || null, legacy: !x.boxId, 品番: x.品番 || l.hinban, lotNumbers: x.lotNumbers || [], machines: x.machines || [], good: toInt(x.good), ng: x.ng || {} };
+    }) };
+    if (!l.start) l.start = nowHM();
+    save();
+    activeLane = lane; renderLane(lane); applyActiveLane(); renderScanLanes(); renderSidebar();
+    toast('✅ ' + T('srs_t_resumed', lane, id));
   }
 
   async function acceptBox(q) {
@@ -739,6 +767,7 @@ window.serverURL = serverURL;
 
   function newUid(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
   function shownNgObj(b) { var o = {}; NG_FIELDS.forEach(function (f) { var n = inNgShown(b, f); if (n) o[f] = n; }); return o; }
+  function carriedSum(l) { return l.resume ? l.resume.lines.reduce(function (a, x) { return a + x.good; }, 0) : 0; }
   function freeGood(b) { return Math.max(0, b.qty - toInt(b.used) - inNgShownTotal(b)); }
 
   function labelsHtml(l) {
@@ -748,7 +777,8 @@ window.serverURL = serverURL;
         (e.printedOk ? '<span class="lbl-ok">✓</span>' : '<span class="lbl-tag bad">' + T('srs_lbl_notprinted') + '</span>') +
         '<button type="button" class="btn btn-secondary btn-sm" data-reprint="' + i + '">' + T('srs_lbl_reprint') + '</button></div>';
     }).join('');
-    return '<div class="lbl-list">' + (rows || '<div class="lbl-none">' + T('srs_lbl_none') + '</div>') + '</div>' +
+    var res = l.resume ? '<div class="lbl-row"><span class="lbl-tag draft">↻</span><b>' + esc(l.resume.srsId) + '</b><span>' + T('srs_resume_line', carriedSum(l)) + '</span></div>' : '';
+    return res + '<div class="lbl-list">' + (rows || '<div class="lbl-none">' + T('srs_lbl_none') + '</div>') + '</div>' +
       '<div class="grid2" style="margin-top:8px">' +
       '<button type="button" class="btn btn-primary" data-act="print-complete">' + T('srs_lbl_print_complete') + '</button>' +
       '<button type="button" class="btn btn-secondary" data-act="print-draft">' + T('srs_lbl_print_draft') + '</button></div>';
@@ -795,7 +825,7 @@ window.serverURL = serverURL;
 
   // allocation dialog -> { qtyLabel, lines, map } | null
   async function allocDialog(l, mode) {
-    var cap = toInt(l.cap), left = mode === 'complete' ? cap : Infinity, def = [];
+    var cap = toInt(l.cap), cs = carriedSum(l), left = mode === 'complete' ? Math.max(0, cap - cs) : Infinity, def = [];
     l.boxes.forEach(function (b, i) { var g = Math.min(freeGood(b), left); def[i] = g; left -= g; });
     var rows = l.boxes.map(function (b, i) {
       var ng = inNgShownTotal(b);
@@ -805,7 +835,7 @@ window.serverURL = serverURL;
     var done = pickDialog(mode === 'complete' ? T('srs_pd_title_c', cap) : T('srs_pd_title_d'), rows + '<div class="pill-info" data-sum></div>',
       [{ r: 'x', label: T('cancel') }, { r: 'ok', label: T('srs_pd_print'), cls: 'btn-primary' }]);
     var ov = pickDialog.last, sum = function () {
-      return Array.prototype.reduce.call(ov.querySelectorAll('[data-pa]'), function (a, e) { return a + toInt(e.value); }, 0);
+      return cs + Array.prototype.reduce.call(ov.querySelectorAll('[data-pa]'), function (a, e) { return a + toInt(e.value); }, 0);
     };
     var refresh = function () { ov.querySelector('[data-sum]').textContent = T('srs_pd_sum', sum(), mode === 'complete' ? cap : sum()); };
     ov.querySelectorAll('[data-pa]').forEach(function (e) { e.oninput = refresh; }); refresh();
@@ -818,9 +848,10 @@ window.serverURL = serverURL;
       return true;
     };
     var r = await done; if (r !== 'ok') return null;
-    var good = Array.prototype.map.call(ov.querySelectorAll('[data-pa]'), function (e) { return toInt(e.value); }), total = good.reduce(function (a, b) { return a + b; }, 0);
+    var good = Array.prototype.map.call(ov.querySelectorAll('[data-pa]'), function (e) { return toInt(e.value); }), total = cs + good.reduce(function (a, b) { return a + b; }, 0);
     if (mode === 'complete' && total !== cap && !(await confirmBox(T('srs_lbl_print_complete'), T('srs_pd_mismatch', total, cap), T('srs_pd_print')))) return null;
     var lines = [], map = [];
+    if (l.resume) l.resume.lines.forEach(function (x) { lines.push(Object.assign({}, x, { carried: true })); map.push(-1); });
     l.boxes.forEach(function (b, i) {
       var ng = shownNgObj(b);
       if (!good[i] && !Object.keys(ng).length) return;
@@ -865,7 +896,7 @@ window.serverURL = serverURL;
         var a = await allocDialog(l, mode); if (!a) return;
         pend = l.pendingPrint = {
           boxUid: newUid('srs-'), mode: mode, map: a.map,
-          payload: { boxUid: '', status: mode, workOrder: l.workOrder, 背番号: l.sebango, 品番: l.hinban, lane: name, machine: MACHINE_LEGACY,
+          payload: { boxUid: '', status: mode, parentSrsId: l.resume ? l.resume.srsId : null, workOrder: l.workOrder, 背番号: l.sebango, 品番: l.hinban, lane: name, machine: MACHINE_LEGACY,
             workers: workerString(), qtyLabel: a.qtyLabel, copies: 1, lines: a.lines }
         };
         pend.payload.boxUid = pend.boxUid; save();
@@ -877,7 +908,7 @@ window.serverURL = serverURL;
         var r = await postJSON('/api/srs-boxes', pend.payload);
         if (!r.ok) {
           var detail = ''; try { detail = (await r.json()).error || ''; } catch (e) { }
-          if (r.status === 400 || r.status === 409) { l.pendingPrint = null; save(); }   // refused for good: nothing was registered, start over
+          if (r.status === 400 || r.status === 409) { l.pendingPrint = null; if (/draft/i.test(detail)) l.resume = null; save(); }   // refused for good: nothing was registered, start over
           return showAlert(T('srs_e_register', detail || 'HTTP ' + r.status));
         }
         box = await r.json();
@@ -885,12 +916,12 @@ window.serverURL = serverURL;
 
       // registered: the pieces are now taken on the server, so book them here before anything else can fail
       pend.payload.lines.forEach(function (line, k) {
-        var b = l.boxes[pend.map[k]]; if (!b) return;
+        var b = pend.map[k] >= 0 ? l.boxes[pend.map[k]] : null; if (!b || line.carried) return;
         b.used = toInt(b.used) + line.good + NG_FIELDS.reduce(function (acc, f) { return acc + toInt(line.ng[f]); }, 0);
       });
       l.boxes.forEach(function (b) { b.ngBase = Object.assign({}, b.ng); });      // shown NG back to 0, real total kept
       var entry = { srsId: box.srsId, status: box.status, qty: box.qtyLabel, measured: box.qtyMeasured, mismatch: !!box.mismatch, layoutId: layoutId, printedOk: false, at: new Date().toISOString() };
-      l.printed.push(entry); l.pendingPrint = null; save();
+      l.printed.push(entry); l.pendingPrint = null; l.resume = null; save();
       renderLane(name); renderSidebar();
       try {
         await sendPrint(l, entry, ip);
@@ -912,12 +943,54 @@ window.serverURL = serverURL;
     } finally { printing = false; }
   }
 
+
+  // Leader approval: camera scan of the leader QR -> /verifyLeader -> { username, name, role } or null
+  function askLeader(reason) {
+    return new Promise(function (resolve) {
+      if (typeof Html5Qrcode === 'undefined') { showAlert(T('srs_e_scanner_unavail')); return resolve(null); }
+      var ov = document.createElement('div'); ov.className = 'modal-overlay show'; ov.style.zIndex = 10060;
+      ov.innerHTML = '<div class="modal" style="max-width:520px"><h3>' + esc(T('srs_ld_title')) + '</h3><p>' + esc(reason) + '</p>' +
+        '<div id="ldReader" style="width:100%;min-height:240px"></div><p id="ldStatus" style="margin-top:8px;font-weight:700"></p>' +
+        '<div class="actions"><button type="button" class="btn btn-secondary btn-grow" id="ldCancel">' + esc(T('cancel')) + '</button></div></div>';
+      document.body.appendChild(ov);
+      var sc = null, busy = false, finished = false, status = ov.querySelector('#ldStatus');
+      function finish(v) {
+        if (finished) return; finished = true;
+        var p; try { p = sc ? sc.stop() : null; } catch (e) { p = null; }
+        Promise.resolve(p).catch(function () { }).then(function () { ov.remove(); resolve(v); });
+      }
+      ov.querySelector('#ldCancel').onclick = function () { finish(null); };
+      try {
+        sc = new Html5Qrcode('ldReader');
+        sc.start({ facingMode: 'environment' }, { fps: 20, qrbox: { width: 240, height: 240 } }, async function (decoded) {
+          if (busy || finished) return; busy = true;
+          try {
+            var r = await postJSON('/verifyLeader', { username: decoded }), j = await r.json();
+            if (j.authorized) finish({ username: j.username || decoded, name: ((j.lastName || '') + ' ' + (j.firstName || '')).trim(), role: j.role || '' });
+            else { status.textContent = '❌ ' + T('srs_leader_not'); busy = false; }
+          } catch (e) { status.textContent = '❌ ' + T('srs_leader_err'); busy = false; }
+        }, function () { }).catch(function () { status.textContent = '❌ ' + T('srs_e_camera_short'); });
+      } catch (e) { status.textContent = '❌ ' + T('srs_e_camera_short'); }
+    });
+  }
+
   // ============================================================
   //  Reset / submit
   // ============================================================
   async function resetLane(name) {
-    if (state.lanes[name].printed.length || state.lanes[name].pendingPrint) return showAlert(T('srs_e_reset_printed'));
-    if (!(await confirmBox(T('srs_reset_title', name), T('srs_reset_text'), T('srs_reset_btn')))) return;
+    var l = state.lanes[name], hasLabels = l.printed.length || l.pendingPrint;
+    if (!(await confirmBox(T('srs_reset_title', name), T(hasLabels ? 'srs_reset_text_labels' : 'srs_reset_text'), T('srs_reset_btn')))) return;
+    if (hasLabels) {
+      var leader = await askLeader(T('srs_ld_reset', name)); if (!leader) return;
+      for (var i = 0; i < l.printed.length; i++) {
+        var e = l.printed[i]; if (e.voided) continue;
+        try {
+          var r = await postJSON('/api/srs-boxes/' + encodeURIComponent(e.srsId) + '/void', { reason: 'reset', leader: { username: leader.username, name: leader.name } });
+          if (!r.ok) { var d = ''; try { d = (await r.json()).error || ''; } catch (x) { } throw new Error(d || 'HTTP ' + r.status); }
+          e.voided = true; save();
+        } catch (x) { return showAlert(T('srs_e_void_fail', e.srsId, x.message)); }
+      }
+    }
     state.lanes[name] = emptyLane(); afterLaneCleared(name);
   }
   function afterLaneCleared(name) {
@@ -945,6 +1018,10 @@ window.serverURL = serverURL;
     var l = state.lanes[name];
     var miss = validate(name);
     if (miss.length) return showAlert(T('srs_v_head') + '\n・' + miss.join('\n・'));
+    if (!l.printed.length && !l.bypass) {     // no label was printed for this lane: a leader must approve
+      var ld = await askLeader(T('srs_ld_nolabel', name)); if (!ld) return;
+      l.bypass = { leader: ld, at: new Date().toISOString() }; save();
+    }
     if (!(await confirmBox(T('srs_submit_lane', name), T('srs_submit_text', l.sebango, procQty(l), goodQty(l), ngTotal(l)), T('submit')))) return;
 
     submitting = true;
@@ -966,6 +1043,7 @@ window.serverURL = serverURL;
         WorkOrders: l.workOrder ? [l.workOrder] : [],
         WorkOrder_Info: l.workOrder ? { number: l.workOrder, 品番: l.woSku, assignedTo: l.woAssigned } : null,
         Srs_Box_IDs: l.printed.map(function (e) { return e.srsId; }),
+        Srs_Label_Bypass: l.printed.length ? null : l.bypass,
         Submit_UID: l.submitUid || (l.submitUid = newUid('sub-')),
         Srs_Unlabelled_NG: l.boxes.filter(function (b) { return b.boxId && inNgShownTotal(b) > 0; }).map(function (b) { return { boxId: b.boxId, ng: shownNgObj(b), ngTotal: inNgShownTotal(b) }; }),
         Break_Time_Total_Minutes: breakTotal(), Break_Time_Data: state.breaks.slice(),
