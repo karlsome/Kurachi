@@ -49,10 +49,11 @@ window.serverURL = serverURL;
   function emptyLane() {
     return {
       sebango: '', hinban: '', hinmei: '', model: '', shape: '', rl: '', workOrder: '', woSku: '', woAssigned: '', imageURL: '',
-      boxes: [],            // [{ boxId ('' for legacy QR), qr, legacy, qty, lots:[lotNumber], machines:[] }]
+      boxes: [],            // inputs [{ boxId ('' for legacy QR), qr, legacy, qty (pieces available this session), base, lots:[lotNumber], machines:[], ng:{type:n} real totals, ngBase:{type:n} totals at the last print }]
       start: '', end: '', date: '',
       qtyOverride: null,
-      ng: {}, spare: 0, srsCode: '', lotNumbers: '', comment: '', photo: null
+      cur: 0,               // index of the input the NG buttons act on
+      spare: 0, srsCode: '', lotNumbers: '', comment: '', photo: null
     };
   }
   function laneOpen(l) { return !!l.workOrder; }   // a lane is claimed by its scanned work order
@@ -98,6 +99,12 @@ window.serverURL = serverURL;
       state.stopCalls = Array.isArray(d.stopCalls) ? d.stopCalls : [];
       state.activeStopCallStart = typeof d.activeStopCallStart === 'number' ? d.activeStopCallStart : null;
       LANES.forEach(function (l) { state.lanes[l] = Object.assign(emptyLane(), (d.lanes || {})[l] || {}); });
+      LANES.forEach(function (n) {      // drafts from before per-input NG: lane NG moves onto the first input
+        var x = state.lanes[n];
+        x.boxes.forEach(function (b) { b.ng = b.ng || {}; b.ngBase = b.ngBase || {}; if (b.base == null) b.base = b.qty; });
+        if (x.ng && x.boxes.length) { NG_FIELDS.forEach(function (f) { if (x.ng[f]) x.boxes[0].ng[f] = toInt(x.boxes[0].ng[f]) + toInt(x.ng[f]); }); }
+        delete x.ng;
+      });
     } catch (e) { console.error('SRS: draft load failed', e); }
   }
 
@@ -300,6 +307,7 @@ window.serverURL = serverURL;
     if (parts.length >= 3 && toInt(parts[1]) > 0) return { raw: raw, boxId: '', hinban: parts[0], qty: toInt(parts[1]), lot: parts.slice(2).join('') };
     return null;
   }
+  var SRS_RE = /-S\d{3,}(\b|$)/i;
   function normSku(v) { return String(v || '').trim().toUpperCase(); }
 
   async function handleScan(text) {
@@ -310,6 +318,7 @@ window.serverURL = serverURL;
     scanBusy = true;
     try {
       if (WO_RE.test(t)) await acceptWorkOrder(t.toUpperCase());
+      else if (SRS_RE.test(t)) step1Error(T('srs_e_srs_label', t));
       else {
         var q = parseBoxQr(t);
         if (!q) return step1Error(T('srs_e_not_label', t));
@@ -390,23 +399,20 @@ window.serverURL = serverURL;
       }
     }
 
-    var hinban = q.hinban, qty = q.qty, lots = q.lot ? [q.lot] : [], machines = [];
+    var hinban = q.hinban, qty = q.qty, base = q.qty, lots = q.lot ? [q.lot] : [], machines = [];
     if (q.boxId) {
       // 2. new QR: the server holds the box (qty, lots)
       var box;
       try {
-        var r = await fetch(serverURL + '/api/scna-boxes/' + encodeURIComponent(q.boxId));
+        var r = await fetch(serverURL + '/api/srs-press-boxes/' + encodeURIComponent(q.boxId));
         if (r.status === 404) return fail(T('srs_e_box_nf', q.boxId));
         if (!r.ok) throw new Error('HTTP ' + r.status);
         box = await r.json();
       } catch (e) { return fail(T('srs_e_server', e.message)); }
-      // 3. already submitted to SRSDB
-      try {
-        var used = await queryDB('submittedDB', 'SRSDB', { Box_IDs: q.boxId });
-        if (used && used.length) return fail(T('srs_e_box_submitted', q.boxId));
-      } catch (e) { return fail(T('srs_e_dupcheck', e.message)); }
+      // 3. pieces still unused (a press box can feed several SRS sessions)
+      if (!(box.remaining > 0)) return fail(T('srs_e_box_empty', q.boxId));
       hinban = hinban || box.品番 || '';
-      qty = toInt(box.qtyMeasured != null ? box.qtyMeasured : (box.qtyLabel != null ? box.qtyLabel : qty));
+      qty = toInt(box.remaining); base = toInt(box.base);
       lots = (box.lots || []).map(function (x) { return x.lotNumber; }).filter(Boolean);
       if (!lots.length && q.lot) lots = [q.lot];
       machines = box.machines || [];
@@ -439,7 +445,8 @@ window.serverURL = serverURL;
     // 5. accept (box ID is kept for traceability even when its WO prefix differs from the lane's WO)
     var l = state.lanes[lane];
     if (!l.boxes.length) l.start = nowHM();
-    l.boxes.push({ boxId: q.boxId, qr: q.raw, legacy: !q.boxId, qty: qty, lots: lots, machines: machines });
+    l.boxes.push({ boxId: q.boxId, qr: q.raw, legacy: !q.boxId, qty: qty, base: base, lots: lots, machines: machines, ng: {}, ngBase: {} });
+    l.cur = l.boxes.length - 1;
     l.qtyOverride = null;     // the new box changes the sum; operator can override again
     var known = l.lotNumbers ? l.lotNumbers.split(/\s*,\s*/) : [];
     lots.forEach(function (x) { if (known.indexOf(x) < 0) known.push(x); });
@@ -535,7 +542,14 @@ window.serverURL = serverURL;
   // ============================================================
   function boxQty(l) { return l.boxes.reduce(function (a, b) { return a + (b.qty || 0); }, 0); }
   function procQty(l) { return l.qtyOverride != null ? l.qtyOverride : boxQty(l); }
-  function ngTotal(l) { return NG_FIELDS.reduce(function (a, f) { return a + toInt(l.ng[f]); }, 0); }
+  // real NG totals per input are kept for submit; the screen shows only what came after the last print
+  function inNg(b) { return NG_FIELDS.reduce(function (a, f) { return a + toInt(b.ng[f]); }, 0); }
+  function inNgShown(b, f) { return Math.max(0, toInt(b.ng[f]) - toInt(b.ngBase[f])); }
+  function inNgShownTotal(b) { return NG_FIELDS.reduce(function (a, f) { return a + inNgShown(b, f); }, 0); }
+  function ngTotal(l) { return l.boxes.reduce(function (a, b) { return a + inNg(b); }, 0); }
+  function ngShownTotal(l) { return l.boxes.reduce(function (a, b) { return a + inNgShownTotal(b); }, 0); }
+  function curBox(l) { return l.boxes[Math.min(toInt(l.cur), l.boxes.length - 1)]; }
+  function boxLabel(b) { return b.boxId || (b.lots[0] ? T('srs_legacy') + ' ' + b.lots[0] : T('srs_legacy')); }
   function goodQty(l) { return Math.max(0, procQty(l) - ngTotal(l)); }
   function cycleSec(l) {
     var work = spanMin(l.start, l.end) - breakTotal() - maintTotal();
@@ -571,7 +585,7 @@ window.serverURL = serverURL;
     html += '<div class="lane-body">' +
       '<div class="product"><div class="name">' + esc(l.sebango) + ' · ' + esc(l.hinban) + '</div>' +
       '<div class="meta">' + esc(l.hinmei) + '<br>' + (l.workOrder ? 'WO: ' + esc(l.workOrder) + ' · ' : '') + esc(l.model) + ' ' + esc(l.shape) + '</div>' +
-      '<div class="box-chips">' + l.boxes.map(function (b) { return '<span class="chip">' + (b.boxId ? esc(b.boxId) : T('srs_legacy')) + ' · ' + b.qty + 'pcs</span>'; }).join('') + '</div>' +
+      '<div class="box-chips">' + l.boxes.map(function (b, i) { return '<button type="button" class="chip' + (i === Math.min(toInt(l.cur), l.boxes.length - 1) ? ' cur' : '') + '" data-cur="' + i + '">' + esc(boxLabel(b)) + ' · ' + T('srs_chip_left', b.qty) + (inNg(b) ? ' · NG ' + inNg(b) : '') + '</button>'; }).join('') + '</div>' +
       '<div style="margin-top:10px"><button type="button" class="btn btn-secondary btn-sm" data-act="scan">' + T('srs_add_box') + '</button></div></div>' +
 
       '<div class="grid2">' +
@@ -586,11 +600,11 @@ window.serverURL = serverURL;
       '<div class="field"><label>' + T('srs_l_srscode') + '</label><input type="text" data-f="srsCode" value="' + esc(l.srsCode) + '"></div>' +
       '<div class="field"><label>' + T('srs_l_spare') + '</label><input type="number" inputmode="numeric" data-f="spare" min="0" value="' + toInt(l.spare) + '"></div></div>' +
 
-      '<div class="section-title">' + T('srs_l_ng') + '</div><div class="ng-grid">' +
+      '<div class="section-title">' + T('srs_l_ng') + ' · ' + esc(boxLabel(curBox(l))) + '</div><div class="ng-grid">' +
       NG_FIELDS.map(function (f, i) {
         return '<div class="ng-item"><span class="lbl">' + esc(T('srs_ng_' + i)) + '</span><div class="stepper">' +
           '<button type="button" data-ng="' + i + '" data-d="-1">−</button>' +
-          '<input type="number" inputmode="numeric" min="0" data-ngv="' + i + '" value="' + toInt(l.ng[f]) + '">' +
+          '<input type="number" inputmode="numeric" min="0" data-ngv="' + i + '" value="' + inNgShown(curBox(l), f) + '">' +
           '<button type="button" data-ng="' + i + '" data-d="1">＋</button></div></div>';
       }).join('') + '</div>' +
 
@@ -621,7 +635,7 @@ window.serverURL = serverURL;
     var l = state.lanes[name], sec = laneEl(name);
     if (!sec || !l.boxes.length) return;
     var set = function (k, v) { var e = sec.querySelector('[data-out="' + k + '"]'); if (e) e.textContent = v; };
-    set('proc', procQty(l)); set('ng', ngTotal(l)); set('good', goodQty(l));
+    set('proc', procQty(l)); set('ng', ngShownTotal(l)); set('good', goodQty(l));
     var c = cycleSec(l);
     set('cycle', c ? T('srs_cycle', c, breakTotal() + maintTotal()) : '');
   }
@@ -648,16 +662,19 @@ window.serverURL = serverURL;
         save(); updateDerived(name);
       };
     });
+    sec.querySelectorAll('[data-cur]').forEach(function (b) {
+      b.onclick = function () { l.cur = +b.getAttribute('data-cur'); save(); renderLane(name); };
+    });
     sec.querySelectorAll('[data-ng]').forEach(function (b) {
       b.onclick = function () {
-        var i = +b.getAttribute('data-ng'), f = NG_FIELDS[i];
-        l.ng[f] = Math.max(0, toInt(l.ng[f]) + (+b.getAttribute('data-d')));
-        sec.querySelector('[data-ngv="' + i + '"]').value = l.ng[f];
+        var i = +b.getAttribute('data-ng'), f = NG_FIELDS[i], cb = curBox(l);
+        cb.ng[f] = toInt(cb.ngBase[f]) + Math.max(0, inNgShown(cb, f) + (+b.getAttribute('data-d')));
+        sec.querySelector('[data-ngv="' + i + '"]').value = inNgShown(cb, f);
         save(); updateDerived(name);
       };
     });
     sec.querySelectorAll('[data-ngv]').forEach(function (inp) {
-      inp.oninput = function () { l.ng[NG_FIELDS[+inp.getAttribute('data-ngv')]] = toInt(inp.value); save(); updateDerived(name); };
+      inp.oninput = function () { var cb = curBox(l), f = NG_FIELDS[+inp.getAttribute('data-ngv')]; cb.ng[f] = toInt(cb.ngBase[f]) + toInt(inp.value); save(); updateDerived(name); };
     });
     var ph = sec.querySelector('[data-photo]');
     if (ph) ph.onchange = function () {
@@ -736,7 +753,7 @@ window.serverURL = serverURL;
     submitting = true;
     var btn = laneEl(name).querySelector('[data-act="submit"]'); if (btn) btn.disabled = true;
     try {
-      var ngBy = {}; NG_FIELDS.forEach(function (f) { ngBy[f] = toInt(l.ng[f]); });
+      var ngBy = {}; NG_FIELDS.forEach(function (f) { ngBy[f] = l.boxes.reduce(function (a, b) { return a + toInt(b.ng[f]); }, 0); });
       var body = Object.assign({
         // legacy SRSDB fields (same names as SRS Process iReporter)
         品番: l.hinban, 背番号: l.sebango,
@@ -748,7 +765,7 @@ window.serverURL = serverURL;
         // new
         Lane: name, 'R/L': name, Tablet_Home: MACHINE_LEGACY,
         Box_IDs: l.boxes.map(function (b) { return b.boxId; }).filter(Boolean),
-        Box_Scans: l.boxes.map(function (b) { return { boxId: b.boxId || null, qr: b.qr || '', legacy: !!b.legacy, qty: b.qty, lots: b.lots || [] }; }),
+        Box_Scans: l.boxes.map(function (b) { return { boxId: b.boxId || null, qr: b.qr || '', legacy: !!b.legacy, qty: b.qty, lots: b.lots || [], ng: b.ng || {} }; }),
         WorkOrders: l.workOrder ? [l.workOrder] : [],
         WorkOrder_Info: l.workOrder ? { number: l.workOrder, 品番: l.woSku, assignedTo: l.woAssigned } : null,
         Break_Time_Total_Minutes: breakTotal(), Break_Time_Data: state.breaks.slice(),

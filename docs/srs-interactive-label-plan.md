@@ -92,9 +92,9 @@ Also `srs` (last result, written at submit — already implemented in `/submitTo
 - [x] Mock tests (in-memory fake Mongo, 36 checks: idempotency, remaining math, over-consumption + rollback, draft → complete chain, supersede/void/revert, submit linking, retry safety, old flow unchanged) — **not yet run against a real MongoDB**
 
 ### Phase 2 — Tablet scan and counters
-- [ ] Input chips with remaining; accept boxes with remaining > 0
-- [ ] Per-input defect counters (iReporter names), shown vs hidden NG
-- [ ] Recognise SRS labels on scan (reject as press box; resume path stub)
+- [x] Input chips with remaining; accept boxes with remaining > 0 (2026-10-27)
+- [x] Per-input defect counters (iReporter names), shown vs hidden NG (`ng` real total, `ngBase` snapshot set at print in Phase 3)
+- [x] Recognise SRS labels on scan (rejected with a "resume coming soon" message; real resume is Phase 4)
 
 ### Phase 3 — Print
 - [ ] Printer IP from the Google sheet (`ipURL`, machine name), layout check, "no layout found, call leader"
@@ -119,3 +119,4 @@ Also `srs` (last result, written at submit — already implemented in `/submitTo
 |---|---|---|
 | 2026-10-27 | 0 | Plan written; decisions S1–S14 locked after 4 rounds of questions |
 | 2026-10-27 | 1 | Server routes + submit changes in `server.js`; fake-Mongo tests pass (36/36). IDs are not burned by refused requests. Not run against real MongoDB; not committed. |
+| 2026-10-27 | 2 | Tablet: press-box scan uses `/api/srs-press-boxes` (remaining > 0), input chips with remaining, per-input NG (shown vs real), SRS-label rejection, old drafts migrated. Checked in headless Chrome with mocked fetch; not committed. |
