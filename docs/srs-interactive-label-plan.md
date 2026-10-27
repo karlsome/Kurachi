@@ -97,9 +97,9 @@ Also `srs` (last result, written at submit — already implemented in `/submitTo
 - [x] Recognise SRS labels on scan (rejected with a "resume coming soon" message; real resume is Phase 4)
 
 ### Phase 3 — Print
-- [ ] Printer IP from the Google sheet (`ipURL`, machine name), layout check, "no layout found, call leader"
-- [ ] Print dialog: complete / draft, allocation, mismatch warning, overrides (S14)
-- [ ] Persisted `printed` state; reprint
+- [x] Printer IP from the Google sheet (`ipURL`, machine name), layout check, "no layout found, call leader"
+- [x] Print dialog: complete / draft, allocation, mismatch warning, overrides (S14)
+- [x] Persisted `printed` state; reprint (pending request keeps its boxUid so a retry never double-consumes)
 
 ### Phase 4 — Draft resume, submit guard, reset guard
 - [ ] Scan draft label → carried lines, new ID with `parent`, old → `superseded`
@@ -120,3 +120,4 @@ Also `srs` (last result, written at submit — already implemented in `/submitTo
 | 2026-10-27 | 0 | Plan written; decisions S1–S14 locked after 4 rounds of questions |
 | 2026-10-27 | 1 | Server routes + submit changes in `server.js`; fake-Mongo tests pass (36/36). IDs are not burned by refused requests. Not run against real MongoDB; not committed. |
 | 2026-10-27 | 2 | Tablet: press-box scan uses `/api/srs-press-boxes` (remaining > 0), input chips with remaining, per-input NG (shown vs real), SRS-label rejection, old drafts migrated. Checked in headless Chrome with mocked fetch; not committed. |
+| 2026-10-27 | 3 | Tablet print: layout + printer IP checks, allocation dialog, register then print, reprint, NG snapshot reset, submit sends `Srs_Box_IDs`/`Submit_UID`/`Srs_Unlabelled_NG`. Headless test with mocks only; real printer untested. Reset is blocked for printed lanes until Phase 4. |

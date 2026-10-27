@@ -53,6 +53,10 @@ window.serverURL = serverURL;
       start: '', end: '', date: '',
       qtyOverride: null,
       cur: 0,               // index of the input the NG buttons act on
+      cap: 0,               // standard 収容数 from masterDB
+      printed: [],          // registered SRS labels [{ srsId, status, qty, measured, mismatch, layoutId, printedOk, at }]
+      pendingPrint: null,   // { boxUid, mode, payload, map } registered-but-unconfirmed label request (safe to retry)
+      submitUid: '',
       spare: 0, srsCode: '', lotNumbers: '', comment: '', photo: null
     };
   }
@@ -381,7 +385,7 @@ window.serverURL = serverURL;
       return fail(T('srs_e_lane_busy', lane, l.workOrder));
     }
     l.sebango = rec.背番号 || ''; l.hinban = rec.品番 || sku; l.hinmei = rec.品名 || ''; l.model = rec.モデル || ''; l.shape = rec.形状 || '';
-    l.rl = lane; l.workOrder = number; l.woSku = sku; l.woAssigned = assigned; l.imageURL = rec.imageURL || '';
+    l.cap = toInt(rec.収容数); l.rl = lane; l.workOrder = number; l.woSku = sku; l.woAssigned = assigned; l.imageURL = rec.imageURL || '';
     l.date = todayStr();
     save();
     activeLane = lane; renderLane(lane); applyActiveLane(); updateBadge(); renderScanLanes(); renderSidebar(); assertMachineState();
@@ -445,7 +449,7 @@ window.serverURL = serverURL;
     // 5. accept (box ID is kept for traceability even when its WO prefix differs from the lane's WO)
     var l = state.lanes[lane];
     if (!l.boxes.length) l.start = nowHM();
-    l.boxes.push({ boxId: q.boxId, qr: q.raw, legacy: !q.boxId, qty: qty, base: base, lots: lots, machines: machines, ng: {}, ngBase: {} });
+    l.boxes.push({ boxId: q.boxId, qr: q.raw, legacy: !q.boxId, qty: qty, used: 0, base: base, lots: lots, machines: machines, ng: {}, ngBase: {} });
     l.cur = l.boxes.length - 1;
     l.qtyOverride = null;     // the new box changes the sum; operator can override again
     var known = l.lotNumbers ? l.lotNumbers.split(/\s*,\s*/) : [];
@@ -585,7 +589,7 @@ window.serverURL = serverURL;
     html += '<div class="lane-body">' +
       '<div class="product"><div class="name">' + esc(l.sebango) + ' · ' + esc(l.hinban) + '</div>' +
       '<div class="meta">' + esc(l.hinmei) + '<br>' + (l.workOrder ? 'WO: ' + esc(l.workOrder) + ' · ' : '') + esc(l.model) + ' ' + esc(l.shape) + '</div>' +
-      '<div class="box-chips">' + l.boxes.map(function (b, i) { return '<button type="button" class="chip' + (i === Math.min(toInt(l.cur), l.boxes.length - 1) ? ' cur' : '') + '" data-cur="' + i + '">' + esc(boxLabel(b)) + ' · ' + T('srs_chip_left', b.qty) + (inNg(b) ? ' · NG ' + inNg(b) : '') + '</button>'; }).join('') + '</div>' +
+      '<div class="box-chips">' + l.boxes.map(function (b, i) { return '<button type="button" class="chip' + (i === Math.min(toInt(l.cur), l.boxes.length - 1) ? ' cur' : '') + '" data-cur="' + i + '">' + esc(boxLabel(b)) + ' · ' + T('srs_chip_left', Math.max(0, b.qty - toInt(b.used))) + (inNg(b) ? ' · NG ' + inNg(b) : '') + '</button>'; }).join('') + '</div>' +
       '<div style="margin-top:10px"><button type="button" class="btn btn-secondary btn-sm" data-act="scan">' + T('srs_add_box') + '</button></div></div>' +
 
       '<div class="grid2">' +
@@ -607,6 +611,8 @@ window.serverURL = serverURL;
           '<input type="number" inputmode="numeric" min="0" data-ngv="' + i + '" value="' + inNgShown(curBox(l), f) + '">' +
           '<button type="button" data-ng="' + i + '" data-d="1">＋</button></div></div>';
       }).join('') + '</div>' +
+
+      '<div class="section-title">' + T('srs_lbl_title') + '</div>' + labelsHtml(l) +
 
       '<div class="totals">' +
       '<div class="total-box"><div class="k">' + T('srs_l_proc') + '</div><div class="v" data-out="proc">0</div></div>' +
@@ -649,6 +655,8 @@ window.serverURL = serverURL;
         if (a === 'scan') gotoScan();
         else if (a === 'reset') resetLane(name);
         else if (a === 'submit') submitLane(name);
+        else if (a === 'print-complete') printLabel(name, 'complete');
+        else if (a === 'print-draft') printLabel(name, 'draft');
         else if (a === 'now-end') { l.end = nowHM(); save(); var i = sec.querySelector('[data-f="end"]'); if (i) i.value = l.end; updateDerived(name); }
         else if (a === 'photo') sec.querySelector('[data-photo]').click();
       };
@@ -661,6 +669,9 @@ window.serverURL = serverURL;
         else l[f] = inp.value;
         save(); updateDerived(name);
       };
+    });
+    sec.querySelectorAll('[data-reprint]').forEach(function (b) {
+      b.onclick = function () { reprintLabel(name, +b.getAttribute('data-reprint')); };
     });
     sec.querySelectorAll('[data-cur]').forEach(function (b) {
       b.onclick = function () { l.cur = +b.getAttribute('data-cur'); save(); renderLane(name); };
@@ -717,10 +728,195 @@ window.serverURL = serverURL;
     b.onclick = function () { activeLane = b.getAttribute('data-lane'); applyActiveLane(); };
   });
 
+
+  // ============================================================
+  //  SRS labels - register an SRS ID on the server, then print through the mini-PC print server (:5001)
+  // ============================================================
+  var LABEL_PROCESS = 'SRS';
+  var ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
+  var printerIP = '';
+  var printing = false;
+
+  function newUid(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+  function shownNgObj(b) { var o = {}; NG_FIELDS.forEach(function (f) { var n = inNgShown(b, f); if (n) o[f] = n; }); return o; }
+  function freeGood(b) { return Math.max(0, b.qty - toInt(b.used) - inNgShownTotal(b)); }
+
+  function labelsHtml(l) {
+    var rows = l.printed.map(function (e, i) {
+      return '<div class="lbl-row"><b>' + esc(e.srsId) + '</b><span class="lbl-tag ' + (e.status === 'draft' ? 'draft' : 'ok') + '">' +
+        T(e.status === 'draft' ? 'srs_lbl_draft' : 'srs_lbl_complete') + '</span><span>' + e.qty + 'pcs</span>' +
+        (e.printedOk ? '<span class="lbl-ok">✓</span>' : '<span class="lbl-tag bad">' + T('srs_lbl_notprinted') + '</span>') +
+        '<button type="button" class="btn btn-secondary btn-sm" data-reprint="' + i + '">' + T('srs_lbl_reprint') + '</button></div>';
+    }).join('');
+    return '<div class="lbl-list">' + (rows || '<div class="lbl-none">' + T('srs_lbl_none') + '</div>') + '</div>' +
+      '<div class="grid2" style="margin-top:8px">' +
+      '<button type="button" class="btn btn-primary" data-act="print-complete">' + T('srs_lbl_print_complete') + '</button>' +
+      '<button type="button" class="btn btn-secondary" data-act="print-draft">' + T('srs_lbl_print_draft') + '</button></div>';
+  }
+
+  async function fetchPrintLayouts(sebango) {
+    var r = await fetch(serverURL + '/api/scna-label-layouts/for-item?sebanggo=' + encodeURIComponent(sebango) + '&process=' + LABEL_PROCESS);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var body = await r.json();
+    return Array.isArray(body.layouts) ? body.layouts : [];
+  }
+  async function resolvePrinterIP() {
+    if (printerIP) return printerIP;
+    var r = await fetch(ipURL + '?filter=' + encodeURIComponent(MACHINE));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var ip = (await r.text()).replace(/"/g, '').trim().split(',')[0].trim();
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) throw new Error(MACHINE + ': ' + (ip || '?'));
+    return (printerIP = ip);
+  }
+
+  // small modal built on the page's own .modal-overlay/.modal styles; resolves with the clicked data-r value
+  function pickDialog(title, bodyHtml, buttons) {
+    return new Promise(function (resolve) {
+      var ov = document.createElement('div'); ov.className = 'modal-overlay show'; ov.style.zIndex = 10050;
+      ov.innerHTML = '<div class="modal" style="max-width:520px"><h3>' + esc(title) + '</h3><div data-body>' + bodyHtml + '</div><div class="actions">' +
+        buttons.map(function (b) { return '<button type="button" class="btn ' + (b.cls || 'btn-secondary') + ' btn-grow" data-r="' + b.r + '">' + esc(b.label) + '</button>'; }).join('') + '</div></div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) {
+        var b = e.target.closest && e.target.closest('[data-r]'); if (!b) return;
+        var r = b.getAttribute('data-r');
+        if (ov._check && r === 'ok' && !ov._check()) return;
+        ov.remove(); resolve(r);
+      });
+      ov._done = ov;
+      pickDialog.last = ov;
+    });
+  }
+  async function chooseLayout(layouts) {
+    var r = await pickDialog(T('srs_pick_layout'), layouts.map(function (x, i) {
+      return '<button type="button" class="btn btn-primary btn-full" style="margin-bottom:8px" data-r="L' + i + '">' + esc(x.name) + '</button>';
+    }).join(''), [{ r: 'x', label: T('cancel') }]);
+    return r && r[0] === 'L' ? layouts[+r.slice(1)].layoutId : null;
+  }
+
+  // allocation dialog -> { qtyLabel, lines, map } | null
+  async function allocDialog(l, mode) {
+    var cap = toInt(l.cap), left = mode === 'complete' ? cap : Infinity, def = [];
+    l.boxes.forEach(function (b, i) { var g = Math.min(freeGood(b), left); def[i] = g; left -= g; });
+    var rows = l.boxes.map(function (b, i) {
+      var ng = inNgShownTotal(b);
+      return '<div class="field"><label>' + esc(boxLabel(b)) + ' · ' + T('srs_pd_avail', freeGood(b)) + (ng ? ' · ' + T('srs_pd_ng_note', ng) : '') + '</label>' +
+        '<input type="number" inputmode="numeric" min="0" max="' + freeGood(b) + '" data-pa="' + i + '" value="' + def[i] + '"></div>';
+    }).join('');
+    var done = pickDialog(mode === 'complete' ? T('srs_pd_title_c', cap) : T('srs_pd_title_d'), rows + '<div class="pill-info" data-sum></div>',
+      [{ r: 'x', label: T('cancel') }, { r: 'ok', label: T('srs_pd_print'), cls: 'btn-primary' }]);
+    var ov = pickDialog.last, sum = function () {
+      return Array.prototype.reduce.call(ov.querySelectorAll('[data-pa]'), function (a, e) { return a + toInt(e.value); }, 0);
+    };
+    var refresh = function () { ov.querySelector('[data-sum]').textContent = T('srs_pd_sum', sum(), mode === 'complete' ? cap : sum()); };
+    ov.querySelectorAll('[data-pa]').forEach(function (e) { e.oninput = refresh; }); refresh();
+    ov._check = function () {
+      var bad = '';
+      ov.querySelectorAll('[data-pa]').forEach(function (e) { var i = +e.getAttribute('data-pa'); if (toInt(e.value) > freeGood(l.boxes[i])) bad = T('srs_pd_over_input', boxLabel(l.boxes[i])); });
+      if (!bad && sum() <= 0) bad = T('srs_pd_zero');
+      if (!bad && mode === 'complete' && sum() > cap) bad = T('srs_pd_over_cap', cap);
+      if (bad) { showAlert(bad); return false; }
+      return true;
+    };
+    var r = await done; if (r !== 'ok') return null;
+    var good = Array.prototype.map.call(ov.querySelectorAll('[data-pa]'), function (e) { return toInt(e.value); }), total = good.reduce(function (a, b) { return a + b; }, 0);
+    if (mode === 'complete' && total !== cap && !(await confirmBox(T('srs_lbl_print_complete'), T('srs_pd_mismatch', total, cap), T('srs_pd_print')))) return null;
+    var lines = [], map = [];
+    l.boxes.forEach(function (b, i) {
+      var ng = shownNgObj(b);
+      if (!good[i] && !Object.keys(ng).length) return;
+      lines.push({ boxId: b.boxId || null, legacy: !b.boxId, 品番: l.hinban, lotNumbers: b.lots || [], machines: b.machines || [], carried: false, good: good[i], ng: ng });
+      map.push(i);
+    });
+    return { qtyLabel: mode === 'complete' ? cap : total, lines: lines, map: map };
+  }
+
+  async function sendPrint(l, entry, ip) {
+    var ov = { qr_1: '{品番},' + entry.qty + ',{lotNumber},' + entry.srsId, box_id: entry.srsId, text_9: '{lotNumber} - ' + entry.srsId, text_6: String(entry.qty) };
+    if (entry.status === 'draft') ov.text_10 = '仮';
+    var prm = { filename: l.sebango, qty: '1', process: LABEL_PROCESS, overrides: JSON.stringify(ov) };
+    if (entry.layoutId) prm.layoutId = entry.layoutId;
+    var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 10000);
+    try {
+      var r = await fetch('http://' + ip + ':5001/request?' + new URLSearchParams(prm).toString(), { method: 'GET', signal: ctl.signal });
+      var text = await r.text(), payload = {};
+      if (text) { try { payload = JSON.parse(text); } catch (e) { payload = { success: r.ok, error: text }; } }
+      if (!r.ok || payload.success === false) throw new Error('HTTP ' + r.status + ': ' + (payload.error || ''));
+    } catch (e) {
+      throw new Error(e.name === 'AbortError' ? 'timeout' : e.message);
+    } finally { clearTimeout(timer); }
+  }
+
+  async function printLabel(name, mode) {
+    if (printing) return;
+    var l = state.lanes[name];
+    if (!l.boxes.length) return;
+    printing = true;
+    try {
+      var pend = l.pendingPrint;
+      if (!pend && mode === 'complete' && !toInt(l.cap)) return showAlert(T('srs_e_no_cap', l.hinban));
+      var layouts, ip;
+      try { layouts = await fetchPrintLayouts(l.sebango); } catch (e) { return showAlert(T('srs_e_server', e.message)); }
+      if (!layouts.length) return showAlert(T('srs_e_no_layout'));
+      var layoutId = layouts.length > 1 ? await chooseLayout(layouts) : layouts[0].layoutId;
+      if (!layoutId) return;
+      try { ip = await resolvePrinterIP(); } catch (e) { return showAlert(T('srs_e_printer', e.message)); }
+
+      if (!pend) {
+        var a = await allocDialog(l, mode); if (!a) return;
+        pend = l.pendingPrint = {
+          boxUid: newUid('srs-'), mode: mode, map: a.map,
+          payload: { boxUid: '', status: mode, workOrder: l.workOrder, 背番号: l.sebango, 品番: l.hinban, lane: name, machine: MACHINE_LEGACY,
+            workers: workerString(), qtyLabel: a.qtyLabel, copies: 1, lines: a.lines }
+        };
+        pend.payload.boxUid = pend.boxUid; save();
+      }
+      pend.payload.layoutId = layoutId; pend.payload.printedBy = { tablet: MACHINE, printerIP: ip };
+
+      var box;
+      try {
+        var r = await postJSON('/api/srs-boxes', pend.payload);
+        if (!r.ok) {
+          var detail = ''; try { detail = (await r.json()).error || ''; } catch (e) { }
+          if (r.status === 400 || r.status === 409) { l.pendingPrint = null; save(); }   // refused for good: nothing was registered, start over
+          return showAlert(T('srs_e_register', detail || 'HTTP ' + r.status));
+        }
+        box = await r.json();
+      } catch (e) { return showAlert(T('srs_e_register', e.message)); }   // network: pending stays, same boxUid is retried
+
+      // registered: the pieces are now taken on the server, so book them here before anything else can fail
+      pend.payload.lines.forEach(function (line, k) {
+        var b = l.boxes[pend.map[k]]; if (!b) return;
+        b.used = toInt(b.used) + line.good + NG_FIELDS.reduce(function (acc, f) { return acc + toInt(line.ng[f]); }, 0);
+      });
+      l.boxes.forEach(function (b) { b.ngBase = Object.assign({}, b.ng); });      // shown NG back to 0, real total kept
+      var entry = { srsId: box.srsId, status: box.status, qty: box.qtyLabel, measured: box.qtyMeasured, mismatch: !!box.mismatch, layoutId: layoutId, printedOk: false, at: new Date().toISOString() };
+      l.printed.push(entry); l.pendingPrint = null; save();
+      renderLane(name); renderSidebar();
+      try {
+        await sendPrint(l, entry, ip);
+        entry.printedOk = true; save(); renderLane(name);
+        toast(T('srs_t_printed', entry.srsId));
+      } catch (e) { showAlert(T('srs_e_print_fail', e.message, entry.srsId)); }
+    } finally { printing = false; }
+  }
+
+  async function reprintLabel(name, idx) {
+    if (printing) return;
+    var l = state.lanes[name], entry = l.printed[idx]; if (!entry) return;
+    printing = true;
+    try {
+      var ip;
+      try { ip = await resolvePrinterIP(); } catch (e) { return showAlert(T('srs_e_printer', e.message)); }
+      try { await sendPrint(l, entry, ip); entry.printedOk = true; save(); renderLane(name); toast(T('srs_t_printed', entry.srsId)); }
+      catch (e) { showAlert(T('srs_e_print_fail', e.message, entry.srsId)); }
+    } finally { printing = false; }
+  }
+
   // ============================================================
   //  Reset / submit
   // ============================================================
   async function resetLane(name) {
+    if (state.lanes[name].printed.length || state.lanes[name].pendingPrint) return showAlert(T('srs_e_reset_printed'));
     if (!(await confirmBox(T('srs_reset_title', name), T('srs_reset_text'), T('srs_reset_btn')))) return;
     state.lanes[name] = emptyLane(); afterLaneCleared(name);
   }
@@ -734,6 +930,7 @@ window.serverURL = serverURL;
     if (!state.workers.length) miss.push(T('srs_v_operator'));
     if (!l.workOrder) miss.push(T('srs_v_wo'));
     if (!l.boxes.length) miss.push(T('srs_v_box'));
+    if (l.pendingPrint) miss.push(T('srs_v_pending'));
     if (!l.start) miss.push(T('srs_v_start'));
     if (!l.end) miss.push(T('srs_v_end'));
     if (procQty(l) <= 0) miss.push(T('srs_v_qty'));
@@ -768,10 +965,14 @@ window.serverURL = serverURL;
         Box_Scans: l.boxes.map(function (b) { return { boxId: b.boxId || null, qr: b.qr || '', legacy: !!b.legacy, qty: b.qty, lots: b.lots || [], ng: b.ng || {} }; }),
         WorkOrders: l.workOrder ? [l.workOrder] : [],
         WorkOrder_Info: l.workOrder ? { number: l.workOrder, 品番: l.woSku, assignedTo: l.woAssigned } : null,
+        Srs_Box_IDs: l.printed.map(function (e) { return e.srsId; }),
+        Submit_UID: l.submitUid || (l.submitUid = newUid('sub-')),
+        Srs_Unlabelled_NG: l.boxes.filter(function (b) { return b.boxId && inNgShownTotal(b) > 0; }).map(function (b) { return { boxId: b.boxId, ng: shownNgObj(b), ngTotal: inNgShownTotal(b) }; }),
         Break_Time_Total_Minutes: breakTotal(), Break_Time_Data: state.breaks.slice(),
         Maintenance_Data: maintData(),
         StopCall: stopCallData()      // leader calls are handed to the first lane that submits so they are not counted twice
       }, ngBy);
+      save();     // keeps Submit_UID so a retry after a lost response returns the saved record
       var sentCalls = state.stopCalls.length;
       if (l.photo) {
         body.images = [{
