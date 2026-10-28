@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="icon" type="image/png" href="src/favicon2.png">
+    <title>検査 日報 - インタラクティブ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800;900&family=Nunito+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* ============================================================
+           Same design system and flow as DCP interactive:
+           Scan tab (Step 0 worker -> Step 1 scan -> completed card),
+           Production tab, timer-based break overlay.
+           ============================================================ */
+        :root {
+            --bg-app: #F4F6FA;
+            --bg-surface: #FFFFFF;
+            --bg-subtle: #F7F8FB;
+            --bg-inset: #EEF1F6;
+            --border: #E6E8EF;
+            --border-strong: #D6DAE3;
+            --text-main: #0F172A;
+            --text-muted: #475569;
+            --text-soft: #64748B;
+            --brand: #1F9D6B;
+            --brand-hover: #178A5C;
+            --brand-soft: #E7F5EF;
+            --blue: #2E6FF2;
+            --blue-soft: #E8F0FE;
+            --red: #E5484D;
+            --red-hover: #CE3B40;
+            --red-soft: #FCEBEC;
+            --amber: #E0900E;
+            --amber-soft: #FBF0DC;
+            --card-radius: 12px;
+            --btn-radius: 8px;
+            --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.06);
+            --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.14);
+            --transition-smooth: 0.18s ease;
+            --header-height: 64px;
+            --tab-bar-height: 66px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: 'Nunito Sans', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif;
+            background: var(--bg-app);
+            color: var(--text-main);
+            height: 100vh;
+            height: 100dvh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-font-smoothing: antialiased;
+        }
+        input, select, textarea, button { font-family: inherit; }
+        input, textarea { user-select: text; -webkit-user-select: text; }
+
+        /* ---------------- Header ---------------- */
+        header {
+            height: var(--header-height);
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px; position: relative; flex-shrink: 0;
+        }
+        .header-title-section { display: flex; align-items: center; gap: 12px; }
+        header h1 { font-size: 1.125rem; font-weight: 800; }
+        .status-tag { font-size: 0.8125rem; font-weight: 700; padding: 5px 12px; border-radius: 6px; background: var(--blue-soft); color: var(--blue); }
+        .freya-center-mark {
+            position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+            font-size: 0.625rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-soft);
+            text-transform: uppercase; pointer-events: none; white-space: nowrap;
+        }
+        .clock { font-size: 0.9375rem; font-weight: 700; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+        /* ---------------- Tab bar ---------------- */
+        .tab-bar {
+            height: var(--tab-bar-height); background: var(--bg-surface); border-bottom: 1px solid var(--border);
+            display: flex; flex-shrink: 0;
+        }
+        .tab-btn {
+            flex: 1; min-width: 0; background: transparent; border: none; color: var(--text-soft);
+            font-size: 0.8125rem; font-weight: 700; cursor: pointer; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 5px; position: relative;
+            transition: color var(--transition-smooth);
+        }
+        .tab-btn.active { color: var(--brand); }
+        .tab-btn.active::after { content: ''; position: absolute; bottom: 0; left: 20%; right: 20%; height: 3px; background: var(--brand); border-radius: 3px 3px 0 0; }
+        .tab-btn .tab-icon { display: flex; height: 24px; align-items: center; }
+        .tab-btn .tab-icon svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .tab-badge {
+            position: absolute; top: 8px; left: calc(50% + 14px); min-width: 18px; height: 18px; padding: 0 5px;
+            border-radius: 9px; background: var(--brand); color: #fff; font-size: 0.6875rem; font-weight: 800;
+            display: none; align-items: center; justify-content: center;
+        }
+
+        .tab-panel { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 20px 20px calc(64px + env(safe-area-inset-bottom, 0px)); display: none; }
+        .tab-panel.active { display: block; }
+
+        /* ---------------- Cards ---------------- */
+        .glass-card {
+            background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--card-radius);
+            padding: 20px; margin-bottom: 16px; box-shadow: var(--shadow-card);
+        }
+        .glass-card h3 { font-size: 0.9375rem; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 16px; }
+
+        /* Scan-tab step cards (same as #step1Modal > div in DCP) */
+        .step-card {
+            background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--card-radius);
+            padding: 22px; width: 100%; max-width: 520px; margin: 0 auto 16px; box-shadow: var(--shadow-card);
+            display: none; flex-direction: column; gap: 16px;
+        }
+        .step-card.show { display: flex; }
+        .step-card h2 { font-size: 1.15rem; font-weight: 700; text-align: center; }
+        .step-card h2 .green { color: var(--brand); }
+        .step-error {
+            display: none; background: rgba(255, 77, 77, 0.1); border: 1px solid var(--red);
+            border-radius: var(--btn-radius); padding: 12px; width: 100%;
+        }
+        .step-error.show { display: block; }
+        .step-error p { color: var(--red); font-size: 0.9rem; line-height: 1.4; white-space: pre-line; }
+        .step-info-box { background: var(--bg-subtle); border: 1px solid var(--border); padding: 14px; border-radius: var(--btn-radius); text-align: center; }
+        .step-info-box p { font-size: 0.9rem; color: var(--text-muted); line-height: 1.6; }
+        .center-col { display: flex; flex-direction: column; align-items: center; gap: 15px; width: 100%; }
+        .hint { font-size: 0.9rem; color: var(--text-muted); text-align: center; }
+        .scanner-box { display: none; width: 100%; border-radius: var(--btn-radius); overflow: hidden; background: #000; }
+        .scanner-box.show { display: block; }
+        #qrReader { width: 100%; aspect-ratio: 1.0; }
+        .step-foot { display: flex; justify-content: space-between; align-items: center; }
+        .step-foot p { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); }
+        .manual-row { display: flex; gap: 8px; width: 100%; }
+        .manual-row input { flex: 1; }
+
+
+        /* Scan tab: per-lane scan status (grey = not scanned, green = scanned) */
+        .scan-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+        .scan-lane { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--bg-subtle); display: flex; flex-direction: column; gap: 8px; }
+        .scan-lane-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+        .scan-lane-head .lane-badge { font-size: 1rem; padding: 3px 12px; }
+        .scan-lane[data-lane="LH"] .lane-badge { background: var(--blue); }
+        .scan-lane[data-lane="RH"] .lane-badge { background: var(--brand); }
+        .scan-lane-prod { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-align: right; min-width: 0; overflow-wrap: anywhere; }
+        .ind { display: flex; align-items: center; gap: 8px; border: 1.5px dashed var(--border-strong); border-radius: 8px; padding: 8px 10px; background: var(--bg-surface); color: var(--text-soft); font-size: 0.8125rem; font-weight: 700; line-height: 1.3; }
+        .ind .dot { flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--border-strong); }
+        .ind .val { font-weight: 800; overflow-wrap: anywhere; }
+        .ind.ok { border-style: solid; border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+        .ind.ok .dot { background: var(--brand); }
+        .ind.warn { border-color: var(--amber); background: var(--amber-soft); color: var(--amber); }
+        .scan-next { font-size: 0.75rem; font-weight: 800; color: var(--amber); }
+
+        .done-card { text-align: center; align-items: center; }
+        .done-check { font-size: 2.4rem; }
+        .lane-status { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+        .lane-status div { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--bg-subtle); font-size: 0.8125rem; font-weight: 700; color: var(--text-muted); }
+        .lane-status div.busy { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+
+        /* Worker slots (Step 0) */
+        .worker-slot { display: flex; gap: 8px; align-items: center; width: 100%; }
+        .tap-field {
+            flex: 1; margin: 0; background: #f8f9fa; cursor: pointer; font-weight: 700; border: 1px solid #e6e8ef;
+            border-radius: 10px; padding: 12px; font-size: 1rem; height: 48px; color: var(--text-main);
+        }
+        .worker-names-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; max-height: 50vh; overflow-y: auto; }
+        .worker-name-btn {
+            width: 100%; min-height: 58px; padding: 12px 14px; font-size: 1rem; font-weight: 700; cursor: pointer;
+            background: var(--bg-surface); border: 1px solid var(--border-strong); color: var(--text-main);
+            border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center; text-align: center;
+        }
+        .worker-name-btn:hover { background: var(--bg-subtle); border-color: var(--blue); }
+        .worker-names-grid .recent-header { grid-column: 1 / -1; font-size: 0.8rem; font-weight: 800; color: var(--text-muted); margin-top: 4px; }
+        .recent-wrap { position: relative; }
+        .recent-wrap .worker-name-btn { width: 100%; background: var(--amber-soft, #FFF4DC); border-color: #EAD2A0; color: #8A5A00; }
+        .delete-recent-btn { position: absolute; top: -7px; right: -7px; width: 26px; height: 26px; border-radius: 50%; background: var(--red, #D93025); color: #fff; border: 2px solid var(--bg-surface, #fff); font-size: 0.9rem; font-weight: 700; cursor: pointer; line-height: 1; display: flex; align-items: center; justify-content: center; z-index: 2; padding: 0; }
+        .worker-name-btn.disabled { opacity: 0.4; border-style: dashed; cursor: not-allowed; filter: grayscale(1); }
+
+        /* ---------------- Buttons ---------------- */
+        .btn {
+            min-height: 44px; padding: 0 18px; font-size: 0.9375rem; font-weight: 700; letter-spacing: -0.01em;
+            line-height: 1.25; border-radius: var(--btn-radius); border: 1px solid transparent; cursor: pointer;
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-align: center;
+            transition: background var(--transition-smooth), border-color var(--transition-smooth), color var(--transition-smooth);
+            text-decoration: none;
+        }
+        .btn:active { transform: translateY(1px); }
+        .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .btn-primary { background: var(--brand); color: #fff; }
+        .btn-primary:hover { background: var(--brand-hover); }
+        .btn-secondary { background: var(--bg-surface); border-color: var(--border-strong); color: var(--text-main); }
+        .btn-secondary:hover { background: var(--bg-subtle); border-color: var(--text-soft); }
+        .btn-alert { background: var(--red); color: #fff; }
+        .btn-alert:hover { background: var(--red-hover); }
+        .btn-break { background: linear-gradient(135deg, #FFB75E 0%, #ED8F03 100%); color: #fff; border: none; box-shadow: 0 4px 10px rgba(237, 143, 3, 0.3); }
+        .btn-full { width: 100%; }
+        .btn-sm { min-height: 38px; padding: 0 14px; font-size: 0.8125rem; }
+        .btn-grow { flex: 1; }
+
+        /* ---------------- Fields ---------------- */
+        .field label { display: block; font-size: 0.75rem; font-weight: 700; color: var(--text-soft); margin-bottom: 4px; }
+        input[type="text"], input[type="number"], input[type="time"], textarea {
+            width: 100%; height: 46px; border: 1px solid var(--border-strong); border-radius: var(--btn-radius);
+            padding: 0 12px; font-size: 1rem; background: var(--bg-surface); color: var(--text-main);
+        }
+        textarea { height: 64px; padding: 8px 12px; resize: none; }
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .section-title { font-size: 0.75rem; font-weight: 800; letter-spacing: 0.06em; color: var(--text-soft); text-transform: uppercase; }
+
+        /* ---------------- Production: lanes ---------------- */
+        .lane-switch { display: none; gap: 8px; margin-bottom: 12px; }
+        .lane-switch button {
+            flex: 1; height: 48px; border-radius: var(--btn-radius); border: 1px solid var(--border-strong);
+            background: var(--bg-surface); font-size: 1rem; font-weight: 800; color: var(--text-muted); cursor: pointer;
+        }
+        .lane-switch button.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+        .lane-switch .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--border-strong); margin-left: 8px; }
+        .lane-switch button.busy .dot { background: var(--brand); }
+        .lane-switch button.active.busy .dot { background: #fff; }
+
+        .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+        .lane { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--card-radius); box-shadow: var(--shadow-card); overflow: hidden; }
+        .lane-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+        .lane-badge { font-size: 1.125rem; font-weight: 900; padding: 4px 14px; border-radius: 6px; color: #fff; }
+        .lane[data-lane="LH"] .lane-badge { background: var(--blue); }
+        .lane[data-lane="RH"] .lane-badge { background: var(--brand); }
+        .lane-state { font-size: 0.8125rem; font-weight: 700; color: var(--text-soft); }
+        .lane-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+        .lane-foot { display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--border); }
+        .empty { display: flex; flex-direction: column; align-items: center; gap: 14px; color: var(--text-soft); text-align: center; padding: 28px 16px; }
+        .empty .big { font-size: 1rem; font-weight: 700; color: var(--text-muted); line-height: 1.5; }
+
+        .product { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+        .product .name { font-size: 1rem; font-weight: 800; }
+        .product .meta { font-size: 0.8125rem; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+        .box-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .chip { font-size: 0.75rem; font-weight: 700; background: var(--blue-soft); color: var(--blue); padding: 4px 10px; border-radius: 6px; }
+        button.chip { border: 2px solid transparent; cursor: pointer; font-family: inherit; }
+        .lbl-list { display: flex; flex-direction: column; gap: 6px; }
+        .lbl-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--bg-surface); font-size: 0.8125rem; }
+        .lbl-row .btn { margin-left: auto; }
+        .lbl-tag { font-size: 0.6875rem; font-weight: 800; padding: 2px 8px; border-radius: 6px; background: var(--bg-inset); }
+        .lbl-tag.ok { background: var(--brand-soft); color: var(--brand); }
+        .lbl-tag.draft { background: var(--amber-soft); color: var(--amber); }
+        .lbl-tag.bad { background: var(--red-soft); color: var(--red); }
+        .lbl-ok { color: var(--brand); font-weight: 900; }
+        .lbl-none { font-size: 0.8125rem; color: var(--text-soft); }
+        button.chip.cur { border-color: var(--blue); }
+
+        .ng-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .ng-item { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--bg-surface); display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+        .ng-item .lbl { font-size: 0.8125rem; font-weight: 700; flex: 1; line-height: 1.2; }
+        .stepper { display: flex; align-items: center; gap: 4px; }
+        .stepper button { width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--bg-subtle); font-size: 1.25rem; font-weight: 800; cursor: pointer; }
+        .stepper button:active { background: var(--bg-inset); }
+        .stepper input { width: 52px; height: 40px; text-align: center; font-size: 1rem; font-weight: 800; padding: 0; }
+
+        .totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .total-box { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; text-align: center; }
+        .total-box .k { font-size: 0.6875rem; font-weight: 700; color: var(--text-soft); }
+        .total-box .v { font-size: 1.375rem; font-weight: 900; font-variant-numeric: tabular-nums; }
+        .total-box.good .v { color: var(--brand); }
+        .total-box.ng .v { color: var(--red); }
+        .pill-info { font-size: 0.8125rem; font-weight: 700; color: var(--text-muted); }
+        .photo-row { display: flex; align-items: center; gap: 10px; }
+        .photo-row img { width: 72px; height: 54px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+
+        /* Break card + list */
+        .break-summary { margin-top: 12px; font-size: 0.875rem; font-weight: 700; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; }
+        .record-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-subtle); }
+        .record-num { width: 26px; height: 26px; border-radius: 50%; background: var(--amber-soft); color: var(--amber); font-weight: 800; font-size: 0.8125rem; display: flex; align-items: center; justify-content: center; }
+        .record-main { flex: 1; font-weight: 700; font-size: 0.9375rem; }
+        .record-main small { display: block; font-weight: 600; color: var(--text-soft); font-size: 0.75rem; }
+
+        /* ---------------- Break overlay (same as DCP) ---------------- */
+        .break-overlay {
+            position: fixed; inset: 0; z-index: 100002; background: linear-gradient(160deg, #15324A, #0E2438);
+            display: none; flex-direction: column; align-items: center; justify-content: center; color: #fff; padding: 24px; text-align: center;
+        }
+        .break-overlay.open { display: flex; }
+        .break-overlay .break-pulse {
+            width: 120px; height: 120px; border-radius: 50%; background: rgba(46, 111, 242, 0.18); border: 2px solid #2E6FF2;
+            display: flex; align-items: center; justify-content: center; margin-bottom: 28px; animation: breakPulse 1.6s ease-in-out infinite;
+        }
+        .break-overlay .break-pulse svg { width: 56px; height: 56px; stroke: #7FB0FF; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        @keyframes breakPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(46, 111, 242, 0.45); } 50% { box-shadow: 0 0 0 22px rgba(46, 111, 242, 0); } }
+        .break-overlay h2 { font-size: 1.6rem; font-weight: 800; }
+        .break-overlay .break-sub { color: #9FB8D4; margin-top: 8px; font-weight: 600; }
+        .break-overlay .break-timer { font-size: 4rem; font-weight: 800; font-variant-numeric: tabular-nums; margin: 24px 0 32px; }
+        .break-overlay .btn-finish-break { background: #fff; color: #15324A; min-height: 56px; padding: 0 40px; border: none; border-radius: var(--btn-radius); font-size: 1.05rem; font-weight: 800; cursor: pointer; }
+
+        /* ---------------- Modals / toast ---------------- */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); display: none; align-items: center; justify-content: center; z-index: 5000; padding: 20px; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: var(--bg-surface); border-radius: 14px; box-shadow: var(--shadow-pop); width: 100%; max-width: 580px; max-height: 90vh; overflow-y: auto; padding: 20px; }
+        .modal h3 { font-size: 1.0625rem; font-weight: 800; margin-bottom: 12px; text-align: center; }
+        .modal p { white-space: pre-line; font-size: 0.9375rem; color: var(--text-muted); line-height: 1.5; }
+        .modal .actions { display: flex; gap: 10px; margin-top: 16px; }
+        .modal.alert { border: 3px solid var(--red); max-width: 480px; }
+        .modal.alert h3 { color: var(--red); }
+        body.flash-red { animation: flash 0.6s ease-in-out infinite alternate; }
+        @keyframes flash { from { background: var(--bg-app); } to { background: var(--red-soft); } }
+        .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--text-main); color: #fff; padding: 12px 20px; border-radius: 10px; font-weight: 700; font-size: 0.9375rem; z-index: 200000; display: none; max-width: 90vw; }
+        .toast.show { display: block; }
+
+        /* ---------------- Header actions: language + info ---------------- */
+        .header-action-section { display: flex; align-items: center; gap: 12px; }
+        .language-selector select {
+            min-height: 40px; padding: 8px 12px; background: var(--bg-surface); border: 1px solid var(--border-strong);
+            border-radius: var(--btn-radius); color: var(--text-main); font-family: inherit; font-size: 0.875rem; font-weight: 600; outline: none; cursor: pointer;
+        }
+        .language-selector select:hover { border-color: var(--blue); }
+        .btn-sidebar-toggle {
+            background: var(--bg-surface); border: 1px solid var(--border-strong); color: var(--text-muted); width: 40px; height: 40px;
+            border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center; font-size: 1rem; font-weight: 800;
+            font-style: italic; cursor: pointer; flex-shrink: 0;
+        }
+        .btn-sidebar-toggle:hover { border-color: var(--blue); color: var(--blue); }
+
+        /* ---------------- Info sidebar ---------------- */
+        .sidebar-backdrop { position: fixed; inset: 0; background: rgba(16, 24, 40, 0.45); z-index: 10004; opacity: 0; pointer-events: none; transition: opacity var(--transition-smooth); }
+        .sidebar-backdrop.open { opacity: 1; pointer-events: auto; }
+        .info-sidebar {
+            position: fixed; top: 0; right: -400px; width: 380px; max-width: 92vw; height: 100vh; height: 100dvh; background: var(--bg-surface);
+            border-left: 1px solid var(--border); z-index: 10005; padding: 24px; display: flex; flex-direction: column; gap: 16px;
+            box-shadow: var(--shadow-pop); transition: right var(--transition-smooth); overflow-y: auto;
+        }
+        .info-sidebar.open { right: 0; }
+        .sidebar-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+        .sidebar-header h2 { font-size: 1.0625rem; font-weight: 800; }
+        .sidebar-close { background: transparent; border: none; color: var(--text-soft); font-size: 1.6rem; line-height: 1; cursor: pointer; }
+        .info-lane { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--bg-subtle); display: flex; flex-direction: column; gap: 8px; }
+        .info-lane .lane-badge { align-self: flex-start; font-size: 0.9375rem; padding: 3px 12px; }
+        .info-lane[data-lane="LH"] .lane-badge { background: var(--blue); }
+        .info-lane[data-lane="RH"] .lane-badge { background: var(--brand); }
+        .info-lane img { width: 100%; max-height: 160px; object-fit: contain; border-radius: 8px; background: #fff; border: 1px solid var(--border); }
+        .info-row label { display: block; font-size: 0.6875rem; font-weight: 700; color: var(--text-soft); }
+        .info-row div { font-size: 0.9375rem; font-weight: 700; overflow-wrap: anywhere; }
+        .info-empty { font-size: 0.8125rem; font-weight: 700; color: var(--text-soft); }
+
+        /* ---------------- Call leader (floating button + hold countdown + overlay) ---------------- */
+        .fab-menu-wrapper { position: fixed; left: 16px; bottom: 32px; z-index: 99990; touch-action: none; }
+        .stopcall-fab {
+            position: relative; width: 86px; height: 86px; background: #E11D2A; color: #fff; border: 3px solid #fff;
+            box-shadow: 0 6px 18px rgba(225, 29, 42, 0.5);
+            clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; font-family: inherit; font-weight: 800;
+            touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; transition: transform 0.2s ease;
+            animation: stopFabPulse 2s ease-in-out infinite;
+        }
+        .stopcall-fab.holding { transform: scale(1.08); animation: none; }
+        .stopcall-fab .fab-content { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; width: 100%; pointer-events: none; }
+        .stopcall-fab svg { width: 30px; height: 30px; }
+        .stopcall-fab span { font-size: 0.8rem; }
+        @keyframes stopFabPulse { 0%, 100% { filter: drop-shadow(0 0 0 rgba(225, 29, 42, 0.55)); } 50% { filter: drop-shadow(0 0 10px rgba(225, 29, 42, 0.8)); } }
+        .stop-hold-countdown { position: fixed; inset: 0; z-index: 100001; display: none; align-items: center; justify-content: center; background: rgba(56, 10, 12, 0.82); }
+        .stop-hold-countdown.show { display: flex; }
+        .stop-hold-ring {
+            width: 230px; height: 230px; border-radius: 50%; border: 6px solid rgba(255, 255, 255, 0.22); box-shadow: inset 0 0 0 6px rgba(225, 29, 42, 0.45);
+            background: rgba(225, 29, 42, 0.18); display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff;
+        }
+        .stop-hold-num { font-size: 7rem; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+        .stop-hold-label { margin-top: 6px; font-size: 0.95rem; font-weight: 700; }
+        .stopcall-overlay { background: linear-gradient(160deg, #5A1014, #380A0C); z-index: 100003; }
+        .stopcall-overlay .break-pulse { background: rgba(225, 29, 42, 0.18); border-color: #E11D2A; animation: stopPulse 1.4s ease-in-out infinite; }
+        .stopcall-overlay .break-pulse svg { stroke: #FFB3B8; }
+        .stopcall-overlay .break-sub { color: #E8A9AD; }
+        .stopcall-overlay .btn-finish-break { background: #fff; color: #5A1014; }
+        @keyframes stopPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(225, 29, 42, 0.5); } 50% { box-shadow: 0 0 0 22px rgba(225, 29, 42, 0); } }
+        .stopcall-cancel-btn {
+            margin-top: 14px; background: transparent; color: #E8A9AD; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: var(--btn-radius);
+            min-height: 48px; padding: 0 28px; font-family: inherit; font-weight: 700; font-size: 0.95rem; cursor: pointer;
+        }
+        .stopcall-qr-wrap { width: 100%; max-width: 300px; margin-top: 18px; display: none; }
+        .stopcall-qr-wrap.show { display: block; }
+        #stopCallQrReader { width: 100%; aspect-ratio: 1; border-radius: var(--btn-radius); overflow: hidden; background: #000; }
+
+        /* ---------------- Maintenance overlay ---------------- */
+        .maintenance-overlay { background: linear-gradient(160deg, #3B2A06, #261A04); }
+        .maintenance-overlay .break-pulse { background: rgba(224, 144, 14, 0.18); border-color: #E0900E; }
+        .maintenance-overlay .break-pulse svg { stroke: #F5C97A; }
+        .maintenance-overlay .break-sub { color: #D9B77A; }
+        .maintenance-overlay .btn-finish-break { background: #fff; color: #3B2A06; }
+        .record-title { font-weight: 800; }
+        .record-del { border: 1px solid var(--border-strong); background: var(--bg-surface); border-radius: 8px; width: 38px; height: 38px; cursor: pointer; color: var(--red); display: flex; align-items: center; justify-content: center; }
+        .maint-form { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+        .total-trouble { background: rgba(255, 77, 77, 0.05); border: 1px solid rgba(255, 77, 77, 0.2); padding: 15px; border-radius: var(--btn-radius); text-align: center; font-weight: 800; }
+        .total-trouble span:last-child { color: var(--red); font-size: 1.1rem; margin-left: 5px; }
+
+        /* ---------------- Kensa additions ---------------- */
+        .lane-badge { background: var(--brand); }
+        .scan-product { display: none; width: 100%; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+        .scan-product.show { display: block; }
+        .scan-product .name { font-size: 1.05rem; font-weight: 800; overflow-wrap: anywhere; }
+        .scan-product .meta { font-size: 0.8125rem; color: var(--text-muted); margin-top: 4px; }
+        .input-list { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+        .input-chip { display: flex; align-items: center; gap: 8px; border: 1.5px solid var(--brand); background: var(--brand-soft); border-radius: 10px; padding: 8px 10px; font-size: 0.8125rem; font-weight: 700; }
+        .input-chip b { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+        .input-chip .chip-left { color: var(--brand); font-weight: 800; white-space: nowrap; }
+        .input-chip .chip-kind { font-size: 0.6875rem; font-weight: 800; padding: 2px 8px; border-radius: 6px; background: var(--blue-soft); color: var(--blue); }
+        .input-chip .chip-x { width: 34px; height: 34px; border: 1px solid var(--border-strong); background: var(--bg-surface); border-radius: 8px; color: var(--red); font-size: 1.1rem; font-weight: 800; cursor: pointer; }
+        .input-empty { font-size: 0.8125rem; font-weight: 700; color: var(--text-soft); text-align: center; }
+        #inspBody { display: none; }
+        #inspBody.show { display: block; }
+        #inspBody .glass-card h3 { margin-bottom: 12px; }
+        #inspChips.box-chips { margin-top: 10px; }
+        .cur-info { margin-top: 8px; font-size: 0.8125rem; font-weight: 700; color: var(--text-muted); }
+        .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .field-row .btn { align-self: end; }
+        .counter-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .counter-box { border: 1px solid var(--border); border-radius: 10px; padding: 6px 8px 8px; background: var(--bg-surface); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .counter-box label { font-size: 0.8125rem; font-weight: 800; color: var(--text-muted); }
+        .counter-box .plus-btn, .counter-box .minus-btn { width: 100%; height: 44px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--bg-subtle); font-size: 1.4rem; font-weight: 800; cursor: pointer; }
+        .counter-box .plus-btn { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+        .counter-box .plus-btn:active, .counter-box .minus-btn:active { background: var(--bg-inset); }
+        .counter-box input { width: 100%; height: 42px; text-align: center; font-size: 1.25rem; font-weight: 900; padding: 0; background: var(--bg-inset); border-color: transparent; }
+        .counter-who { font-size: 0.8125rem; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; }
+        .totals4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+        .hatsumono-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .hatsumono-row img { width: 96px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-inset); display: none; }
+        .hatsumono-row img.has { display: block; }
+        .photo-status-indicator { font-size: 0.75rem; font-weight: 800; padding: 3px 10px; border-radius: 6px; background: var(--red-soft); color: var(--red); }
+        .photo-status-indicator.ok { background: var(--brand-soft); color: var(--brand); }
+        .footer-actions { display: flex; gap: 10px; margin-top: 4px; }
+        .alloc-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.875rem; font-weight: 700; }
+        .alloc-row > span, .alloc-row > b { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+        .alloc-row input { width: 90px; flex: none; text-align: center; }
+        .print-sum { margin-top: 10px; font-weight: 800; text-align: center; }
+        .modal .step-error { margin-top: 10px; }
+        .modal .qr-box { width: 100%; max-width: 300px; margin: 12px auto 0; }
+        #ldReader { width: 100%; aspect-ratio: 1; border-radius: var(--btn-radius); overflow: hidden; background: #000; }
+        @media (max-width: 860px) { .freya-center-mark { display: none; } }
+        @media (max-width: 520px) { .totals4 { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+
+<body>
+    <audio id="alert-sound" src="src/alert.mp3" preload="auto"></audio>
+
+    <header>
+        <div class="header-title-section">
+            <h1><span data-i18n="kensa_title_prefix">検査</span><span data-i18n="daily_report">日報</span></h1>
+            <span class="status-tag" id="headerMachineTag">設備: --</span>
+        </div>
+        <span class="freya-center-mark">Freya System v4</span>
+        <div class="header-action-section">
+            <span class="clock" id="clock">--:--</span>
+            <div class="language-selector">
+                <select id="languageSelector">
+                    <option value="ja">日本語</option>
+                    <option value="en">English</option>
+                    <option value="pt">Português</option>
+                </select>
+            </div>
+            <button type="button" class="btn-sidebar-toggle" id="infoBtn" aria-label="Info">i</button>
+        </div>
+    </header>
+
+    <div class="tab-bar">
+        <button type="button" class="tab-btn active" data-tab="scan">
+            <span class="tab-icon"><svg viewBox="0 0 24 24">
+                    <path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2" />
+                    <line x1="4" y1="12" x2="20" y2="12" /></svg></span>
+            <span class="tab-label" data-i18n="kensa_tab_scan">Scan</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="production">
+            <span class="tab-icon"><svg viewBox="0 0 24 24">
+                    <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /><path d="M8 11l2 2 4-4" /></svg></span>
+            <span class="tab-label" data-i18n="kensa_tab_inspect">Inspect</span>
+            <span class="tab-badge" id="prodBadge">0</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="maintenance">
+            <span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.7 2.7-2-2 2.7-2.7z" /></svg></span>
+            <span class="tab-label" data-i18n="maintenance_tab">Maintenance</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="submit">
+            <span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7" /></svg></span>
+            <span class="tab-label" data-i18n="kensa_tab_submit">Submit</span>
+        </button>
+    </div>
+
+    <!-- ===================== TAB 1: SCAN ===================== -->
+    <div class="tab-panel active" id="panel-scan">
+
+        <div class="step-card" id="step0Modal">
+            <h2><span class="green" data-i18n="kensa_worker_confirm">作業者確認</span></h2>
+
+            <div class="center-col" id="step0ConfirmState" style="display:none">
+                <p class="hint" style="font-size:1.1rem; color:var(--text-main); line-height:1.5"><span data-i18n="kensa_worker_continue_q1">作業を続ける作業者は</span><br>
+                    <strong id="step0CurrentWorkerName" style="color:var(--brand); font-size:1.4rem; display:block; margin:8px 0; white-space:pre-line; line-height:1.6"></strong>
+                    <span data-i18n="kensa_worker_continue_q2">ですか？</span></p>
+                <div style="display:flex; gap:10px; width:100%; margin-top:10px">
+                    <button type="button" class="btn btn-secondary" style="flex:1" id="step0Change" data-i18n="kensa_change">変更</button>
+                    <button type="button" class="btn btn-primary" style="flex:2" id="step0Yes" data-i18n="yes">はい</button>
+                </div>
+            </div>
+
+            <div class="center-col" id="step0SelectState" style="display:none">
+                <p class="hint" style="color:var(--text-main); font-size:1rem" data-i18n="kensa_select_workers">作業者を選択してください</p>
+                <div id="workerListContainer" style="width:100%; display:flex; flex-direction:column; gap:10px"></div>
+                <button type="button" class="btn btn-secondary btn-full" id="addWorkerBtn" style="font-weight:700">
+                    <span style="font-size:1.2rem; font-weight:800">+</span> <span data-i18n="kensa_add_worker">作業者を追加</span>
+                </button>
+                <button type="button" class="btn btn-primary btn-full" id="step0Next" style="margin-top:10px" data-i18n="kensa_next">次へ</button>
+            </div>
+        </div>
+
+        <!-- Step 1: scan incoming boxes (legacy QR / DCP box / SRS label). No work order. -->
+        <div class="step-card" id="step1Modal">
+            <h2 data-i18n="kensa_step1_title">ステップ 1：箱QR をスキャン</h2>
+            <p class="hint" style="margin-top:-6px" data-i18n="kensa_step1_hint">旧QR・プレス箱・SRSラベルを読み込みます。最初の箱で品番が決まります</p>
+            <div class="scan-product" id="scanProduct">
+                <div class="name" id="scanProdName"></div>
+                <div class="meta" id="scanProdMeta"></div>
+            </div>
+            <div class="input-list" id="scanInputs"></div>
+            <p class="input-empty" id="scanInputsEmpty" data-i18n="kensa_inputs_none">まだ箱を読み込んでいません</p>
+            <div class="center-col" id="step1Content">
+                <div class="step-error" id="step1ErrorMsg"><p></p></div>
+                <button type="button" id="startStep1Scan" class="btn btn-primary btn-full" data-i18n="kensa_scan_btn">箱QR をスキャン</button>
+                <div class="manual-row">
+                    <input type="text" id="manualBoxId" placeholder="QR" data-i18n="kensa_manual_ph" autocomplete="off">
+                    <button type="button" class="btn btn-secondary" id="manualBoxOk">OK</button>
+                </div>
+            </div>
+            <div class="scanner-box" id="step1Scanner"><div id="qrReader"></div></div>
+            <div class="step-foot">
+                <p id="step1MachineName"></p>
+                <button type="button" id="scanResetBtn" class="btn btn-alert btn-sm" data-i18n="kensa_reset_btn">リセット</button>
+                <button type="button" id="doneToProd" class="btn btn-secondary btn-sm" data-i18n="kensa_to_inspect">検査入力へ →</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== TAB 2: INSPECT ===================== -->
+    <div class="tab-panel" id="panel-production">
+
+        <div class="glass-card" id="inspEmpty">
+            <div class="empty">
+                <div class="big" data-i18n="kensa_insp_empty">先に箱QRをスキャンしてください</div>
+                <button type="button" class="btn btn-primary" id="goScanBtn" data-i18n="kensa_go_scan">スキャンへ</button>
+            </div>
+        </div>
+
+        <div id="inspBody">
+            <!-- Product + current input -->
+            <div class="glass-card">
+                <div class="product">
+                    <div class="name" id="inspProdName"></div>
+                    <div class="meta" id="inspProdMeta"></div>
+                </div>
+                <div class="section-title" style="margin-top:14px" data-i18n="kensa_cur_input">対象の箱</div>
+                <div class="box-chips" id="inspChips"></div>
+                <div class="cur-info" id="inspCurInfo"></div>
+            </div>
+
+            <!-- 12 NG counters (same numbering as newKensa iReporter), applied to the current input -->
+            <div class="glass-card">
+                <h3 data-i18n="kensa_counters_title">検査不良カウンター</h3>
+                <div class="counter-who"><span data-i18n="kensa_counter_for">対象:</span> <b id="counterInputName">--</b></div>
+                <div class="counter-grid" id="counterGrid">
+                    <div class="counter-box" id="counter-box-1"><label for="counter-1">1</label><button type="button" class="plus-btn" id="counter-plus-1" data-ng="1">+</button><input readonly id="counter-1" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-1" data-ng="1">-</button></div>
+                    <div class="counter-box" id="counter-box-2"><label for="counter-2">2</label><button type="button" class="plus-btn" id="counter-plus-2" data-ng="2">+</button><input readonly id="counter-2" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-2" data-ng="2">-</button></div>
+                    <div class="counter-box" id="counter-box-3"><label for="counter-3">3</label><button type="button" class="plus-btn" id="counter-plus-3" data-ng="3">+</button><input readonly id="counter-3" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-3" data-ng="3">-</button></div>
+                    <div class="counter-box" id="counter-box-4"><label for="counter-4">4</label><button type="button" class="plus-btn" id="counter-plus-4" data-ng="4">+</button><input readonly id="counter-4" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-4" data-ng="4">-</button></div>
+                    <div class="counter-box" id="counter-box-5"><label for="counter-5">5</label><button type="button" class="plus-btn" id="counter-plus-5" data-ng="5">+</button><input readonly id="counter-5" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-5" data-ng="5">-</button></div>
+                    <div class="counter-box" id="counter-box-6"><label for="counter-6">6</label><button type="button" class="plus-btn" id="counter-plus-6" data-ng="6">+</button><input readonly id="counter-6" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-6" data-ng="6">-</button></div>
+                    <div class="counter-box" id="counter-box-7"><label for="counter-7">7</label><button type="button" class="plus-btn" id="counter-plus-7" data-ng="7">+</button><input readonly id="counter-7" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-7" data-ng="7">-</button></div>
+                    <div class="counter-box" id="counter-box-8"><label for="counter-8">8</label><button type="button" class="plus-btn" id="counter-plus-8" data-ng="8">+</button><input readonly id="counter-8" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-8" data-ng="8">-</button></div>
+                    <div class="counter-box" id="counter-box-9"><label for="counter-9">9</label><button type="button" class="plus-btn" id="counter-plus-9" data-ng="9">+</button><input readonly id="counter-9" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-9" data-ng="9">-</button></div>
+                    <div class="counter-box" id="counter-box-10"><label for="counter-10">10</label><button type="button" class="plus-btn" id="counter-plus-10" data-ng="10">+</button><input readonly id="counter-10" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-10" data-ng="10">-</button></div>
+                    <div class="counter-box" id="counter-box-11"><label for="counter-11">11</label><button type="button" class="plus-btn" id="counter-plus-11" data-ng="11">+</button><input readonly id="counter-11" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-11" data-ng="11">-</button></div>
+                    <div class="counter-box" id="counter-box-12"><label for="counter-12" data-i18n="kensa_ng_other">その他</label><button type="button" class="plus-btn" id="counter-plus-12" data-ng="12">+</button><input readonly id="counter-12" value="0" type="number"><button type="button" class="minus-btn" id="counter-minus-12" data-ng="12">-</button></div>
+                </div>
+                <div class="totals4">
+                    <div class="total-box"><div class="k" data-i18n="kensa_l_proc">加工数</div><div class="v" id="totProc">0</div></div>
+                    <div class="total-box good"><div class="k" data-i18n="kensa_l_good">良品</div><div class="v" id="totGood">0</div></div>
+                    <div class="total-box ng"><div class="k" data-i18n="kensa_l_ng_shown">NG (表示)</div><div class="v" id="totNg">0</div></div>
+                    <div class="total-box ng"><div class="k" data-i18n="kensa_l_ng_real">NG (累計)</div><div class="v" id="totNgReal">0</div></div>
+                </div>
+                <div class="pill-info" id="inspCycle" style="margin-top:10px"></div>
+            </div>
+
+            <!-- 初物 first-piece photo (required before submit) -->
+            <div class="glass-card">
+                <h3 data-i18n="kensa_hatsumono_title">初物チェック写真</h3>
+                <div class="hatsumono-row">
+                    <button type="button" id="hatsumonoButton" class="btn btn-secondary" data-i18n="kensa_hatsumono_btn">初物を撮影</button>
+                    <input type="file" id="hatsumonoFileInput" accept="image/*" capture="environment" style="display:none">
+                    <div class="photo-status-indicator" id="hatsumonoStatusIndicator">FALSE</div>
+                    <span id="hatsumonoLabel" style="display:none">FALSE</span>
+                    <img id="hatsumonoPic" src="" alt="初物チェック">
+                </div>
+            </div>
+
+            <!-- Kensa labels -->
+            <div class="glass-card">
+                <h3 data-i18n="kensa_lbl_title">検査ラベル</h3>
+                <div class="lbl-list" id="lblList"></div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px">
+                    <button type="button" class="btn btn-primary btn-grow" id="printCompleteBtn" data-i18n="kensa_lbl_print_complete">満箱ラベル印刷</button>
+                    <button type="button" class="btn btn-secondary btn-grow" id="printDraftBtn" data-i18n="kensa_lbl_print_draft">未完成箱として印刷</button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Break time (timer-based) -->
+        <div class="glass-card">
+            <h3 data-i18n="kensa_break_title">休憩時間</h3>
+            <button type="button" id="breakStartButton" class="btn btn-break btn-full" style="height:56px; font-size:1.15rem; border-radius:12px">
+                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px">
+                    <path d="M17 8h1a4 4 0 1 1 0 8h-1"></path><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"></path>
+                    <line x1="6" y1="2" x2="6" y2="4"></line><line x1="10" y1="2" x2="10" y2="4"></line><line x1="14" y1="2" x2="14" y2="4"></line>
+                </svg>
+                <span data-i18n="kensa_break_start">休憩を開始</span>
+            </button>
+            <div class="break-summary"><span data-i18n="kensa_break_total">合計休憩時間:</span><span id="total-break-display">0分</span><span id="break-count-display"></span></div>
+            <div id="break-list"></div>
+        </div>
+    </div>
+
+    <!-- ===================== TAB: SUBMIT ===================== -->
+    <div class="tab-panel" id="panel-submit">
+        <div class="glass-card" id="subEmpty">
+            <div class="empty">
+                <div class="big" data-i18n="kensa_insp_empty">先に箱QRをスキャンしてください</div>
+                <button type="button" class="btn btn-primary" id="subGoScanBtn" data-i18n="kensa_go_scan">スキャンへ</button>
+            </div>
+        </div>
+        <div id="subBody" style="display:none">
+            <div class="glass-card">
+                <h3 data-i18n="kensa_sub_title">送信内容の確認</h3>
+                <div class="product"><div class="name" id="subProdName"></div><div class="meta" id="subProdMeta"></div></div>
+                <div class="totals4" style="margin-top:12px">
+                    <div class="total-box"><div class="k" data-i18n="kensa_l_proc">加工数</div><div class="v" id="subProc">0</div></div>
+                    <div class="total-box good"><div class="k" data-i18n="kensa_l_good">良品</div><div class="v" id="subGood">0</div></div>
+                    <div class="total-box ng"><div class="k" data-i18n="kensa_l_ng_real">NG (累計)</div><div class="v" id="subNg">0</div></div>
+                    <div class="total-box"><div class="k" data-i18n="kensa_lbl_title">検査ラベル</div><div class="v" id="subLabels">0</div></div>
+                </div>
+                <div class="pill-info" id="subCycle" style="margin-top:10px"></div>
+            </div>
+            <!-- Times / lot / spare -->
+            <div class="glass-card">
+                <div class="field-row">
+                    <div class="field"><label for="inspStart" data-i18n="kensa_l_start">検査開始</label><input type="time" id="inspStart"></div>
+                    <div class="field"><label for="inspEnd" data-i18n="kensa_l_end">検査終了</label><input type="time" id="inspEnd"></div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="inspEndNow" style="margin-top:8px" data-i18n="kensa_end_now">終了 = 今</button>
+                <div class="field-row" style="margin-top:12px">
+                    <div class="field"><label for="inspLot" data-i18n="kensa_l_lot">製造ロット</label><input type="text" id="inspLot" autocomplete="off"></div>
+                    <div class="field"><label for="inspSpare" data-i18n="kensa_l_spare">スペア</label><input type="text" id="inspSpare" autocomplete="off"></div>
+                </div>
+            </div>
+
+            <div class="glass-card">
+                <h3 data-i18n="kensa_sub_checks">確認項目</h3>
+                <div id="subChecks"></div>
+            </div>
+            <div class="glass-card">
+                <div class="field"><label for="inspComment" data-i18n="kensa_l_comment">コメント</label><textarea id="inspComment"></textarea></div>
+                <div class="footer-actions" style="margin-top:14px">
+                    <button type="button" class="btn btn-alert" id="resetBtn" data-i18n="kensa_reset_btn">リセット</button>
+                    <button type="button" class="btn btn-primary btn-grow" id="submitBtn" data-i18n="kensa_submit_btn">送信</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== TAB 3: MAINTENANCE ===================== -->
+    <div class="tab-panel" id="panel-maintenance">
+        <div class="glass-card">
+            <h3 data-i18n="machine_trouble_title">機械故障時間</h3>
+            <button type="button" id="maintenanceStartButton" class="btn btn-primary btn-full" style="height:56px; font-size:1.05rem; margin-bottom:12px">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.7 2.7-2-2 2.7-2.7z" /></svg>
+                <span data-i18n="maintenance_start_btn">故障タイマー開始</span>
+            </button>
+            <button type="button" id="add-maintenance-btn" class="btn btn-secondary btn-full" style="margin-bottom:20px" data-i18n="maintenance_add_manual">手動で追加</button>
+            <div id="maintenance-records-container" style="margin-bottom:20px"></div>
+            <div class="total-trouble"><span data-i18n="total_trouble_time">合計故障時間:</span><span id="total-trouble-display">0分</span></div>
+        </div>
+    </div>
+
+    <!-- Break full-screen overlay -->
+    <div id="breakOverlay" class="break-overlay">
+        <div class="break-pulse">
+            <svg viewBox="0 0 24 24"><path d="M18 8h1a3 3 0 0 1 0 6h-1" /><path d="M3 8h15v5a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4z" /><line x1="7" y1="2" x2="7" y2="5" /><line x1="11" y1="2" x2="11" y2="5" /><line x1="15" y1="2" x2="15" y2="5" /></svg>
+        </div>
+        <h2 data-i18n="kensa_on_break">休憩中</h2>
+        <p class="break-sub" data-i18n="kensa_on_break_sub">作業を一時停止しています</p>
+        <div class="break-timer" id="breakTimerDisplay">00:00</div>
+        <button type="button" class="btn-finish-break" id="finishBreakButton" data-i18n="kensa_break_end">休憩を終了</button>
+    </div>
+
+    <!-- Worker picker -->
+    <div class="modal-overlay" id="workerNameModal">
+        <div class="modal">
+            <h3 data-i18n="kensa_pick_worker">作業者を選択</h3>
+            <div class="worker-names-grid" id="workerNamesContainer"></div>
+            <div class="manual-row" id="manualWorkerRow" style="display:none; margin-top:12px">
+                <input type="text" id="manualWorkerInput" placeholder="Name" autocomplete="off" data-i18n="kensa_name_ph">
+                <button type="button" class="btn btn-primary" id="manualWorkerOk">OK</button>
+            </div>
+            <button type="button" class="btn btn-secondary btn-full" id="manualEntryBtn" style="margin-top:15px" data-i18n="kensa_manual_entry">手動入力</button>
+            <button type="button" class="btn btn-alert btn-full" id="closeWorkerModal" style="margin-top:10px" data-i18n="close">閉じる</button>
+        </div>
+    </div>
+
+    <!-- Blocking alert (submit problems) -->
+    <div class="modal-overlay" id="alertModal">
+        <div class="modal alert">
+            <h3 id="alertTitle" data-i18n="kensa_err_title">エラー</h3>
+            <p id="alertText"></p>
+            <div class="actions"><button type="button" class="btn btn-alert btn-grow" id="alertOk">OK</button></div>
+        </div>
+    </div>
+
+    <!-- Confirm modal -->
+    <div class="modal-overlay" id="confirmModal">
+        <div class="modal" style="max-width:480px">
+            <h3 id="confirmTitle"></h3>
+            <p id="confirmText"></p>
+            <div class="actions">
+                <button type="button" class="btn btn-secondary btn-grow" id="confirmNo" data-i18n="cancel">キャンセル</button>
+                <button type="button" class="btn btn-primary btn-grow" id="confirmYes">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Maintenance full-screen overlay (machine trouble timer) -->
+    <div id="maintenanceOverlay" class="break-overlay maintenance-overlay">
+        <div class="break-pulse">
+            <svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.7 2.7-2-2 2.7-2.7z" /></svg>
+        </div>
+        <h2 data-i18n="maintenance_in_progress">機械故障中</h2>
+        <p class="break-sub" data-i18n="maintenance_sub">機械を修理中です</p>
+        <div class="break-timer" id="maintenanceTimerDisplay">00:00</div>
+        <button type="button" class="btn-finish-break" id="finishMaintenanceButton" data-i18n="finish_maintenance">故障対応を終了</button>
+    </div>
+
+    <!-- Maintenance record form (after the timer, or manual add) -->
+    <div class="modal-overlay" id="maintModal">
+        <div class="modal" style="max-width:480px">
+            <h3 data-i18n="kensa_maint_record">故障の記録</h3>
+            <div class="maint-form">
+                <div class="grid2">
+                    <div class="field"><label data-i18n="kensa_start">開始</label><input type="time" id="maintStart"></div>
+                    <div class="field"><label data-i18n="kensa_end">終了</label><input type="time" id="maintEnd"></div>
+                </div>
+                <div class="field"><label data-i18n="kensa_maint_comment">故障内容 / コメント</label><textarea id="maintComment"></textarea></div>
+            </div>
+            <div class="actions">
+                <button type="button" class="btn btn-secondary btn-grow" id="maintCancel" data-i18n="cancel">キャンセル</button>
+                <button type="button" class="btn btn-primary btn-grow" id="maintSave" data-i18n="kensa_save">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Print dialog (complete / draft). JS fills the allocation rows. -->
+    <div class="modal-overlay" id="printModal">
+        <div class="modal" style="max-width:520px">
+            <h3 id="printTitle"></h3>
+            <p id="printInfo"></p>
+            <div id="printAlloc" style="margin-top:8px"></div>
+            <div class="field" id="printQtyWrap" style="margin-top:10px; display:none">
+                <label for="printQty" data-i18n="kensa_pd_qty">ラベル数量</label>
+                <input type="number" id="printQty" inputmode="numeric" min="0">
+            </div>
+            <div class="print-sum" id="printSum"></div>
+            <div class="step-error" id="printError"><p></p></div>
+            <div class="actions">
+                <button type="button" class="btn btn-secondary btn-grow" id="printCancel" data-i18n="cancel">キャンセル</button>
+                <button type="button" class="btn btn-primary btn-grow" id="printOk" data-i18n="kensa_pd_print">印刷</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leader QR dialog (submit without label / reset with printed labels) -->
+    <div class="modal-overlay" id="leaderModal">
+        <div class="modal" style="max-width:420px">
+            <h3 id="ldTitle" data-i18n="kensa_ld_title">リーダー承認</h3>
+            <p id="ldText"></p>
+            <div class="qr-box"><div id="ldReader"></div></div>
+            <p id="ldStatus" style="text-align:center; margin-top:10px; font-weight:700; min-height:20px"></p>
+            <div class="actions">
+                <button type="button" class="btn btn-secondary btn-grow" id="ldCancel" data-i18n="cancel">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Call leader: floating button (hold 2s) -->
+    <div class="fab-menu-wrapper" id="callMenuWrapper">
+        <button type="button" id="stopCallMainToggle" class="stopcall-fab" aria-label="Call leader">
+            <div class="fab-content">
+                <svg viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1v-6h3v4z"></path><path d="M3 19a2 2 0 0 0 2 2h1v-6H3v4z"></path>
+                </svg>
+                <span data-i18n="call_btn_label">呼出</span>
+            </div>
+        </button>
+    </div>
+
+    <div id="stopHoldCountdown" class="stop-hold-countdown">
+        <div class="stop-hold-ring">
+            <div class="stop-hold-num" id="stopHoldNum">2</div>
+            <div class="stop-hold-label" data-i18n="stopcall_keephold">押し続けてください</div>
+        </div>
+    </div>
+
+    <!-- Call leader: full-screen overlay (production halted until a leader scans their QR) -->
+    <div id="stopCallOverlay" class="break-overlay stopcall-overlay">
+        <div class="break-pulse">
+            <svg viewBox="0 0 24 24">
+                <path d="M18.5 10a6.5 6.5 0 0 0-13 0" /><path d="M5 10v4a2 2 0 0 0 2 2h1v-6H6a1 1 0 0 0-1 0z" />
+                <path d="M19 10v4a2 2 0 0 1-2 2h-1v-6h2a1 1 0 0 1 1 0z" /><path d="M8 18a4 4 0 0 0 4 2" />
+            </svg>
+        </div>
+        <h2 data-i18n="stopcall_wait">リーダーをお待ちください</h2>
+        <p class="break-sub" data-i18n="stopcall_inprogress">呼び出し中…</p>
+        <div class="break-timer" id="stopCallTimerDisplay">00:00</div>
+        <button type="button" class="btn-finish-break" id="stopCallUnlockButton" data-i18n="stopcall_unlock">リーダーQRで解除</button>
+        <button type="button" class="stopcall-cancel-btn" id="stopCallCancelButton" data-i18n="stopcall_cancel">間違えました</button>
+        <div class="stopcall-qr-wrap" id="stopCallQrWrap">
+            <div id="stopCallQrReader"></div>
+            <p id="stopCallStatus" style="text-align:center; margin-top:12px; font-size:0.92rem; font-weight:700; color:#E8A9AD; min-height:20px;"></p>
+        </div>
+    </div>
+
+    <!-- Product info sidebar (the "i" button) -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+    <div class="info-sidebar" id="infoSidebar">
+        <div class="sidebar-header">
+            <h2 data-i18n="product_info_title">製品情報</h2>
+            <button type="button" class="sidebar-close" id="sidebarClose">&times;</button>
+        </div>
+        <div id="infoLanes"></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="html5-qrcode.min.js"></script>
+    <script src="i18n.js"></script>
+    <script src="Kensa interactive i18n.js"></script>
+    <script src="Kensa interactive SCNA.js"></script>
+</body>
+
+</html>

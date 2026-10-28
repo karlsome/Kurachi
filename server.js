@@ -27883,6 +27883,508 @@ app.post("/api/srs-boxes/:srsId/void", async (req, res) => {
 });
 // ==== SRS BOXES END ======================================================
 
+// ==== KENSA BOXES START ==================================================
+// Kensa (inspection) labels for "Kensa interactive SCNA". One printed label = one Kensa box, ID `<背番号>-<yyyymmdd>-K<seq>`.
+// See docs/kensa-interactive-plan.md (API contract section). All routes are new; nothing existing is modified.
+//   kensaBoxDB   the label registry: status complete | draft | superseded | voided, lines (which DCP box / SRS box / legacy lot
+//                gave how many good + NG pieces), parentKensaId for drafts finished later
+//   scnaBoxDB    DCP boxes get `kensaConsumed: [{ kensaId, good, ng, pieces, at, void? }]`. The same entry is mirrored into
+//                `srsConsumed` with `viaKensa: true` so the (unchanged) SRS routes see the pieces as taken and their optimistic
+//                concurrency also guards the shared pool. Remaining = base - srsConsumed(no viaKensa) - kensaConsumed.
+//   srsBoxDB     SRS boxes get `kensaConsumed` only.
+const _KENSA_COUNTERS = Array.from({ length: 12 }, (_, i) => `counter-${i + 1}`);
+
+class _KensaError extends Error {
+  constructor(status, message, extra) { super(message); this.status = status; this.extra = extra || {}; }
+}
+function _kensaSend(res, error, label) {
+  if (error instanceof _KensaError) return res.status(error.status).json({ error: error.message, ...error.extra });
+  console.error(`❌ ${label}:`, error);
+  return res.status(500).json({ error: `${label} failed`, details: error.message });
+}
+
+let _kensaBoxDbIndexesReady = false;
+async function _ensureKensaBoxDbIndexes() {
+  if (_kensaBoxDbIndexesReady) return;
+  const db = client.db(DB_NAME);
+  const col = db.collection("kensaBoxDB");
+  await col.createIndex({ kensaId: 1 }, { unique: true });
+  await col.createIndex({ boxUid: 1 }, { unique: true });
+  await col.createIndex({ parentKensaId: 1 });
+  await col.createIndex({ "lines.boxId": 1 });
+  await col.createIndex({ "lines.srsId": 1 });
+  await col.createIndex({ kensaRecordId: 1 });
+  await db.collection("scnaBoxDB").createIndex({ "kensaConsumed.kensaId": 1 });
+  await db.collection("srsBoxDB").createIndex({ "kensaConsumed.kensaId": 1 });
+  _kensaBoxDbIndexesReady = true;
+}
+
+function _kensaInt(v, what) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) throw new _KensaError(400, `${what} must be a whole number >= 0`);
+  return n;
+}
+// Kind of an input ID: DCP press box `...-B###`, SRS label `...-S###`, Kensa label `...-K###`.
+function _kensaIdKind(id) {
+  const s = String(id || "").trim().toUpperCase();
+  if (/-B\d+$/.test(s)) return "dcp";
+  if (/-S\d+$/.test(s)) return "srs";
+  if (/-K\d+$/.test(s)) return "kensa";
+  return null;
+}
+function _kensaPieces(e) { return (Number(e && e.pieces) || ((Number(e && e.good) || 0) + (Number(e && e.ng) || 0))); }
+// pieces already taken from an input (voided entries give them back)
+function _kensaTaken(kind, doc) {
+  let n = ((doc && doc.kensaConsumed) || []).filter(e => e && e.void !== true).reduce((a, e) => a + _kensaPieces(e), 0);
+  if (kind === "dcp") {
+    n += ((doc && doc.srsConsumed) || []).filter(e => e && e.void !== true && !e.viaKensa).reduce((a, e) => a + (Number(e.pieces) || 0), 0);
+  }
+  return n;
+}
+function _kensaBase(doc) { return _pressBoxBase(doc); }   // measured quantity, else label quantity (same rule for DCP and SRS boxes)
+function _kensaUsable(kind, doc) {
+  return kind === "srs" ? (doc.status === "complete" || doc.status === "draft") : true;
+}
+
+function _cleanKensaLines(lines) {
+  if (!Array.isArray(lines) || !lines.length) throw new _KensaError(400, "lines is required (at least one input)");
+  const seenNew = new Set(), seenCarried = new Set();
+  return lines.map((l, i) => {
+    l = l || {};
+    const boxId = String(l.boxId || "").trim().toUpperCase() || null;
+    const srsId = String(l.srsId || "").trim().toUpperCase() || null;
+    if (boxId && srsId) throw new _KensaError(400, `lines[${i}]: a line is either a DCP box or an SRS box, not both`);
+    if (boxId && _kensaIdKind(boxId) !== "dcp") throw new _KensaError(400, `lines[${i}]: ${boxId} is not a DCP box ID (...-B###)`);
+    if (srsId && _kensaIdKind(srsId) !== "srs") throw new _KensaError(400, `lines[${i}]: ${srsId} is not an SRS ID (...-S###)`);
+    const carried = !!l.carried;
+    const inputId = boxId || srsId;
+    if (inputId) {
+      const seen = carried ? seenCarried : seenNew;
+      if (seen.has(inputId)) throw new _KensaError(400, `lines[${i}]: input ${inputId} appears twice`);
+      seen.add(inputId);
+    }
+    const ng = {};
+    _KENSA_COUNTERS.forEach(c => { ng[c] = _kensaInt((l.ng && l.ng[c]) || 0, `lines[${i}].ng.${c}`); });
+    const ngTotal = _KENSA_COUNTERS.reduce((a, c) => a + ng[c], 0);
+    const good = _kensaInt(l.good || 0, `lines[${i}].good`);
+    const lotNumber = String(l.lotNumber || (Array.isArray(l.lotNumbers) ? l.lotNumbers.filter(Boolean).join(",") : "") || "").trim();
+    if (!inputId && !lotNumber) throw new _KensaError(400, `lines[${i}]: a legacy input needs a lot number`);
+    return { boxId, srsId, legacy: !inputId, 品番: String(l.品番 || "").trim(), lotNumber, carried, good, ng, ngTotal };
+  });
+}
+
+function _kensaCol(kind) { return kind === "srs" ? "srsBoxDB" : "scnaBoxDB"; }
+function _kensaField(kind) { return kind === "srs" ? "srsId" : "boxId"; }
+
+// Read-only: can `need` pieces be taken from this input? Throws the 409s that _kensaConsume throws. Used before the ID is
+// issued so a refused request does not burn a number.
+async function _kensaCheckInput(db, kind, id, sku, need) {
+  const doc = await db.collection(_kensaCol(kind)).findOne({ [_kensaField(kind)]: id });
+  const what = kind === "srs" ? "SRS box" : "Press box";
+  if (!doc) throw new _KensaError(409, `${what} not found: ${id}`, { id });
+  if (!_kensaUsable(kind, doc)) throw new _KensaError(409, `${what} ${id} is ${doc.status} and cannot be used`, { id, status: doc.status });
+  if (sku && doc.品番 && _normSku(doc.品番) !== _normSku(sku)) throw new _KensaError(409, `${what} ${id} is product ${doc.品番}, not ${sku}`, { id });
+  const base = _kensaBase(doc);
+  if (!base) throw new _KensaError(409, `${what} ${id} has no quantity`, { id });
+  const remaining = base - _kensaTaken(kind, doc);
+  if (need > remaining) throw new _KensaError(409, `${what} ${id} has only ${Math.max(0, remaining)} pieces left (needs ${need})`, { id, remaining: Math.max(0, remaining), need });
+  return { doc, remaining };
+}
+
+// Take good + ng pieces from an input for kensaId. Optimistic concurrency on the array lengths (kensaConsumed, and srsConsumed
+// for a DCP box, which the SRS routes also guard) so two tablets cannot both take the last pieces.
+async function _kensaConsume(db, kind, id, sku, kensaId, good, ngTotal) {
+  const need = good + ngTotal;
+  const col = db.collection(_kensaCol(kind));
+  const field = _kensaField(kind);
+  const sized = (name, len) => len === 0
+    ? { $or: [{ [name]: { $exists: false } }, { [name]: { $size: 0 } }] }
+    : { [name]: { $size: len } };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { doc, remaining } = await _kensaCheckInput(db, kind, id, sku, need);
+    const at = new Date().toISOString();
+    const entry = { kensaId, good, ng: ngTotal, pieces: need, at };
+    const filter = { [field]: id, $and: [sized("kensaConsumed", (doc.kensaConsumed || []).length)] };
+    const push = { kensaConsumed: entry };
+    if (kind === "dcp") {
+      filter.$and.push(sized("srsConsumed", (doc.srsConsumed || []).length));
+      push.srsConsumed = { srsId: null, kensaId, viaKensa: true, good, ng: ngTotal, pieces: need, at };
+    }
+    const r = await col.updateOne(filter, { $push: push });
+    if (r.modifiedCount === 1) return remaining - need;
+  }
+  throw new _KensaError(409, `Input ${id} is busy, try again`, { id });
+}
+async function _kensaRelease(db, taken, kensaId) {
+  for (const t of taken) {
+    try {
+      const upd = { $pull: { kensaConsumed: { kensaId } } };
+      if (t.kind === "dcp") upd.$pull.srsConsumed = { kensaId, viaKensa: true };
+      await db.collection(_kensaCol(t.kind)).updateOne({ [_kensaField(t.kind)]: t.id }, upd);
+    } catch (e) { console.error(`Kensa rollback failed for ${t.id}:`, e.message); }
+  }
+}
+async function _kensaReopenParent(col, parentKensaId, kensaId) {
+  if (!parentKensaId) return;
+  try { await col.updateOne({ kensaId: parentKensaId, replacedBy: kensaId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } }); }
+  catch (e) { console.error("Kensa draft revert failed:", e.message); }
+}
+
+// POST /api/kensa-boxes - issue a Kensa ID and register the label. Idempotent on boxUid.
+app.post("/api/kensa-boxes", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const boxUid = String(b.boxUid || "").trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(boxUid)) throw new _KensaError(400, "boxUid is required (8-64 letters, numbers, _ or -)");
+    const status = String(b.status || "");
+    if (status !== "complete" && status !== "draft") throw new _KensaError(400, "status must be 'complete' or 'draft'");
+    const sebanggo = String(b.背番号 || "").trim();
+    const hinban = String(b.品番 || "").trim();
+    if (!sebanggo || !hinban) throw new _KensaError(400, "背番号 and 品番 are required");
+    const machine = String(b.machine || "").trim();
+    if (!machine) throw new _KensaError(400, "machine is required");
+    const lines = _cleanKensaLines(b.lines).map(l => ({ ...l, 品番: l.品番 || hinban }));
+    const qtyLabel = _kensaInt(b.qtyLabel, "qtyLabel");
+    if (qtyLabel <= 0) throw new _KensaError(400, "qtyLabel must be greater than 0");
+    const qtyMeasured = lines.reduce((a, l) => a + l.good, 0);
+    if (qtyMeasured <= 0) throw new _KensaError(400, "the lines contain no good pieces");
+    if (status === "draft" && qtyLabel !== qtyMeasured) throw new _KensaError(400, `draft qtyLabel (${qtyLabel}) must equal the sum of the lines (${qtyMeasured})`);
+    const parentKensaId = String(b.parentKensaId || "").trim().toUpperCase() || null;
+    if (parentKensaId && !lines.some(l => l.carried)) throw new _KensaError(400, "a resumed box must carry the draft's lines (carried: true)");
+    if (!parentKensaId && lines.some(l => l.carried)) throw new _KensaError(400, "carried lines need parentKensaId");
+
+    await client.connect();
+    await _ensureKensaBoxDbIndexes();
+    const db = client.db(DB_NAME);
+    const col = db.collection("kensaBoxDB");
+
+    const existing = await col.findOne({ boxUid });
+    if (existing) return res.json({ ...existing, existing: true });
+
+    // refuse before a number is issued (the checks are repeated atomically when the pieces are taken)
+    if (parentKensaId) {
+      const parent = await col.findOne({ kensaId: parentKensaId });
+      if (!parent) throw new _KensaError(409, `Draft not found: ${parentKensaId}`);
+      if (_normSku(parent.品番) !== _normSku(hinban)) throw new _KensaError(409, `Draft ${parentKensaId} is product ${parent.品番}, not ${hinban}`);
+      if (parent.status !== "draft") throw new _KensaError(409, `Draft ${parentKensaId} is not an open draft (status ${parent.status})`, { parentKensaId, status: parent.status });
+    }
+    for (const l of lines) {
+      if (l.carried || l.legacy || l.good + l.ngTotal === 0) continue;
+      await _kensaCheckInput(db, l.boxId ? "dcp" : "srs", l.boxId || l.srsId, l.品番, l.good + l.ngTotal);
+    }
+
+    const key = _scnaBoxKey(null, sebanggo);
+    const counter = await db.collection("scnaBoxCounters").findOneAndUpdate(
+      { _id: `${key}-K` }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" }
+    );
+    const seq = (counter && (counter.value ? counter.value.seq : counter.seq)) || 1;
+    const kensaId = `${key}-K${String(seq).padStart(3, "0")}`;
+
+    if (parentKensaId) {   // claim the draft first (atomic), so two tablets cannot both finish it
+      const claim = await col.updateOne(
+        { kensaId: parentKensaId, status: "draft" },
+        { $set: { status: "superseded", replacedBy: kensaId, supersededAt: new Date().toISOString() } }
+      );
+      if (claim.modifiedCount !== 1) throw new _KensaError(409, `Draft ${parentKensaId} is not an open draft`, { parentKensaId });
+    }
+
+    const taken = [];
+    try {
+      for (const l of lines) {
+        if (l.carried || l.legacy || l.good + l.ngTotal === 0) continue;
+        const kind = l.boxId ? "dcp" : "srs";
+        const id = l.boxId || l.srsId;
+        await _kensaConsume(db, kind, id, l.品番, kensaId, l.good, l.ngTotal);
+        taken.push({ kind, id });
+      }
+      const doc = {
+        kensaId, boxUid, seq, factory: "SCNA", status,
+        背番号: sebanggo, 品番: hinban, machine,
+        workers: String(b.workers || "").trim(),
+        qtyLabel, qtyMeasured, mismatch: qtyLabel !== qtyMeasured,
+        lines, parentKensaId, replacedBy: null,
+        printedAt: b.printedAt || new Date().toISOString(),
+        printedBy: b.printedBy || null, copies: Number(b.copies) || 1, layoutId: b.layoutId || null,
+        kensaRecordId: null, void: null, createdAt: new Date().toISOString()
+      };
+      try {
+        await col.insertOne(doc);
+      } catch (e) {
+        if (e && e.code === 11000) {   // same boxUid arrived twice at once: give back and return the first
+          await _kensaRelease(db, taken, kensaId);
+          await _kensaReopenParent(col, parentKensaId, kensaId);
+          const again = await col.findOne({ boxUid });
+          if (again) return res.json({ ...again, existing: true });
+        }
+        throw e;
+      }
+      return res.status(201).json(doc);
+    } catch (e) {
+      await _kensaRelease(db, taken, kensaId);
+      await _kensaReopenParent(col, parentKensaId, kensaId);
+      throw e;
+    }
+  } catch (error) {
+    _kensaSend(res, error, "Saving Kensa box");
+  }
+});
+
+// GET /api/kensa-boxes/:kensaId[?chain=1] - the label; chain=1 adds the drafts it replaced, the input boxes and the kensaDB records.
+app.get("/api/kensa-boxes/:kensaId", async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const col = db.collection("kensaBoxDB");
+    const box = await col.findOne({ kensaId: String(req.params.kensaId || "").trim().toUpperCase() });
+    if (!box) return res.status(404).json({ error: "Kensa box not found" });
+    if (!req.query.chain) return res.json(box);
+
+    const parents = [];
+    let cur = box;
+    for (let i = 0; i < 10 && cur.parentKensaId; i++) {
+      cur = await col.findOne({ kensaId: cur.parentKensaId });
+      if (!cur) break;
+      parents.push(cur);
+    }
+    const all = [box, ...parents];
+    const boxIds = [...new Set(all.flatMap(x => (x.lines || []).map(l => l.boxId).filter(Boolean)))];
+    const srsIds = [...new Set(all.flatMap(x => (x.lines || []).map(l => l.srsId).filter(Boolean)))];
+    const pressBoxes = boxIds.length ? await db.collection("scnaBoxDB").find({ boxId: { $in: boxIds } }).toArray() : [];
+    const srsBoxes = srsIds.length ? await db.collection("srsBoxDB").find({ srsId: { $in: srsIds } }).toArray() : [];
+    const kensaRecords = await client.db("submittedDB").collection("kensaDB").find({ Kensa_Box_IDs: { $in: all.map(x => x.kensaId) } }).toArray();
+    res.json({ box, parents, pressBoxes, srsBoxes, kensaRecords });
+  } catch (error) {
+    _kensaSend(res, error, "Reading Kensa box");
+  }
+});
+
+// GET /api/kensa-inputs/:id - what the Kensa tablet scans: a DCP box (...-B###) or an SRS label (...-S###) with its remaining pieces.
+app.get("/api/kensa-inputs/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim().toUpperCase();
+    const kind = _kensaIdKind(id);
+    if (kind === "kensa") return res.status(400).json({ error: "A Kensa label cannot be used as an input", kind: "kensa", id });
+    if (!kind) return res.status(404).json({ error: "Unknown ID format (expected ...-B### or ...-S###)", id });
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const doc = await db.collection(_kensaCol(kind)).findOne({ [_kensaField(kind)]: id });
+    if (!doc) return res.status(404).json({ error: kind === "srs" ? "SRS box not found" : "Box not found", kind, id });
+    const usable = _kensaUsable(kind, doc);
+    const base = _kensaBase(doc);
+    const consumed = _kensaTaken(kind, doc);
+    let lotNumbers = [];
+    if (kind === "dcp") {
+      lotNumbers = (doc.lots || []).map(x => String((x && x.lotNumber) || "").trim()).filter(Boolean);
+    } else {
+      (doc.lines || []).forEach(l => {
+        const ls = Array.isArray(l.lotNumbers) ? l.lotNumbers : (l.lotNumber ? [l.lotNumber] : []);
+        ls.forEach(x => { x = String(x || "").trim(); if (x) lotNumbers.push(x); });
+      });
+      if (!lotNumbers.length) {   // lines that came from DCP boxes: take the box lots
+        const ids = (doc.lines || []).map(l => l.boxId).filter(Boolean);
+        if (ids.length) {
+          const boxes = await db.collection("scnaBoxDB").find({ boxId: { $in: ids } }).toArray();
+          boxes.forEach(x => (x.lots || []).forEach(l => { const v = String((l && l.lotNumber) || "").trim(); if (v) lotNumbers.push(v); }));
+        }
+      }
+    }
+    lotNumbers = [...new Set(lotNumbers)];
+    res.json({
+      kind, id, 品番: doc.品番 || "", 背番号: doc.背番号 || "", lotNumbers,
+      status: kind === "srs" ? doc.status : (doc.status || "complete"), usable,
+      base, consumed, remaining: usable ? Math.max(0, base - consumed) : 0
+    });
+  } catch (error) {
+    _kensaSend(res, error, "Reading Kensa input");
+  }
+});
+
+// POST /api/kensa-boxes/:kensaId/void - reset after printing (leader approved on the tablet). Gives the pieces back; a draft that
+// this box replaced becomes an open draft again. A box already linked to a kensaDB record cannot be voided.
+app.post("/api/kensa-boxes/:kensaId/void", async (req, res) => {
+  try {
+    const leader = (req.body && req.body.leader) || {};
+    const leaderUser = String(leader.username || "").trim();
+    if (!leaderUser) throw new _KensaError(400, "leader.username is required");
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const col = db.collection("kensaBoxDB");
+    const kensaId = String(req.params.kensaId || "").trim().toUpperCase();
+    const box = await col.findOne({ kensaId });
+    if (!box) throw new _KensaError(404, "Kensa box not found");
+    if (box.kensaRecordId) throw new _KensaError(409, "This Kensa box is already part of a submitted kensa record");
+    if (box.status !== "complete" && box.status !== "draft") throw new _KensaError(409, `Kensa box is ${box.status}`);
+    const r = await col.updateOne({ kensaId, status: box.status, kensaRecordId: null }, { $set: {
+      status: "voided",
+      void: { at: new Date().toISOString(), reason: String((req.body && req.body.reason) || "reset"), previousStatus: box.status, leader: { username: leaderUser, name: String(leader.name || "") } }
+    } });
+    if (r.modifiedCount !== 1) throw new _KensaError(409, "Kensa box changed, try again");
+    for (const cname of ["scnaBoxDB", "srsBoxDB"]) {
+      await db.collection(cname).updateMany(
+        { "kensaConsumed.kensaId": kensaId },
+        { $set: { "kensaConsumed.$[e].void": true } },
+        { arrayFilters: [{ "e.kensaId": kensaId }] }
+      );
+    }
+    await db.collection("scnaBoxDB").updateMany(
+      { "srsConsumed.kensaId": kensaId },
+      { $set: { "srsConsumed.$[e].void": true } },
+      { arrayFilters: [{ "e.kensaId": kensaId }] }
+    );
+    if (box.parentKensaId) await _kensaReopenParent(col, box.parentKensaId, kensaId);
+    res.json({ ok: true, kensaId, status: "voided" });
+  } catch (error) {
+    _kensaSend(res, error, "Voiding Kensa box");
+  }
+});
+
+let _kensaDbIndexReady = false;
+async function _ensureKensaDbIndex(kensaDB) {
+  if (_kensaDbIndexReady) return;
+  await kensaDB.createIndex({ Submit_UID: 1 }, { unique: true, partialFilterExpression: { Submit_UID: { $type: "string" } } });
+  await kensaDB.createIndex({ Kensa_Box_IDs: 1 });
+  await kensaDB.createIndex({ Box_IDs: 1 });
+  _kensaDbIndexReady = true;
+}
+
+// POST /submitToKensaDBInteractive - the inspection record (legacy kensaDB fields + Kensa/box links). Photos use the same payload as the
+// DCP interactive submit: images:[{ base64, label:'初物チェック'|'終物チェック', sebanggo, date, worker, factory, machine }].
+app.post("/submitToKensaDBInteractive", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("submittedDB");
+    const kensaDB = database.collection("kensaDB");
+    const formData = req.body || {};
+    try { await _ensureKensaDbIndex(kensaDB); } catch (e) { console.error("kensaDB indexes failed:", e.message); }
+
+    const submitUid = String(formData.Submit_UID || "").trim();
+    if (submitUid) {
+      const done = await kensaDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+      if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+    }
+
+    const requiredFields = ["品番", "背番号", "Total", "工場", "Worker_Name", "Process_Quantity", "Remaining_Quantity",
+      "Date", "Time_start", "Time_end", "設備", "Counters", "Total_NG", "製造ロット", "Cycle_Time"];
+    const missing = requiredFields.filter(f => formData[f] === undefined || formData[f] === null);
+    if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(", ")}` });
+
+    const cleanIds = (v) => Array.isArray(v) ? [...new Set(v.map(x => String(x || "").trim().toUpperCase()).filter(Boolean))] : [];
+    const kensaIds = cleanIds(formData.Kensa_Box_IDs);
+    const boxIds = cleanIds(formData.Box_IDs);
+    formData.Kensa_Box_IDs = kensaIds;
+    formData.Box_IDs = boxIds;
+
+    const boxDb = client.db(DB_NAME);
+    if (kensaIds.length) {   // labels printed in this session: valid, still open, not linked to another record
+      const labels = await boxDb.collection("kensaBoxDB").find({ kensaId: { $in: kensaIds } }).toArray();
+      const byId = new Map(labels.map(x => [x.kensaId, x]));
+      const bad = kensaIds.filter(id => {
+        const x = byId.get(id);
+        return !x || (x.status !== "complete" && x.status !== "draft") || x.kensaRecordId;
+      });
+      if (bad.length) {
+        return res.status(409).json({
+          error: `Kensa label cannot be submitted: ${bad.map(id => `${id} (${byId.get(id) ? (byId.get(id).kensaRecordId ? "already submitted" : byId.get(id).status) : "not found"})`).join(", ")}`,
+          kensaIds: bad
+        });
+      }
+    }
+
+    // photos: 初物 is required, 終物 is optional
+    const images = (Array.isArray(formData.images) ? formData.images : []).concat(Array.isArray(formData.photos) ? formData.photos : []);
+    delete formData.images;
+    delete formData.photos;
+    if (!images.some(i => i && i.label === "初物チェック" && i.base64)) {
+      return res.status(400).json({ error: "初物チェック (first-piece) photo is required" });
+    }
+    const labelToField = { "初物チェック": "初物チェック画像", "終物チェック": "終物チェック画像" };
+    const safe = (v) => String(v === undefined || v === null || v === "" ? "x" : v).replace(/[\\/]+/g, "_");
+    const bucket = admin.storage().bucket();
+    for (const img of images) {
+      if (!img || !img.base64 || !labelToField[img.label]) continue;
+      try {
+        const buffer = Buffer.from(img.base64, "base64");
+        const factory = safe(img.factory || formData.工場);
+        const fileName = `${safe(img.sebanggo || formData.背番号)}_${safe(img.date || formData.Date)}_${safe(img.worker || formData.Worker_Name)}_${factory}_${safe(img.machine || formData.設備)}_${img.label}.jpg`;
+        const file = bucket.file(`CycleCheck/${factory}/${fileName}`);
+        const downloadToken = "masterDBToken69";
+        await uploadToFirebaseWithRetry(file, buffer, {
+          metadata: { contentType: "image/jpeg", metadata: { firebaseStorageDownloadTokens: downloadToken } }
+        });
+        formData[labelToField[img.label]] = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+      } catch (uploadError) {
+        console.error(`❌ Kensa interactive: photo upload failed (${img.label}):`, uploadError.message);
+      }
+    }
+    if (!formData["初物チェック画像"]) {
+      return res.status(502).json({ error: "初物チェック photo upload failed, please retry" });
+    }
+
+    formData.createdAt = new Date().toISOString();
+    let result;
+    try {
+      result = await kensaDB.insertOne(formData);
+    } catch (e) {
+      if (e && e.code === 11000 && submitUid) {   // the same submit arrived twice at once
+        const done = await kensaDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+        if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+      }
+      throw e;
+    }
+    _invalidateFinancialsCache("kensaDB insert");
+    _invalidateFactoryOverviewCache("kensaDB insert");
+
+    // The record is saved; what follows is bookkeeping, so a failure is logged and not returned as a submit error.
+    if (kensaIds.length) {
+      try {
+        await boxDb.collection("kensaBoxDB").updateMany(
+          { kensaId: { $in: kensaIds } },
+          { $set: { kensaRecordId: result.insertedId, submittedAt: formData.createdAt } }
+        );
+      } catch (e) { console.error("Kensa label link failed (kensaDB record saved):", e.message); }
+    }
+    // NG found after the last print: those pieces are gone from the input too
+    const lateNg = Array.isArray(formData.Kensa_Unlabelled_NG) ? formData.Kensa_Unlabelled_NG : [];
+    for (const x of lateNg) {
+      const id = String((x && (x.boxId || x.srsId || x.id)) || "").trim().toUpperCase();
+      const ng = Number(x && x.ngTotal) || 0;
+      const kind = _kensaIdKind(id);
+      if (!id || ng <= 0 || (kind !== "dcp" && kind !== "srs")) continue;
+      try {
+        const push = { kensaConsumed: { kensaId: null, recordId: result.insertedId, good: 0, ng, pieces: ng, at: formData.createdAt } };
+        if (kind === "dcp") push.srsConsumed = { srsId: null, kensaId: null, viaKensa: true, recordId: result.insertedId, good: 0, ng, pieces: ng, at: formData.createdAt };
+        await boxDb.collection(_kensaCol(kind)).updateOne({ [_kensaField(kind)]: id }, { $push: push });
+      } catch (e) { console.error(`Kensa late NG for ${id} failed:`, e.message); }
+    }
+    // Write the result back onto each input so a box lookup shows who inspected it, where and when.
+    if (boxIds.length) {
+      const run = {
+        kensaRecordId: result.insertedId, kensaIds,
+        machine: formData.設備 || "", workers: formData.Worker_Name || "",
+        date: formData.Date || "", timeStart: formData.Time_start || "", timeEnd: formData.Time_end || "",
+        submittedAt: formData.createdAt
+      };
+      for (const kind of ["dcp", "srs"]) {
+        const ids = boxIds.filter(id => _kensaIdKind(id) === kind);
+        if (!ids.length) continue;
+        try {
+          await boxDb.collection(_kensaCol(kind)).updateMany(
+            { [_kensaField(kind)]: { $in: ids } },
+            { $set: { kensa: run }, $push: { kensaRuns: run } }
+          );
+        } catch (e) { console.error("Kensa box write-back failed (kensaDB record saved):", e.message); }
+      }
+    }
+
+    res.status(201).json({ message: "Data and images successfully saved to kensaDB", insertedId: result.insertedId });
+  } catch (error) {
+    console.error("Error saving data to kensaDB (interactive):", error);
+    res.status(500).json({ error: "Error saving data to kensaDB" });
+  }
+});
+// ==== KENSA BOXES END ====================================================
+
+
 app.get("/api/scna-label-layouts", async (req, res) => {
   try {
     await client.connect();
