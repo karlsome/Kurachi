@@ -11029,6 +11029,8 @@ app.post('/api/financials/breakdown/records', async (req, res) => {
   }
   const limit = Math.min(Math.max(parseInt(req.body?.limit, 10) || 20, 1), 50);
   const requestedPage = Math.max(parseInt(req.body?.page, 10) || 1, 1);
+  const sortField = String(req.body?.sortField || 'date');
+  const sortDir = req.body?.sortDir === 'asc' ? 1 : -1;
   try {
     const submittedDb = client.db('submittedDB');
     let total, records;
@@ -11038,11 +11040,21 @@ app.post('/api/financials/breakdown/records', async (req, res) => {
       const query = _buildRecoveryQuery({ fromDate, toDate, factory, ban });
       total = await col.countDocuments(query);
       const page = Math.min(requestedPage, Math.max(Math.ceil(total / limit), 1));
-      const docs = await col.find(query).sort({ lotDate: -1, createdAt: -1, _id: -1 })
-        .skip((page - 1) * limit).limit(limit).toArray();
+      // quantity is the sum of recoveries[].quantity, so it is computed before sorting
+      const recoverySortKeys = { date: 'lotDate', lot: '製造ロット', hinban: '品番', factory: 'factory', quantity: '_qty' };
+      const recoverySort = recoverySortKeys[sortField]
+        ? { [recoverySortKeys[sortField]]: sortDir, createdAt: -1, _id: -1 }
+        : { lotDate: -1, createdAt: -1, _id: -1 };
+      const docs = await col.aggregate([
+        { $match: query },
+        { $addFields: { _qty: { $sum: '$recoveries.quantity' } } },
+        { $sort: recoverySort },
+        { $skip: (page - 1) * limit },
+        { $limit: limit }
+      ], { allowDiskUse: true }).toArray();
       records = docs.map(d => ({
         _id: String(d._id), lotDate: d.lotDate || null, lot: d.製造ロット || '', hinban: d.品番 || '',
-        factory: d.factory || '', quantity: _recoveryDocQty(d),
+        factory: d.factory || '', quantity: d._qty || 0,
         recoveries: (d.recoveries || []).map(r => ({ defectType: r.defectType, quantity: r.quantity || 0 })),
         userId: d.userId || '', createdAt: d.createdAt || null
       }));
@@ -11056,12 +11068,21 @@ app.post('/api/financials/breakdown/records', async (req, res) => {
     total = countRes[0]?.n || 0;
     const page = Math.min(requestedPage, Math.max(Math.ceil(total / limit), 1));
     const { columns: defectColumns, model } = await _finBreakdownDefectColumns(source, ban);
+    // Whitelisted sort keys -> document field (defect columns are addressed as "defect:<key>")
+    const sortKeys = { date: 'normalizedLotDate', lot: '製造ロット', hinban: '品番', factory: '工場',
+                       machine: '設備', worker: 'Worker_Name', ng: cfg.ngField };
+    if (source === 'press') sortKeys.quantity = 'Process_Quantity';
+    if (source === 'kensa') sortKeys.quantity = 'Total';
+    defectColumns.forEach(c => { sortKeys[`defect:${c.key}`] = source === 'kensa' ? `Counters.${c.key}` : c.key; });
+    const sortSpec = sortKeys[sortField]
+      ? { [sortKeys[sortField]]: sortDir, normalizedLotDate: -1, _id: -1 }
+      : { normalizedLotDate: -1, _id: -1 };
     const project = { normalizedLotDate: 1, 製造ロット: 1, 品番: 1, 工場: 1, Date: 1, 設備: 1, Worker_Name: 1,
                       Process_Quantity: 1, Total: 1, Total_NG: 1, SRS_Total_NG: 1 };
     defectColumns.forEach(c => { project[source === 'kensa' ? `Counters.${c.key}` : c.key] = 1; });
     const docs = await col.aggregate([
       ...base,
-      { $sort: { normalizedLotDate: -1, _id: -1 } },
+      { $sort: sortSpec },
       { $skip: (page - 1) * limit },
       { $limit: limit },
       { $project: project }
@@ -11078,6 +11099,28 @@ app.post('/api/financials/breakdown/records', async (req, res) => {
   } catch (error) {
     console.error('❌ Error loading financials breakdown records:', error);
     res.status(500).json({ success: false, error: 'Failed to load records', message: error.message });
+  }
+});
+
+/**
+ * POST /api/financials/breakdown/record
+ * Body: { source: press|slit|srs|kensa, id }
+ * The full submitted document behind one breakdown row (for the 生産記録詳細 modal).
+ */
+app.post('/api/financials/breakdown/record', async (req, res) => {
+  const source = String(req.body?.source || '');
+  const id = String(req.body?.id || '');
+  if (!_FIN_BREAKDOWN_SOURCES[source] || !ObjectId.isValid(id)) {
+    return res.status(400).json({ success: false, error: 'valid source and id are required' });
+  }
+  try {
+    const doc = await client.db('submittedDB').collection(_FIN_BREAKDOWN_SOURCES[source].collection)
+      .findOne({ _id: new ObjectId(id) });
+    if (!doc) return res.status(404).json({ success: false, error: 'Record not found' });
+    res.json({ success: true, record: doc });
+  } catch (error) {
+    console.error('❌ Error loading financials breakdown record:', error);
+    res.status(500).json({ success: false, error: 'Failed to load record', message: error.message });
   }
 });
 // ─────────────────────────────────────────────────────────────────────────────
