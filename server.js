@@ -10878,24 +10878,32 @@ app.post('/api/financials/breakdown', async (req, res) => {
     const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
     const params = { fromDate, toDate, ban, factory };
 
-    // One tiny aggregation per process: totals grouped by 品番 + 工場 for this 背番号
-    const sumStage = (field, extra = {}) => ({
-      $group: {
-        _id: { hinban: '$品番', factory: '$工場' },
-        ng: { $sum: { $ifNull: [`$${field}`, 0] } },
-        ...extra
-      }
-    });
+    // Defect columns per process (kensa labels depend on the 背番号's model)
+    const defectColumns = {};
+    await Promise.all(Object.keys(_FIN_BREAKDOWN_SOURCES).map(async src => {
+      defectColumns[src] = (await _finBreakdownDefectColumns(src, ban)).columns;
+    }));
+
+    // One tiny aggregation per process: totals (and per-defect sums d0..dn) grouped by 品番 + 工場
+    const sumStage = (source, extra = {}) => {
+      const defectSums = {};
+      defectColumns[source].forEach((c, i) => {
+        defectSums[`d${i}`] = { $sum: { $ifNull: [`$${source === 'kensa' ? 'Counters.' : ''}${c.key}`, 0] } };
+      });
+      return {
+        $group: {
+          _id: { hinban: '$品番', factory: '$工場' },
+          ng: { $sum: { $ifNull: [`$${_FIN_BREAKDOWN_SOURCES[source].ngField}`, 0] } },
+          ...defectSums,
+          ...extra
+        }
+      };
+    };
+    const runAgg = (source, extra) => submittedDb.collection(_FIN_BREAKDOWN_SOURCES[source].collection)
+      .aggregate([..._finBreakdownBasePipeline(source, params), sumStage(source, extra)], { allowDiskUse: true }).toArray();
     const [pressAgg, slitAgg, srsAgg, kensaAgg] = await Promise.all([
-      submittedDb.collection('pressDB').aggregate(
-        [..._finBreakdownBasePipeline('press', params), sumStage('Total_NG', { created: { $sum: { $ifNull: ['$Process_Quantity', 0] } } })],
-        { allowDiskUse: true }).toArray(),
-      submittedDb.collection('slitDB').aggregate(
-        [..._finBreakdownBasePipeline('slit', params), sumStage('Total_NG')], { allowDiskUse: true }).toArray(),
-      submittedDb.collection('SRSDB').aggregate(
-        [..._finBreakdownBasePipeline('srs', params), sumStage('SRS_Total_NG')], { allowDiskUse: true }).toArray(),
-      submittedDb.collection('kensaDB').aggregate(
-        [..._finBreakdownBasePipeline('kensa', params), sumStage('Total_NG')], { allowDiskUse: true }).toArray()
+      runAgg('press', { created: { $sum: { $ifNull: ['$Process_Quantity', 0] } } }),
+      runAgg('slit'), runAgg('srs'), runAgg('kensa')
     ]);
 
     const byKey = new Map();
@@ -10903,13 +10911,17 @@ app.post('/api/financials/breakdown', async (req, res) => {
       const hinban = id.hinban;
       const fac = id.factory || 'Unknown';
       const key = `${hinban}__${fac}`;
-      if (!byKey.has(key)) byKey.set(key, { hinban, ban, factory: fac, created: 0, pressNg: 0, slitNg: 0, srsNg: 0, kensaNg: 0 });
+      if (!byKey.has(key)) byKey.set(key, { hinban, ban, factory: fac, created: 0, pressNg: 0, slitNg: 0, srsNg: 0, kensaNg: 0,
+        defects: { press: {}, slit: {}, srs: {}, kensa: {} } });
       return byKey.get(key);
     };
-    pressAgg.forEach(r => { const e = entry(r._id); e.created += r.created || 0; e.pressNg += r.ng || 0; });
-    slitAgg.forEach(r  => { entry(r._id).slitNg  += r.ng || 0; });
-    srsAgg.forEach(r   => { entry(r._id).srsNg   += r.ng || 0; });
-    kensaAgg.forEach(r => { entry(r._id).kensaNg += r.ng || 0; });
+    const addDefects = (e, source, r) => {
+      defectColumns[source].forEach((c, i) => { e.defects[source][c.key] = (e.defects[source][c.key] || 0) + (r[`d${i}`] || 0); });
+    };
+    pressAgg.forEach(r => { const e = entry(r._id); e.created += r.created || 0; e.pressNg += r.ng || 0; addDefects(e, 'press', r); });
+    slitAgg.forEach(r  => { const e = entry(r._id); e.slitNg  += r.ng || 0; addDefects(e, 'slit', r); });
+    srsAgg.forEach(r   => { const e = entry(r._id); e.srsNg   += r.ng || 0; addDefects(e, 'srs', r); });
+    kensaAgg.forEach(r => { const e = entry(r._id); e.kensaNg += r.ng || 0; addDefects(e, 'kensa', r); });
 
     const hinbans = Array.from(new Set(Array.from(byKey.values()).map(e => e.hinban).filter(Boolean)));
     const masterDocs = await masterCollection.find(
@@ -10938,6 +10950,9 @@ app.post('/api/financials/breakdown', async (req, res) => {
       if (!target) return;
       target.pressNg += z.pressNg; target.slitNg += z.slitNg; target.srsNg += z.srsNg; target.kensaNg += z.kensaNg;
       target.mergedZeroCreatedNg += z.pressNg + z.slitNg + z.srsNg + z.kensaNg;
+      Object.keys(z.defects).forEach(src => Object.keys(z.defects[src]).forEach(k => {
+        target.defects[src][k] = (target.defects[src][k] || 0) + z.defects[src][k];
+      }));
     });
 
     const recoveryDocs = await submittedDb.collection('recoveryDB')
@@ -10962,6 +10977,14 @@ app.post('/api/financials/breakdown', async (req, res) => {
         hinban: r.hinban, factory: r.factory, model: r.model,
         created: r.created, pressNg: r.pressNg, slitNg: r.slitNg, srsNg: r.srsNg, kensaNg: r.kensaNg,
         mergedZeroCreatedNg: r.mergedZeroCreatedNg,
+        // Per-process defect quantities; `unclassified` = process NG not explained by the defect fields
+        defectsByProcess: ['press', 'slit', 'srs', 'kensa'].map(src => {
+          const processNg = r[`${src}Ng`];
+          const items = defectColumns[src]
+            .map(c => ({ key: c.key, label: c.label, label_en: c.label_en, qty: r.defects[src][c.key] || 0 }))
+            .filter(d => d.qty > 0).sort((a, b) => b.qty - a.qty);
+          return { process: src, ng: processNg, items, unclassified: Math.max(processNg - items.reduce((s, d) => s + d.qty, 0), 0) };
+        }),
         totalNg, recoveredNg: r.recoveredNg, ngAfterRecovery, finalGood,
         recoveryDocCount: (docsByRow.get(r) || []).length,
         pricePerPc: r.pricePerPc,
