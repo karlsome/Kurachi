@@ -127,10 +127,11 @@ window.serverURL = serverURL;
     document.body.classList.remove('flash-red');
     var a = $('alert-sound'); if (a && a.pause) { a.pause(); a.currentTime = 0; }
   };
-  function confirmBox(title, text, yesLabel) {
+  function confirmBox(title, text, yesLabel, danger) {
     return new Promise(function (resolve) {
       $('confirmTitle').textContent = title; $('confirmText').textContent = text;
       $('confirmYes').textContent = yesLabel || 'OK';
+      $('confirmYes').className = 'btn btn-grow ' + (danger ? 'btn-alert' : 'btn-primary');   // red for destructive actions (reset)
       $('confirmModal').classList.add('show');
       $('confirmYes').onclick = function () { $('confirmModal').classList.remove('show'); resolve(true); };
       $('confirmNo').onclick = function () { $('confirmModal').classList.remove('show'); resolve(false); };
@@ -999,7 +1000,7 @@ window.serverURL = serverURL;
   // ============================================================
   async function resetBench() {
     var b = state.bench, hasLabels = livePrinted(b).length || b.pendingPrint;
-    if (!(await confirmBox(T('kensa_reset_title'), T(hasLabels ? 'kensa_reset_text_labels' : 'kensa_reset_text'), T('kensa_reset_btn')))) return;
+    if (!(await confirmBox(T('kensa_reset_title'), T(hasLabels ? 'kensa_reset_text_labels' : 'kensa_reset_text'), T('kensa_reset_btn'), true))) return;
     if (hasLabels) {
       var leader = await askLeader(T('kensa_ld_reset')); if (!leader) return;
       for (var i = 0; i < b.printed.length; i++) {

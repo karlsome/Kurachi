@@ -664,11 +664,13 @@
             </div>
             <div class="glass-card">
                 <div class="field"><label for="inspComment" data-i18n="kensa_l_comment">コメント</label><textarea id="inspComment"></textarea></div>
-                <div class="footer-actions" style="margin-top:14px">
-                    <button type="button" class="btn btn-alert" id="resetBtn" data-i18n="kensa_reset_btn">リセット</button>
-                    <button type="button" class="btn btn-primary btn-grow" id="submitBtn" data-i18n="kensa_submit_btn">送信</button>
-                </div>
             </div>
+        </div>
+
+        <!-- Action buttons (like DCP interactive): Submit, then a full-width red Reset; always visible -->
+        <div style="display:flex; flex-direction:column; gap:12px; margin-top:20px">
+            <button type="button" class="btn btn-primary btn-full" id="submitBtn" style="height:52px; font-size:1.1rem" data-i18n="kensa_submit_btn">送信</button>
+            <button type="button" class="btn btn-alert btn-full" id="resetBtn" style="height:48px" data-i18n="kensa_reset_btn">リセット</button>
         </div>
     </div>
 
