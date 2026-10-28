@@ -9691,6 +9691,119 @@ const _FINANCIALS_SORTERS = {
 };
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Mongo $function body that turns a 製造ロット string into an ISO date (mirrors normalizeLotDate)
+const _NORMALIZE_LOT_DATE_BODY = `
+    function(lot) {
+      if (!lot) return null;
+      var s = String(lot).trim();
+      var yr, mo, dy;
+      // 1. Already ISO yyyy-mm-dd
+      if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) {
+        yr = parseInt(s.slice(0,4), 10);
+        mo = parseInt(s.slice(5,7), 10);
+        dy = parseInt(s.slice(8,10), 10);
+      // 2. Single-dash: yymmdd-xx, yyyymm-dd, yymm-dd
+      } else if (/^\\d+-\\d+$/.test(s)) {
+        var parts = s.split('-');
+        var left = parts[0], right = parts[1];
+        if (left.length === 6) {
+          var py = parseInt(left.slice(0,4), 10);
+          var pm = parseInt(left.slice(4,6), 10);
+          var pd = parseInt(right.slice(0,2), 10);
+          if (py >= 2020 && py <= 2099 && pm >= 1 && pm <= 12 && pd >= 1 && pd <= 31) {
+            yr = py; mo = pm; dy = pd;
+          } else {
+            yr = 2000 + parseInt(left.slice(0,2), 10);
+            mo = parseInt(left.slice(2,4), 10);
+            dy = parseInt(left.slice(4,6), 10);
+          }
+        } else if (left.length === 4) {
+          yr = 2000 + parseInt(left.slice(0,2), 10);
+          mo = parseInt(left.slice(2,4), 10);
+          dy = parseInt(right.slice(0,2), 10);
+        } else { return null; }
+      // 3. Strip non-digits
+      } else {
+        var digits = s.replace(/\\D/g, '');
+        if (digits.length >= 8) {
+          var py2 = parseInt(digits.slice(0,4), 10);
+          var pm2 = parseInt(digits.slice(4,6), 10);
+          var pd2 = parseInt(digits.slice(6,8), 10);
+          if (py2 >= 2020 && py2 <= 2099 && pm2 >= 1 && pm2 <= 12 && pd2 >= 1 && pd2 <= 31) {
+            yr = py2; mo = pm2; dy = pd2;
+          } else {
+            yr = 2000 + parseInt(digits.slice(0,2), 10);
+            mo = parseInt(digits.slice(2,4), 10);
+            dy = parseInt(digits.slice(4,6), 10);
+          }
+        } else if (digits.length >= 6) {
+          yr = 2000 + parseInt(digits.slice(0,2), 10);
+          mo = parseInt(digits.slice(2,4), 10);
+          dy = parseInt(digits.slice(4,6), 10);
+        } else { return null; }
+      }
+      if (!yr || mo < 1 || mo > 12 || dy < 1 || dy > 31) return null;
+      var dt = new Date(Date.UTC(yr, mo - 1, dy));
+      if (dt.getUTCFullYear() !== yr || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== dy) return null;
+      return yr + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy;
+    }
+  `;
+
+// Sum of recoveries[].quantity in one recoveryDB document
+const _recoveryDocQty = (doc) => Array.isArray(doc?.recoveries)
+  ? doc.recoveries.reduce((s, r) => s + (r.quantity || 0), 0)
+  : 0;
+
+/**
+ * Allocate recoveryDB documents to financial rows and stamp `row.recoveredNg`.
+ * Rows are keyed by 品番+背番号+工場, but recoveries are mostly known by 背番号, so a
+ * naive per-ban stamp would subtract the same recovered qty from every row of that ban.
+ * Each recovery doc is instead assigned to exactly ONE row: candidates are the rows of its
+ * 背番号, narrowed by 品番 then 工場 when the doc carries them (and a match exists), and the
+ * remaining tie goes to the row with the highest `created`.
+ * Returns Map(row -> [recovery docs]) so callers can list the contributing documents.
+ */
+function _allocateRecoveriesToRows(rows, recoveryDocs) {
+  const rowsByBan = new Map();
+  rows.forEach(r => {
+    r.recoveredNg = 0;
+    if (!rowsByBan.has(r.ban)) rowsByBan.set(r.ban, []);
+    rowsByBan.get(r.ban).push(r);
+  });
+  const docsByRow = new Map();
+  recoveryDocs.forEach(doc => {
+    let candidates = rowsByBan.get(doc.背番号);
+    if (!candidates || !candidates.length) return;
+    const byHinban = doc.品番 ? candidates.filter(r => r.hinban === doc.品番) : [];
+    if (byHinban.length) candidates = byHinban;
+    const byFactory = doc.factory ? candidates.filter(r => r.factory === doc.factory) : [];
+    if (byFactory.length) candidates = byFactory;
+    const target = candidates.reduce((best, r) => (r.created > best.created ? r : best), candidates[0]);
+    target.recoveredNg += _recoveryDocQty(doc);
+    if (!docsByRow.has(target)) docsByRow.set(target, []);
+    docsByRow.get(target).push(doc);
+  });
+  return docsByRow;
+}
+
+// recoveryDB filter shared by /api/financials and the breakdown endpoints
+function _buildRecoveryQuery({ fromDate, toDate, factory, ban }) {
+  const query = {};
+  if (factory) query.factory = factory;
+  if (ban) query.背番号 = ban;
+  if (fromDate || toDate) {
+    const lotRange = {};
+    const createdRange = {};
+    if (fromDate) { lotRange.$gte = fromDate; createdRange.$gte = `${fromDate}T00:00:00.000Z`; }
+    if (toDate)   { lotRange.$lte = toDate;   createdRange.$lte = `${toDate}T23:59:59.999Z`; }
+    query.$or = [
+      { lotDate: lotRange },
+      { lotDate: { $exists: false }, createdAt: createdRange }
+    ];
+  }
+  return query;
+}
+
 /**
  * Financials API
  * POST /api/financials
@@ -9781,62 +9894,7 @@ app.post('/api/financials', async (req, res) => {
     return `${yr}-${String(mo).padStart(2, '0')}-${String(dy).padStart(2, '0')}`;
   };
 
-  const normalizeLotDateBody = `
-    function(lot) {
-      if (!lot) return null;
-      var s = String(lot).trim();
-      var yr, mo, dy;
-      // 1. Already ISO yyyy-mm-dd
-      if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) {
-        yr = parseInt(s.slice(0,4), 10);
-        mo = parseInt(s.slice(5,7), 10);
-        dy = parseInt(s.slice(8,10), 10);
-      // 2. Single-dash: yymmdd-xx, yyyymm-dd, yymm-dd
-      } else if (/^\\d+-\\d+$/.test(s)) {
-        var parts = s.split('-');
-        var left = parts[0], right = parts[1];
-        if (left.length === 6) {
-          var py = parseInt(left.slice(0,4), 10);
-          var pm = parseInt(left.slice(4,6), 10);
-          var pd = parseInt(right.slice(0,2), 10);
-          if (py >= 2020 && py <= 2099 && pm >= 1 && pm <= 12 && pd >= 1 && pd <= 31) {
-            yr = py; mo = pm; dy = pd;
-          } else {
-            yr = 2000 + parseInt(left.slice(0,2), 10);
-            mo = parseInt(left.slice(2,4), 10);
-            dy = parseInt(left.slice(4,6), 10);
-          }
-        } else if (left.length === 4) {
-          yr = 2000 + parseInt(left.slice(0,2), 10);
-          mo = parseInt(left.slice(2,4), 10);
-          dy = parseInt(right.slice(0,2), 10);
-        } else { return null; }
-      // 3. Strip non-digits
-      } else {
-        var digits = s.replace(/\\D/g, '');
-        if (digits.length >= 8) {
-          var py2 = parseInt(digits.slice(0,4), 10);
-          var pm2 = parseInt(digits.slice(4,6), 10);
-          var pd2 = parseInt(digits.slice(6,8), 10);
-          if (py2 >= 2020 && py2 <= 2099 && pm2 >= 1 && pm2 <= 12 && pd2 >= 1 && pd2 <= 31) {
-            yr = py2; mo = pm2; dy = pd2;
-          } else {
-            yr = 2000 + parseInt(digits.slice(0,2), 10);
-            mo = parseInt(digits.slice(2,4), 10);
-            dy = parseInt(digits.slice(4,6), 10);
-          }
-        } else if (digits.length >= 6) {
-          yr = 2000 + parseInt(digits.slice(0,2), 10);
-          mo = parseInt(digits.slice(2,4), 10);
-          dy = parseInt(digits.slice(4,6), 10);
-        } else { return null; }
-      }
-      if (!yr || mo < 1 || mo > 12 || dy < 1 || dy > 31) return null;
-      var dt = new Date(Date.UTC(yr, mo - 1, dy));
-      if (dt.getUTCFullYear() !== yr || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== dy) return null;
-      return yr + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy;
-    }
-  `;
+  const normalizeLotDateBody = _NORMALIZE_LOT_DATE_BODY;
 
   // Hoisted so the catch block can access them for stampede cleanup
   let _cacheKey, _inflightResolve, _inflightReject;
@@ -10572,31 +10630,11 @@ app.post('/api/financials', async (req, res) => {
     try {
       const recoveryDb = client.db('submittedDB');
       const recoveryCollection = recoveryDb.collection('recoveryDB');
-      const recoveryQuery = {};
-      if (trimmedFactory) recoveryQuery.factory = trimmedFactory;
-      const recoveryDateConditions = [];
-      if (fromDate || toDate) {
-        const lotRange = {};
-        const createdRange = {};
-        if (fromDate) { lotRange.$gte = fromDate; createdRange.$gte = `${fromDate}T00:00:00.000Z`; }
-        if (toDate)   { lotRange.$lte = toDate;   createdRange.$lte = `${toDate}T23:59:59.999Z`; }
-        recoveryDateConditions.push({ lotDate: lotRange });
-        recoveryDateConditions.push({ lotDate: { $exists: false }, createdAt: createdRange });
-        recoveryQuery.$or = recoveryDateConditions;
-      }
+      const recoveryQuery = _buildRecoveryQuery({ fromDate, toDate, factory: trimmedFactory });
       const allRecoveries = await recoveryCollection.find(recoveryQuery).toArray();
-      // Build a map: ban -> total recovered quantity
-      const recoveryByBan = new Map();
-      allRecoveries.forEach(item => {
-        const ban = item.背番号;
-        if (!ban) return;
-        const qty = Array.isArray(item.recoveries)
-          ? item.recoveries.reduce((s, r) => s + (r.quantity || 0), 0)
-          : 0;
-        recoveryByBan.set(ban, (recoveryByBan.get(ban) || 0) + qty);
-      });
-      // Stamp recoveredNg on ALL rows (not just current page) so the cache is self-contained
-      rows.forEach(row => { row.recoveredNg = recoveryByBan.get(row.ban) || 0; });
+      // Stamp recoveredNg on ALL rows (not just current page) so the cache is self-contained.
+      // Each recovery doc lands on exactly one row (see _allocateRecoveriesToRows).
+      _allocateRecoveriesToRows(rows, allRecoveries);
 
       // Rebuild factoryTotalsMap with recovery-adjusted finalGood and scrapLoss
       factoryTotalsMap.clear();
@@ -10643,13 +10681,12 @@ app.post('/api/financials', async (req, res) => {
         .slice(0, 5);
 
       // Apply recovery adjustment to ALL rows (pre-pagination)
-      if (recoveryByBan.size > 0) {
+      if (allRecoveries.length > 0) {
         let adjTotalLoss = 0;
         let adjFinalGood = 0;
         let adjScrapLoss = 0;
         rows.forEach(row => {
-          const recoveredNg = recoveryByBan.get(row.ban) || 0;
-          const ngAfterRecovery = Math.max((row.totalNg || 0) - recoveredNg, 0);
+          const ngAfterRecovery = Math.max((row.totalNg || 0) - (row.recoveredNg || 0), 0);
           adjTotalLoss  += ngAfterRecovery;
           adjFinalGood  += (row.created || 0) - ngAfterRecovery;
           adjScrapLoss  += ngAfterRecovery * (row.pricePerPc || 0);
@@ -10770,6 +10807,257 @@ app.post('/api/financials', async (req, res) => {
     });
   }
 });
+
+// ── Financials breakdown (drill-down for one 背番号) ─────────────────────────
+// Source collections: process -> { collection, ng field }. press is filtered on its
+// own `Date`; the other three derive the date from 製造ロット via $function.
+const _FIN_BREAKDOWN_SOURCES = {
+  press: { collection: 'pressDB', ngField: 'Total_NG',     lotDated: false },
+  slit:  { collection: 'slitDB',  ngField: 'Total_NG',     lotDated: true  },
+  srs:   { collection: 'SRSDB',   ngField: 'SRS_Total_NG', lotDated: true  },
+  kensa: { collection: 'kensaDB', ngField: 'Total_NG',     lotDated: true  }
+};
+
+// Fixed per-process defect columns (top-level fields on the submitted docs; names mirror
+// the 不良管理 screen). kensaDB is model-specific and resolved from defectDefinitions instead.
+const _FIN_FIXED_DEFECTS = {
+  press: [{ key: '疵引不良', label: '疵引不良', label_en: 'Scratch Defect' },
+          { key: '加工不良', label: '加工不良', label_en: 'Processing Defect' },
+          { key: 'その他',   label: 'その他',   label_en: 'Other' }],
+  srs:   ['くっつき・めくれ', 'シワ', '転写位置ズレ', '転写不良', '文字欠け', 'その他'].map(k => ({ key: k, label: k, label_en: '' }))
+};
+_FIN_FIXED_DEFECTS.slit = _FIN_FIXED_DEFECTS.press;
+
+// Defect columns for one source; kensa labels come from the 背番号's model in defectDefinitions
+async function _finBreakdownDefectColumns(source, ban) {
+  if (_FIN_FIXED_DEFECTS[source]) return { columns: _FIN_FIXED_DEFECTS[source], model: '' };
+  const masterDb = client.db('Sasaki_Coating_MasterDB');
+  const master = await masterDb.collection('masterDB').findOne({ 背番号: ban }, { projection: { モデル: 1 } });
+  const model = master?.モデル || '';
+  const def = model ? await masterDb.collection('defectDefinitions').findOne({ モデル: model }) : null;
+  const columns = Array.from({ length: 12 }, (_, i) => {
+    const key = `counter-${i + 1}`;
+    return { key, label: def?.counters?.[key]?.trim() || `カウンター${i + 1}`, label_en: def?.counters_en?.[key]?.trim() || '' };
+  });
+  return { columns, model };
+}
+
+// Base pipeline stages selecting one 背番号's documents inside the date range
+function _finBreakdownBasePipeline(source, { fromDate, toDate, ban, factory }) {
+  const cfg = _FIN_BREAKDOWN_SOURCES[source];
+  const match = { 背番号: ban };
+  if (factory) match['工場'] = factory;
+  if (!cfg.lotDated) {
+    match.Date = { $gte: fromDate, $lte: toDate };
+    return [{ $match: match }, { $addFields: { normalizedLotDate: '$Date' } }];
+  }
+  match.製造ロット = { $exists: true, $ne: '' };
+  return [
+    { $match: match },
+    { $addFields: { normalizedLotDate: { $function: { body: _NORMALIZE_LOT_DATE_BODY, args: ['$製造ロット'], lang: 'js' } } } },
+    { $match: { normalizedLotDate: { $gte: fromDate, $lte: toDate } } }
+  ];
+}
+
+/**
+ * POST /api/financials/breakdown
+ * Body: { fromDate, toDate, ban, factory? }
+ * Rebuilds the financial rows of ONE 背番号 with the same rules as /api/financials and returns
+ * every number needed to explain its Scrap Loss. Raw source documents are NOT included here;
+ * they are served page by page by /api/financials/breakdown/records.
+ */
+app.post('/api/financials/breakdown', async (req, res) => {
+  const { fromDate, toDate } = req.body || {};
+  const ban = String(req.body?.ban || '').trim();
+  const factory = String(req.body?.factory || '').trim();
+  if (!fromDate || !toDate || !ban) {
+    return res.status(400).json({ success: false, error: 'fromDate, toDate and ban are required' });
+  }
+  try {
+    const submittedDb = client.db('submittedDB');
+    const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
+    const params = { fromDate, toDate, ban, factory };
+
+    // One tiny aggregation per process: totals grouped by 品番 + 工場 for this 背番号
+    const sumStage = (field, extra = {}) => ({
+      $group: {
+        _id: { hinban: '$品番', factory: '$工場' },
+        ng: { $sum: { $ifNull: [`$${field}`, 0] } },
+        ...extra
+      }
+    });
+    const [pressAgg, slitAgg, srsAgg, kensaAgg] = await Promise.all([
+      submittedDb.collection('pressDB').aggregate(
+        [..._finBreakdownBasePipeline('press', params), sumStage('Total_NG', { created: { $sum: { $ifNull: ['$Process_Quantity', 0] } } })],
+        { allowDiskUse: true }).toArray(),
+      submittedDb.collection('slitDB').aggregate(
+        [..._finBreakdownBasePipeline('slit', params), sumStage('Total_NG')], { allowDiskUse: true }).toArray(),
+      submittedDb.collection('SRSDB').aggregate(
+        [..._finBreakdownBasePipeline('srs', params), sumStage('SRS_Total_NG')], { allowDiskUse: true }).toArray(),
+      submittedDb.collection('kensaDB').aggregate(
+        [..._finBreakdownBasePipeline('kensa', params), sumStage('Total_NG')], { allowDiskUse: true }).toArray()
+    ]);
+
+    const byKey = new Map();
+    const entry = (id) => {
+      const hinban = id.hinban;
+      const fac = id.factory || 'Unknown';
+      const key = `${hinban}__${fac}`;
+      if (!byKey.has(key)) byKey.set(key, { hinban, ban, factory: fac, created: 0, pressNg: 0, slitNg: 0, srsNg: 0, kensaNg: 0 });
+      return byKey.get(key);
+    };
+    pressAgg.forEach(r => { const e = entry(r._id); e.created += r.created || 0; e.pressNg += r.ng || 0; });
+    slitAgg.forEach(r  => { entry(r._id).slitNg  += r.ng || 0; });
+    srsAgg.forEach(r   => { entry(r._id).srsNg   += r.ng || 0; });
+    kensaAgg.forEach(r => { entry(r._id).kensaNg += r.ng || 0; });
+
+    const hinbans = Array.from(new Set(Array.from(byKey.values()).map(e => e.hinban).filter(Boolean)));
+    const masterDocs = await masterCollection.find(
+      { 品番: { $in: hinbans } },
+      { projection: { 品番: 1, モデル: 1, 背番号: 1, pricePerPc: 1 } }
+    ).toArray();
+    const masterMap = new Map(masterDocs.map(d => [d.品番, d]));
+
+    // Same rules as /api/financials: rows without a price are skipped, rows with created=0
+    // fold their NG into the highest-created row of the same 背番号.
+    const skippedNoPrice = [];
+    const priced = [];
+    byKey.forEach(e => {
+      const master = masterMap.get(e.hinban);
+      const pricePerPc = parseFloat(master?.pricePerPc) || 0;
+      if (pricePerPc <= 0) {
+        skippedNoPrice.push({ hinban: e.hinban, factory: e.factory, created: e.created,
+          totalNg: e.pressNg + e.slitNg + e.srsNg + e.kensaNg });
+        return;
+      }
+      priced.push({ ...e, model: master?.モデル || '', pricePerPc, mergedZeroCreatedNg: 0 });
+    });
+    const rows = priced.filter(r => r.created > 0);
+    priced.filter(r => r.created === 0).forEach(z => {
+      const target = rows.reduce((best, r) => (!best || r.created > best.created ? r : best), null);
+      if (!target) return;
+      target.pressNg += z.pressNg; target.slitNg += z.slitNg; target.srsNg += z.srsNg; target.kensaNg += z.kensaNg;
+      target.mergedZeroCreatedNg += z.pressNg + z.slitNg + z.srsNg + z.kensaNg;
+    });
+
+    const recoveryDocs = await submittedDb.collection('recoveryDB')
+      .find(_buildRecoveryQuery({ fromDate, toDate, factory, ban })).toArray();
+    const docsByRow = _allocateRecoveriesToRows(rows, recoveryDocs);
+
+    const totals = { created: 0, totalNg: 0, recoveredNg: 0, ngAfterRecovery: 0, finalGood: 0, cost: 0, scrapLoss: 0, value: 0,
+                     pressNg: 0, slitNg: 0, srsNg: 0, kensaNg: 0 };
+    const outRows = rows.map(r => {
+      const totalNg = r.pressNg + r.slitNg + r.srsNg + r.kensaNg;
+      const ngAfterRecovery = Math.max(totalNg - r.recoveredNg, 0);
+      const finalGood = r.created - ngAfterRecovery;
+      const cost = r.created * r.pricePerPc;
+      const scrapLoss = ngAfterRecovery * r.pricePerPc;
+      ['created', 'pressNg', 'slitNg', 'srsNg', 'kensaNg'].forEach(k => { totals[k] += r[k]; });
+      Object.assign(totals, {
+        totalNg: totals.totalNg + totalNg, recoveredNg: totals.recoveredNg + r.recoveredNg,
+        ngAfterRecovery: totals.ngAfterRecovery + ngAfterRecovery, finalGood: totals.finalGood + finalGood,
+        cost: totals.cost + cost, scrapLoss: totals.scrapLoss + scrapLoss, value: totals.value + (cost - scrapLoss)
+      });
+      return {
+        hinban: r.hinban, factory: r.factory, model: r.model,
+        created: r.created, pressNg: r.pressNg, slitNg: r.slitNg, srsNg: r.srsNg, kensaNg: r.kensaNg,
+        mergedZeroCreatedNg: r.mergedZeroCreatedNg,
+        totalNg, recoveredNg: r.recoveredNg, ngAfterRecovery, finalGood,
+        recoveryDocCount: (docsByRow.get(r) || []).length,
+        pricePerPc: r.pricePerPc,
+        cost: Number(cost.toFixed(2)), scrapLoss: Number(scrapLoss.toFixed(2)), value: Number((cost - scrapLoss).toFixed(2)),
+        yieldPercent: r.created > 0 ? Number(((finalGood / r.created) * 100).toFixed(2)) : 0
+      };
+    }).sort((a, b) => b.scrapLoss - a.scrapLoss);
+
+    totals.cost = Number(totals.cost.toFixed(2));
+    totals.scrapLoss = Number(totals.scrapLoss.toFixed(2));
+    totals.value = Number(totals.value.toFixed(2));
+    totals.yieldPercent = totals.created > 0 ? Number(((totals.finalGood / totals.created) * 100).toFixed(2)) : 0;
+
+    res.json({
+      success: true, ban, factory, fromDate, toDate,
+      model: outRows[0]?.model || '',
+      rows: outRows, totals, skippedNoPrice,
+      unallocatedRecoveryDocs: recoveryDocs.length - Array.from(docsByRow.values()).reduce((s, d) => s + d.length, 0)
+    });
+  } catch (error) {
+    console.error('❌ Error building financials breakdown:', error);
+    res.status(500).json({ success: false, error: 'Failed to build breakdown', message: error.message });
+  }
+});
+
+/**
+ * POST /api/financials/breakdown/records
+ * Body: { fromDate, toDate, ban, factory?, source: press|slit|srs|kensa|recovery, page?, limit? }
+ * One server-side page of the raw documents behind a breakdown (newest first). Only `limit`
+ * (max 50) documents are read per call; a parallel count query supplies the page total.
+ */
+app.post('/api/financials/breakdown/records', async (req, res) => {
+  const { fromDate, toDate } = req.body || {};
+  const ban = String(req.body?.ban || '').trim();
+  const factory = String(req.body?.factory || '').trim();
+  const source = String(req.body?.source || '');
+  if (!fromDate || !toDate || !ban) {
+    return res.status(400).json({ success: false, error: 'fromDate, toDate and ban are required' });
+  }
+  if (source !== 'recovery' && !_FIN_BREAKDOWN_SOURCES[source]) {
+    return res.status(400).json({ success: false, error: 'source must be press, slit, srs, kensa or recovery' });
+  }
+  const limit = Math.min(Math.max(parseInt(req.body?.limit, 10) || 20, 1), 50);
+  const requestedPage = Math.max(parseInt(req.body?.page, 10) || 1, 1);
+  try {
+    const submittedDb = client.db('submittedDB');
+    let total, records;
+
+    if (source === 'recovery') {
+      const col = submittedDb.collection('recoveryDB');
+      const query = _buildRecoveryQuery({ fromDate, toDate, factory, ban });
+      total = await col.countDocuments(query);
+      const page = Math.min(requestedPage, Math.max(Math.ceil(total / limit), 1));
+      const docs = await col.find(query).sort({ lotDate: -1, createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit).limit(limit).toArray();
+      records = docs.map(d => ({
+        _id: String(d._id), lotDate: d.lotDate || null, lot: d.製造ロット || '', hinban: d.品番 || '',
+        factory: d.factory || '', quantity: _recoveryDocQty(d),
+        recoveries: (d.recoveries || []).map(r => ({ defectType: r.defectType, quantity: r.quantity || 0 })),
+        userId: d.userId || '', createdAt: d.createdAt || null
+      }));
+      return res.json({ success: true, source, records, total, page, limit, totalPages: Math.ceil(total / limit) });
+    }
+
+    const cfg = _FIN_BREAKDOWN_SOURCES[source];
+    const col = submittedDb.collection(cfg.collection);
+    const base = _finBreakdownBasePipeline(source, { fromDate, toDate, ban, factory });
+    const countRes = await col.aggregate([...base, { $count: 'n' }], { allowDiskUse: true }).toArray();
+    total = countRes[0]?.n || 0;
+    const page = Math.min(requestedPage, Math.max(Math.ceil(total / limit), 1));
+    const { columns: defectColumns, model } = await _finBreakdownDefectColumns(source, ban);
+    const project = { normalizedLotDate: 1, 製造ロット: 1, 品番: 1, 工場: 1, Date: 1, 設備: 1, Worker_Name: 1,
+                      Process_Quantity: 1, Total: 1, Total_NG: 1, SRS_Total_NG: 1 };
+    defectColumns.forEach(c => { project[source === 'kensa' ? `Counters.${c.key}` : c.key] = 1; });
+    const docs = await col.aggregate([
+      ...base,
+      { $sort: { normalizedLotDate: -1, _id: -1 } },
+      { $skip: (page - 1) * limit },
+      { $limit: limit },
+      { $project: project }
+    ], { allowDiskUse: true }).toArray();
+    records = docs.map(d => ({
+      defects: Object.fromEntries(defectColumns.map(c =>
+        [c.key, Number(source === 'kensa' ? d.Counters?.[c.key] : d[c.key]) || 0])),
+      _id: String(d._id), date: d.normalizedLotDate || d.Date || null, lot: d.製造ロット || '',
+      hinban: d.品番 || '', factory: d.工場 || '', machine: d.設備 || '', worker: d.Worker_Name || '',
+      quantity: source === 'press' ? (d.Process_Quantity || 0) : (source === 'kensa' ? (d.Total || 0) : null),
+      ng: d[cfg.ngField] || 0
+    }));
+    res.json({ success: true, source, records, defectColumns, model, total, page, limit, totalPages: Math.ceil(total / limit) });
+  } catch (error) {
+    console.error('❌ Error loading financials breakdown records:', error);
+    res.status(500).json({ success: false, error: 'Failed to load records', message: error.message });
+  }
+});
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Financials CSV Export — all rows, no pagination
