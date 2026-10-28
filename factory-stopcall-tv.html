@@ -979,6 +979,14 @@
         const FACTORY = params.get('filter') || params.get('factory') || '';
         const SERVER = params.get('server') || serverURL; // ?server= override for local testing
 
+        // Language: SCNA defaults to English only; every other factory keeps the bilingual "日本語 / English" text.
+        // ?lang=en|ja overrides. L() takes a "日本語 / English" string, T() takes a (ja, en) pair.
+        const LANG = (params.get('lang') || (FACTORY.toUpperCase() === 'SCNA' ? 'en' : 'ja')).toLowerCase();
+        const EN = LANG === 'en';
+        const L = (s) => { if (!EN) return s; const i = s.lastIndexOf(' / '); return i < 0 ? s : s.slice(i + 3); };
+        const T = (ja, en) => EN ? en : ja;
+        if (EN) document.documentElement.lang = 'en';
+
         // Per-factory machine roster (mirrors chooseMachine.html). Office/entrance ignored.
         // Row-major: 6 rows x 5 columns (2 tile cols, GAP col, 2 tile cols).
         // GAP marks the vertical divider and is never auto-filled with new machines;
@@ -1008,7 +1016,7 @@
         const FACTORY_COLS = { 'SCNA': 3 };
         const GRID_COLS = FACTORY_COLS[FACTORY] || 5;
 
-        document.title = (FACTORY || '工場') + ' 呼び出しモニター / Call Monitor';
+        document.title = EN ? (FACTORY || 'Factory') + ' Call Monitor' : (FACTORY || '工場') + ' 呼び出しモニター / Call Monitor';
 
         // ----- Build the grid -----
         const grid = document.getElementById('grid');
@@ -1048,7 +1056,7 @@
                     '<div class="seb"></div>' +
                     '<div class="mat-seb"></div>' +
                     '<div class="big-mode"></div>' +
-                    '<div class="status">停止 / IDLE</div>' +
+                    '<div class="status">' + L('停止 / IDLE') + '</div>' +
                     '<div class="seb-mini"></div>' +
                     '<div class="elapsed"></div>';
                 grid.appendChild(tile);
@@ -1087,10 +1095,10 @@
             if (!btn) return;
             if (soundOn) {
                 btn.classList.add('on');
-                btn.textContent = '🔊 音 ON / Sound on';
+                btn.textContent = L('🔊 音 ON / Sound on');
             } else {
                 btn.classList.remove('on');
-                btn.textContent = '🔇 音 OFF / Muted';
+                btn.textContent = L('🔇 音 OFF / Muted');
             }
         }
         updateSoundButton();
@@ -1172,8 +1180,8 @@
                                 reNotifiedIntervals.set(machine, intervalIdx);
                                 const mins = intervalIdx * 8;
                                 const title = types.stop
-                                    ? `停止待ち (${mins}分経過) / STOP QUEUED (${mins} MIN)`
-                                    : `呼び出し (${mins}分経過) / CALLING (${mins} MIN)`;
+                                    ? (EN ? `STOP QUEUED (${mins} MIN)` : `停止待ち (${mins}分経過) / STOP QUEUED (${mins} MIN)`)
+                                    : (EN ? `CALLING (${mins} MIN)` : `呼び出し (${mins}分経過) / CALLING (${mins} MIN)`);
                                 queueTakeover(machine, title, types.stop ? 'stop' : 'leader');
                             } else if (intervalIdx > lastIdx) {
                                 // Missed the window (e.g. page just loaded), just catch up silently
@@ -1336,13 +1344,13 @@
                 sebEl.textContent = (mode === 'running') ? (ms.sebanggo || '') : '';
                 if (mode === 'running' && ms.sebanggo) fitSeb(tile, ms.sebanggo);
                 tile.querySelector('.status').textContent =
-                    mode === 'running' ? '稼働 / RUNNING' :
-                        mode === 'check' ? '点検 / CHECK' : '停止 / IDLE';
+                    mode === 'running' ? L('稼働 / RUNNING') :
+                        mode === 'check' ? L('点検 / CHECK') : L('停止 / IDLE');
                 // Break/maintenance/check: big mode word in the center, small 背番号 bottom-left
                 const bigMode = tile.querySelector('.big-mode');
                 const sebMini = tile.querySelector('.seb-mini');
                 if (mode === 'break' || mode === 'maintenance' || mode === 'check') {
-                    const word = mode === 'break' ? '休憩中' : mode === 'maintenance' ? '整備中' : 'Check';
+                    const word = mode === 'break' ? T('休憩中', 'BREAK') : mode === 'maintenance' ? T('整備中', 'MAINTENANCE') : 'Check';
                     bigMode.textContent = word;
                     fitText(bigMode, word, valueColumnWidth(tile), valueColumnHeight(tile), 96);
                     sebMini.textContent = ms.sebanggo || '';
@@ -1412,19 +1420,19 @@
                 const prevTypes = lastMachineCallTypes.get(it.machine) || {};
 
                 if (it.leader && !prevTypes.leader) {
-                    newlyAddedEvents.push({ machine: it.machine, title: '呼び出し / CALLING LEADER', type: 'leader', since: it.since });
+                    newlyAddedEvents.push({ machine: it.machine, title: L('呼び出し / CALLING LEADER'), type: 'leader', since: it.since });
                 }
                 if (it.stop && !prevTypes.stop) {
-                    newlyAddedEvents.push({ machine: it.machine, title: '停止待ち / STOP QUEUED', type: 'stop', since: it.since });
+                    newlyAddedEvents.push({ machine: it.machine, title: L('停止待ち / STOP QUEUED'), type: 'stop', since: it.since });
                 }
                 if (it.box && !prevTypes.box) {
-                    newlyAddedEvents.push({ machine: it.machine, title: '空箱リクエスト / BOX REQUEST', type: 'box', since: it.since });
+                    newlyAddedEvents.push({ machine: it.machine, title: L('空箱リクエスト / BOX REQUEST'), type: 'box', since: it.since });
                 }
                 if (it.material && !prevTypes.material) {
-                    newlyAddedEvents.push({ machine: it.machine, title: '部材リクエスト / MATERIAL REQUEST', type: 'material', since: it.since });
+                    newlyAddedEvents.push({ machine: it.machine, title: L('部材リクエスト / MATERIAL REQUEST'), type: 'material', since: it.since });
                 }
                 if (it.quality && !prevTypes.quality) {
-                    newlyAddedEvents.push({ machine: it.machine, title: '2時間品質チェック / 2-HOUR QUALITY CHECK', type: 'quality', since: it.since });
+                    newlyAddedEvents.push({ machine: it.machine, title: L('2時間品質チェック / 2-HOUR QUALITY CHECK'), type: 'quality', since: it.since });
                 }
 
                 nextMachineCallTypes.set(it.machine, { leader: !!it.leader, stop: !!it.stop, box: !!it.box, material: !!it.material, quality: !!it.quality });
@@ -1457,10 +1465,10 @@
             if (n > 0) {
                 banner.classList.add('alert');
                 const names = activeList.map((it, i) => '#' + (i + 1) + ' ' + it.machine).join('　');
-                text.innerHTML = '<span class="pill">' + n + '</span> 台 呼び出し中 / Calling — ' + names;
+                text.innerHTML = '<span class="pill">' + n + '</span> ' + (EN ? 'Calling — ' : '台 呼び出し中 / Calling — ') + names;
             } else {
                 banner.classList.remove('alert');
-                text.textContent = 'すべて正常 / All clear';
+                text.textContent = L('すべて正常 / All clear');
             }
         }
 
@@ -1485,7 +1493,7 @@
             el.dataset.type = item.type;
             document.querySelector('#takeover .to-label').textContent = item.title;
             document.getElementById('toMachine').textContent = item.machine;
-            document.getElementById('toRank').textContent = '#' + (idx + 1) + ' に呼ばれました / called';
+            document.getElementById('toRank').textContent = '#' + (idx + 1) + (EN ? ' called' : ' に呼ばれました / called');
             el.classList.add('show');
             setTimeout(() => {
                 el.classList.remove('show');
@@ -1522,25 +1530,25 @@
         }
 
         function connect() {
-            if (!FACTORY) { setConn('offline', '工場が指定されていません / No factory'); return; }
+            if (!FACTORY) { setConn('offline', L('工場が指定されていません / No factory')); return; }
             closeES(); // never stack connections
             try {
                 es = new EventSource(`${SERVER}/sse/factory/${encodeURIComponent(FACTORY)}`);
             } catch (e) {
-                setConn('offline', '接続エラー / Connection error');
+                setConn('offline', L('接続エラー / Connection error'));
                 scheduleReconnect();
                 return;
             }
             lastMessageAt = Date.now();
-            es.onopen = () => { lastMessageAt = Date.now(); setConn('online', '接続済み / Connected'); };
+            es.onopen = () => { lastMessageAt = Date.now(); setConn('online', L('接続済み / Connected')); };
             es.onmessage = (ev) => {
                 lastMessageAt = Date.now();
                 let data;
                 try { data = JSON.parse(ev.data); } catch (e) { return; }
                 if (data.type === 'ping') {
-                    setConn('online', '接続済み / Connected'); // heartbeat keeps us green
+                    setConn('online', L('接続済み / Connected')); // heartbeat keeps us green
                 } else if (data.type === 'connected') {
-                    setConn('online', '接続済み / Connected');
+                    setConn('online', L('接続済み / Connected'));
                 } else if (data.type === 'stopcall') {
                     // Full state is replayed by the server on (re)connect, so this
                     // also resynchronizes the board after any outage.
@@ -1553,7 +1561,7 @@
                 }
             };
             es.onerror = () => {
-                setConn('offline', '再接続中… / Reconnecting…');
+                setConn('offline', L('再接続中… / Reconnecting…'));
                 // EventSource tries to auto-reconnect, but if it is stuck CLOSED
                 // we recreate it ourselves.
                 if (!es || es.readyState === 2 /* CLOSED */) scheduleReconnect();
@@ -1577,7 +1585,7 @@
         setInterval(() => {
             const silentFor = Date.now() - lastMessageAt;
             if (silentFor > STALE_MS) {
-                setConn('offline', '再接続中… / Reconnecting…');
+                setConn('offline', L('再接続中… / Reconnecting…'));
                 closeES();
                 connect();
                 lastMessageAt = Date.now(); // give the fresh connection time
@@ -1851,7 +1859,7 @@
                 const remaining = ev.sec - sec;
                 if (remaining >= 1 && remaining <= COUNTDOWN_LEAD && !firedToday.done.has(ev.id + ':fire')) {
                     if (ev.kind === 'exercise') scheduledMode = 'exercise'; // hold calls during the lead-in
-                    showCountdown(ev.kind === 'exercise' ? 'まもなく ラジオ体操' : '時報まで', remaining);
+                    showCountdown(ev.kind === 'exercise' ? T('まもなく ラジオ体操', 'Radio exercise starts soon') : T('時報まで', 'Chime in'), remaining);
                     showing = true;
                     break;
                 }
@@ -1867,6 +1875,17 @@
         preloadExerciseAudio();
 
 
+
+        // Static texts in the markup are bilingual / Japanese; swap them for English on SCNA
+        if (EN) {
+            const setTxt = (sel, txt) => { const el = document.querySelector(sel); if (el) el.textContent = txt; };
+            setTxt('#connText', 'Connecting…');
+            setTxt('#takeover .to-label', 'CALLING LEADER');
+            setTxt('#cdLabel', 'Starting soon');
+            setTxt('#exOverlay .ex-title', 'Radio Exercise');
+            setTxt('#exSub', 'remaining');
+            setTxt('#chimeOverlay .ch-label', 'TIME');
+        }
 
         connect();
     </script>
