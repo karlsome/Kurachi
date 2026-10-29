@@ -116,9 +116,9 @@ window.serverURL = serverURL;
 
   // ---------- small UI helpers ----------
   var toastTimer;
-  function toast(msg) {
+  function toast(msg, ms) {
     var t = $('toast'); t.textContent = msg; t.classList.add('show');
-    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.remove('show'); }, ms || 2600);
   }
   function playAlert() {
     var a = $('alert-sound');
@@ -219,19 +219,44 @@ window.serverURL = serverURL;
     state.workers = names; save(); workerConfirmed = true; showStep1();
   };
 
+  // Recent workers: same localStorage key / size as DCP interactive, newest first
+  var RECENT_KEY = 'recentWorkerNames', MAX_RECENT = 6;
+  function getRecent() { try { var r = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
+  function setRecent(list) { try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch (e) { } }
+  function addRecent(name) { name = (name || '').trim(); if (!name) return; setRecent([name].concat(getRecent().filter(function (n) { return n !== name; })).slice(0, MAX_RECENT)); }
+  function removeRecent(name) { setRecent(getRecent().filter(function (n) { return n !== name; })); }
+
   // worker picker modal
   function openWorkerModal(idx) {
     activeSlot = idx;
     $('manualWorkerRow').style.display = 'none';
+    renderWorkerNames();
+    $('workerNameModal').classList.add('show');
+  }
+  function renderWorkerNames() {
     var host = $('workerNamesContainer'); host.innerHTML = '';
-    var others = workerSlots.filter(function (n, i) { return i !== idx && n; }).map(function (n) { return n.toLowerCase(); });
-    workerNamesData.forEach(function (name) {
+    var others = workerSlots.filter(function (n, i) { return i !== activeSlot && n; }).map(function (n) { return n.toLowerCase(); });
+    function mkBtn(name) {
       var b = document.createElement('button'); b.type = 'button'; b.className = 'worker-name-btn'; b.textContent = name;
       if (others.indexOf(name.toLowerCase()) >= 0) { b.classList.add('disabled'); b.disabled = true; b.textContent = name + T('srs_selected_suffix'); }
       else b.onclick = function () { pickWorker(name); };
-      host.appendChild(b);
-    });
-    $('workerNameModal').classList.add('show');
+      return b;
+    }
+    var recent = getRecent();
+    if (recent.length) {
+      var h = document.createElement('div'); h.className = 'worker-section-header recent-header'; h.textContent = '⭐ ' + T('srs_recent_workers');
+      host.appendChild(h);
+      recent.forEach(function (name) {
+        var wrap = document.createElement('div'); wrap.className = 'recent-wrap';
+        var x = document.createElement('button'); x.type = 'button'; x.className = 'delete-recent-btn'; x.textContent = '×';
+        x.onclick = function (e) { e.stopPropagation(); removeRecent(name); renderWorkerNames(); };
+        var b = mkBtn(name); b.classList.add('recent');
+        wrap.appendChild(b); wrap.appendChild(x); host.appendChild(wrap);
+      });
+      var h2 = document.createElement('div'); h2.className = 'worker-section-header recent-header'; h2.textContent = T('srs_all_workers');
+      host.appendChild(h2);
+    }
+    workerNamesData.forEach(function (name) { host.appendChild(mkBtn(name)); });
   }
   function pickWorker(name) {
     name = (name || '').trim();
@@ -239,6 +264,7 @@ window.serverURL = serverURL;
     var dup = workerSlots.some(function (n, i) { return i !== activeSlot && n && n.toLowerCase() === name.toLowerCase(); });
     if (dup) return toast('⚠️ ' + T('srs_t_already_selected', name));
     workerSlots[activeSlot] = name;
+    addRecent(name);
     $('workerNameModal').classList.remove('show');
     renderWorkerSlots();
   }
@@ -246,6 +272,18 @@ window.serverURL = serverURL;
   $('manualEntryBtn').onclick = function () { $('manualWorkerRow').style.display = 'flex'; $('manualWorkerInput').value = ''; $('manualWorkerInput').focus(); };
   $('manualWorkerOk').onclick = function () { pickWorker($('manualWorkerInput').value); };
   $('manualWorkerInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') pickWorker(this.value); });
+
+  // Admin print rule (freyaAdmin2 SCNA > Gatekeeper). Required unless an admin set this machine to optional; any failure keeps it required.
+  var printRequired = true;
+  async function loadPrintRule() {
+    try {
+      var r = await fetch(serverURL + '/queries', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dbName: 'Sasaki_Coating_MasterDB', collectionName: 'scnaPrintRuleDB', query: { factory: FACTORY, machine: MACHINE } }) });
+      if (!r.ok) return;
+      var rows = await r.json();
+      if (Array.isArray(rows) && rows[0] && rows[0].printRequired === false) { printRequired = false; }
+    } catch (e) { console.warn('print rule load failed, keeping required', e); }
+  }
 
   async function loadWorkers() {
     try {
@@ -316,12 +354,25 @@ window.serverURL = serverURL;
   var SRS_RE = /-S\d{3,}(\b|$)/i;
   function normSku(v) { return String(v || '').trim().toUpperCase(); }
 
+
+  // Which processes are already done for a scanned QR (press / SRS / Kensa), whatever kind of QR it is
+  async function showTrace(text) {
+    try {
+      var r = await fetch(serverURL + '/api/scna-trace?code=' + encodeURIComponent(text));
+      if (!r.ok) return;
+      var d = await r.json(), p = d.processes || {};
+      function mark(n, x) { return n + (x && x.done ? ' ✓' : x && x.started ? ' …' : ' –'); }
+      toast(T('srs_trace_done') + ': ' + mark(T('srs_proc_press'), p.press) + ' / ' + mark(T('srs_proc_srs'), p.srs) + ' / ' + mark(T('srs_proc_kensa'), p.kensa), 6000);
+    } catch (e) { /* trace is informational only */ }
+  }
+
   async function handleScan(text) {
     if (scanBusy) return;
     clearStep1Error();
     var t = String(text || '').trim();
     if (!t) return;
     scanBusy = true;
+    if (!WO_RE.test(t)) showTrace(t);
     try {
       if (WO_RE.test(t)) await acceptWorkOrder(t.toUpperCase());
       else if (SRS_RE.test(t)) await acceptSrsLabel(t);
@@ -685,6 +736,7 @@ window.serverURL = serverURL;
         else if (a === 'submit') submitLane(name);
         else if (a === 'print-complete') printLabel(name, 'complete');
         else if (a === 'print-draft') printLabel(name, 'draft');
+        else if (a === 'register-only') registerOnly(name);
         else if (a === 'now-end') { l.end = nowHM(); save(); var i = sec.querySelector('[data-f="end"]'); if (i) i.value = l.end; updateDerived(name); }
         else if (a === 'photo') sec.querySelector('[data-photo]').click();
       };
@@ -774,14 +826,15 @@ window.serverURL = serverURL;
     var rows = l.printed.map(function (e, i) {
       return '<div class="lbl-row"><b>' + esc(e.srsId) + '</b><span class="lbl-tag ' + (e.status === 'draft' ? 'draft' : 'ok') + '">' +
         T(e.status === 'draft' ? 'srs_lbl_draft' : 'srs_lbl_complete') + '</span><span>' + e.qty + 'pcs</span>' +
-        (e.printedOk ? '<span class="lbl-ok">✓</span>' : '<span class="lbl-tag bad">' + T('srs_lbl_notprinted') + '</span>') +
+        (e.printedOk ? '<span class="lbl-ok">✓</span>' : e.noPrint ? '<span class="lbl-tag draft">' + T('srs_lbl_idonly') + '</span>' : '<span class="lbl-tag bad">' + T('srs_lbl_notprinted') + '</span>') +
         '<button type="button" class="btn btn-secondary btn-sm" data-reprint="' + i + '">' + T('srs_lbl_reprint') + '</button></div>';
     }).join('');
     var res = l.resume ? '<div class="lbl-row"><span class="lbl-tag draft">↻</span><b>' + esc(l.resume.srsId) + '</b><span>' + T('srs_resume_line', carriedSum(l)) + '</span></div>' : '';
     return res + '<div class="lbl-list">' + (rows || '<div class="lbl-none">' + T('srs_lbl_none') + '</div>') + '</div>' +
       '<div class="grid2" style="margin-top:8px">' +
       '<button type="button" class="btn btn-primary" data-act="print-complete">' + T('srs_lbl_print_complete') + '</button>' +
-      '<button type="button" class="btn btn-secondary" data-act="print-draft">' + T('srs_lbl_print_draft') + '</button></div>';
+      '<button type="button" class="btn btn-secondary" data-act="print-draft">' + T('srs_lbl_print_draft') + '</button></div>' +
+      (printRequired ? '' : '<button type="button" class="btn btn-secondary" style="margin-top:8px;width:100%" data-act="register-only">' + T('srs_lbl_register_only') + '</button>');
   }
 
   async function fetchPrintLayouts(sebango) {
@@ -877,20 +930,22 @@ window.serverURL = serverURL;
     } finally { clearTimeout(timer); }
   }
 
-  async function printLabel(name, mode) {
-    if (printing) return;
+  async function printLabel(name, mode, noPrint) {
+    if (printing) return false;
     var l = state.lanes[name];
-    if (!l.boxes.length) return;
+    if (!l.boxes.length) return false;
     printing = true;
     try {
       var pend = l.pendingPrint;
       if (!pend && mode === 'complete' && !toInt(l.cap)) return showAlert(T('srs_e_no_cap', l.hinban));
-      var layouts, ip;
-      try { layouts = await fetchPrintLayouts(l.sebango); } catch (e) { return showAlert(T('srs_e_server', e.message)); }
-      if (!layouts.length) return showAlert(T('srs_e_no_layout'));
-      var layoutId = layouts.length > 1 ? await chooseLayout(layouts) : layouts[0].layoutId;
-      if (!layoutId) return;
-      try { ip = await resolvePrinterIP(); } catch (e) { return showAlert(T('srs_e_printer', e.message)); }
+      var layouts, ip = null, layoutId = null;
+      if (!noPrint) {
+        try { layouts = await fetchPrintLayouts(l.sebango); } catch (e) { return showAlert(T('srs_e_server', e.message)); }
+        if (!layouts.length) return showAlert(T('srs_e_no_layout'));
+        layoutId = layouts.length > 1 ? await chooseLayout(layouts) : layouts[0].layoutId;
+        if (!layoutId) return;
+        try { ip = await resolvePrinterIP(); } catch (e) { return showAlert(T('srs_e_printer', e.message)); }
+      }
 
       if (!pend) {
         var a = await allocDialog(l, mode); if (!a) return;
@@ -901,7 +956,7 @@ window.serverURL = serverURL;
         };
         pend.payload.boxUid = pend.boxUid; save();
       }
-      pend.payload.layoutId = layoutId; pend.payload.printedBy = { tablet: MACHINE, printerIP: ip };
+      pend.payload.layoutId = layoutId; pend.payload.printedBy = { tablet: MACHINE, printerIP: ip, noPrint: !!noPrint };
 
       var box;
       try {
@@ -920,15 +975,23 @@ window.serverURL = serverURL;
         b.used = toInt(b.used) + line.good + NG_FIELDS.reduce(function (acc, f) { return acc + toInt(line.ng[f]); }, 0);
       });
       l.boxes.forEach(function (b) { b.ngBase = Object.assign({}, b.ng); });      // shown NG back to 0, real total kept
-      var entry = { srsId: box.srsId, status: box.status, qty: box.qtyLabel, measured: box.qtyMeasured, mismatch: !!box.mismatch, layoutId: layoutId, printedOk: false, at: new Date().toISOString() };
+      var entry = { srsId: box.srsId, status: box.status, qty: box.qtyLabel, measured: box.qtyMeasured, mismatch: !!box.mismatch, layoutId: layoutId, printedOk: false, noPrint: !!noPrint, at: new Date().toISOString() };
       l.printed.push(entry); l.pendingPrint = null; l.resume = null; save();
       renderLane(name); renderSidebar();
+      if (noPrint) { toast(T('srs_t_registered', entry.srsId)); return true; }
       try {
         await sendPrint(l, entry, ip);
         entry.printedOk = true; save(); renderLane(name);
         toast(T('srs_t_printed', entry.srsId));
       } catch (e) { showAlert(T('srs_e_print_fail', e.message, entry.srsId)); }
+      return true;
     } finally { printing = false; }
+  }
+
+  // Optional printing: the ID is still issued (so the next process can trace the box), but nothing is sent to a printer
+  async function registerOnly(name) {
+    var l = state.lanes[name];
+    return printLabel(name, toInt(l.cap) ? 'complete' : 'draft', true);
   }
 
   async function reprintLabel(name, idx) {
@@ -1018,7 +1081,11 @@ window.serverURL = serverURL;
     var l = state.lanes[name];
     var miss = validate(name);
     if (miss.length) return showAlert(T('srs_v_head') + '\n・' + miss.join('\n・'));
-    if (!l.printed.length && !l.bypass) {     // no label was printed for this lane: a leader must approve
+    if (!printRequired && !l.printed.some(function (e) { return !e.voided; }) && !l.pendingPrint) {     // no printer needed, but the box still gets an ID
+      if (!(await confirmBox(T('srs_lbl_register_only'), T('srs_ld_register_first'), T('srs_lbl_register_only')))) return;
+      if (!(await registerOnly(name))) return;
+    }
+    if (printRequired && !l.printed.length && !l.bypass) {     // no label was printed for this lane: a leader must approve
       var ld = await askLeader(T('srs_ld_nolabel', name)); if (!ld) return;
       l.bypass = { leader: ld, at: new Date().toISOString() }; save();
     }
@@ -1353,6 +1420,7 @@ window.serverURL = serverURL;
     if (state.activeMaintStart) openMaintOverlay();   // maintenance was running
     if (state.activeStopCallStart) { openStopCallOverlay(); notifyStopCall('activate'); }   // a leader call was open: keep the TV blinking
     loadWorkers();
+    loadPrintRule();
     showStep0();
     tickClock(); setInterval(tickClock, 15000);
     setTimeout(assertMachineState, 3000);

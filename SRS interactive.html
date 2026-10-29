@@ -175,6 +175,10 @@
             border-radius: var(--btn-radius); display: flex; align-items: center; justify-content: center; text-align: center;
         }
         .worker-name-btn:hover { background: var(--bg-subtle); border-color: var(--blue); }
+        .worker-names-grid .recent-header { grid-column: 1 / -1; font-size: 0.8rem; font-weight: 800; color: var(--text-muted); margin-top: 4px; }
+        .recent-wrap { position: relative; }
+        .recent-wrap .worker-name-btn { width: 100%; background: var(--amber-soft, #FFF4DC); border-color: #EAD2A0; color: #8A5A00; }
+        .delete-recent-btn { position: absolute; top: -7px; right: -7px; width: 26px; height: 26px; border-radius: 50%; background: var(--red, #D93025); color: #fff; border: 2px solid var(--bg-surface, #fff); font-size: 0.9rem; font-weight: 700; cursor: pointer; line-height: 1; display: flex; align-items: center; justify-content: center; z-index: 2; padding: 0; }
         .worker-name-btn.disabled { opacity: 0.4; border-style: dashed; cursor: not-allowed; filter: grayscale(1); }
 
         /* ---------------- Buttons ---------------- */

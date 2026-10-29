@@ -107,9 +107,9 @@ window.serverURL = serverURL;
 
   // ---------- small UI helpers ----------
   var toastTimer;
-  function toast(msg) {
+  function toast(msg, ms) {
     var t = $('toast'); t.textContent = msg; t.classList.add('show');
-    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.remove('show'); }, ms || 2600);
   }
   function playAlert() {
     var a = $('alert-sound');
@@ -267,6 +267,18 @@ window.serverURL = serverURL;
   $('manualWorkerOk').onclick = function () { pickWorker($('manualWorkerInput').value); };
   $('manualWorkerInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') pickWorker(this.value); });
 
+  // Admin print rule (freyaAdmin2 SCNA > Gatekeeper). Required unless an admin set this machine to optional; any failure keeps it required.
+  var printRequired = true;
+  async function loadPrintRule() {
+    try {
+      var r = await fetch(serverURL + '/queries', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dbName: 'Sasaki_Coating_MasterDB', collectionName: 'scnaPrintRuleDB', query: { factory: FACTORY, machine: MACHINE } }) });
+      if (!r.ok) return;
+      var rows = await r.json();
+      if (Array.isArray(rows) && rows[0] && rows[0].printRequired === false) { printRequired = false; $('registerOnlyBtn').style.display = ''; refreshAll(); }
+    } catch (e) { console.warn('print rule load failed, keeping required', e); }
+  }
+
   async function loadWorkers() {
     try {
       var r = await fetch(serverURL + '/getWorkerNames?selectedFactory=' + encodeURIComponent(FACTORY));
@@ -340,12 +352,25 @@ window.serverURL = serverURL;
     return p.length ? p[p.length - 1].toUpperCase() : '';
   }
 
+
+  // Which processes are already done for a scanned QR (press / SRS / Kensa), whatever kind of QR it is
+  async function showTrace(text) {
+    try {
+      var r = await fetch(serverURL + '/api/scna-trace?code=' + encodeURIComponent(text));
+      if (!r.ok) return;
+      var d = await r.json(), p = d.processes || {};
+      function mark(n, x) { return n + (x && x.done ? ' ✓' : x && x.started ? ' …' : ' –'); }
+      toast(T('kensa_trace_done') + ': ' + mark(T('kensa_proc_press'), p.press) + ' / ' + mark(T('kensa_proc_srs'), p.srs) + ' / ' + mark(T('kensa_proc_kensa'), p.kensa), 6000);
+    } catch (e) { /* trace is informational only */ }
+  }
+
   async function handleScan(text) {
     if (scanBusy) return;
     clearStep1Error();
     var t = String(text || '').trim();
     if (!t) return;
     scanBusy = true;
+    showTrace(t);
     try {
       var kid = kensaIdOf(t);
       if (kid) await acceptKensaLabel(kid);
@@ -623,7 +648,7 @@ window.serverURL = serverURL;
     var row = document.createElement('div'); row.className = 'lbl-row';
     row.textContent = miss.length ? '⚠ ' + T('kensa_v_head') + ' ' + miss.join(' / ') : '✅ ' + T('kensa_sub_ok');
     host.appendChild(row);
-    if (!livePrinted(b).length && !miss.length) {
+    if (printRequired && !livePrinted(b).length && !miss.length) {
       var w = document.createElement('div'); w.className = 'lbl-row'; w.textContent = 'ℹ ' + T('kensa_ld_nolabel');
       host.appendChild(w);
     }
@@ -638,6 +663,7 @@ window.serverURL = serverURL;
     $('submitBtn').onclick = submitBench;
     $('printCompleteBtn').onclick = function () { printLabel('complete'); };
     $('printDraftBtn').onclick = function () { printLabel('draft'); };
+    $('registerOnlyBtn').onclick = function () { registerOnly(); };
     $('inspEndNow').onclick = function () { b().end = nowHM(); save(); $('inspEnd').value = b().end; updateDerived(); };
     [['inspStart', 'start'], ['inspEnd', 'end'], ['inspLot', 'lotNumbers'], ['inspComment', 'comment']].forEach(function (p) {
       $(p[0]).oninput = function () { b()[p[1]] = this.value; save(); updateDerived(); if (p[1] === 'lotNumbers') renderSidebar(); };
@@ -782,7 +808,7 @@ window.serverURL = serverURL;
       } else {
         row.innerHTML = '<b>' + esc(e.kensaId) + '</b><span class="lbl-tag ' + (e.status === 'draft' ? 'draft' : 'ok') + '">' +
           T(e.status === 'draft' ? 'kensa_lbl_draft' : 'kensa_lbl_complete') + '</span><span>' + e.qty + 'pcs</span>' +
-          (e.printedOk ? '<span class="lbl-ok">✓</span>' : '<span class="lbl-tag bad">' + T('kensa_lbl_notprinted') + '</span>') +
+          (e.printedOk ? '<span class="lbl-ok">✓</span>' : e.noPrint ? '<span class="lbl-tag draft">' + T('kensa_lbl_idonly') + '</span>' : '<span class="lbl-tag bad">' + T('kensa_lbl_notprinted') + '</span>') +
           '<button type="button" class="btn btn-secondary btn-sm">' + T('kensa_lbl_reprint') + '</button>';
         row.querySelector('button').onclick = function () { reprintLabel(i); };
         shown++;
@@ -893,20 +919,22 @@ window.serverURL = serverURL;
     } finally { clearTimeout(timer); }
   }
 
-  async function printLabel(mode) {
-    if (printing) return;
+  async function printLabel(mode, noPrint) {
+    if (printing) return false;
     var b = state.bench;
-    if (!b.boxes.length) return;
+    if (!b.boxes.length) return false;
     printing = true;
     try {
       var pend = b.pendingPrint;
       if (!pend && mode === 'complete' && !toInt(b.cap)) return showAlert(T('kensa_e_no_cap', b.hinban));
-      var layouts, ip;
-      try { layouts = await fetchPrintLayouts(b.sebango); } catch (e) { return showAlert(T('kensa_e_server', e.message)); }
-      if (!layouts.length) return showAlert(T('kensa_e_no_layout'));
-      var layoutId = layouts.length > 1 ? await chooseLayout(layouts) : layouts[0].layoutId;
-      if (!layoutId) return;
-      try { ip = await resolvePrinterIP(); } catch (e) { return showAlert(T('kensa_e_printer', e.message)); }
+      var layouts, ip = null, layoutId = null;
+      if (!noPrint) {
+        try { layouts = await fetchPrintLayouts(b.sebango); } catch (e) { return showAlert(T('kensa_e_server', e.message)); }
+        if (!layouts.length) return showAlert(T('kensa_e_no_layout'));
+        layoutId = layouts.length > 1 ? await chooseLayout(layouts) : layouts[0].layoutId;
+        if (!layoutId) return;
+        try { ip = await resolvePrinterIP(); } catch (e) { return showAlert(T('kensa_e_printer', e.message)); }
+      }
 
       if (!pend) {
         var a = await allocDialog(b, mode); if (!a) return;
@@ -920,7 +948,7 @@ window.serverURL = serverURL;
         };
         pend.payload.boxUid = pend.boxUid; save();
       }
-      pend.payload.layoutId = layoutId; pend.payload.printedBy = { tablet: MACHINE, printerIP: ip };
+      pend.payload.layoutId = layoutId; pend.payload.printedBy = { tablet: MACHINE, printerIP: ip, noPrint: !!noPrint };
 
       var box;
       try {
@@ -943,12 +971,19 @@ window.serverURL = serverURL;
       var entry = { kensaId: box.kensaId || box.id, boxUid: pend.boxUid, status: box.status || mode, qty: box.qtyLabel, measured: box.qtyMeasured, mismatch: !!box.mismatch, layoutId: layoutId, printedOk: false, at: new Date().toISOString() };
       b.printed.push(entry); b.pendingPrint = null; b.resume = null; save();
       renderBench(); renderSidebar();
+      if (noPrint) { entry.noPrint = true; save(); renderBench(); toast(T('kensa_t_registered', entry.kensaId)); return true; }
       try {
         await sendPrint(b, entry, ip);
         entry.printedOk = true; save(); renderBench();
         toast(T('kensa_t_printed', entry.kensaId));
       } catch (e) { showAlert(T('kensa_e_print_fail', e.message, entry.kensaId)); }
+      return true;
     } finally { printing = false; }
+  }
+
+  // Optional printing: the ID is still issued (so the next process can trace the box), but nothing is sent to a printer
+  async function registerOnly() {
+    return printLabel(toInt(state.bench.cap) ? 'complete' : 'draft', true);
   }
 
   // reprint = same ID / same boxUid, nothing new is registered
@@ -1041,7 +1076,12 @@ window.serverURL = serverURL;
     var miss = validate();
     if (miss.length) return showAlert(T('kensa_v_head') + '\n・' + miss.join('\n・'));
     var live = livePrinted(b);
-    if (!live.length && !b.bypass) {     // no label was printed: a leader must approve
+    if (!printRequired && !live.length && !b.pendingPrint) {     // no printer needed, but the box still gets an ID
+      if (!(await confirmBox(T('kensa_lbl_register_only'), T('kensa_ld_register_first'), T('kensa_lbl_register_only')))) return;
+      if (!(await registerOnly())) return;
+      live = livePrinted(b);
+    }
+    if (printRequired && !live.length && !b.bypass) {     // no label was printed: a leader must approve
       var ld = await askLeader(T('kensa_ld_nolabel')); if (!ld) return;
       b.bypass = { leader: ld, at: new Date().toISOString() }; save();
     }
@@ -1376,6 +1416,7 @@ window.serverURL = serverURL;
     if (state.activeMaintStart) openMaintOverlay();   // maintenance was running
     if (state.activeStopCallStart) { openStopCallOverlay(); notifyStopCall('activate'); }   // a leader call was open: keep the TV blinking
     loadWorkers();
+    loadPrintRule();
     showStep0();
     tickClock(); setInterval(tickClock, 15000);
     setTimeout(assertMachineState, 3000);

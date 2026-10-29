@@ -28199,6 +28199,84 @@ app.get("/api/kensa-inputs/:id", async (req, res) => {
   }
 });
 
+// GET /api/scna-trace?code=<any QR text or ID> - which processes are already done for a box, whatever QR is scanned:
+// a press box (...-B###), an SRS label (...-S###), a Kensa label (...-K###) or a legacy "品番,収容数,lot" QR (matched by lot).
+// Printing does not matter: a label counts once its ID is registered (also when it was registered without printing).
+app.get("/api/scna-trace", async (req, res) => {
+  try {
+    const code = String(req.query.code || "").trim();
+    if (!code) return res.status(400).json({ error: "code is required" });
+    const parts = code.split(/[,\s]+/).map(p => p.trim()).filter(Boolean);
+    let id = "", kind = null;
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const k = _kensaIdKind(parts[i]);
+      if (k) { id = parts[i].toUpperCase(); kind = k; parts.splice(i, 1); break; }
+    }
+    const lot = !id && parts.length >= 3 ? parts.slice(2).join("") : "";
+    if (!id && !lot) return res.status(404).json({ error: "Unknown QR format" });
+
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const live = { $in: ["complete", "draft", "superseded"] };
+    const pressIds = new Set(), srsIds = new Set(), kensaIds = new Set();
+    let hinban = parts[0] || "";
+
+    if (kind === "dcp") pressIds.add(id);
+    else if (kind === "srs") srsIds.add(id);
+    else if (kind === "kensa") kensaIds.add(id);
+    else {
+      const lotQ = { $or: [{ "lines.lotNumbers": lot }, { "lines.lotNumber": lot }], status: live };
+      (await db.collection("scnaBoxDB").find({ "lots.lotNumber": lot }).project({ boxId: 1 }).limit(200).toArray()).forEach(x => pressIds.add(x.boxId));
+      (await db.collection("srsBoxDB").find(lotQ).project({ srsId: 1 }).limit(200).toArray()).forEach(x => srsIds.add(x.srsId));
+      (await db.collection("kensaBoxDB").find(lotQ).project({ kensaId: 1 }).limit(200).toArray()).forEach(x => kensaIds.add(x.kensaId));
+    }
+
+    // walk the chain in both directions: kensa -> srs/press (lines), srs -> press (lines), press -> srs -> kensa (consumers)
+    for (let round = 0; round < 3; round++) {
+      if (kensaIds.size) {
+        for (const d of await db.collection("kensaBoxDB").find({ kensaId: { $in: [...kensaIds] } }).toArray()) {
+          hinban = hinban || d.品番 || "";
+          (d.lines || []).forEach(l => { if (l.srsId) srsIds.add(l.srsId); if (l.boxId) pressIds.add(l.boxId); });
+        }
+      }
+      if (srsIds.size) {
+        for (const d of await db.collection("srsBoxDB").find({ srsId: { $in: [...srsIds] } }).toArray()) {
+          hinban = hinban || d.品番 || "";
+          (d.lines || []).forEach(l => { if (l.boxId) pressIds.add(l.boxId); });
+        }
+        (await db.collection("kensaBoxDB").find({ "lines.srsId": { $in: [...srsIds] }, status: live }).project({ kensaId: 1 }).toArray()).forEach(x => kensaIds.add(x.kensaId));
+      }
+      if (pressIds.size) {
+        (await db.collection("srsBoxDB").find({ "lines.boxId": { $in: [...pressIds] }, status: live }).project({ srsId: 1 }).toArray()).forEach(x => srsIds.add(x.srsId));
+        (await db.collection("kensaBoxDB").find({ "lines.boxId": { $in: [...pressIds] }, status: live }).project({ kensaId: 1 }).toArray()).forEach(x => kensaIds.add(x.kensaId));
+      }
+    }
+
+    // a voided label does not count; a draft is "started" (partial), only complete/superseded-by-complete is done
+    const srsDocs = srsIds.size ? await db.collection("srsBoxDB").find({ srsId: { $in: [...srsIds] } }).project({ srsId: 1, status: 1 }).toArray() : [];
+    const kensaDocs = kensaIds.size ? await db.collection("kensaBoxDB").find({ kensaId: { $in: [...kensaIds] } }).project({ kensaId: 1, status: 1 }).toArray() : [];
+    const summarize = (docs, field) => {
+      const ok = docs.filter(d => d.status && d.status !== "voided");
+      return {
+        done: ok.some(d => d.status === "complete" || d.status === "superseded"),
+        started: ok.length > 0,
+        ids: ok.map(d => d[field])
+      };
+    };
+    res.json({
+      code, kind: kind || "legacy", id, lot, 品番: hinban,
+      processes: {
+        press: { done: pressIds.size > 0, started: pressIds.size > 0, ids: [...pressIds] },
+        srs: summarize(srsDocs, "srsId"),
+        kensa: summarize(kensaDocs, "kensaId")
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error tracing SCNA code:", error);
+    res.status(500).json({ error: "Trace failed", details: error.message });
+  }
+});
+
 // POST /api/kensa-boxes/:kensaId/void - reset after printing (leader approved on the tablet). Gives the pieces back; a draft that
 // this box replaced becomes an open draft again. A box already linked to a kensaDB record cannot be voided.
 app.post("/api/kensa-boxes/:kensaId/void", async (req, res) => {
