@@ -38,6 +38,17 @@
       translations.en.processing_defect = 'Non Conforming (Internal)';
       translations.en.submit_lbl_defect_pull = 'Non Conforming (Supplier)';
       translations.en.submit_lbl_defect_process = 'Non Conforming (Internal)';
+      // Step 1 is the work order here (the kanban is not used).
+      translations.en.step_1_header = 'Step 1: SCAN Work Order';
+      translations.en.scan_kanban_btn = 'Scan Work Order';
+      if (translations.ja) {
+        translations.ja.step_1_header = 'ステップ 1：ワークオーダーをスキャン';
+        translations.ja.scan_kanban_btn = 'ワークオーダーをスキャン';
+      }
+      if (translations.pt) {
+        translations.pt.step_1_header = 'Passo 1: ESCANEAR Ordem de Trabalho';
+        translations.pt.scan_kanban_btn = 'Escanear Ordem de Trabalho';
+      }
       if (document.readyState !== 'loading' && typeof applyTranslations === 'function') applyTranslations(getCurrentLanguage());
     }
   } catch (e) { console.warn('SCNA defect label override failed:', e); }
@@ -170,9 +181,27 @@
     });
   }
 
+  // Program names carry the machine ("VCA01 AOL 4"). Number is matched whole, so "AOL 4" never matches "AOL 45".
+  function aolNumberOf(text) {
+    var m = /AOL[\s\-_]*(\d+)/i.exec(String(text || ''));
+    return m ? m[1] : null;
+  }
+  // Programs meant for this machine: named for it; else the ones not named for any AOL machine;
+  // else (every program is named for another machine) the full list, so the operator decides.
+  function programsForMachine(programs, machine) {
+    var n = aolNumberOf(machine);
+    if (!n) return programs;
+    var own = programs.filter(function (p) { return aolNumberOf(p.displayName) === n; });
+    if (own.length) return own;
+    var untagged = programs.filter(function (p) { return !aolNumberOf(p.displayName); });
+    return untagged.length ? untagged : programs;
+  }
+
   // -> program object | null (none uploaded: use legacy .pce) | false (operator cancelled)
-  function chooseNcProgram(sebanggo) {
-    var c = ncChoice[sebanggo];
+  // Choice is per machine, so AOL-4 and AOL-5 each get their own program.
+  function chooseNcProgram(sebanggo, machine) {
+    var key = sebanggo + '|' + (machine || '');
+    var c = ncChoice[key];
     if (c && Date.now() - c.at < NC_CHOICE_TTL_MS) return c.promise;
     var promise = (async function () {
       var programs = [];
@@ -184,11 +213,12 @@
         }
       } catch (e) { console.warn('SCNA NC program lookup failed, using .pce:', e); }
       if (!programs.length) return null;
+      programs = programsForMachine(programs, machine);
       if (programs.length === 1) return programs[0];
-      return await pickNcProgram(sebanggo, programs);
+      return await pickNcProgram(sebanggo + (machine ? ' / ' + machine : ''), programs);
     })();
-    ncChoice[sebanggo] = { promise: promise, at: Date.now() };
-    promise.then(function (r) { if (r === false) delete ncChoice[sebanggo]; });
+    ncChoice[key] = { promise: promise, at: Date.now() };
+    promise.then(function (r) { if (r === false) delete ncChoice[key]; });
     return promise;
   }
 
@@ -273,7 +303,7 @@
         var sb = sebanggoOfNcUrl(input);
         var ncMachine = '';
         try { ncMachine = new URL(input, window.location.href).searchParams.get('machine') || ''; } catch (e) { }
-        var prog = sb ? await chooseNcProgram(sb) : null;
+        var prog = sb ? await chooseNcProgram(sb, ncMachine) : null;
         if (prog === false) { releaseSendCooldown(ncMachine); return new Response('', { status: 499 }); }   // operator cancelled
         if (prog && prog._id) {
           var u = new URL(input, window.location.href);
@@ -439,6 +469,24 @@
     return 'display:block;width:100%;padding:14px;margin-top:10px;border-radius:12px;font-size:1rem;font-weight:700;' +
       'cursor:pointer;background:' + bg + ';color:' + fg + ';border:1.5px solid ' + (border || bg) + ';';
   }
+  // Language: Japanese shows Japanese only, every other language shows English only.
+  // L('日本語 / English') picks one side; tr(ja, en) is the same for text built from parts.
+  function isJa() { try { return (typeof getCurrentLanguage === 'function' ? getCurrentLanguage() : 'ja') === 'ja'; } catch (e) { return true; } }
+  function L(s) {
+    s = String(s); var i = s.indexOf(' / ');
+    if (i < 0) return s;
+    return isJa() ? s.slice(0, i) : s.slice(i + 3);
+  }
+  function tr(ja, en) { return isJa() ? ja : en; }
+  // Static labels re-picked when the language changes (checked once a second).
+  function setBi(el, s) { el.setAttribute('data-bi', s); el.textContent = L(s); }
+  setInterval(function () {
+    var els = document.querySelectorAll('[data-bi]');
+    for (var i = 0; i < els.length; i++) {
+      var t = L(els[i].getAttribute('data-bi'));
+      if (els[i].textContent !== t) els[i].textContent = t;
+    }
+  }, 1000);
   function toast(msg) {
     if (typeof window.showAppToast === 'function') window.showAppToast(msg, 4000);
     else if (typeof showAlert === 'function') showAlert(msg);
@@ -479,13 +527,13 @@
 
   function openWorkOrderPicker() {
     var el = overlay('scnaWoModal',
-      '<h3 style="margin:0 0 4px;font-size:1.2rem;">作業指示 / Work Order</h3>' +
-      '<p style="margin:0 0 12px;color:#6B7280;font-size:.85rem;">このタブレット / This tablet: <b>' +
+      '<h3 style="margin:0 0 4px;font-size:1.2rem;">' + L('作業指示 / Work Order') + '</h3>' +
+      '<p style="margin:0 0 12px;color:#6B7280;font-size:.85rem;">' + L('このタブレット / This tablet: ') + '<b>' +
       esc(legacyLabel(tabletUnit())) + '</b></p>' +
       '<input id="scnaWoSearch" type="text" placeholder="WO / SKU / Customer" ' +
       'style="width:100%;padding:12px;border:1.5px solid #D1D5DB;border-radius:10px;font-size:1rem;box-sizing:border-box;">' +
-      '<div id="scnaWoList" style="margin-top:12px;color:#6B7280;">読み込み中... / Loading...</div>' +
-      '<button type="button" id="scnaWoClose" style="' + btnCss('#F3F4F6', '#374151', '#D1D5DB') + '">閉じる / Close</button>');
+      '<div id="scnaWoList" style="margin-top:12px;color:#6B7280;">' + L('読み込み中... / Loading...') + '</div>' +
+      '<button type="button" id="scnaWoClose" style="' + btnCss('#F3F4F6', '#374151', '#D1D5DB') + '">' + L('閉じる / Close') + '</button>');
     $('scnaWoClose').onclick = function () { el.remove(); };
 
     fetchWorkOrders().then(function (list) {
@@ -515,7 +563,7 @@
             '<div style="font-size:.78rem;color:#9AA1AC;">' + esc(w.Status) + ' · ' + esc(w.Deadline || '') + '</div>' +
             '</button>';
         }).join('');
-        $('scnaWoList').innerHTML = html || '該当なし / No work orders';
+        $('scnaWoList').innerHTML = html || L('該当なし / No work orders') + '';
         Array.prototype.forEach.call($('scnaWoList').querySelectorAll('button[data-n]'), function (b) {
           b.onclick = function () {
             var row = rows.filter(function (r) { return r.wo.Number === b.getAttribute('data-n'); })[0];
@@ -528,7 +576,7 @@
       render();
     }).catch(function (err) {
       console.error('SCNA: work orders failed', err);
-      $('scnaWoList').textContent = '❌ 読み込み失敗 / Failed to load work orders';
+      $('scnaWoList').textContent = L('❌ 読み込み失敗 / Failed to load work orders') + '';
     });
   }
 
@@ -548,13 +596,12 @@
   function showWrongTablet(wo, assigned, ms) {
     var el = overlay('scnaWrongTablet',
       '<div style="font-size:42px;text-align:center;">⚠️</div>' +
-      '<h3 style="text-align:center;margin:6px 0 10px;">このワークオーダーはこの機械用ではありません<br>' +
-      '<span style="font-size:.9rem;font-weight:600;">This work order is not for this machine</span></h3>' +
+      '<h3 style="text-align:center;margin:6px 0 10px;">' + tr('このワークオーダーはこの機械用ではありません', 'This work order is not for this machine') + '</h3>' +
       '<p style="text-align:center;margin:0;">' + esc(wo.Number) + ' → <b>' + esc(assigned) + '</b><br>' +
-      'タブレット / Tablet: <b>' + esc(legacyLabel(tabletUnit())) + '</b></p>' +
+      L('タブレット / Tablet: ') + '<b>' + esc(legacyLabel(tabletUnit())) + '</b></p>' +
       '<button type="button" id="scnaWtOk" style="' + btnCss('#2E6FF2', '#fff') + '">OK</button>' +
       '<button type="button" id="scnaWtOverride" style="' + btnCss('#fff', '#6B7280', '#D1D5DB') +
-      'font-size:.85rem;padding:9px;">リーダー承認で切り替え / Override (leader)</button>');
+      'font-size:.85rem;padding:9px;">' + L('リーダー承認で切り替え / Override (leader)') + '</button>');
     $('scnaWtOk').onclick = function () { el.remove(); };
     $('scnaWtOverride').onclick = function () {
       if (typeof window.verifyLeaderUI !== 'function') { toast('Leader verification unavailable'); return; }
@@ -562,8 +609,8 @@
       window.verifyLeaderUI(function () {
         applyOverriddenWorkOrder(wo, assigned, ms);
       },
-        'リーダー承認 / Leader approval',
-        'このワークオーダーをこのタブレットの機械で行うにはリーダーQRをスキャン<br>Scan leader QR to run this work order on this tablet\'s machines');
+        L('リーダー承認 / Leader approval') + '',
+        tr('このワークオーダーをこのタブレットの機械で行うにはリーダーQRをスキャン', 'Scan leader QR to run this work order on this tablet\'s machines'));
     };
   }
 
@@ -595,7 +642,7 @@
     } catch (e) { console.error('SCNA: masterDB lookup failed', e); }
 
     if (!rec || !rec.背番号) {
-      toast('❌ マスターに品番が見つかりません / SKU not found in masterDB: ' + clean);
+      toast(L('❌ マスターに品番が見つかりません / SKU not found in masterDB: ') + '' + clean);
       return false;
     }
 
@@ -661,7 +708,7 @@
     b.type = 'button'; b.id = 'scnaWoBtn';
     b.className = scanBtn.className;
     b.style.cssText = 'margin-top:10px;';
-    b.textContent = '📋 作業指示を選ぶ / Select Work Order';
+    setBi(b, '📋 作業指示を選ぶ / Select Work Order');
     b.addEventListener('click', function (e) { e.preventDefault(); openWorkOrderPicker(); });
     scanBtn.parentNode.insertBefore(b, scanBtn.nextSibling);
   }
@@ -689,6 +736,24 @@
   /* ------------------------------------------------------------------ */
   /* 7. Lot entry by keypad (no QR / no material-code validation)        */
   /* ------------------------------------------------------------------ */
+
+  // After a lot has been recorded on a machine (typed or scanned): cycle reading, photo gate, next step.
+  function afterLotRecorded(lot, machine) {
+    getRun();
+    markLotStart(machine, lot);   // reading of the listener's cycles_total at this lot change
+    var next = function () {
+      var after = function () {
+        if (typeof window.proceedAfterMachineDone === 'function') window.proceedAfterMachineDone();
+        else if (typeof showStep3Modal === 'function') showStep3Modal();
+      };
+      if (typeof window.afterLotPhotoProceed === 'function') window.afterLotPhotoProceed(after); else after();
+    };
+    var hasPhoto = (typeof materialLabelPhotos !== 'undefined') && Array.isArray(materialLabelPhotos) &&
+      materialLabelPhotos.some(function (p) { return p && p.lotNumber === lot; });
+    setTimeout(function () {
+      if (!hasPhoto && typeof window.materialPhotoGate === 'function') window.materialPhotoGate(next); else next();
+    }, 300);
+  }
 
   function manualLotEntry() {
     var input = $('材料ロット');
@@ -725,21 +790,163 @@
       }
       if (!ok) { if (typeof showStep2Modal === 'function') showStep2Modal(); return; }
 
-      getRun();
-      markLotStart(machine, lot);   // reading of the listener's cycles_total at this lot change
-      var next = function () {
-        var after = function () {
-          if (typeof window.proceedAfterMachineDone === 'function') window.proceedAfterMachineDone();
-          else if (typeof showStep3Modal === 'function') showStep3Modal();
-        };
-        if (typeof window.afterLotPhotoProceed === 'function') window.afterLotPhotoProceed(after); else after();
-      };
-      var hasPhoto = (typeof materialLabelPhotos !== 'undefined') && Array.isArray(materialLabelPhotos) &&
-        materialLabelPhotos.some(function (p) { return p && p.lotNumber === lot; });
-      setTimeout(function () {
-        if (!hasPhoto && typeof window.materialPhotoGate === 'function') window.materialPhotoGate(next); else next();
-      }, 300);
+      afterLotRecorded(lot, machine);
     }, 300);
+  }
+
+
+  /* ---- 7b. Lot entry by QR scan: "Part#,meters,unit,lot" -------------- */
+
+  // Parse from the right so a part number containing commas still works.
+  function parseLotQR(text) {
+    var parts = String(text || '').split(',');
+    if (parts.length < 4) return null;
+    var lot = parts[parts.length - 1].trim();
+    var part = parts.slice(0, parts.length - 3).join(',').trim();
+    if (!lot || !part) return null;
+    return { part: part, lot: lot };
+  }
+
+  // Expected material = masterDB 材料 or 材料背番号 (either one). Exact, case-sensitive, trimmed; a comma-separated
+  // field may list alternatives (same as the normal validateMaterialCode).
+  function expectedMaterials() {
+    var vals = [($('material') || {}).value, ($('material-code') || {}).value,
+      (typeof currentProductDetails !== 'undefined' && currentProductDetails && currentProductDetails.materialCode) || ''];
+    var out = [];
+    vals.forEach(function (v) {
+      v = String(v || '').trim();
+      if (!v) return;
+      if (out.indexOf(v) < 0) out.push(v);
+      v.split(',').forEach(function (c) { c = c.trim(); if (c && out.indexOf(c) < 0) out.push(c); });
+    });
+    return out;
+  }
+
+  function esc(t) { return String(t).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+
+  function scanScannerUI(on) {
+    var content = $('step2Content'), sc = $('step2Scanner');
+    if (content) content.style.display = on ? 'none' : 'flex';
+    if (sc) sc.style.display = on ? 'block' : 'none';
+    var cancel = $('scnaScanCancel');
+    if (on && sc && !cancel) {
+      cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.id = 'scnaScanCancel';
+      setBi(cancel, '✕ キャンセル / Cancel');
+      cancel.style.cssText = btnCss('#fff', '#c0392b', '#c0392b');
+      cancel.onclick = function () { stopLotScan().then(function () { scanScannerUI(false); }); };
+      sc.appendChild(cancel);
+    }
+    if (cancel) cancel.style.display = on ? 'block' : 'none';
+  }
+
+  async function stopLotScan() {
+    try { if (typeof step2Scanner !== 'undefined' && step2Scanner) await step2Scanner.stop(); } catch (e) { }
+    try { if (typeof step2Scanner !== 'undefined' && step2Scanner) step2Scanner.clear(); } catch (e) { }
+    try { step2Scanner = null; } catch (e) { }
+  }
+
+  function showScanError(html, alertText) {
+    var box = $('step2ErrorMsg');
+    var p = box && box.querySelector('p');
+    if (p) { p.innerHTML = html; box.style.display = 'block'; }
+    if (typeof showAlert === 'function') showAlert(alertText);
+  }
+
+  async function scnaLotScan() {
+    var grouped = (typeof groupedMachines !== 'undefined') && groupedMachines.length > 1;
+    if (grouped && !window.__lotScanMachine) {
+      var s2 = $('step2Modal'); if (s2) s2.style.display = 'none';
+      if (typeof window.chooseScanMachine === 'function') { window.chooseScanMachine(scnaLotScan); return; }
+    }
+    var machine = window.__lotScanMachine || (typeof groupedMachines !== 'undefined' && groupedMachines[0]) || '';
+    var step2 = $('step2Modal');
+    if (step2 && step2.style.display === 'none' && typeof showStep2Modal === 'function') showStep2Modal();
+    var box = $('step2ErrorMsg'); if (box) box.style.display = 'none';
+    var snd = $('alert-sound');
+    if (snd) { try { snd.pause(); snd.currentTime = 0; snd.muted = true; } catch (e) { } }
+    var am = $('scanAlertModal'); if (am) am.style.display = 'none';
+    document.body.classList.remove('flash-red');
+
+    await stopLotScan();
+    var host = $('step2QrReader'); if (host) host.innerHTML = '';
+    scanScannerUI(true);
+    await new Promise(function (r) { setTimeout(r, 100); });
+
+    var busy = false;
+    try { step2Scanner = new Html5Qrcode('step2QrReader'); } catch (e) { scanScannerUI(false); return; }
+    step2Scanner.start({ facingMode: 'environment' }, {
+      fps: 30, qrbox: { width: 800, height: 800 }, aspectRatio: 1.0, disableFlip: false,
+      advanced: [{ focusMode: 'continuous', focusDistance: { ideal: 0 } }]
+    }, async function (text) {
+      if (busy) return;
+      busy = true;
+      try {
+        await stopLotScan();
+        scanScannerUI(false);
+        var q = parseLotQR(text);
+        if (!q) {
+          showScanError('❌ <strong>' + tr('QRコードの形式が正しくありません', 'Invalid QR code format') + '</strong><br><br>' + tr('スキャン値', 'Scanned') + ': <code>' + esc(text) + '</code><br><br>' + tr('期待する形式', 'Expected') + ': <code>Part#,meters,unit,lot</code>',
+            '❌ ' + tr('QRコードの形式が正しくありません', 'Invalid QR code format') + '\n\n' + tr('スキャン値', 'Scanned') + ': ' + text + '\n\n' + tr('期待する形式', 'Expected') + ': Part#,meters,unit,lot');
+          return;
+        }
+        var exp = expectedMaterials();
+        if (exp.indexOf(q.part) < 0) {
+          var shown = exp.length ? exp.join(' / ') : tr('(マスターに材料 / 材料背番号 がありません)', '(材料 / 材料背番号 not set in master)');
+          showScanError('❌ <strong>' + tr('材料が一致しません', 'Material mismatch') + '</strong><br><br>' + tr('期待値', 'Expected') + ': <code style="color:#2e7d32;">' + esc(shown) + '</code><br>' + tr('スキャン値', 'Scanned') + ': <code style="color:#c62828;">' + esc(q.part) + '</code><br><br>' + tr('正しい材料ロットをスキャンしてください。', 'Please scan the correct material lot.'),
+            '❌ ' + tr('材料が一致しません', 'Material mismatch') + '\n\n' + tr('期待値', 'Expected') + ': ' + shown + '\n' + tr('スキャン値', 'Scanned') + ': ' + q.part + '\n\n' + tr('正しい材料ロットをスキャンしてください。', 'Please scan the correct material lot.'));
+          return;
+        }
+        window.__scannedLotQRMap = window.__scannedLotQRMap || {};
+        window.__scannedLotQRMap[q.lot] = { materialSeiban: q.part, scannedQR: text };
+        var extra = { materialSeiban: q.part, scannedQR: text };
+        var known = (typeof materialLots !== 'undefined') && materialLots.some(function (l) { return l.lotNumber === q.lot; });
+        var onMachine = (typeof window.getAllLotRecords === 'function') &&
+          window.getAllLotRecords().some(function (r) { return r.machine === machine && r.lotNumber === q.lot; });
+        if (onMachine) {
+          toast(tr('このロットは既にこの機械に追加されています: ', 'Lot already added on this machine: ') + q.lot);
+          if (step2) step2.style.display = 'none';
+          setTimeout(function () {
+            if (typeof window.proceedAfterMachineDone === 'function') window.proceedAfterMachineDone();
+            else if (typeof showStep3Modal === 'function') showStep3Modal();
+          }, 600);
+          return;
+        }
+        if (!known) {
+          if (typeof addScannedLot !== 'function' || !addScannedLot(q.lot)) { if (typeof showStep2Modal === 'function') showStep2Modal(); return; }
+        }
+        if (typeof window.recordLotScan === 'function') {
+          window.__pendingPrevLot = window.recordLotScan(q.lot, machine, 'scanned', extra);
+          if (typeof window.assertMachineState === 'function') window.assertMachineState();
+        }
+        if (typeof saveMaterialLots === 'function') saveMaterialLots();
+        if (typeof renderMaterialLotTags === 'function') renderMaterialLotTags();
+        if (typeof logTabletAction === 'function') {
+          try { await logTabletAction('Scanned material lot (Step 2)', 'in-progress', { lotNumber: q.lot, specificMachine: machine, materialCode: q.part }); } catch (e) { }
+        }
+        if (step2) step2.style.display = 'none';
+        afterLotRecorded(q.lot, machine);
+      } catch (e) {
+        console.error('SCNA lot scan failed', e);
+        showScanError('❌ <strong>' + tr('QRコードの処理エラー', 'QR processing error') + '</strong><br><br>' + esc(e.message || e), tr('QRコードの処理エラー', 'QR processing error'));
+      }
+    }, function () { }).catch(function () {
+      scanScannerUI(false);
+      toast(tr('カメラを起動できませんでした', 'Could not start camera'));
+    });
+  }
+
+  function addLotScanButton() {
+    var b = $('startStep2Scan');
+    if (!b || $('scnaScanLot')) return;
+    var sb = document.createElement('button');
+    sb.type = 'button';
+    sb.id = 'scnaScanLot';
+    sb.className = b.className;
+    setBi(sb, '📷 ロットQRをスキャン / Scan lot QR');
+    b.parentNode.insertBefore(sb, b);
+    sb.addEventListener('click', function (e) { e.preventDefault(); scnaLotScan(); });
   }
 
   document.addEventListener('click', function (e) {
@@ -750,15 +957,35 @@
     if (grouped && !window.__lotScanMachine) return;
     e.stopImmediatePropagation();
     e.preventDefault();
+    // Second machine of the pair: the page re-clicks this button (not the operator) once the other machine
+    // is chosen after the first lot. Let the operator pick scan or typing again instead of forcing the keypad.
+    var done = window.__lotCycleMachinesDone || [];
+    if (grouped && !e.isTrusted && done.length > 0 && done.indexOf(window.__lotScanMachine) < 0) {
+      askLotMethod(window.__lotScanMachine);
+      return;
+    }
     manualLotEntry();
   }, true);
+
+  function askLotMethod(machine) {
+    var el = overlay('scnaLotMethod',
+      '<h3 style="margin:0 0 4px;font-size:1.2rem;">' + L('ロット入力方法 / Lot entry method') + '</h3>' +
+      '<p style="margin:0 0 8px;color:#6B7280;font-size:.9rem;">' + esc(machine) + '</p>' +
+      '<button type="button" data-m="scan" style="' + btnCss('#2563EB', '#fff') + '">' + L('📷 ロットQRをスキャン / Scan lot QR') + '</button>' +
+      '<button type="button" data-m="manual" style="' + btnCss('#fff', '#111827', '#9CA3AF') + '">' + L('⌨ ロット番号を入力 / Enter lot number') + '</button>');
+    el.addEventListener('click', function (ev) {
+      var b = ev.target.closest('button'); if (!b) return;
+      el.remove();
+      if (b.getAttribute('data-m') === 'scan') scnaLotScan(); else manualLotEntry();
+    });
+  }
 
   // The page's "Scan material" buttons refuse to run when the product's material code is empty,
   // and SCNA products have none (lots are typed, never validated). Same flow, guarded on the 背番号.
   function scnaMaterialScan() {
     var seb = (typeof currentProductDetails !== 'undefined' && currentProductDetails && currentProductDetails.sebanggo) ||
       ($('sub-dropdown') && $('sub-dropdown').value) || '';
-    if (!seb) { toast('先に製品をスキャンしてください / Scan the product first'); return; }
+    if (!seb) { toast(L('先に製品をスキャンしてください / Scan the product first')); return; }
     window.__materialScanMode = 'production';
     window.__lotScanEpoch = (window.__lotScanEpoch || 0) + 1;
     if (window.__lotCycleMachinesDone) window.__lotCycleMachinesDone = [];
@@ -766,7 +993,7 @@
     var go = function () {
       if (typeof showStep2Modal !== 'function') return;
       showStep2Modal();
-      setTimeout(function () { var b = $('startStep2Scan'); if (b) b.click(); }, 250);
+      setTimeout(function () { scnaLotScan(); }, 250);
     };
     if (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1 && typeof window.chooseScanMachine === 'function') {
       window.chooseScanMachine(go);
@@ -868,7 +1095,8 @@
 
   function relabelLotStep() {
     var b = $('startStep2Scan');
-    if (b) b.textContent = '⌨ ロット番号を入力 / Enter lot number';
+    if (b) setBi(b, '⌨ ロット番号を入力 / Enter lot number');
+    addLotScanButton();
     var ov = $('overrideStep2');
     if (ov) ov.style.display = 'none';
   }
@@ -1264,7 +1492,7 @@
       wo = (await fetchWorkOrders() || []).filter(function (w) { return String(w.Number).toUpperCase() === number; })[0];
     } catch (e) { console.error('SCNA: work order scan lookup failed', e); }
     if (!wo) {
-      toast('❌ ワークオーダーが見つかりません / Work order not found: ' + number);
+      toast(L('❌ ワークオーダーが見つかりません / Work order not found: ') + '' + number);
       return;
     }
     selectWorkOrder(wo);
@@ -1280,12 +1508,12 @@
     if ($('scnaResetBtn')) return;
     var b = document.createElement('button');
     b.type = 'button'; b.id = 'scnaResetBtn';
-    b.textContent = '↺ リセット / Reset';
+    setBi(b, '↺ リセット / Reset');
     b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:64px;z-index:100050;display:none;padding:10px 16px;' +
       'border-radius:999px;border:1.5px solid #DC2626;background:#fff;color:#DC2626;font-weight:800;' +
       'font-size:.9rem;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25);font-family:inherit;';
     b.onclick = function () {
-      var msg = 'リセットして最初からやり直しますか？ / Reset and start over?';
+      var msg = L('リセットして最初からやり直しますか？ / Reset and start over?') + '';
       if (!window.confirm(msg)) return;
       currentWO = null;
       if (typeof window.resetAllSteps === 'function') window.resetAllSteps();
@@ -2007,19 +2235,21 @@
   function updateLiveQty(list) {
     var pq = $('ProcessQuantity');
     if (!pq || document.activeElement === pq) return;
-    var marks = cycleMarks(), openPieces = 0, any = false, complete = true;
+    // Machines that can be measured are summed; a machine on manual count (listener offline / no start reading)
+    // adds nothing until its lot is closed and its shots are entered, then the page recalculates the field.
+    var marks = cycleMarks(), openPieces = 0, any = false;
     list.forEach(function (m) {
       var ms = marks[m] || [];
       var cur = ms[ms.length - 1];
       var st = SCNA.cycleStatus[m];
-      if (!cur || cur.end != null || cur.start == null || !st || !st.auto) { if (cur && cur.end == null) complete = false; return; }
+      if (!cur || cur.end != null || cur.start == null || !st || !st.auto) return;
       var pc = lotPcPerCycle(m, cur.lotNumber);
-      if (pc == null) { complete = false; return; }
+      if (pc == null) return;
       var cycles = st.total - cur.start;
-      if (!(cycles >= 0)) { complete = false; return; }
+      if (!(cycles >= 0)) return;
       openPieces += cycles * pc; any = true;
     });
-    if (!any || !complete) return;
+    if (!any) return;
     var closed = 0;
     try {
       var lotsAll = readLots();
