@@ -14298,7 +14298,11 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         }
 
         if (action.startsWith('Stop call activated')) m.stopCallAt = log.ms;
-        else if (/^Stop call (unlocked|resolved|canceled)/.test(action)) m.stopCallAt = null;
+        else if (/^Stop call (unlocked|resolved|canceled)/.test(action)) {
+          // The leader unlock (gatekeeper) also releases a CNC cancel lock.
+          m.stopCallAt = null;
+          m.cncCancelAt = null;
+        }
         else if (action.startsWith('CNC Cancel Button Detected')) m.cncCancelAt = log.ms;
         else if (action.startsWith('CNC Cancel Unlocked')) m.cncCancelAt = null;
         else if (action === 'Maintenance started') m.maintenanceAt = log.ms;
