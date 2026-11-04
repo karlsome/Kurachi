@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Box lookup (temporary)</title>
+<style>
+  :root { --bg:#f4f6fa; --card:#fff; --ink:#101828; --mute:#667085; --line:#e4e7ec; --brand:#2e6ff2; --warn:#b54708; --bad:#b42318; --ok:#027a48; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Segoe UI","Hiragino Sans",sans-serif; }
+  header { background:#16223a; color:#fff; padding:14px 16px; }
+  header h1 { margin:0; font-size:1.1rem; }
+  header small { opacity:.7; }
+  main { max-width:1100px; margin:0 auto; padding:14px 16px 60px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:14px; }
+  .card h2 { margin:0 0 10px; font-size:1rem; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  input[type=text] { flex:1; min-width:220px; padding:12px; font-size:1rem; border:2px solid var(--brand); border-radius:10px; }
+  button { padding:12px 16px; font-size:.95rem; font-weight:700; border:0; border-radius:10px; background:var(--brand); color:#fff; cursor:pointer; }
+  button.alt { background:#fff; color:#344054; border:1px solid #d0d5dd; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:10px 18px; }
+  .kv .k { font-size:.72rem; color:var(--mute); font-weight:700; }
+  .kv .v { font-weight:800; word-break:break-all; }
+  table { width:100%; border-collapse:collapse; font-size:.88rem; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:.72rem; color:var(--mute); }
+  .tbl { overflow-x:auto; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:.72rem; font-weight:800; background:#eef4ff; color:#1d3f9c; }
+  .tag.warn { background:#fffaeb; color:var(--warn); }
+  .tag.ok { background:#ecfdf3; color:var(--ok); }
+  .tag.bad { background:#fef3f2; color:var(--bad); }
+  .imgs { display:flex; gap:10px; flex-wrap:wrap; }
+  .imgs figure { margin:0; }
+  .imgs img { height:130px; max-width:240px; object-fit:contain; border:1px solid var(--line); border-radius:8px; background:#fafafa; cursor:zoom-in; }
+  .imgs figcaption { font-size:.72rem; color:var(--mute); margin-top:3px; }
+  .err { color:var(--bad); font-weight:700; }
+  .mute { color:var(--mute); }
+  details pre { background:#0f172a; color:#d1e0ff; padding:12px; border-radius:8px; overflow:auto; max-height:420px; font-size:.78rem; }
+  #viewer { position:fixed; inset:0; background:rgba(0,0,0,.85); display:none; align-items:center; justify-content:center; z-index:10; }
+  #viewer img { max-width:96vw; max-height:92vh; }
+  video { width:100%; max-width:420px; border-radius:10px; display:none; margin-top:10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>箱の中身 / Box lookup <small>— temporary test page</small></h1>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <input id="scan" type="text" placeholder="ラベルのQRをスキャン / Scan the label QR (or type the box ID)" autofocus autocomplete="off">
+      <button id="go">Look up</button>
+      <button id="cam" class="alt">📷 Camera</button>
+    </div>
+    <video id="video" playsinline muted></video>
+    <div class="row" style="margin-top:10px;">
+      <input id="server" type="text" style="flex:0 1 320px;min-width:200px;border-width:1px;border-color:#d0d5dd;padding:8px;font-size:.85rem;" aria-label="Server">
+      <span class="mute" style="align-self:center;font-size:.8rem;">server (kept in this browser)</span>
+    </div>
+    <div class="mute" style="font-size:.8rem;margin-top:8px;">
+      QR format: <code>品番,収容数,lotNumber,boxId</code>. The last part is the box ID. You can also open this page with <code>?q=&lt;boxId&gt;</code>.
+    </div>
+  </div>
+  <div id="out"></div>
+</main>
+<div id="viewer"><img alt=""></div>
+
+<script>
+(function () {
+  var DEFAULT_SERVER = 'http://10.50.33.39:3000';
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); };
+  var kv = function (k, v) { return '<div class="kv"><div class="k">' + esc(k) + '</div><div class="v">' + (v === '' || v == null ? '<span class="mute">—</span>' : v) + '</div></div>'; };
+  var fmt = function (iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    return isNaN(d) ? esc(iso) : d.toLocaleString('ja-JP', { hour12: false });
+  };
+  var num = function (v) { return v == null || v === '' ? '' : esc(v); };
+
+  var serverInput = $('server');
+  try { serverInput.value = localStorage.getItem('boxLookupServer') || DEFAULT_SERVER; } catch (e) { serverInput.value = DEFAULT_SERVER; }
+  var base = function () { return serverInput.value.trim().replace(/\/+$/, '') || DEFAULT_SERVER; };
+  serverInput.addEventListener('change', function () { try { localStorage.setItem('boxLookupServer', serverInput.value.trim()); } catch (e) { } });
+
+  // "775031-P0858,60,20261022,WO-005460-B003" -> WO-005460-B003 ; a bare box ID works too
+  function boxIdFrom(text) {
+    var t = String(text || '').trim();
+    if (!t) return '';
+    var parts = t.split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+    return parts[parts.length - 1];
+  }
+
+  async function getJson(url, opts) {
+    var res = await fetch(url, opts);
+    var body = await res.json().catch(function () { return null; });
+    if (!res.ok) throw new Error((body && (body.error || body.message)) || ('HTTP ' + res.status));
+    return body;
+  }
+
+  async function findPress(box) {
+    var queries = [];
+    if (box.runId) queries.push({ Run_ID: box.runId });
+    queries.push({ Box_IDs: box.boxId });
+    for (var i = 0; i < queries.length; i++) {
+      var rows = await getJson(base() + '/queries', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dbName: 'submittedDB', collectionName: 'pressDB', query: queries[i] })
+      });
+      if (Array.isArray(rows) && rows.length) return rows;
+    }
+    return [];
+  }
+
+  function images(list) {
+    list = (list || []).filter(Boolean);
+    if (!list.length) return '<span class="mute">—</span>';
+    return '<div class="imgs">' + list.map(function (x) {
+      return '<figure><img src="' + esc(x.url) + '" data-zoom="1" loading="lazy" alt=""><figcaption>' + esc(x.cap || '') + '</figcaption></figure>';
+    }).join('') + '</div>';
+  }
+  var asArr = function (v) { return v == null ? [] : (Array.isArray(v) ? v : [v]); };
+
+  function renderBox(box) {
+    var tags = [];
+    tags.push('<span class="tag ' + (box.fillMethod === 'timed' ? 'ok' : 'warn') + '">fill: ' + esc(box.fillMethod || '—') + '</span>');
+    if (box.approximate) tags.push('<span class="tag warn">approximate</span>');
+    if (box.capped) tags.push('<span class="tag">capped to 収容数</span>');
+    var lots = (box.lots || []).map(function (l) {
+      return '<tr><td>' + (l.source === 'spare' ? '<span class="tag warn">spare</span>' : esc(l.machine)) + '</td><td><b>' + esc(l.lotNumber) + '</b></td>' +
+        '<td>' + num(l.shots) + '</td><td><b>' + num(l.pieces) + '</b></td>' +
+        '<td>' + fmt(l.firstCycleAt) + '</td><td>' + fmt(l.lastCycleAt) + '</td><td>' + esc(l.countSource || '') + '</td></tr>';
+    }).join('');
+    return '<div class="card"><h2>箱 / Box <span class="tag">' + esc(box.boxId) + '</span> ' + tags.join(' ') + '</h2>' +
+      '<div class="grid">' +
+      kv('品番', esc(box.品番)) + kv('背番号', esc(box.背番号)) +
+      kv('収容数 (label)', num(box.qtyLabel)) + kv('Measured pcs in box', num(box.qtyMeasured)) +
+      kv('Worker', esc(box.worker)) + kv('Machines', esc((box.machines || []).join(', '))) +
+      kv('Work order', esc(box.workOrderNumber)) + kv('Run ID', esc(box.runId)) +
+      kv('Printed', fmt(box.printedAt || box.finishedAt)) + kv('Box started', fmt(box.startedAt)) +
+      kv('Produced since last box', num(box.producedSinceLastBox)) + kv('Carried to next box', num(box.carriedOverPieces)) +
+      '</div>' +
+      (box.notes && box.notes.length ? '<p class="mute" style="font-size:.82rem;">' + box.notes.map(esc).join(' · ') + '</p>' : '') +
+      '<h2 style="margin-top:14px;">この箱のロット内訳 / Lots in this box</h2>' +
+      '<div class="tbl"><table><thead><tr><th>Machine</th><th>Lot</th><th>Cycles (shots)</th><th>Pieces</th><th>First cycle</th><th>Last cycle</th><th>Count</th></tr></thead><tbody>' +
+      (lots || '<tr><td colspan="7" class="mute">No lot lines</td></tr>') + '</tbody></table></div></div>';
+  }
+
+  function renderPress(p, box) {
+    var details = asArr(p.Lot_Details);
+    var boxKeys = {};
+    (box.lots || []).forEach(function (l) { if (l.source !== 'spare') boxKeys[l.machine + '|' + l.lotNumber] = l; });
+    var lotRows = details.map(function (d) {
+      var inBox = boxKeys[d.machine + '|' + d.lotNumber];
+      var imgs = images(asArr(d.image).map(function (u) { return { url: u, cap: '材料ラベル' }; })
+        .concat(asArr(d.defectImage).map(function (u) { return { url: u, cap: '不良' }; })));
+      return '<tr><td>' + esc(d.machine) + '</td><td><b>' + esc(d.lotNumber) + '</b> ' + (inBox ? '<span class="tag ok">in this box</span>' : '<span class="tag">other box</span>') + '</td>' +
+        '<td>' + num(d.shots) + (d.shotsAuto != null && d.shotsAuto !== d.shots ? ' <span class="mute">(auto ' + esc(d.shotsAuto) + ')</span>' : '') + '</td>' +
+        '<td>' + num(d.pieces) + '</td><td>' + num(d.meters) + '</td><td>' + esc(d.materialSeiban || '') + '</td>' +
+        '<td>' + esc(d.countSource || '') + (d.cyclesTotalStart != null ? '<div class="mute" style="font-size:.72rem;">' + esc(d.cyclesTotalStart) + ' → ' + esc(d.cyclesTotalEnd) + '</div>' : '') + '</td>' +
+        '<td>' + fmt(d.timestamp) + '</td><td>' + (d.cycleSecMedian != null ? esc(d.cycleSecMedian) + ' s <span class="mute" style="font-size:.72rem;">(' + esc(d.cycleSecMin) + '–' + esc(d.cycleSecMax) + ', n=' + esc(d.cycleIntervals) + ')</span>' : '<span class="mute">—</span>') + '</td><td>' + imgs + '</td></tr>';
+    }).join('');
+
+    var spare = asArr(p.Spare_Lots).map(function (s) {
+      return '<tr><td><b>' + esc(s.lotNumber) + '</b></td><td>' + num(s.pieces) + '</td><td>' + esc(s.worker) + '</td><td>' + fmt(s.at) + '</td><td>' + esc(s.consumedByBoxUid || '') + '</td></tr>';
+    }).join('');
+
+    var check = images([
+      p['初物チェック画像'] && { url: p['初物チェック画像'], cap: '初物 / first piece check' },
+      p['終物チェック画像'] && { url: p['終物チェック画像'], cap: '終物 / last piece check' }
+    ]);
+    var labels = images(asArr(p['材料ラベル画像']).map(function (u) { return { url: u, cap: '材料ラベル' }; }));
+
+    var maint = p.Maintenance_Data && p.Maintenance_Data.records ? p.Maintenance_Data.records.length : 0;
+    var stop = p.StopCall && p.StopCall.count ? p.StopCall.count + ' (' + (p.StopCall.totalWaitMinutes || 0) + ' min)' : '0';
+
+    return '<div class="card"><h2>生産記録 / Production record (pressDB) <span class="tag">' + esc(p._id) + '</span></h2>' +
+      '<p class="mute" style="font-size:.8rem;margin-top:-4px;">This is the whole run (one submit). The box above holds only part of it.</p>' +
+      '<div class="grid">' +
+      kv('品番', esc(p.品番)) + kv('背番号', esc(p.背番号)) + kv('設備', esc(p.設備)) + kv('Worker', esc(p.Worker_Name)) +
+      kv('Date', esc(p.Date)) + kv('Time', esc((p.Time_start || '') + ' – ' + (p.Time_end || ''))) +
+      kv('Total (good)', num(p.Total)) + kv('Process quantity', num(p.Process_Quantity)) +
+      kv('疵引不良', num(p['疵引不良'])) + kv('加工不良', num(p['加工不良'])) + kv('その他', num(p['その他'])) + kv('Total NG', num(p.Total_NG)) +
+      kv('Spare', num(p.Spare)) + kv('スペアからの部分数', num(p['スペアからの部分数'])) +
+      kv('Total meters', num(p.Total_Meters)) + kv('Total pieces', num(p.Total_Pieces)) +
+      kv('Shots (ショット数)', num(p['ショット数'])) + kv('Cycle time', num(p.Cycle_Time)) +
+      kv('Break (min)', num(p.Total_Break_Minutes)) + kv('Trouble (min)', num(p.Total_Trouble_Minutes)) +
+      kv('Maintenance records', maint) + kv('Leader calls', esc(stop)) +
+      kv('Work order', esc(p.WorkOrder_Info && p.WorkOrder_Info.workOrderNumber)) + kv('Run ID', esc(p.Run_ID)) +
+      kv('Boxes in this run', esc((p.Box_IDs || []).join(', '))) +
+      '</div>' +
+      (p.Comment ? '<p><b>Comment:</b> ' + esc(p.Comment) + '</p>' : '') +
+      '<h2 style="margin-top:14px;">ロット別 / Per lot</h2>' +
+      '<div class="tbl"><table><thead><tr><th>Machine</th><th>Lot</th><th>Shots</th><th>Pieces</th><th>Meters</th><th>Material</th><th>Count source</th><th>Time</th><th>Cycle time (median)</th><th>Images</th></tr></thead><tbody>' +
+      (lotRows || '<tr><td colspan="10" class="mute">No lot details</td></tr>') + '</tbody></table></div>' +
+      (spare ? '<h2 style="margin-top:14px;">スペア / Spare lots</h2><div class="tbl"><table><thead><tr><th>Lot</th><th>Pieces</th><th>Worker</th><th>Added</th><th>Used by box</th></tr></thead><tbody>' + spare + '</tbody></table></div>' : '') +
+      '<h2 style="margin-top:14px;">初物・終物 / First & last piece check</h2>' + check +
+      '<h2 style="margin-top:14px;">材料ラベル / Material labels</h2>' + labels +
+      '<details style="margin-top:14px;"><summary>Raw record</summary><pre>' + esc(JSON.stringify(p, null, 2)) + '</pre></details></div>';
+  }
+
+  async function lookup(text) {
+    var out = $('out');
+    var id = boxIdFrom(text);
+    if (!id) return;
+    out.innerHTML = '<div class="card mute">Looking up ' + esc(id) + ' …</div>';
+    try {
+      var box = await getJson(base() + '/api/scna-boxes/' + encodeURIComponent(id));
+      var html = renderBox(box);
+      var rows = [];
+      try { rows = await findPress(box); } catch (e) { html += '<div class="card err">pressDB: ' + esc(e.message) + '</div>'; }
+      if (rows.length) html += rows.map(function (p) { return renderPress(p, box); }).join('');
+      else html += '<div class="card"><span class="tag warn">not submitted yet</span> <span class="mute">No pressDB record for this run yet (it is saved when the run is submitted on the tablet).</span></div>';
+      html += '<div class="card"><details><summary>Raw box record</summary><pre>' + esc(JSON.stringify(box, null, 2)) + '</pre></details></div>';
+      out.innerHTML = html;
+    } catch (e) {
+      out.innerHTML = '<div class="card err">Box "' + esc(id) + '" not found or server unreachable: ' + esc(e.message) +
+        '<div class="mute" style="font-weight:400;margin-top:6px;">Server: ' + esc(base()) + '</div></div>';
+    }
+  }
+
+  $('go').addEventListener('click', function () { lookup($('scan').value); });
+  $('scan').addEventListener('keydown', function (e) { if (e.key === 'Enter') lookup(this.value); });
+  document.addEventListener('click', function (e) {
+    var img = e.target.closest && e.target.closest('img[data-zoom]');
+    if (img) { $('viewer').firstElementChild.src = img.src; $('viewer').style.display = 'flex'; }
+  });
+  $('viewer').addEventListener('click', function () { this.style.display = 'none'; });
+
+  // Camera scan (Chrome / Android: BarcodeDetector). A hardware scanner typing into the field works everywhere.
+  $('cam').addEventListener('click', async function () {
+    if (!('BarcodeDetector' in window)) { alert('This browser has no camera QR reader. Use a scanner or type the box ID.'); return; }
+    var video = $('video');
+    try {
+      var stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      video.srcObject = stream; video.style.display = 'block'; await video.play();
+      var det = new BarcodeDetector({ formats: ['qr_code'] });
+      var tick = async function () {
+        if (!video.srcObject) return;
+        try {
+          var codes = await det.detect(video);
+          if (codes.length) {
+            stream.getTracks().forEach(function (t) { t.stop(); });
+            video.srcObject = null; video.style.display = 'none';
+            $('scan').value = codes[0].rawValue; lookup(codes[0].rawValue); return;
+          }
+        } catch (e) { }
+        requestAnimationFrame(tick);
+      };
+      tick();
+    } catch (e) { alert('Camera not available: ' + e.message + '\n(Camera needs https or localhost; a typed/scanner input works anywhere.)'); }
+  });
+
+  var q = new URLSearchParams(location.search).get('q');
+  if (q) { $('scan').value = q; lookup(q); }
+})();
+</script>
+</body>
+</html>

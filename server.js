@@ -212,6 +212,7 @@ function buildStopCallPayload(factoryId) {
     if (info.stop && info.stop.since < earliest) earliest = info.stop.since;
     if (info.box && info.box.since < earliest) earliest = info.box.since;
     if (info.material && info.material.since < earliest) earliest = info.material.since;
+    if (info.quality && info.quality.since < earliest) earliest = info.quality.since;
     
     if (earliest !== Infinity) {
       active.push({
@@ -221,6 +222,7 @@ function buildStopCallPayload(factoryId) {
         stop: !!info.stop,
         box: !!info.box,
         material: !!info.material,
+        quality: !!info.quality,
         zairyoSebanggo: info.material ? info.material.zairyoSebanggo : undefined
       });
     }
@@ -4470,8 +4472,12 @@ app.post('/submitToDCP', async (req, res) => {
                     const buffer = Buffer.from(imgData.base64, 'base64');
                     console.log(`🔍 Processing material label image ${imgData.id}: buffer size = ${buffer.length} bytes`);
 
-                    // Create unique filename
-                    const fileName = `${formData.背番号}_${formData.Date}_${imgData.timestamp}_${imgData.id}_materialLabelImage.jpg`;
+                    // Create unique filename with lot number (and defect tag if applicable)
+                    const isDefect = !!imgData.isDefect;
+                    const cleanLot = imgData.lotNumber
+                        ? `lot-${String(imgData.lotNumber).trim().replace(/[^a-zA-Z0-9_-]/g, '_')}${isDefect ? '-defect' : ''}`
+                        : (imgData.id ? String(imgData.id).trim().replace(/[^a-zA-Z0-9_-]/g, '_') : `photo-${Date.now()}`);
+                    const fileName = `${formData.背番号}_${formData.Date}_${imgData.timestamp}_${cleanLot}_materialLabelImage.jpg`;
                     const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
                     const file = bucket.file(filePath);
                     const downloadToken = "masterDBToken69";
@@ -5064,6 +5070,173 @@ app.post("/submitToSRSDBiReporter", async (req, res) => {
   }
 });
 
+
+// ---------------------------------------------------------------------------
+// SRS interactive (SCNA / Girasol): own route so the production "SRS Process iReporter" route above stays untouched.
+// Same save as /submitToSRSDBiReporter, plus box traceability (docs/srs-interactive-label-plan.md):
+//  - Box_IDs index; the SRS result is written back onto each press box in scnaBoxDB (srs = latest, srsRuns = all)
+//  - Srs_Box_IDs: the SRS labels printed in this lane session. Each must exist, be complete/draft, not voided and not yet
+//    linked; they get srsRecordId set. Press boxes may now be used by several records (leftover pieces), so the old
+//    "box already submitted -> 409" check only applies to the old whole-box flow (no Srs_Box_IDs sent).
+//  - Submit_UID (optional): a retry of the same submit returns the saved record instead of a duplicate
+//  - Srs_Unlabelled_NG: [{ boxId, ng, ngTotal }] NG found after the last print; taken from the press box's remaining pieces
+// ---------------------------------------------------------------------------
+let _srsBoxIndexReady = false;
+async function _ensureSrsBoxIndex(SRSDB) {
+  if (_srsBoxIndexReady) return;
+  await SRSDB.createIndex({ Box_IDs: 1 });
+  await SRSDB.createIndex({ Srs_Box_IDs: 1 });
+  await SRSDB.createIndex({ Submit_UID: 1 }, { unique: true, partialFilterExpression: { Submit_UID: { $type: "string" } } });
+  _srsBoxIndexReady = true;
+}
+
+app.post("/submitToSRSDBInteractive", async (req, res) => {
+  try {
+    await client.connect();
+
+    const database = client.db("submittedDB");
+    const SRSDB = database.collection("SRSDB");
+    const formData = req.body;
+    try { await _ensureSrsBoxIndex(SRSDB); } catch (e) { console.error("SRSDB indexes failed:", e.message); }
+
+    // retry of a submit that already went through
+    const submitUid = String(formData.Submit_UID || "").trim();
+    if (submitUid) {
+      const done = await SRSDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+      if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+    }
+
+    const cleanIds = (v) => Array.isArray(v) ? [...new Set(v.map(x => String(x || "").trim()).filter(Boolean))] : [];
+    const srsBoxIds = cleanIds(formData.Box_IDs);
+    const srsLabelIds = cleanIds(formData.Srs_Box_IDs);
+
+    if (srsLabelIds.length) {
+      // labels printed in this session: valid, still open, not linked to another record
+      const labels = await client.db(DB_NAME).collection("srsBoxDB").find({ srsId: { $in: srsLabelIds } }).toArray();
+      const byId = new Map(labels.map(x => [x.srsId, x]));
+      const bad = srsLabelIds.filter(id => {
+        const x = byId.get(id);
+        return !x || (x.status !== "complete" && x.status !== "draft") || x.srsRecordId;
+      });
+      if (bad.length) {
+        return res.status(409).json({
+          error: `SRS label cannot be submitted: ${bad.map(id => `${id} (${byId.get(id) ? (byId.get(id).srsRecordId ? "already submitted" : byId.get(id).status) : "not found"})`).join(", ")}`,
+          srsIds: bad
+        });
+      }
+    } else if (srsBoxIds.length) {
+      // old whole-box flow: a box is processed by SRS once
+      const used = await SRSDB.findOne({ Box_IDs: { $in: srsBoxIds } }, { projection: { Box_IDs: 1 } });
+      if (used) {
+        const dup = srsBoxIds.filter(id => (used.Box_IDs || []).includes(id));
+        return res.status(409).json({ error: `Box already submitted to SRS: ${dup.join(", ")}`, boxIds: dup });
+      }
+    }
+
+    // Handle base64 images
+    const images = formData.images || [];
+    delete formData.images;
+
+    const labelToField = {
+      "初物チェック": "初物チェック画像",
+      // Add more labels if needed
+    };
+
+    for (const img of images) {
+      if (!img.base64 || !img.label) continue;
+
+      const buffer = Buffer.from(img.base64, 'base64');
+      const fileName = `${img.sebanggo}_${img.date}_${img.worker}_${img.factory}_${img.machine}_${img.label}.jpg`;
+      const filePath = `CycleCheck/SRS/${fileName}`;
+      const file = admin.storage().bucket().file(filePath);
+
+      const downloadToken = "masterDBToken69";
+
+      await file.save(buffer, {
+        metadata: {
+          contentType: "image/jpeg",
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken
+          }
+        }
+      });
+
+      const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+      const fieldName = labelToField[img.label] || `${img.label}画像`;
+
+      formData[fieldName] = publicUrl;
+    }
+
+    // Add createdAt timestamp
+    formData.createdAt = new Date().toISOString();
+
+    let result;
+    try {
+      result = await SRSDB.insertOne(formData);
+    } catch (e) {
+      if (e && e.code === 11000 && submitUid) {   // the same submit arrived twice at once
+        const done = await SRSDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+        if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+      }
+      throw e;
+    }
+    _invalidateFinancialsCache('SRSDB insert');
+
+    // The SRS record is saved; what follows is bookkeeping, so a failure is logged and not returned as a submit error.
+    const boxDb = client.db(DB_NAME);
+    if (srsLabelIds.length) {
+      try {
+        await boxDb.collection("srsBoxDB").updateMany(
+          { srsId: { $in: srsLabelIds } },
+          { $set: { srsRecordId: result.insertedId, submittedAt: formData.createdAt } }
+        );
+      } catch (e) { console.error("SRS label link failed (SRSDB record saved):", e.message); }
+    }
+    // NG found after the last print: those pieces are gone from the press box too
+    const lateNg = Array.isArray(formData.Srs_Unlabelled_NG) ? formData.Srs_Unlabelled_NG : [];
+    for (const x of lateNg) {
+      const boxId = String((x && x.boxId) || "").trim();
+      const ng = Number(x && x.ngTotal) || 0;
+      if (!boxId || ng <= 0) continue;
+      try {
+        await boxDb.collection("scnaBoxDB").updateOne({ boxId }, { $push: { srsConsumed: {
+          srsId: null, recordId: result.insertedId, good: 0, ng, pieces: ng, at: formData.createdAt
+        } } });
+      } catch (e) { console.error(`SRS late NG for ${boxId} failed:`, e.message); }
+    }
+    // Write the SRS result back onto each press box so a box lookup shows who ran SRS, on which Girasol, under which work order.
+    if (srsBoxIds.length) {
+      const run = {
+        srsRecordId: result.insertedId,
+        srsIds: srsLabelIds,
+        machine: formData.設備 || "",
+        lane: formData.Lane || formData["R/L"] || "",
+        workers: formData.Worker_Name || "",
+        workOrders: Array.isArray(formData.WorkOrders) ? formData.WorkOrders : [],
+        date: formData.Date || "",
+        timeStart: formData.Time_start || "",
+        timeEnd: formData.Time_end || "",
+        submittedAt: formData.createdAt
+      };
+      try {
+        await boxDb.collection("scnaBoxDB").updateMany(
+          { boxId: { $in: srsBoxIds } },
+          { $set: { srs: run }, $push: { srsRuns: run } }
+        );
+      } catch (e) {
+        console.error("SRS box write-back failed (SRSDB record saved):", e.message);
+      }
+    }
+
+    res.status(201).json({
+      message: "Data and images successfully saved to SRSDB",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error("Error saving data to SRSDB (interactive):", error);
+    res.status(500).json({ error: "Error saving data to SRSDB" });
+  }
+});
 
 // This is for SRS LH
 // Route to fetch all 背番号 with R/L = "LH" from masterDB
@@ -11273,6 +11446,10 @@ app.post('/api/analytics-data', async (req, res) => {
     factoryAccess = [],
     factoryFilter, // CRITICAL: Factory filter parameter
     bans,          // Optional: array of 背番号 to restrict results to
+    partNumbers,   // Optional: array of 品番 to restrict results to
+    hinbans,       // Optional: alias for partNumbers
+    models,        // Optional: array of モデル to restrict results to
+    advancedFilters, // Optional: array of MongoDB filter clauses
     collectionName = 'kensaDB',
     dbName = "submittedDB"
   } = req.body;
@@ -11313,6 +11490,96 @@ app.post('/api/analytics-data', async (req, res) => {
     if (Array.isArray(bans) && bans.length > 0) {
       baseQuery['背番号'] = { $in: bans };
       console.log(`🔖 Applied 背番号 filter: ${bans.length} products`);
+    }
+
+    // Apply 品番 (part number) filter
+    const resolvedPartNumbers = partNumbers || hinbans;
+    if (Array.isArray(resolvedPartNumbers) && resolvedPartNumbers.length > 0) {
+      baseQuery['品番'] = { $in: resolvedPartNumbers };
+      console.log(`🔖 Applied 品番 filter: ${resolvedPartNumbers.length} part numbers`);
+    }
+
+    // Apply モデル (model) filter - resolved via masterDB (submittedDB records don't store モデル directly)
+    if (Array.isArray(models) && models.length > 0) {
+      try {
+        const masterDb = client.db('Sasaki_Coating_MasterDB');
+        const masterDocs = await masterDb.collection('masterDB').find(
+          { モデル: { $in: models } },
+          { projection: { 背番号: 1, 品番: 1, _id: 0 } }
+        ).toArray();
+        const modelBans = [...new Set(masterDocs.map(d => d.背番号).filter(Boolean))];
+        const modelHinbans = [...new Set(masterDocs.map(d => d.品番).filter(Boolean))];
+        console.log(`🔖 Resolved ${models.length} models to ${modelBans.length} 背番号 and ${modelHinbans.length} 品番`);
+        if (modelBans.length > 0) {
+          if (baseQuery['背番号'] && baseQuery['背番号'].$in) {
+            baseQuery['背番号'].$in = baseQuery['背番号'].$in.filter(b => modelBans.includes(b));
+          } else {
+            baseQuery['背番号'] = { $in: modelBans };
+          }
+        } else if (modelHinbans.length > 0) {
+          if (baseQuery['品番'] && baseQuery['品番'].$in) {
+            baseQuery['品番'].$in = baseQuery['品番'].$in.filter(p => modelHinbans.includes(p));
+          } else {
+            baseQuery['品番'] = { $in: modelHinbans };
+          }
+        } else {
+          baseQuery['背番号'] = { $in: ['__NO_MATCH__'] };
+        }
+      } catch (err) {
+        console.error('Failed to resolve models in masterDB:', err);
+      }
+    }
+
+    // Apply advanced filter clauses if provided
+    if (Array.isArray(advancedFilters) && advancedFilters.length > 0) {
+      if (!baseQuery.$and) {
+        baseQuery = { $and: [baseQuery] };
+      }
+      for (const clause of advancedFilters) {
+        if (!clause || typeof clause !== 'object' || Object.keys(clause).length === 0) continue;
+
+        let normalizedClause = { ...clause };
+
+        // 1. Resolve モデル if queried (submittedDB records don't store モデル directly)
+        if ('モデル' in normalizedClause) {
+          try {
+            const masterDb = client.db('Sasaki_Coating_MasterDB');
+            const modelCond = normalizedClause['モデル'];
+            const resolvedModelCond = Array.isArray(modelCond) ? { $in: modelCond } : modelCond;
+            const masterDocs = await masterDb.collection('masterDB').find(
+              { モデル: resolvedModelCond },
+              { projection: { 背番号: 1, 品番: 1, _id: 0 } }
+            ).toArray();
+            const modelBans = [...new Set(masterDocs.map(d => d.背番号).filter(Boolean))];
+            const modelHinbans = [...new Set(masterDocs.map(d => d.品番).filter(Boolean))];
+            if (modelBans.length > 0) {
+              normalizedClause = { 背番号: { $in: modelBans } };
+            } else if (modelHinbans.length > 0) {
+              normalizedClause = { 品番: { $in: modelHinbans } };
+            } else {
+              normalizedClause = { 背番号: '__NO_MATCH__' };
+            }
+          } catch (err) {
+            console.error('Failed to resolve モデル in advanced filter clause:', err);
+          }
+        } else {
+          // 2. Normalize array values for scalar fields: { field: [val] } -> unwrap or { $in: val }
+          for (const key of Object.keys(normalizedClause)) {
+            if (key.startsWith('$')) continue;
+            const val = normalizedClause[key];
+            if (Array.isArray(val)) {
+              if (val.length === 1) {
+                normalizedClause[key] = val[0];
+              } else if (val.length > 1) {
+                normalizedClause[key] = { $in: val };
+              }
+            }
+          }
+        }
+
+        baseQuery.$and.push(normalizedClause);
+      }
+      console.log(`🔍 Applied ${advancedFilters.length} advanced filter clauses. Query:`, JSON.stringify(baseQuery));
     }
 
     // Build climate data query (for temperature/humidity)
@@ -12837,7 +13104,7 @@ app.post('/api/production-goals/lookup', async (req, res) => {
 // ==================== UPDATE PRODUCTION PLAN ====================
 app.post('/api/production-plans/update', async (req, res) => {
     try {
-        const { planId, factory, date, products, breaks, updatedBy } = req.body;
+        const { planId, factory, date, products, breaks, updatedBy, startTime, unavailableEquipment } = req.body;
         
         if (!planId) {
             return res.status(400).json({ 
@@ -12858,6 +13125,8 @@ app.post('/api/production-plans/update', async (req, res) => {
         if (products) updateData.products = products;
         if (breaks) updateData.breaks = breaks;
         if (updatedBy) updateData.updatedBy = updatedBy;
+        if (startTime !== undefined) updateData.startTime = startTime;
+        if (unavailableEquipment !== undefined) updateData.unavailableEquipment = unavailableEquipment;
         
         const result = await collection.updateOne(
             { _id: new ObjectId(planId) },
@@ -12915,7 +13184,7 @@ app.get('/api/production-plans', async (req, res) => {
 // ==================== CREATE PRODUCTION PLAN ====================
 app.post('/api/production-plans', async (req, res) => {
     try {
-        const { factory, date, products, breaks, createdBy } = req.body;
+        const { factory, date, products, breaks, createdBy, startTime, unavailableEquipment } = req.body;
         
         if (!factory || !date) {
             return res.status(400).json({ 
@@ -12936,6 +13205,8 @@ app.post('/api/production-plans', async (req, res) => {
             createdAt: new Date(),
             updatedAt: new Date()
         };
+        if (startTime) plan.startTime = startTime;
+        if (unavailableEquipment) plan.unavailableEquipment = unavailableEquipment;
         
         const result = await collection.insertOne(plan);
         
@@ -13664,6 +13935,728 @@ app.get('/api/factory-status/machines/:factoryName', async (req, res) => {
   } catch (error) {
     console.error(`Error fetching machines for ${req.params.factoryName}:`, error);
     res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// ============================================
+// DIGITAL TWIN — live per-machine state for the freyaAdmin2 3D dashboard
+// Sources: cycleCountDB (live cycles), tabletLogDB (worker/背番号/alerts),
+//          masterDB (pcPerCycle), setsubiDB (heads/table length/pairs), productionGoalsDB
+// ============================================
+const DIGITAL_TWIN_IDLE_MS = 10 * 60 * 1000;       // no cycle for 10 min => idle
+const DIGITAL_TWIN_OFF_MS = 60 * 60 * 1000;        // no activity for 60 min => off
+const DIGITAL_TWIN_RESET_HOUR_JST = 2;             // ioT listener resets cycles at 02:00
+const DIGITAL_TWIN_JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DIGITAL_TWIN_STATUS_PRIORITY = ['stopCall', 'cncCancel', 'maintenance', 'break', 'running', 'idle', 'off'];
+
+function getDigitalTwinProductionDay(nowMs = Date.now()) {
+  const jstNow = new Date(nowMs + DIGITAL_TWIN_JST_OFFSET_MS); // UTC fields == JST wall clock
+  const todayCutoff = Date.UTC(
+    jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate(), DIGITAL_TWIN_RESET_HOUR_JST
+  ) - DIGITAL_TWIN_JST_OFFSET_MS;
+  const cutoffMs = nowMs < todayCutoff ? todayCutoff - 24 * 60 * 60 * 1000 : todayCutoff;
+  return {
+    cutoffMs,
+    productionDate: new Date(cutoffMs + DIGITAL_TWIN_JST_OFFSET_MS).toISOString().slice(0, 10),
+    calendarDate: jstNow.toISOString().slice(0, 10),
+  };
+}
+
+// cycleCountDB timestamps are naive JST (Python datetime.now().isoformat())
+function parseDigitalTwinTimestamp(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.getTime();
+  const str = String(value).trim();
+  const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(str);
+  const ms = Date.parse(hasZone ? str : `${str}+09:00`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function splitDigitalTwinEquipment(value) {
+  return String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+// sessionID format: `${背番号|setup}_${設備}_${工場}_${date}_${n}`
+function getDigitalTwinSessionEquipment(sessionID) {
+  const parts = String(sessionID || '').split('_');
+  return parts.length >= 5 ? parts[1] : '';
+}
+
+function toDigitalTwinNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function timeToDigitalTwinMinutes(t) {
+  if (!t || typeof t !== 'string') return null;
+  const m = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
+function minutesToDigitalTwinTime(mins) {
+  if (mins === null || mins === undefined) return '';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function buildDigitalTwinTimelineSegments({
+  runs = [],
+  activeRun = null,
+  currentStatus = 'off',
+  dayStartMin = 480,
+  dayEndMin = 1140,
+}) {
+  const segments = [];
+  const addSegment = (type, sMin, eMin, meta = {}) => {
+    if (eMin <= sMin) return;
+    const last = segments[segments.length - 1];
+    if (
+      last &&
+      last.type === type &&
+      last.sebanggo === (meta.sebanggo || '') &&
+      last.label === (meta.label || '')
+    ) {
+      last.endMin = eMin;
+      last.end = minutesToDigitalTwinTime(eMin);
+      last.durationMin = last.endMin - last.startMin;
+      return;
+    }
+    segments.push({
+      type,
+      startMin: sMin,
+      endMin: eMin,
+      start: minutesToDigitalTwinTime(sMin),
+      end: minutesToDigitalTwinTime(eMin),
+      durationMin: eMin - sMin,
+      sebanggo: meta.sebanggo || '',
+      hinban: meta.hinban || '',
+      worker: meta.worker || '',
+      pieces: meta.pieces || 0,
+      shots: meta.shots || 0,
+      label: meta.label || '',
+    });
+  };
+
+  let minShiftStart = dayStartMin;
+  let maxShiftEnd = dayEndMin;
+  runs.forEach((r) => {
+    if (r.startMin !== null && r.startMin < minShiftStart) minShiftStart = Math.floor(r.startMin / 30) * 30;
+    if (r.endMin !== null && r.endMin > maxShiftEnd) maxShiftEnd = Math.ceil(r.endMin / 30) * 30;
+  });
+  if (activeRun && activeRun.startMin !== null && activeRun.startMin < minShiftStart) {
+    minShiftStart = Math.floor(activeRun.startMin / 30) * 30;
+  }
+  if (activeRun && activeRun.endMin !== null && activeRun.endMin > maxShiftEnd) {
+    maxShiftEnd = Math.ceil(activeRun.endMin / 30) * 30;
+  }
+
+  let cursor = minShiftStart;
+
+  for (const r of runs) {
+    if (r.startMin === null || r.endMin === null) continue;
+    if (r.startMin > cursor) {
+      const gap = r.startMin - cursor;
+      addSegment(gap <= 15 ? 'setup' : 'idle', cursor, r.startMin, {
+        label: gap <= 15 ? '段取・切替' : 'アイドル',
+      });
+      cursor = r.startMin;
+    }
+
+    const subEvents = [];
+    (r.breaks || []).forEach((b) => {
+      if (b.startMin >= r.startMin && b.endMin <= r.endMin && b.endMin > b.startMin) {
+        subEvents.push({ type: 'break', startMin: b.startMin, endMin: b.endMin, label: '休憩' });
+      }
+    });
+    (r.stopCalls || []).forEach((s) => {
+      const sMin = timeToDigitalTwinMinutes(s.start || s.time);
+      const eMin = timeToDigitalTwinMinutes(s.end || s.resolvedAt);
+      if (sMin !== null && eMin !== null && sMin >= r.startMin && eMin <= r.endMin && eMin > sMin) {
+        subEvents.push({ type: 'stopCall', startMin: sMin, endMin: eMin, label: '呼出・停止' });
+      }
+    });
+    (r.maintenances || []).forEach((m) => {
+      const sMin = timeToDigitalTwinMinutes(m.start);
+      const eMin = timeToDigitalTwinMinutes(m.end);
+      if (sMin !== null && eMin !== null && sMin >= r.startMin && eMin <= r.endMin && eMin > sMin) {
+        subEvents.push({ type: 'maintenance', startMin: sMin, endMin: eMin, label: 'メンテナンス' });
+      }
+    });
+    subEvents.sort((a, b) => a.startMin - b.startMin);
+
+    let runCursor = r.startMin;
+    for (const sub of subEvents) {
+      if (sub.startMin > runCursor) {
+        addSegment('running', runCursor, sub.startMin, {
+          sebanggo: r.sebanggo,
+          hinban: r.hinban,
+          worker: r.worker,
+          label: r.sebanggo || '稼働',
+        });
+      }
+      addSegment(sub.type, Math.max(runCursor, sub.startMin), sub.endMin, {
+        label: sub.label,
+      });
+      runCursor = Math.max(runCursor, sub.endMin);
+    }
+    if (runCursor < r.endMin) {
+      addSegment('running', runCursor, r.endMin, {
+        sebanggo: r.sebanggo,
+        hinban: r.hinban,
+        worker: r.worker,
+        label: r.sebanggo || '稼働',
+      });
+    }
+    cursor = Math.max(cursor, r.endMin);
+  }
+
+  if (activeRun && activeRun.startMin !== null && activeRun.endMin !== null && activeRun.endMin > cursor) {
+    if (activeRun.startMin > cursor) {
+      const gap = activeRun.startMin - cursor;
+      addSegment(gap <= 15 ? 'setup' : 'idle', cursor, activeRun.startMin, {
+        label: gap <= 15 ? '段取・切替' : 'アイドル',
+      });
+      cursor = activeRun.startMin;
+    }
+    const actType = currentStatus === 'break' ? 'break'
+      : currentStatus === 'stopCall' ? 'stopCall'
+      : currentStatus === 'maintenance' ? 'maintenance'
+      : currentStatus === 'idle' ? 'idle'
+      : 'running';
+    addSegment(actType, cursor, activeRun.endMin, {
+      sebanggo: activeRun.sebanggo,
+      hinban: activeRun.hinban,
+      worker: activeRun.worker,
+      label: activeRun.sebanggo || (actType === 'running' ? '稼働中' : actType),
+    });
+    cursor = activeRun.endMin;
+  }
+
+  if (cursor < maxShiftEnd) {
+    addSegment(currentStatus === 'off' ? 'off' : 'idle', cursor, maxShiftEnd, {
+      label: currentStatus === 'off' ? '停止' : '待機',
+    });
+  }
+
+  const summary = {
+    runningMin: 0,
+    idleMin: 0,
+    setupMin: 0,
+    breakMin: 0,
+    stopCallMin: 0,
+    maintenanceMin: 0,
+    offMin: 0,
+    totalShiftMin: maxShiftEnd - minShiftStart,
+    shiftStart: minutesToDigitalTwinTime(minShiftStart),
+    shiftEnd: minutesToDigitalTwinTime(maxShiftEnd),
+    uptimePercent: 0,
+  };
+  segments.forEach((s) => {
+    if (s.type === 'running') summary.runningMin += s.durationMin;
+    else if (s.type === 'idle') summary.idleMin += s.durationMin;
+    else if (s.type === 'setup') summary.setupMin += s.durationMin;
+    else if (s.type === 'break') summary.breakMin += s.durationMin;
+    else if (s.type === 'stopCall') summary.stopCallMin += s.durationMin;
+    else if (s.type === 'maintenance') summary.maintenanceMin += s.durationMin;
+    else if (s.type === 'off') summary.offMin += s.durationMin;
+  });
+  const operatingMin = summary.runningMin + summary.idleMin + summary.setupMin + summary.stopCallMin + summary.maintenanceMin;
+  summary.uptimePercent = operatingMin > 0 ? Math.round((summary.runningMin / operatingMin) * 100) : 0;
+
+  return { segments, summary };
+}
+
+// Factories that can be shown on the dashboard: any factory with recent press records or a cycle sensor.
+app.get('/api/digital-twin-factories', async (req, res) => {
+  try {
+    const since = new Date(Date.now() + DIGITAL_TWIN_JST_OFFSET_MS - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const masterDb = client.db(DB_NAME);
+    const submittedDb = client.db('submittedDB');
+    const distinctField = (collection, field, match) => collection
+      .aggregate([{ $match: match }, { $group: { _id: `$${field}` } }])
+      .toArray()
+      .then((rows) => rows.map((r) => r._id));
+    const [pressFactories, sensorFactories] = await Promise.all([
+      distinctField(submittedDb.collection('pressDB'), '工場', { Date: { $gte: since } }),
+      distinctField(masterDb.collection('cycleCountDB'), 'factory', {}),
+    ]);
+    const sensorSet = new Set(sensorFactories.map((f) => String(f || '').trim()));
+    const names = [...new Set([...pressFactories, ...sensorFactories].map((f) => String(f || '').trim()))]
+      .filter((f) => f && !f.endsWith('工場') || ['第一工場', '第二工場'].includes(f));
+    const factories = names
+      .map((factory) => ({ factory, hasCycleSensors: sensorSet.has(factory) }))
+      .sort((a, b) => Number(b.hasCycleSensors) - Number(a.hasCycleSensors) || a.factory.localeCompare(b.factory, 'ja'));
+    res.json({ success: true, factories });
+  } catch (error) {
+    console.error('Error listing digital twin factories:', error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+app.get('/api/digital-twin/:factoryName', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    const nowMs = Date.now();
+    const { cutoffMs, productionDate, calendarDate } = getDigitalTwinProductionDay(nowMs);
+    const recentSince = new Date(cutoffMs + DIGITAL_TWIN_JST_OFFSET_MS - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const masterDb = client.db(DB_NAME);
+    const submittedDb = client.db('submittedDB');
+
+    const [cycleDocs, setsubiDocs, logDocs, pressDocs, goalRows, recentEquipment] = await Promise.all([
+      masterDb.collection('cycleCountDB').find({ factory }).toArray(),
+      masterDb.collection(CHECK_FORM_EQUIPMENT_COLLECTION)
+        .find({ 工場: factory, _archived: { $ne: true } })
+        .project({ name: 1, noOfHead: 1, tableLength: 1 })
+        .toArray(),
+      submittedDb.collection('tabletLogDB')
+        .find({ 工場: factory, Date: { $in: [...new Set([productionDate, calendarDate])] } })
+        .project({ 設備: 1, sessionID: 1, 背番号: 1, 品番: 1, Worker_Name: 1, Action: 1, Status: 1, Timestamp: 1 })
+        .toArray(),
+      submittedDb.collection('pressDB')
+        .find({ 工場: factory, Date: { $in: [...new Set([productionDate, calendarDate])] } })
+        .sort({ Time_start: 1 })
+        .toArray(),
+      submittedDb.collection('productionGoalsDB').aggregate([
+        { $match: { factory, date: productionDate } },
+        { $group: { _id: null, target: { $sum: { $convert: { input: '$targetQuantity', to: 'double', onError: 0, onNull: 0 } } } } },
+      ]).toArray(),
+      // Machines used in the last 30 days (for factories without a fixed floor map)
+      submittedDb.collection('pressDB')
+        .aggregate([{ $match: { 工場: factory, Date: { $gte: recentSince } } }, { $group: { _id: '$設備' } }])
+        .toArray()
+        .then((rows) => rows.map((r) => r._id).filter(Boolean)),
+    ]);
+    const recentlyUsedIds = new Set(recentEquipment.flatMap((e) => splitDigitalTwinEquipment(e)));
+
+    // ── Machines + pairs from setsubiDB ──
+    const machines = new Map();
+    const ensureMachine = (id) => {
+      if (!machines.has(id)) {
+        machines.set(id, {
+          id, noOfHead: 1, tableLength: null, hasCycleSensor: false,
+          cycleRaw: null, lastCycleMs: null,
+          stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null,
+          lastLogMs: null, lastLogStatus: null, sessionEquipment: '',
+          worker: '', sebanggo: '', hinban: '', sebanggoAt: 0,
+          // Tablet session: 'Start time set' opens it, 'End time set' marks wrap-up, Submit/Reset closes it
+          sessionStartMs: null, endTimeSet: false,
+        });
+      }
+      return machines.get(id);
+    };
+    const pairOf = new Map();
+    setsubiDocs.forEach((doc) => {
+      const names = splitDigitalTwinEquipment(doc.name);
+      if (names.length === 2) {
+        pairOf.set(names[0], names[1]);
+        pairOf.set(names[1], names[0]);
+        return;
+      }
+      if (names.length !== 1) return;
+      const m = ensureMachine(names[0]);
+      m.noOfHead = toDigitalTwinNumber(doc.noOfHead) || 1;
+      m.tableLength = toDigitalTwinNumber(doc.tableLength);
+    });
+
+    // ── Live cycles (latest doc per machine) ──
+    cycleDocs.forEach((doc) => {
+      const id = String(doc.machine || '').trim();
+      if (!id) return;
+      const m = ensureMachine(id);
+      const ts = parseDigitalTwinTimestamp(doc.timestamp);
+      if (m.lastCycleMs !== null && ts !== null && ts < m.lastCycleMs) return;
+      m.hasCycleSensor = true;
+      m.cycleRaw = Number(doc.cycle) || 0;
+      m.lastCycleMs = ts;
+    });
+
+    // ── Tablet log replay (oldest → newest) for alerts, worker, 背番号 ──
+    const logs = logDocs
+      .map((log) => ({ ...log, ms: parseDigitalTwinTimestamp(log.Timestamp) }))
+      .filter((log) => log.ms !== null && log.ms >= cutoffMs && log.ms <= nowMs + 60000)
+      .sort((a, b) => a.ms - b.ms);
+
+    logs.forEach((log) => {
+      const action = String(log.Action || '');
+      const sessionEquip = getDigitalTwinSessionEquipment(log.sessionID);
+      const isSetup = String(log.sessionID || '').startsWith('setup_');
+      splitDigitalTwinEquipment(log.設備).forEach((id) => {
+        const m = ensureMachine(id);
+        m.lastLogMs = log.ms;
+        m.lastLogStatus = log.Status || null;
+        if (sessionEquip) m.sessionEquipment = sessionEquip;
+        if (log.Worker_Name) m.worker = log.Worker_Name;
+        if (log.背番号 && !isSetup && log.ms >= m.sebanggoAt) {
+          m.sebanggo = log.背番号;
+          m.hinban = log.品番 || '';
+          m.sebanggoAt = log.ms;
+        }
+
+        if (action.startsWith('Stop call activated')) m.stopCallAt = log.ms;
+        else if (/^Stop call (unlocked|resolved|canceled)/.test(action)) m.stopCallAt = null;
+        else if (action.startsWith('CNC Cancel Button Detected')) m.cncCancelAt = log.ms;
+        else if (action.startsWith('CNC Cancel Unlocked')) m.cncCancelAt = null;
+        else if (action === 'Maintenance started') m.maintenanceAt = log.ms;
+        else if (action === 'Maintenance ended') m.maintenanceAt = null;
+        else if (action === 'Break started') m.breakAt = log.ms;
+        else if (action === 'Break ended') m.breakAt = null;
+        else if (action === 'Start time set') {
+          m.sessionStartMs = log.ms;
+          m.endTimeSet = false;
+        } else if (action === 'End time set') {
+          if (m.sessionStartMs) m.endTimeSet = true;
+        } else if (action === 'Submit button pressed' || action === 'Reset button pressed') {
+          m.breakAt = null;
+          m.maintenanceAt = null;
+          m.sessionStartMs = null;
+          m.endTimeSet = false;
+        }
+        if (log.Status === 'Completed' || log.Status === 'Reset') {
+          m.sessionStartMs = null;
+          m.endTimeSet = false;
+        }
+      });
+    });
+
+    // ── Group completed pressDB runs by machine ──
+    const pressByMachine = new Map();
+    pressDocs.forEach((doc) => {
+      splitDigitalTwinEquipment(doc.設備).forEach((id) => {
+        if (!pressByMachine.has(id)) pressByMachine.set(id, []);
+        pressByMachine.get(id).push(doc);
+      });
+    });
+
+    // ── pcPerCycle from masterDB for active + completed 背番号 ──
+    const sebanggoList = [
+      ...new Set([
+        ...[...machines.values()].map((m) => m.sebanggo),
+        ...pressDocs.map((d) => d.背番号),
+      ].filter(Boolean)),
+    ];
+    const products = sebanggoList.length
+      ? await masterDb.collection('masterDB')
+        .find({ 背番号: { $in: sebanggoList } })
+        .project({ 背番号: 1, 工場: 1, pcPerCycle: 1, machineConfig: 1 })
+        .toArray()
+      : [];
+    const productBySebanggo = new Map();
+    products.forEach((p) => {
+      const existing = productBySebanggo.get(p.背番号);
+      if (!existing || (p.工場 === factory && existing.工場 !== factory)) productBySebanggo.set(p.背番号, p);
+    });
+    const resolvePcPerCycle = (product, machineId) => {
+      if (!product) return null;
+      const config = product.machineConfig && typeof product.machineConfig === 'object' ? product.machineConfig : null;
+      return toDigitalTwinNumber(config?.[machineId]?.pcPerCycle) ?? toDigitalTwinNumber(product.pcPerCycle);
+    };
+
+    // ── Per-machine status, accurate piece counts, and timeline ──
+    const results = new Map();
+    machines.forEach((m) => {
+      const cycleIsToday = m.lastCycleMs !== null && m.lastCycleMs >= cutoffMs;
+      const todayCycles = cycleIsToday ? m.cycleRaw : 0;
+      const lastActivityMs = Math.max(cycleIsToday ? m.lastCycleMs : 0, m.lastLogMs || 0) || null;
+
+      let status = 'off';
+      if (m.stopCallAt) status = 'stopCall';
+      else if (m.cncCancelAt) status = 'cncCancel';
+      else if (m.maintenanceAt) status = 'maintenance';
+      else if (m.breakAt) status = 'break';
+      else if (cycleIsToday && nowMs - m.lastCycleMs < DIGITAL_TWIN_IDLE_MS) status = 'running';
+      // No cycle sensor: tablet logs go quiet during a run, so an open session (start set, end not yet set) = running
+      else if (!m.hasCycleSensor && m.sessionStartMs && !m.endTimeSet) status = 'running';
+      else if (lastActivityMs && nowMs - lastActivityMs < DIGITAL_TWIN_OFF_MS) status = 'idle';
+      else if (!m.hasCycleSensor && m.sessionStartMs) status = 'idle'; // wrap-up left open
+
+      // Parse completed runs for this machine
+      const mPressDocs = pressByMachine.get(m.id) || [];
+      const completedRuns = mPressDocs.map((d) => {
+        const startMin = timeToDigitalTwinMinutes(d.Time_start);
+        const endMin = timeToDigitalTwinMinutes(d.Time_end);
+        const shots = Number(d.ショット数) || 0;
+        const pieces = Number(d.Total_Pieces || d.Process_Quantity) || 0;
+        const breaks = Object.values(d.Break_Time_Data || {})
+          .filter((b) => b && b.start && b.end)
+          .map((b) => ({
+            start: b.start,
+            end: b.end,
+            startMin: timeToDigitalTwinMinutes(b.start),
+            endMin: timeToDigitalTwinMinutes(b.end),
+          }))
+          .filter((b) => b.startMin !== null && b.endMin !== null && b.endMin > b.startMin);
+
+        return {
+          sebanggo: d.背番号 || '',
+          hinban: d.品番 || '',
+          start: d.Time_start || '',
+          end: d.Time_end || '',
+          startMin,
+          endMin,
+          shots,
+          pieces,
+          worker: d.Worker_Name || '',
+          breaks,
+          stopCalls: Array.isArray(d.StopCall?.records) ? d.StopCall.records : [],
+          maintenances: Array.isArray(d.Maintenance_Data?.records) ? d.Maintenance_Data.records : [],
+        };
+      }).sort((a, b) => (a.startMin || 0) - (b.startMin || 0));
+
+      const totalCompletedPieces = completedRuns.reduce((sum, r) => sum + r.pieces, 0);
+      const totalCompletedShots = completedRuns.reduce((sum, r) => sum + r.shots, 0);
+
+      // Active / in-progress run calculation
+      const activeCycles = (cycleIsToday && m.hasCycleSensor)
+        ? Math.max(0, todayCycles - totalCompletedShots)
+        : 0;
+      const activePcPerCycle = resolvePcPerCycle(productBySebanggo.get(m.sebanggo), m.id);
+      const activePieces = activeCycles > 0 && activePcPerCycle ? activeCycles * activePcPerCycle : 0;
+
+      let pieces = null;
+      if (totalCompletedPieces > 0 || activePieces > 0) {
+        pieces = totalCompletedPieces + activePieces;
+      } else if (todayCycles > 0 && activePcPerCycle) {
+        pieces = todayCycles * activePcPerCycle;
+      }
+
+      // Display cycles: sensor count if available, otherwise total shots from press records
+      const displayCycles = m.hasCycleSensor ? todayCycles : totalCompletedShots;
+
+      // Active run object (if currently in progress)
+      let activeRun = null;
+      if ((m.lastLogStatus === 'in-progress' || m.sessionStartMs) && status !== 'off') {
+        let activeStartMin = 480;
+        if (m.sessionStartMs) {
+          const d = new Date(m.sessionStartMs + DIGITAL_TWIN_JST_OFFSET_MS);
+          activeStartMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+        } else if (completedRuns.length > 0 && completedRuns[completedRuns.length - 1].endMin) {
+          activeStartMin = completedRuns[completedRuns.length - 1].endMin;
+        } else if (m.sebanggoAt) {
+          const d = new Date(m.sebanggoAt + DIGITAL_TWIN_JST_OFFSET_MS);
+          activeStartMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+        }
+        const jstNow = new Date(nowMs + DIGITAL_TWIN_JST_OFFSET_MS);
+        const nowMin = jstNow.getUTCHours() * 60 + jstNow.getUTCMinutes();
+        const activeEndMin = Math.max(activeStartMin, nowMin);
+
+        activeRun = {
+          sebanggo: m.sebanggo || '',
+          hinban: m.hinban || '',
+          worker: m.worker || '',
+          start: minutesToDigitalTwinTime(activeStartMin),
+          end: minutesToDigitalTwinTime(activeEndMin),
+          startMin: activeStartMin,
+          endMin: activeEndMin,
+          shots: activeCycles,
+          pieces: activePieces,
+          status,
+        };
+      }
+
+      // Build timeline segments and summary
+      const { segments: timeline, summary: timelineSummary } = buildDigitalTwinTimelineSegments({
+        runs: completedRuns,
+        activeRun,
+        currentStatus: status,
+        dayStartMin: 480,
+        dayEndMin: 1140,
+      });
+
+      // Clean runs for frontend response
+      const cleanRuns = completedRuns.map(({ sebanggo, hinban, start, end, shots, pieces: rPieces, worker }) => ({
+        sebanggo,
+        hinban,
+        start,
+        end,
+        shots,
+        pieces: rPieces,
+        worker,
+        durationMin: (timeToDigitalTwinMinutes(end) || 0) - (timeToDigitalTwinMinutes(start) || 0),
+      }));
+
+      // Worker and product fallback from latest run if idle/off
+      const fallbackWorker = m.worker || (cleanRuns.length > 0 ? cleanRuns[cleanRuns.length - 1].worker : '');
+      const fallbackSebanggo = m.sebanggo || (cleanRuns.length > 0 ? cleanRuns[cleanRuns.length - 1].sebanggo : '');
+      const fallbackHinban = m.hinban || (cleanRuns.length > 0 ? cleanRuns[cleanRuns.length - 1].hinban : '');
+
+      results.set(m.id, {
+        id: m.id,
+        noOfHead: m.noOfHead,
+        tableLength: m.tableLength,
+        hasCycleSensor: m.hasCycleSensor,
+        statusSource: m.hasCycleSensor ? 'sensor' : 'tablet',
+        recentlyUsed: m.hasCycleSensor || recentlyUsedIds.has(m.id) || m.lastLogMs !== null || mPressDocs.length > 0,
+        sessionStartedAt: m.sessionStartMs ? new Date(m.sessionStartMs).toISOString() : null,
+        status,
+        cycle: m.cycleRaw,
+        todayCycles: displayCycles,
+        lastCycleAt: m.lastCycleMs ? new Date(m.lastCycleMs).toISOString() : null,
+        secondsSinceCycle: cycleIsToday ? Math.max(0, Math.round((nowMs - m.lastCycleMs) / 1000)) : null,
+        lastActivityAt: lastActivityMs ? new Date(lastActivityMs).toISOString() : null,
+        worker: fallbackWorker,
+        sebanggo: fallbackSebanggo,
+        hinban: fallbackHinban,
+        pcPerCycle: activePcPerCycle,
+        pieces,
+        alertSince: m.stopCallAt || m.cncCancelAt || m.maintenanceAt || m.breakAt
+          ? new Date(m.stopCallAt || m.cncCancelAt || m.maintenanceAt || m.breakAt).toISOString()
+          : null,
+        completedRuns: cleanRuns,
+        activeRun,
+        timeline,
+        timelineSummary,
+        pair: null,
+        _sessionEquipment: m.sessionEquipment,
+      });
+    });
+
+    // ── Pairs: fixed partners; merged status + shared count when running together ──
+    results.forEach((r) => {
+      const partnerId = pairOf.get(r.id);
+      if (!partnerId) return;
+      const partner = results.get(partnerId);
+      const together = splitDigitalTwinEquipment(r._sessionEquipment).length === 2
+        || (partner && splitDigitalTwinEquipment(partner._sessionEquipment).length === 2
+          && splitDigitalTwinEquipment(partner._sessionEquipment).includes(r.id))
+        || (r.completedRuns.length > 0 && partner && partner.completedRuns.length > 0
+          && r.completedRuns[0].start === partner.completedRuns[0]?.start
+          && r.completedRuns[0].sebanggo === partner.completedRuns[0]?.sebanggo);
+
+      r.pair = { partner: partnerId, together: Boolean(together) };
+    });
+
+    results.forEach((r) => {
+      if (!r.pair?.together) return;
+      const partner = results.get(r.pair.partner);
+      if (!partner) return;
+      const statuses = [r.status, partner.status];
+      r.pair.status = DIGITAL_TWIN_STATUS_PRIORITY.find((s) => statuses.includes(s)) || r.status;
+      r.pair.sharedCycles = r.hasCycleSensor && partner.hasCycleSensor
+        ? (r.todayCycles || 0) + (partner.todayCycles || 0)
+        : Math.max(r.todayCycles || 0, partner.todayCycles || 0);
+      r.pair.sharedPieces = Math.max(r.pieces ?? 0, partner.pieces ?? 0);
+      r.pair.worker = r.worker || partner.worker;
+      r.pair.sebanggo = r.sebanggo || partner.sebanggo;
+      r.pair.completedRuns = r.completedRuns.length >= partner.completedRuns.length ? r.completedRuns : partner.completedRuns;
+    });
+
+    const machineList = [...results.values()]
+      .map(({ _sessionEquipment, ...rest }) => rest)
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    res.json({
+      success: true,
+      factory,
+      generatedAt: new Date(nowMs).toISOString(),
+      productionDate,
+      idleThresholdMinutes: DIGITAL_TWIN_IDLE_MS / 60000,
+      hasCycleSensors: machineList.some((m) => m.hasCycleSensor),
+      goal: goalRows[0]?.target || 0,
+      machines: machineList,
+    });
+  } catch (error) {
+    console.error(`Error building digital twin for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// ── DIGITAL TWIN ANNOTATIONS (Permanent 3D sensor & camera spatial coordinates) ──
+app.get('/api/digital-twin/:factoryName/annotations', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    try { await client.connect(); } catch (_) {}
+    const masterDb = client.db(DB_NAME);
+    const doc = await masterDb.collection('twinAnnotations').findOne({ factory });
+
+    if (!doc) {
+      return res.json({
+        success: true,
+        factory,
+        sensors: null,
+        cameras: null,
+        updatedAt: null,
+      });
+    }
+
+    res.json({
+      success: true,
+      factory,
+      sensors: Array.isArray(doc.sensors) ? doc.sensors : [],
+      cameras: Array.isArray(doc.cameras) ? doc.cameras : [],
+      updatedAt: doc.updatedAt || null,
+      updatedBy: doc.updatedBy || null,
+    });
+  } catch (error) {
+    console.error(`Error fetching annotations for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/digital-twin/:factoryName/annotations', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    const { sensors, cameras, updatedBy } = req.body || {};
+    try { await client.connect(); } catch (_) {}
+    const masterDb = client.db(DB_NAME);
+    const now = new Date();
+
+    const updateDoc = {
+      $set: {
+        factory,
+        sensors: Array.isArray(sensors) ? sensors : [],
+        cameras: Array.isArray(cameras) ? cameras : [],
+        updatedAt: now,
+        updatedBy: String(updatedBy || 'admin').trim(),
+      },
+      $setOnInsert: {
+        createdAt: now,
+      },
+    };
+
+    await masterDb.collection('twinAnnotations').updateOne(
+      { factory },
+      updateDoc,
+      { upsert: true }
+    );
+
+    res.json({
+      success: true,
+      factory,
+      updatedAt: now,
+      message: 'Annotations saved permanently to MongoDB',
+    });
+  } catch (error) {
+    console.error(`Error saving annotations for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/digital-twin/:factoryName/annotations', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    try { await client.connect(); } catch (_) {}
+    const masterDb = client.db(DB_NAME);
+    await masterDb.collection('twinAnnotations').deleteOne({ factory });
+
+    res.json({
+      success: true,
+      factory,
+      message: 'Annotations reset to default',
+    });
+  } catch (error) {
+    console.error(`Error resetting annotations for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -25254,7 +26247,9 @@ app.get('/api/freya-tablet-data', async (req, res) => {
                 { "背番号": searchRegex },
                 { "Worker_Name": searchRegex },
                 { "材料ロット": searchRegex },
-                { "Comment": searchRegex }
+                { "Comment": searchRegex },
+                { "Run_ID": searchRegex },
+                { "Box_IDs": searchRegex }
             ];
             
             // If we already have an $or condition for dates, we need to use $and
@@ -25880,11 +26875,16 @@ app.get('/api/equipment/list', async (req, res) => {
  */
 app.post('/api/equipment/data', async (req, res) => {
     try {
-        const { startDate, endDate, equipment } = req.body;
+        const { startDate, endDate, equipment, hinban, seiban, hinbans, parts } = req.body;
         
         console.log('📊 Fetching equipment data (optimized)...');
         console.log(`   Date range: ${startDate} to ${endDate}`);
         console.log(`   Equipment count: ${equipment?.length || 'all'}`);
+        if (Array.isArray(parts) && parts.length > 0) {
+            console.log(`   Parts count: ${parts.length}`);
+        } else if (hinban) {
+            console.log(`   Part: ${hinban} / ${seiban || 'all'}`);
+        }
         
         const db = client.db('submittedDB');
         const collection = db.collection('pressDB');
@@ -25902,24 +26902,35 @@ app.post('/api/equipment/data', async (req, res) => {
             matchQuery.設備 = { $in: equipment };
         }
         
-        // Fetch data with only needed fields (projection)
-        const results = await collection.find(matchQuery, {
-            projection: {
-                設備: 1,
-                工場: 1,
-                Date: 1,
-                品番: 1,
-                背番号: 1,
-                ショット数: 1,
-                Process_Quantity: 1,
-                Total_NG: 1,
-                SRS_Total_NG: 1,
-                Time_start: 1,
-                Time_end: 1,
-                作業者: 1,
-                STATUS: 1
+        if (Array.isArray(parts) && parts.length > 0) {
+            const orList = parts.map(p => {
+                const c = {};
+                if (p.hinban) c.品番 = p.hinban;
+                if (p.seiban) c.背番号 = p.seiban;
+                return c;
+            }).filter(c => Object.keys(c).length > 0);
+            if (orList.length > 0) {
+                matchQuery.$or = orList;
             }
-        }).toArray();
+        } else if (Array.isArray(hinbans) && hinbans.length > 0) {
+            matchQuery.品番 = { $in: hinbans };
+        } else if (Array.isArray(hinban) && hinban.length > 0) {
+            matchQuery.品番 = { $in: hinban };
+        } else {
+            if (hinban) matchQuery.品番 = hinban;
+            if (seiban) matchQuery.背番号 = seiban;
+        }
+        
+        // Fetch data with all fields for full record details
+        const results = await collection.find(matchQuery)
+            .sort({ Date: -1, Time_start: -1 })
+            .toArray();
+        
+        // Normalize Worker_Name and 作業者 so both are populated
+        results.forEach(r => {
+            if (!r.Worker_Name && r['作業者']) r.Worker_Name = r['作業者'];
+            if (!r['作業者'] && r.Worker_Name) r['作業者'] = r.Worker_Name;
+        });
         
         console.log(`✅ Found ${results.length} records`);
         
@@ -25934,6 +26945,168 @@ app.post('/api/equipment/data', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to fetch equipment data: ' + error.message
+        });
+    }
+});
+
+/**
+ * POST /api/equipment/part-comparison
+ * Dedicated endpoint for cross-machine part benchmarking (品番 / 背番号)
+ * Returns both aggregated machine comparison statistics and full record details.
+ */
+app.post('/api/equipment/part-comparison', async (req, res) => {
+    try {
+        const { hinban, seiban, hinbans, parts, startDate, endDate } = req.body;
+        
+        console.log('🔍 Cross-machine part comparison requested:');
+        if (Array.isArray(parts) && parts.length > 0) {
+            console.log(`   Parts count: ${parts.length} (${parts.map(p => p.hinban).join(', ')})`);
+        } else if (Array.isArray(hinbans) && hinbans.length > 0) {
+            console.log(`   Hinbans count: ${hinbans.length} (${hinbans.join(', ')})`);
+        } else {
+            console.log(`   Part: ${hinban || 'any'} / ${seiban || 'any'}`);
+        }
+        console.log(`   Date Range: ${startDate || 'all'} ~ ${endDate || 'all'}`);
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('pressDB');
+        
+        const matchQuery = {};
+        
+        if (Array.isArray(parts) && parts.length > 0) {
+            const orList = parts.map(p => {
+                const c = {};
+                if (p.hinban) c.品番 = p.hinban;
+                if (p.seiban) c.背番号 = p.seiban;
+                return c;
+            }).filter(c => Object.keys(c).length > 0);
+            if (orList.length > 0) {
+                matchQuery.$or = orList;
+            }
+        } else if (Array.isArray(hinbans) && hinbans.length > 0) {
+            matchQuery.品番 = { $in: hinbans };
+        } else if (Array.isArray(hinban) && hinban.length > 0) {
+            matchQuery.品番 = { $in: hinban };
+        } else {
+            if (hinban) matchQuery.品番 = hinban;
+            if (seiban) matchQuery.背番号 = seiban;
+        }
+        
+        if (startDate || endDate) {
+            matchQuery.Date = {};
+            if (startDate) matchQuery.Date.$gte = startDate;
+            if (endDate) matchQuery.Date.$lte = endDate;
+        }
+        
+        const records = await collection.find(matchQuery)
+            .sort({ Date: -1, Time_start: -1 })
+            .toArray();
+            
+        // Normalize Worker_Name and 作業者
+        records.forEach(r => {
+            if (!r.Worker_Name && r['作業者']) r.Worker_Name = r['作業者'];
+            if (!r['作業者'] && r.Worker_Name) r['作業者'] = r.Worker_Name;
+        });
+        
+        // Aggregate statistics per machine
+        const machinesMap = {};
+        let grandTotalShots = 0;
+        let grandTotalDefects = 0;
+        
+        records.forEach(r => {
+            const mach = r.設備 || r.machine || 'Unknown';
+            if (!machinesMap[mach]) {
+                machinesMap[mach] = {
+                    machine: mach,
+                    totalShots: 0,
+                    goodShots: 0,
+                    totalDefects: 0,
+                    totalMinutes: 0,
+                    recordCount: 0,
+                    firstSeen: r.Date,
+                    lastSeen: r.Date,
+                    records: []
+                };
+            }
+            
+            const shots = Number(r['ショット数'] || r.shots || r.Process_Quantity || r.Total_Count || r.totalCount || r.total_count || r.良品数 || 0);
+            const defects = Number(r.Total_NG || r.SRS_Total_NG || r['不良数'] || r.Bad_Count || r.badCount || r.Defect_Count || 0);
+            
+            machinesMap[mach].totalShots += shots;
+            machinesMap[mach].totalDefects += defects;
+            machinesMap[mach].goodShots += Math.max(0, shots - defects);
+            machinesMap[mach].recordCount += 1;
+            machinesMap[mach].records.push(r);
+            
+            // Track date span
+            if (r.Date && (!machinesMap[mach].firstSeen || r.Date < machinesMap[mach].firstSeen)) {
+                machinesMap[mach].firstSeen = r.Date;
+            }
+            if (r.Date && (!machinesMap[mach].lastSeen || r.Date > machinesMap[mach].lastSeen)) {
+                machinesMap[mach].lastSeen = r.Date;
+            }
+            
+            // Duration calculation if time fields exist
+            if (r.Time_start && r.Time_end) {
+                const [sh, sm] = r.Time_start.split(':').map(Number);
+                const [eh, em] = r.Time_end.split(':').map(Number);
+                if (!isNaN(sh) && !isNaN(sm) && !isNaN(eh) && !isNaN(em)) {
+                    let mins = (eh * 60 + em) - (sh * 60 + sm);
+                    if (mins < 0) mins += 1440; // overnight
+                    if (mins > 0 && mins < 1440) machinesMap[mach].totalMinutes += mins;
+                }
+            }
+            
+            grandTotalShots += shots;
+            grandTotalDefects += defects;
+        });
+        
+        const machineList = Object.values(machinesMap).map(m => {
+            const defectRate = m.totalShots > 0 ? (m.totalDefects / m.totalShots) * 100 : 0;
+            const operatingHours = +(m.totalMinutes / 60).toFixed(1);
+            const share = grandTotalShots > 0 ? (m.totalShots / grandTotalShots) * 100 : 0;
+            const shotsPerHour = operatingHours > 0 ? Math.round(m.totalShots / operatingHours) : 0;
+            
+            return {
+                machine: m.machine,
+                totalShots: m.totalShots,
+                goodShots: m.goodShots,
+                totalDefects: m.totalDefects,
+                defectRate: +defectRate.toFixed(2),
+                operatingHours,
+                shotsPerHour,
+                share: +share.toFixed(1),
+                recordCount: m.recordCount,
+                firstSeen: m.firstSeen,
+                lastSeen: m.lastSeen,
+                records: m.records
+            };
+        }).sort((a, b) => b.totalShots - a.totalShots);
+        
+        const overallDefectRate = grandTotalShots > 0 ? (grandTotalDefects / grandTotalShots) * 100 : 0;
+        
+        console.log(`✅ Part comparison found ${records.length} records across ${machineList.length} machines`);
+        
+        res.json({
+            success: true,
+            hinban,
+            seiban,
+            overall: {
+                totalShots: grandTotalShots,
+                totalDefects: grandTotalDefects,
+                defectRate: +overallDefectRate.toFixed(2),
+                machineCount: machineList.length,
+                recordCount: records.length
+            },
+            machines: machineList,
+            records
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in /api/equipment/part-comparison:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to process part cross-machine comparison: ' + error.message
         });
     }
 });
@@ -26379,6 +27552,1651 @@ app.get('/api/factory-overview/env', async (req, res) => {
 });
 
 // ==================== END FACTORY OVERVIEW ENDPOINTS ====================
+
+// ==================== SCNA NC PROGRAMS (PLT -> JSON points) ====================
+// Admin uploads a .plt for a masterDB item (工場: SCNA only); the browser converts it to points.
+// The miniPC listener fetches the points by program id and sends them to the CNC directly.
+
+function _validateScnaNcPoints(points) {
+  if (!Array.isArray(points) || points.length === 0) return "points must be a non-empty array";
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (!p || ![0, 1].includes(Number(p.flag)) || !Number.isInteger(Number(p.layer))
+      || !Number.isFinite(Number(p.x)) || !Number.isFinite(Number(p.y))) {
+      return `invalid point at position ${i}`;
+    }
+  }
+  return null;
+}
+
+app.post("/api/scna-nc-programs", async (req, res) => {
+  try {
+    const { sebanggo, displayName, fileName, pltBase64, pceBase64, points, uploadedBy } = req.body;
+    // The browser sends either the exported .plt (pltBase64) or the Xiao .pce (pceBase64)
+    const sourceType = pceBase64 ? "pce" : "plt";
+    const sourceBase64 = pceBase64 || pltBase64;
+    if (!sebanggo || !displayName || !String(displayName).trim() || !fileName || !sourceBase64) {
+      return res.status(400).json({ error: "sebanggo, displayName, fileName and pltBase64 (or pceBase64) are required" });
+    }
+    const pointsError = _validateScnaNcPoints(points);
+    if (pointsError) return res.status(400).json({ error: pointsError });
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+
+    // Strictly SCNA items only
+    const item = await database.collection("masterDB").findOne({ 背番号: sebanggo, 工場: "SCNA" });
+    if (!item) {
+      return res.status(400).json({ error: `背番号 ${sebanggo} is not an SCNA (工場: SCNA) item` });
+    }
+
+    const programs = database.collection("scnaNCProgramsDB");
+    const name = String(displayName).trim();
+    const dup = await programs.findOne({ 背番号: sebanggo, displayName: name, isActive: true });
+    if (dup) {
+      return res.status(409).json({ error: `A program named "${name}" already exists for ${sebanggo}` });
+    }
+
+    const docId = new ObjectId();
+    const buffer = Buffer.from(String(sourceBase64).split(',')[1] || sourceBase64, 'base64');
+    const storagePath = `scnaNC/${sebanggo}/${docId}_${Date.now()}.${sourceType}`;
+    const file = admin.storage().bucket().file(storagePath);
+    await file.save(buffer, {
+      metadata: {
+        contentType: 'application/octet-stream',
+        metadata: { firebaseStorageDownloadTokens: 'masterDBToken69' }
+      },
+      public: true
+    });
+    const sourceURL = `https://storage.googleapis.com/${file.bucket.name}/${encodeURIComponent(file.name)}?alt=media&token=masterDBToken69`;
+
+    const nowIso = new Date().toISOString();
+    const cleanPoints = points.map((p, i) => ({
+      index: i,
+      flag: Number(p.flag),
+      layer: Number(p.layer),
+      x: Number(p.x),
+      y: Number(p.y),
+      value: p.value === undefined ? 1.0 : Number(p.value)
+    }));
+
+    await programs.insertOne({
+      _id: docId,
+      背番号: sebanggo,
+      品番: item.品番 || "",
+      工場: "SCNA",
+      displayName: name,
+      fileName,
+      sourceType,
+      // pltURL is kept for PLT uploads as before; a PCE upload stores its original under pceURL
+      ...(sourceType === "pce" ? { pceURL: sourceURL } : { pltURL: sourceURL }),
+      points: cleanPoints,
+      pointCount: cleanPoints.length,
+      uploadedBy: uploadedBy || 'admin',
+      uploadedAt: nowIso,
+      updatedAt: nowIso,
+      isActive: true
+    });
+
+    res.status(201).json({ success: true, documentId: docId, pointCount: cleanPoints.length, sourceType, sourceURL });
+  } catch (error) {
+    console.error("❌ Error uploading SCNA NC program:", error);
+    res.status(500).json({ error: "Failed to upload NC program", details: error.message });
+  }
+});
+
+// List programs for one 背番号 (no points payload — used by admin and the tablet picker)
+app.get("/api/scna-nc-programs/by-sebanggo/:sebanggo", async (req, res) => {
+  try {
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const list = await programs.find({ 背番号: req.params.sebanggo, isActive: true })
+      .project({ points: 0 })
+      .sort({ displayName: 1 })
+      .toArray();
+    res.json(list);
+  } catch (error) {
+    console.error("❌ Error listing SCNA NC programs:", error);
+    res.status(500).json({ error: "Failed to list NC programs", details: error.message });
+  }
+});
+
+// Which SCNA 背番号 already have programs (for the admin table badge)
+app.get("/api/scna-nc-programs/counts", async (req, res) => {
+  try {
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const rows = await programs.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: "$背番号", count: { $sum: 1 } } }
+    ]).toArray();
+    res.json(Object.fromEntries(rows.map(r => [r._id, r.count])));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to count NC programs", details: error.message });
+  }
+});
+
+// Points for the miniPC listener
+app.get("/api/scna-nc-programs/:id/points", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const doc = await programs.findOne(
+      { _id: new ObjectId(req.params.id), isActive: true },
+      { projection: { displayName: 1, 背番号: 1, points: 1 } }
+    );
+    if (!doc) return res.status(404).json({ error: "Program not found" });
+    res.json({ id: doc._id, 背番号: doc.背番号, displayName: doc.displayName, points: doc.points });
+  } catch (error) {
+    console.error("❌ Error fetching SCNA NC program points:", error);
+    res.status(500).json({ error: "Failed to fetch NC program", details: error.message });
+  }
+});
+
+app.patch("/api/scna-nc-programs/:id", async (req, res) => {
+  try {
+    const name = String(req.body?.displayName || "").trim();
+    if (!name) return res.status(400).json({ error: "displayName is required" });
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const current = await programs.findOne({ _id: new ObjectId(req.params.id), isActive: true }, { projection: { 背番号: 1 } });
+    if (!current) return res.status(404).json({ error: "Program not found" });
+    const dup = await programs.findOne({ 背番号: current.背番号, displayName: name, isActive: true, _id: { $ne: current._id } });
+    if (dup) return res.status(409).json({ error: `A program named "${name}" already exists for ${current.背番号}` });
+    await programs.updateOne({ _id: current._id }, { $set: { displayName: name, updatedAt: new Date().toISOString() } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to rename NC program", details: error.message });
+  }
+});
+
+// Soft delete (keeps the PLT and points for audit/recovery)
+app.delete("/api/scna-nc-programs/:id", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const result = await programs.updateOne(
+      { _id: new ObjectId(req.params.id), isActive: true },
+      { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+    );
+    if (!result.matchedCount) return res.status(404).json({ error: "Program not found" });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete NC program", details: error.message });
+  }
+});
+
+// ==================== END SCNA NC PROGRAMS ====================
+
+// ==================== SCNA LABEL LAYOUTS ====================
+// Layouts drawn in freyaAdmin2 (SCNA > Label Designer). The miniPC print server
+// (print_DBprinter.py) reads them straight from the `labelLayouts` collection via /queries:
+//   { layoutId, name, customers: [..], isDefault, layout: { widthMm, heightMm, elements: [..] } }
+const LABEL_ELEMENT_TYPES = ["text", "barcode128", "qr", "line", "rect"];
+
+function _validateLabelLayout(layout) {
+  if (!layout || typeof layout !== "object") return "layout is required";
+  const w = Number(layout.widthMm), h = Number(layout.heightMm);
+  if (!(w > 0 && w <= 500) || !(h > 0 && h <= 500)) return "widthMm / heightMm must be between 0 and 500";
+  if (!Array.isArray(layout.elements)) return "layout.elements must be an array";
+  if (layout.elements.length > 200) return "too many elements (max 200)";
+  for (let i = 0; i < layout.elements.length; i++) {
+    const el = layout.elements[i];
+    if (!el || !LABEL_ELEMENT_TYPES.includes(el.type)) return `invalid element type at position ${i}`;
+    // Optional element ID: the key the tablet uses to set a value at print time (see print_DBprinter.py overrides).
+    // Not unique on purpose: every element with the same ID receives the same value.
+    if (el.name !== undefined && el.name !== "") {
+      if (typeof el.name !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(el.name)) return `element ${i}: ID may only use letters, numbers, _ and - (max 64)`;
+    }
+    for (const k of ["x", "y", "w", "h"]) {
+      if (!Number.isFinite(Number(el[k]))) return `element ${i}: ${k} must be a number`;
+    }
+  }
+  return null;
+}
+
+// Hash of the drawn layout. The Firebase thumbnail records the hash it was rendered from, so the admin page
+// only trusts the stored image while it still matches the layout (otherwise it draws a preview on the spot).
+function _layoutHash(layout) {
+  return require("crypto").createHash("sha1").update(JSON.stringify(layout || {})).digest("hex").slice(0, 16);
+}
+
+function _cleanCustomers(customers) {
+  if (!Array.isArray(customers)) return [];
+  return [...new Set(customers.map(c => String(c || "").trim()).filter(Boolean))];
+}
+
+// SCNA processes. Each label layout lists the processes it can be printed from (labelLayouts.processes) and each
+// item binds layouts per process (masterDB.labelLayoutByProcess.<process>). Layouts from before processes existed
+// were all press layouts; _ensureLabelProcesses backfills that.
+const SCNA_LABEL_PROCESSES = ["PSA", "press", "SRS", "kensa"];
+
+function _cleanProcesses(processes) {
+  if (!Array.isArray(processes)) return [];
+  return SCNA_LABEL_PROCESSES.filter(p => processes.includes(p));
+}
+
+// Process asked for by a caller; a missing value means press so tablets that do not send it yet keep working.
+function _requestedProcess(value) {
+  const p = String(value || "press").trim();
+  return SCNA_LABEL_PROCESSES.includes(p) ? p : null;
+}
+
+// Backfill, idempotent: layouts without processes become press layouts, and the old masterDB.labelLayoutIds
+// (and the older single labelLayoutId) folds into labelLayoutByProcess.press.
+async function _ensureLabelProcesses(database) {
+  await database.collection("labelLayouts").updateMany(
+    { processes: { $exists: false } },
+    { $set: { processes: ["press"] } }
+  );
+  await database.collection("masterDB").updateMany(
+    { 工場: "SCNA", $or: [{ labelLayoutIds: { $exists: true } }, { labelLayoutId: { $exists: true } }] },
+    [
+      { $set: { "labelLayoutByProcess.press": { $setUnion: [
+        { $ifNull: ["$labelLayoutByProcess.press", []] },
+        { $ifNull: ["$labelLayoutIds", []] },
+        { $cond: [{ $in: [{ $ifNull: ["$labelLayoutId", ""] }, ["", null]] }, [], ["$labelLayoutId"]] },
+      ] } } },
+      { $unset: ["labelLayoutIds", "labelLayoutId"] },
+    ]
+  );
+}
+
+// A customer maps to one layout per process, and only one layout can be the default for a process.
+async function _applyLabelLayoutExclusivity(col, layoutId, customers, isDefault, processes) {
+  if (customers.length) {
+    await col.updateMany(
+      { layoutId: { $ne: layoutId }, processes: { $in: processes } },
+      { $pull: { customers: { $in: customers } } }
+    );
+  }
+  if (isDefault) {
+    await col.updateMany({ layoutId: { $ne: layoutId }, processes: { $in: processes } }, { $set: { isDefault: false } });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SCNA box traceability (docs/scna-box-traceability-plan.md): one record per printed box in scnaBoxDB.
+// The server issues the box ID (<work order>-B<seq>, serial from an atomic counter). boxUid is made by the tablet
+// up front, so a retry or reload of the same box never creates a second one.
+// ---------------------------------------------------------------------------
+let _scnaBoxIndexesReady = false;
+async function _ensureScnaBoxIndexes() {
+  if (_scnaBoxIndexesReady) return;
+  const col = client.db(DB_NAME).collection("scnaBoxDB");
+  await col.createIndex({ boxUid: 1 }, { unique: true });
+  await col.createIndex({ boxId: 1 }, { unique: true });
+  await col.createIndex({ runId: 1 });
+  _scnaBoxIndexesReady = true;
+}
+
+// Counter key: the work order number; without one, <背番号>-<YYYYMMDD> (JST). Letters, numbers, . _ - only.
+function _scnaBoxKey(workOrderNumber, sebanggo) {
+  let key = String(workOrderNumber || "").trim();
+  if (!key) {
+    const ymd = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+    key = `${String(sebanggo || "").trim()}-${ymd}`;
+  }
+  return key.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+}
+
+const _SCNA_BOX_FIELDS = [
+  "runId", "workOrderNumber", "背番号", "品番", "machines", "Tablet_Home", "worker", "startedAt", "finishedAt",
+  "printedAt", "printedBy", "copies", "layoutId", "qtyLabel", "qtyMeasured", "lots", "snapshot", "approximate", "notes",
+  "capped", "producedSinceLastBox", "carriedOverPieces", "fillMethod"
+];
+
+app.post("/api/scna-boxes", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const boxUid = String(body.boxUid || "").trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(boxUid)) return res.status(400).json({ error: "boxUid is required (8-64 letters, numbers, _ or -)" });
+    if (!String(body.背番号 || "").trim() && !String(body.workOrderNumber || "").trim()) {
+      return res.status(400).json({ error: "背番号 or workOrderNumber is required" });
+    }
+    if (body.lots !== undefined && !Array.isArray(body.lots)) return res.status(400).json({ error: "lots must be an array" });
+
+    await client.connect();
+    await _ensureScnaBoxIndexes();
+    const db = client.db(DB_NAME);
+    const col = db.collection("scnaBoxDB");
+
+    const existing = await col.findOne({ boxUid });
+    if (existing) return res.json({ ...existing, existing: true });
+
+    const key = _scnaBoxKey(body.workOrderNumber, body.背番号);
+    const counter = await db.collection("scnaBoxCounters").findOneAndUpdate(
+      { _id: key }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" }
+    );
+    const seq = (counter && (counter.value ? counter.value.seq : counter.seq)) || 1;
+
+    const doc = { boxId: `${key}-B${String(seq).padStart(3, "0")}`, boxUid, seq, factory: "SCNA" };
+    for (const f of _SCNA_BOX_FIELDS) if (body[f] !== undefined) doc[f] = body[f];
+    doc.lots = Array.isArray(doc.lots) ? doc.lots : [];
+    doc.approximate = !!doc.approximate;
+    doc.pressId = null;
+    doc.createdAt = new Date().toISOString();
+
+    try {
+      await col.insertOne(doc);
+    } catch (e) {
+      if (e && e.code === 11000) {   // same boxUid arrived twice at once: return the first
+        const again = await col.findOne({ boxUid });
+        if (again) return res.json({ ...again, existing: true });
+      }
+      throw e;
+    }
+    res.status(201).json(doc);
+  } catch (error) {
+    console.error("❌ Error saving SCNA box:", error);
+    res.status(500).json({ error: "Failed to save box", details: error.message });
+  }
+});
+
+app.get("/api/scna-boxes/:boxId", async (req, res) => {
+  try {
+    await client.connect();
+    const doc = await client.db(DB_NAME).collection("scnaBoxDB").findOne({ boxId: req.params.boxId });
+    if (!doc) return res.status(404).json({ error: "Box not found" });
+    res.json(doc);
+  } catch (error) {
+    console.error("❌ Error reading SCNA box:", error);
+    res.status(500).json({ error: "Failed to read box", details: error.message });
+  }
+});
+
+app.get("/api/scna-boxes", async (req, res) => {
+  try {
+    const runId = String(req.query.runId || "").trim();
+    const lotNumber = String(req.query.lotNumber || "").trim();
+    if (!runId && !lotNumber) return res.status(400).json({ error: "runId or lotNumber is required" });
+    await client.connect();
+    // lotNumber: every box that contains this material lot (exact match, spare lines included)
+    const filter = runId ? { runId } : { "lots.lotNumber": lotNumber };
+    const list = await client.db(DB_NAME).collection("scnaBoxDB").find(filter).sort(runId ? { seq: 1 } : { printedAt: -1 }).limit(500).toArray();
+    res.json(list);
+  } catch (error) {
+    console.error("❌ Error listing SCNA boxes:", error);
+    res.status(500).json({ error: "Failed to list boxes", details: error.message });
+  }
+});
+
+// ==== SRS BOXES START ====================================================
+// SRS WIP labels (Girasol). One printed label = one SRS box, ID `<WO>-S<seq>`. See docs/srs-interactive-label-plan.md.
+//   srsBoxDB     the label registry: status complete | draft | superseded | voided, the lines (which press box / legacy
+//                lot gave how many good + NG pieces), parent link for drafts that were finished later
+//   scnaBoxDB    press boxes get `srsConsumed: [{ srsId, good, ng, pieces, at, void? }]`; remaining = base - consumed
+// All routes are new; the DCP box routes and the legacy SRS routes are not touched.
+const _SRS_NG_FIELDS = ["くっつき・めくれ", "シワ", "転写位置ズレ", "転写不良", "文字欠け", "その他"];
+
+class _SrsError extends Error {
+  constructor(status, message, extra) { super(message); this.status = status; this.extra = extra || {}; }
+}
+function _srsSend(res, error, label) {
+  if (error instanceof _SrsError) return res.status(error.status).json({ error: error.message, ...error.extra });
+  console.error(`❌ ${label}:`, error);
+  return res.status(500).json({ error: `${label} failed`, details: error.message });
+}
+
+let _srsBoxDbIndexesReady = false;
+async function _ensureSrsBoxDbIndexes() {
+  if (_srsBoxDbIndexesReady) return;
+  const db = client.db(DB_NAME);
+  const col = db.collection("srsBoxDB");
+  await col.createIndex({ srsId: 1 }, { unique: true });
+  await col.createIndex({ boxUid: 1 }, { unique: true });
+  await col.createIndex({ parentSrsId: 1 });
+  await col.createIndex({ "lines.boxId": 1 });
+  await col.createIndex({ srsRecordId: 1 });
+  await db.collection("scnaBoxDB").createIndex({ "srsConsumed.srsId": 1 });
+  _srsBoxDbIndexesReady = true;
+}
+
+// Pieces of a press box: the measured quantity, else the label quantity (plan S5). Voided SRS boxes give their pieces back.
+function _pressBoxBase(doc) {
+  const m = Number(doc && doc.qtyMeasured);
+  if (m > 0) return m;
+  const l = Number(doc && doc.qtyLabel);
+  return l > 0 ? l : 0;
+}
+function _pressBoxConsumed(doc) {
+  return ((doc && doc.srsConsumed) || [])
+    .filter(e => e && e.void !== true)
+    .reduce((a, e) => a + (Number(e.pieces) || 0), 0);
+}
+function _pressBoxRemaining(doc) { return Math.max(0, _pressBoxBase(doc) - _pressBoxConsumed(doc)); }
+
+function _srsInt(v, what) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) throw new _SrsError(400, `${what} must be a whole number >= 0`);
+  return n;
+}
+function _srsNgObject(ng) {
+  const out = {};
+  _SRS_NG_FIELDS.forEach(f => { out[f] = _srsInt((ng && ng[f]) || 0, `ng.${f}`); });
+  return out;
+}
+function _normSku(v) { return String(v || "").trim().toUpperCase(); }
+
+function _cleanSrsLines(lines) {
+  if (!Array.isArray(lines) || !lines.length) throw new _SrsError(400, "lines is required (at least one input)");
+  const seen = new Set();
+  return lines.map((l, i) => {
+    l = l || {};
+    const boxId = String(l.boxId || "").trim().toUpperCase() || null;
+    if (boxId) {
+      if (seen.has(boxId)) throw new _SrsError(400, `lines[${i}]: press box ${boxId} appears twice`);
+      seen.add(boxId);
+    }
+    const ng = _srsNgObject(l.ng);
+    const ngTotal = _SRS_NG_FIELDS.reduce((a, f) => a + ng[f], 0);
+    const good = _srsInt(l.good || 0, `lines[${i}].good`);
+    const lotNumbers = (Array.isArray(l.lotNumbers) ? l.lotNumbers : (l.lotNumber ? [l.lotNumber] : []))
+      .map(x => String(x || "").trim()).filter(Boolean);
+    if (!boxId && !lotNumbers.length) throw new _SrsError(400, `lines[${i}]: a legacy input needs a lot number`);
+    return {
+      boxId, legacy: !boxId, 品番: String(l.品番 || "").trim(), lotNumbers,
+      machines: Array.isArray(l.machines) ? l.machines.map(x => String(x)).filter(Boolean) : [],
+      carried: !!l.carried, good, ng, ngTotal
+    };
+  });
+}
+
+// Read-only: can `need` pieces be taken from this press box? Throws the same 409s as _consumePressBox. Used before the
+// SRS ID is issued so a refused request does not burn a number.
+async function _checkPressBox(db, boxId, sku, need) {
+  const doc = await db.collection("scnaBoxDB").findOne({ boxId });
+  if (!doc) throw new _SrsError(409, `Press box not found: ${boxId}`, { boxId });
+  if (sku && doc.品番 && _normSku(doc.品番) !== _normSku(sku)) {
+    throw new _SrsError(409, `Press box ${boxId} is product ${doc.品番}, not ${sku}`, { boxId });
+  }
+  const base = _pressBoxBase(doc);
+  if (!base) throw new _SrsError(409, `Press box ${boxId} has no quantity`, { boxId });
+  const remaining = base - _pressBoxConsumed(doc);
+  if (need > remaining) {
+    throw new _SrsError(409, `Press box ${boxId} has only ${Math.max(0, remaining)} pieces left (needs ${need})`, { boxId, remaining: Math.max(0, remaining), need });
+  }
+  return { doc, remaining };
+}
+
+// Take `good + ng` pieces from a press box for srsId. Optimistic concurrency on the length of srsConsumed so two
+// tablets cannot both take the last pieces; returns the pieces left.
+async function _consumePressBox(db, boxId, sku, srsId, good, ngTotal) {
+  const need = good + ngTotal;
+  const col = db.collection("scnaBoxDB");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const doc = await col.findOne({ boxId });
+    if (!doc) throw new _SrsError(409, `Press box not found: ${boxId}`, { boxId });
+    if (sku && doc.品番 && _normSku(doc.品番) !== _normSku(sku)) {
+      throw new _SrsError(409, `Press box ${boxId} is product ${doc.品番}, not ${sku}`, { boxId });
+    }
+    const base = _pressBoxBase(doc);
+    if (!base) throw new _SrsError(409, `Press box ${boxId} has no quantity`, { boxId });
+    const remaining = base - _pressBoxConsumed(doc);
+    if (need > remaining) {
+      throw new _SrsError(409, `Press box ${boxId} has only ${Math.max(0, remaining)} pieces left (needs ${need})`, { boxId, remaining: Math.max(0, remaining), need });
+    }
+    const len = (doc.srsConsumed || []).length;
+    const filter = len === 0
+      ? { boxId, $or: [{ srsConsumed: { $exists: false } }, { srsConsumed: { $size: 0 } }] }
+      : { boxId, srsConsumed: { $size: len } };
+    const r = await col.updateOne(filter, { $push: { srsConsumed: { srsId, good, ng: ngTotal, pieces: need, at: new Date().toISOString() } } });
+    if (r.modifiedCount === 1) return remaining - need;
+  }
+  throw new _SrsError(409, `Press box ${boxId} is busy, try again`, { boxId });
+}
+async function _releasePressBoxes(db, boxIds, srsId) {
+  for (const boxId of boxIds) {
+    try { await db.collection("scnaBoxDB").updateOne({ boxId }, { $pull: { srsConsumed: { srsId } } }); }
+    catch (e) { console.error(`SRS rollback failed for ${boxId}:`, e.message); }
+  }
+}
+
+// POST /api/srs-boxes - issue an SRS ID and register the label. Idempotent on boxUid (a retry returns the first box).
+app.post("/api/srs-boxes", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const boxUid = String(b.boxUid || "").trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(boxUid)) throw new _SrsError(400, "boxUid is required (8-64 letters, numbers, _ or -)");
+    const status = String(b.status || "");
+    if (status !== "complete" && status !== "draft") throw new _SrsError(400, "status must be 'complete' or 'draft'");
+    const workOrder = String(b.workOrder || "").trim();
+    const sebanggo = String(b.背番号 || "").trim();
+    const hinban = String(b.品番 || "").trim();
+    if (!sebanggo || !hinban) throw new _SrsError(400, "背番号 and 品番 are required");
+    const lane = String(b.lane || "").trim().toUpperCase();
+    if (lane !== "LH" && lane !== "RH") throw new _SrsError(400, "lane must be LH or RH");
+    const machine = String(b.machine || "").trim();
+    if (!machine) throw new _SrsError(400, "machine is required");
+    const lines = _cleanSrsLines(b.lines).map(l => ({ ...l, 品番: l.品番 || hinban }));
+    const qtyLabel = _srsInt(b.qtyLabel, "qtyLabel");
+    if (qtyLabel <= 0) throw new _SrsError(400, "qtyLabel must be greater than 0");
+    const qtyMeasured = lines.reduce((a, l) => a + l.good, 0);
+    if (qtyMeasured <= 0) throw new _SrsError(400, "the lines contain no good pieces");
+    // a draft label shows exactly what was entered; a complete label shows 収容数 even if the measured total differs (flagged)
+    if (status === "draft" && qtyLabel !== qtyMeasured) throw new _SrsError(400, `draft qtyLabel (${qtyLabel}) must equal the sum of the lines (${qtyMeasured})`);
+    const parentSrsId = String(b.parentSrsId || "").trim() || null;
+    if (parentSrsId && !lines.some(l => l.carried)) throw new _SrsError(400, "a resumed box must carry the draft's lines (carried: true)");
+    if (!parentSrsId && lines.some(l => l.carried)) throw new _SrsError(400, "carried lines need parentSrsId");
+
+    await client.connect();
+    await _ensureSrsBoxDbIndexes();
+    const db = client.db(DB_NAME);
+    const col = db.collection("srsBoxDB");
+
+    const existing = await col.findOne({ boxUid });
+    if (existing) return res.json({ ...existing, existing: true });
+
+    // refuse before a number is issued (the checks are repeated atomically when the pieces are taken)
+    if (parentSrsId) {
+      const parent = await col.findOne({ srsId: parentSrsId });
+      if (!parent) throw new _SrsError(409, `Draft not found: ${parentSrsId}`);
+      if (_normSku(parent.品番) !== _normSku(hinban)) throw new _SrsError(409, `Draft ${parentSrsId} is product ${parent.品番}, not ${hinban}`);
+      if (parent.status !== "draft") throw new _SrsError(409, `Draft ${parentSrsId} is not an open draft (status ${parent.status})`, { parentSrsId, status: parent.status });
+    }
+    for (const l of lines) {
+      if (l.carried || !l.boxId || l.good + l.ngTotal === 0) continue;
+      await _checkPressBox(db, l.boxId, l.品番, l.good + l.ngTotal);
+    }
+
+    const key = _scnaBoxKey(workOrder, sebanggo);
+    const counter = await db.collection("scnaBoxCounters").findOneAndUpdate(
+      { _id: `${key}-S` }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" }
+    );
+    const seq = (counter && (counter.value ? counter.value.seq : counter.seq)) || 1;
+    const srsId = `${key}-S${String(seq).padStart(3, "0")}`;
+
+    // claim the draft first (atomic), so two tablets cannot both finish it
+    if (parentSrsId) {
+      const parent = await col.findOne({ srsId: parentSrsId });
+      if (!parent) throw new _SrsError(409, `Draft not found: ${parentSrsId}`);
+      if (_normSku(parent.品番) !== _normSku(hinban)) throw new _SrsError(409, `Draft ${parentSrsId} is product ${parent.品番}, not ${hinban}`);
+      const claim = await col.updateOne(
+        { srsId: parentSrsId, status: "draft" },
+        { $set: { status: "superseded", replacedBy: srsId, supersededAt: new Date().toISOString() } }
+      );
+      if (claim.modifiedCount !== 1) throw new _SrsError(409, `Draft ${parentSrsId} is not an open draft (status ${parent.status})`, { parentSrsId, status: parent.status });
+    }
+
+    const consumed = [];
+    try {
+      for (const l of lines) {
+        if (l.carried || !l.boxId || l.good + l.ngTotal === 0) continue;
+        await _consumePressBox(db, l.boxId, l.品番, srsId, l.good, l.ngTotal);
+        consumed.push(l.boxId);
+      }
+      const doc = {
+        srsId, boxUid, seq, factory: "SCNA", status,
+        workOrder, 背番号: sebanggo, 品番: hinban, machine, lane,
+        workers: String(b.workers || "").trim(),
+        qtyLabel, qtyMeasured, mismatch: qtyLabel !== qtyMeasured,
+        lines, parentSrsId, replacedBy: null,
+        printedAt: b.printedAt || new Date().toISOString(),
+        printedBy: b.printedBy || null, copies: Number(b.copies) || 1, layoutId: b.layoutId || null,
+        srsRecordId: null, void: null, createdAt: new Date().toISOString()
+      };
+      try {
+        await col.insertOne(doc);
+      } catch (e) {
+        if (e && e.code === 11000) {   // same boxUid arrived twice at once: give back and return the first
+          await _releasePressBoxes(db, consumed, srsId);
+          if (parentSrsId) await col.updateOne({ srsId: parentSrsId, replacedBy: srsId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } });
+          const again = await col.findOne({ boxUid });
+          if (again) return res.json({ ...again, existing: true });
+        }
+        throw e;
+      }
+      return res.status(201).json(doc);
+    } catch (e) {
+      await _releasePressBoxes(db, consumed, srsId);
+      if (parentSrsId) {
+        try { await col.updateOne({ srsId: parentSrsId, replacedBy: srsId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } }); }
+        catch (e2) { console.error("SRS draft revert failed:", e2.message); }
+      }
+      throw e;
+    }
+  } catch (error) {
+    _srsSend(res, error, "Saving SRS box");
+  }
+});
+
+// GET /api/srs-boxes/:srsId[?chain=1] - the label; chain=1 adds the drafts it replaced, the press boxes and the SRSDB records.
+app.get("/api/srs-boxes/:srsId", async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const box = await db.collection("srsBoxDB").findOne({ srsId: String(req.params.srsId || "").trim().toUpperCase() });
+    if (!box) return res.status(404).json({ error: "SRS box not found" });
+    if (!req.query.chain) return res.json(box);
+
+    const parents = [];
+    let cur = box;
+    for (let i = 0; i < 10 && cur.parentSrsId; i++) {
+      cur = await db.collection("srsBoxDB").findOne({ srsId: cur.parentSrsId });
+      if (!cur) break;
+      parents.push(cur);
+    }
+    const all = [box, ...parents];
+    const boxIds = [...new Set(all.flatMap(x => (x.lines || []).map(l => l.boxId).filter(Boolean)))];
+    const pressBoxes = boxIds.length ? await db.collection("scnaBoxDB").find({ boxId: { $in: boxIds } }).toArray() : [];
+    const srsIds = all.map(x => x.srsId);
+    const srsRecords = await client.db("submittedDB").collection("SRSDB").find({ Srs_Box_IDs: { $in: srsIds } }).toArray();
+    res.json({ box, parents, pressBoxes, srsRecords });
+  } catch (error) {
+    _srsSend(res, error, "Reading SRS box");
+  }
+});
+
+// GET /api/srs-press-boxes/:boxId - a press box with its remaining pieces (what the SRS tablet scans).
+app.get("/api/srs-press-boxes/:boxId", async (req, res) => {
+  try {
+    await client.connect();
+    const doc = await client.db(DB_NAME).collection("scnaBoxDB").findOne({ boxId: String(req.params.boxId || "").trim().toUpperCase() });
+    if (!doc) return res.status(404).json({ error: "Box not found" });
+    res.json({ ...doc, base: _pressBoxBase(doc), consumed: _pressBoxConsumed(doc), remaining: _pressBoxRemaining(doc) });
+  } catch (error) {
+    _srsSend(res, error, "Reading press box");
+  }
+});
+
+// POST /api/srs-boxes/:srsId/void - lane reset after printing (leader approved on the tablet). Gives the pieces back; a
+// draft that this box replaced becomes an open draft again. A box already linked to an SRSDB record cannot be voided.
+app.post("/api/srs-boxes/:srsId/void", async (req, res) => {
+  try {
+    const leader = (req.body && req.body.leader) || {};
+    const leaderUser = String(leader.username || "").trim();
+    if (!leaderUser) throw new _SrsError(400, "leader.username is required");
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const col = db.collection("srsBoxDB");
+    const srsId = String(req.params.srsId || "").trim().toUpperCase();
+    const box = await col.findOne({ srsId });
+    if (!box) throw new _SrsError(404, "SRS box not found");
+    if (box.srsRecordId) throw new _SrsError(409, "This SRS box is already part of a submitted SRS record");
+    if (box.status !== "complete" && box.status !== "draft") throw new _SrsError(409, `SRS box is ${box.status}`);
+    const r = await col.updateOne({ srsId, status: box.status, srsRecordId: null }, { $set: {
+      status: "voided",
+      void: { at: new Date().toISOString(), reason: String(req.body.reason || "reset"), previousStatus: box.status, leader: { username: leaderUser, name: String(leader.name || "") } }
+    } });
+    if (r.modifiedCount !== 1) throw new _SrsError(409, "SRS box changed, try again");
+    await db.collection("scnaBoxDB").updateMany(
+      { "srsConsumed.srsId": srsId },
+      { $set: { "srsConsumed.$[e].void": true } },
+      { arrayFilters: [{ "e.srsId": srsId }] }
+    );
+    if (box.parentSrsId) {
+      await col.updateOne({ srsId: box.parentSrsId, status: "superseded", replacedBy: srsId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } });
+    }
+    res.json({ ok: true, srsId, status: "voided" });
+  } catch (error) {
+    _srsSend(res, error, "Voiding SRS box");
+  }
+});
+// ==== SRS BOXES END ======================================================
+
+// ==== KENSA BOXES START ==================================================
+// Kensa (inspection) labels for "Kensa interactive SCNA". One printed label = one Kensa box, ID `<背番号>-<yyyymmdd>-K<seq>`.
+// See docs/kensa-interactive-plan.md (API contract section). All routes are new; nothing existing is modified.
+//   kensaBoxDB   the label registry: status complete | draft | superseded | voided, lines (which DCP box / SRS box / legacy lot
+//                gave how many good + NG pieces), parentKensaId for drafts finished later
+//   scnaBoxDB    DCP boxes get `kensaConsumed: [{ kensaId, good, ng, pieces, at, void? }]`. The same entry is mirrored into
+//                `srsConsumed` with `viaKensa: true` so the (unchanged) SRS routes see the pieces as taken and their optimistic
+//                concurrency also guards the shared pool. Remaining = base - srsConsumed(no viaKensa) - kensaConsumed.
+//   srsBoxDB     SRS boxes get `kensaConsumed` only.
+const _KENSA_COUNTERS = Array.from({ length: 12 }, (_, i) => `counter-${i + 1}`);
+
+class _KensaError extends Error {
+  constructor(status, message, extra) { super(message); this.status = status; this.extra = extra || {}; }
+}
+function _kensaSend(res, error, label) {
+  if (error instanceof _KensaError) return res.status(error.status).json({ error: error.message, ...error.extra });
+  console.error(`❌ ${label}:`, error);
+  return res.status(500).json({ error: `${label} failed`, details: error.message });
+}
+
+let _kensaBoxDbIndexesReady = false;
+async function _ensureKensaBoxDbIndexes() {
+  if (_kensaBoxDbIndexesReady) return;
+  const db = client.db(DB_NAME);
+  const col = db.collection("kensaBoxDB");
+  await col.createIndex({ kensaId: 1 }, { unique: true });
+  await col.createIndex({ boxUid: 1 }, { unique: true });
+  await col.createIndex({ parentKensaId: 1 });
+  await col.createIndex({ "lines.boxId": 1 });
+  await col.createIndex({ "lines.srsId": 1 });
+  await col.createIndex({ kensaRecordId: 1 });
+  await db.collection("scnaBoxDB").createIndex({ "kensaConsumed.kensaId": 1 });
+  await db.collection("srsBoxDB").createIndex({ "kensaConsumed.kensaId": 1 });
+  _kensaBoxDbIndexesReady = true;
+}
+
+function _kensaInt(v, what) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) throw new _KensaError(400, `${what} must be a whole number >= 0`);
+  return n;
+}
+// Kind of an input ID: DCP press box `...-B###`, SRS label `...-S###`, Kensa label `...-K###`.
+function _kensaIdKind(id) {
+  const s = String(id || "").trim().toUpperCase();
+  if (/-B\d+$/.test(s)) return "dcp";
+  if (/-S\d+$/.test(s)) return "srs";
+  if (/-K\d+$/.test(s)) return "kensa";
+  return null;
+}
+function _kensaPieces(e) { return (Number(e && e.pieces) || ((Number(e && e.good) || 0) + (Number(e && e.ng) || 0))); }
+// pieces already taken from an input (voided entries give them back)
+function _kensaTaken(kind, doc) {
+  let n = ((doc && doc.kensaConsumed) || []).filter(e => e && e.void !== true).reduce((a, e) => a + _kensaPieces(e), 0);
+  if (kind === "dcp") {
+    n += ((doc && doc.srsConsumed) || []).filter(e => e && e.void !== true && !e.viaKensa).reduce((a, e) => a + (Number(e.pieces) || 0), 0);
+  }
+  return n;
+}
+function _kensaBase(doc) { return _pressBoxBase(doc); }   // measured quantity, else label quantity (same rule for DCP and SRS boxes)
+function _kensaUsable(kind, doc) {
+  return kind === "srs" ? (doc.status === "complete" || doc.status === "draft") : true;
+}
+
+function _cleanKensaLines(lines) {
+  if (!Array.isArray(lines) || !lines.length) throw new _KensaError(400, "lines is required (at least one input)");
+  const seenNew = new Set(), seenCarried = new Set();
+  return lines.map((l, i) => {
+    l = l || {};
+    const boxId = String(l.boxId || "").trim().toUpperCase() || null;
+    const srsId = String(l.srsId || "").trim().toUpperCase() || null;
+    if (boxId && srsId) throw new _KensaError(400, `lines[${i}]: a line is either a DCP box or an SRS box, not both`);
+    if (boxId && _kensaIdKind(boxId) !== "dcp") throw new _KensaError(400, `lines[${i}]: ${boxId} is not a DCP box ID (...-B###)`);
+    if (srsId && _kensaIdKind(srsId) !== "srs") throw new _KensaError(400, `lines[${i}]: ${srsId} is not an SRS ID (...-S###)`);
+    const carried = !!l.carried;
+    const inputId = boxId || srsId;
+    if (inputId) {
+      const seen = carried ? seenCarried : seenNew;
+      if (seen.has(inputId)) throw new _KensaError(400, `lines[${i}]: input ${inputId} appears twice`);
+      seen.add(inputId);
+    }
+    const ng = {};
+    _KENSA_COUNTERS.forEach(c => { ng[c] = _kensaInt((l.ng && l.ng[c]) || 0, `lines[${i}].ng.${c}`); });
+    const ngTotal = _KENSA_COUNTERS.reduce((a, c) => a + ng[c], 0);
+    const good = _kensaInt(l.good || 0, `lines[${i}].good`);
+    const lotNumber = String(l.lotNumber || (Array.isArray(l.lotNumbers) ? l.lotNumbers.filter(Boolean).join(",") : "") || "").trim();
+    if (!inputId && !lotNumber) throw new _KensaError(400, `lines[${i}]: a legacy input needs a lot number`);
+    return { boxId, srsId, legacy: !inputId, 品番: String(l.品番 || "").trim(), lotNumber, carried, good, ng, ngTotal };
+  });
+}
+
+function _kensaCol(kind) { return kind === "srs" ? "srsBoxDB" : "scnaBoxDB"; }
+function _kensaField(kind) { return kind === "srs" ? "srsId" : "boxId"; }
+
+// Read-only: can `need` pieces be taken from this input? Throws the 409s that _kensaConsume throws. Used before the ID is
+// issued so a refused request does not burn a number.
+async function _kensaCheckInput(db, kind, id, sku, need) {
+  const doc = await db.collection(_kensaCol(kind)).findOne({ [_kensaField(kind)]: id });
+  const what = kind === "srs" ? "SRS box" : "Press box";
+  if (!doc) throw new _KensaError(409, `${what} not found: ${id}`, { id });
+  if (!_kensaUsable(kind, doc)) throw new _KensaError(409, `${what} ${id} is ${doc.status} and cannot be used`, { id, status: doc.status });
+  if (sku && doc.品番 && _normSku(doc.品番) !== _normSku(sku)) throw new _KensaError(409, `${what} ${id} is product ${doc.品番}, not ${sku}`, { id });
+  const base = _kensaBase(doc);
+  if (!base) throw new _KensaError(409, `${what} ${id} has no quantity`, { id });
+  const remaining = base - _kensaTaken(kind, doc);
+  if (need > remaining) throw new _KensaError(409, `${what} ${id} has only ${Math.max(0, remaining)} pieces left (needs ${need})`, { id, remaining: Math.max(0, remaining), need });
+  return { doc, remaining };
+}
+
+// Take good + ng pieces from an input for kensaId. Optimistic concurrency on the array lengths (kensaConsumed, and srsConsumed
+// for a DCP box, which the SRS routes also guard) so two tablets cannot both take the last pieces.
+async function _kensaConsume(db, kind, id, sku, kensaId, good, ngTotal) {
+  const need = good + ngTotal;
+  const col = db.collection(_kensaCol(kind));
+  const field = _kensaField(kind);
+  const sized = (name, len) => len === 0
+    ? { $or: [{ [name]: { $exists: false } }, { [name]: { $size: 0 } }] }
+    : { [name]: { $size: len } };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { doc, remaining } = await _kensaCheckInput(db, kind, id, sku, need);
+    const at = new Date().toISOString();
+    const entry = { kensaId, good, ng: ngTotal, pieces: need, at };
+    const filter = { [field]: id, $and: [sized("kensaConsumed", (doc.kensaConsumed || []).length)] };
+    const push = { kensaConsumed: entry };
+    if (kind === "dcp") {
+      filter.$and.push(sized("srsConsumed", (doc.srsConsumed || []).length));
+      push.srsConsumed = { srsId: null, kensaId, viaKensa: true, good, ng: ngTotal, pieces: need, at };
+    }
+    const r = await col.updateOne(filter, { $push: push });
+    if (r.modifiedCount === 1) return remaining - need;
+  }
+  throw new _KensaError(409, `Input ${id} is busy, try again`, { id });
+}
+async function _kensaRelease(db, taken, kensaId) {
+  for (const t of taken) {
+    try {
+      const upd = { $pull: { kensaConsumed: { kensaId } } };
+      if (t.kind === "dcp") upd.$pull.srsConsumed = { kensaId, viaKensa: true };
+      await db.collection(_kensaCol(t.kind)).updateOne({ [_kensaField(t.kind)]: t.id }, upd);
+    } catch (e) { console.error(`Kensa rollback failed for ${t.id}:`, e.message); }
+  }
+}
+async function _kensaReopenParent(col, parentKensaId, kensaId) {
+  if (!parentKensaId) return;
+  try { await col.updateOne({ kensaId: parentKensaId, replacedBy: kensaId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } }); }
+  catch (e) { console.error("Kensa draft revert failed:", e.message); }
+}
+
+// POST /api/kensa-boxes - issue a Kensa ID and register the label. Idempotent on boxUid.
+app.post("/api/kensa-boxes", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const boxUid = String(b.boxUid || "").trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(boxUid)) throw new _KensaError(400, "boxUid is required (8-64 letters, numbers, _ or -)");
+    const status = String(b.status || "");
+    if (status !== "complete" && status !== "draft") throw new _KensaError(400, "status must be 'complete' or 'draft'");
+    const sebanggo = String(b.背番号 || "").trim();
+    const hinban = String(b.品番 || "").trim();
+    if (!sebanggo || !hinban) throw new _KensaError(400, "背番号 and 品番 are required");
+    const machine = String(b.machine || "").trim();
+    if (!machine) throw new _KensaError(400, "machine is required");
+    const lines = _cleanKensaLines(b.lines).map(l => ({ ...l, 品番: l.品番 || hinban }));
+    const qtyLabel = _kensaInt(b.qtyLabel, "qtyLabel");
+    if (qtyLabel <= 0) throw new _KensaError(400, "qtyLabel must be greater than 0");
+    const qtyMeasured = lines.reduce((a, l) => a + l.good, 0);
+    if (qtyMeasured <= 0) throw new _KensaError(400, "the lines contain no good pieces");
+    if (status === "draft" && qtyLabel !== qtyMeasured) throw new _KensaError(400, `draft qtyLabel (${qtyLabel}) must equal the sum of the lines (${qtyMeasured})`);
+    const parentKensaId = String(b.parentKensaId || "").trim().toUpperCase() || null;
+    if (parentKensaId && !lines.some(l => l.carried)) throw new _KensaError(400, "a resumed box must carry the draft's lines (carried: true)");
+    if (!parentKensaId && lines.some(l => l.carried)) throw new _KensaError(400, "carried lines need parentKensaId");
+
+    await client.connect();
+    await _ensureKensaBoxDbIndexes();
+    const db = client.db(DB_NAME);
+    const col = db.collection("kensaBoxDB");
+
+    const existing = await col.findOne({ boxUid });
+    if (existing) return res.json({ ...existing, existing: true });
+
+    // refuse before a number is issued (the checks are repeated atomically when the pieces are taken)
+    if (parentKensaId) {
+      const parent = await col.findOne({ kensaId: parentKensaId });
+      if (!parent) throw new _KensaError(409, `Draft not found: ${parentKensaId}`);
+      if (_normSku(parent.品番) !== _normSku(hinban)) throw new _KensaError(409, `Draft ${parentKensaId} is product ${parent.品番}, not ${hinban}`);
+      if (parent.status !== "draft") throw new _KensaError(409, `Draft ${parentKensaId} is not an open draft (status ${parent.status})`, { parentKensaId, status: parent.status });
+    }
+    for (const l of lines) {
+      if (l.carried || l.legacy || l.good + l.ngTotal === 0) continue;
+      await _kensaCheckInput(db, l.boxId ? "dcp" : "srs", l.boxId || l.srsId, l.品番, l.good + l.ngTotal);
+    }
+
+    const key = _scnaBoxKey(null, sebanggo);
+    const counter = await db.collection("scnaBoxCounters").findOneAndUpdate(
+      { _id: `${key}-K` }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" }
+    );
+    const seq = (counter && (counter.value ? counter.value.seq : counter.seq)) || 1;
+    const kensaId = `${key}-K${String(seq).padStart(3, "0")}`;
+
+    if (parentKensaId) {   // claim the draft first (atomic), so two tablets cannot both finish it
+      const claim = await col.updateOne(
+        { kensaId: parentKensaId, status: "draft" },
+        { $set: { status: "superseded", replacedBy: kensaId, supersededAt: new Date().toISOString() } }
+      );
+      if (claim.modifiedCount !== 1) throw new _KensaError(409, `Draft ${parentKensaId} is not an open draft`, { parentKensaId });
+    }
+
+    const taken = [];
+    try {
+      for (const l of lines) {
+        if (l.carried || l.legacy || l.good + l.ngTotal === 0) continue;
+        const kind = l.boxId ? "dcp" : "srs";
+        const id = l.boxId || l.srsId;
+        await _kensaConsume(db, kind, id, l.品番, kensaId, l.good, l.ngTotal);
+        taken.push({ kind, id });
+      }
+      const doc = {
+        kensaId, boxUid, seq, factory: "SCNA", status,
+        背番号: sebanggo, 品番: hinban, machine,
+        workers: String(b.workers || "").trim(),
+        qtyLabel, qtyMeasured, mismatch: qtyLabel !== qtyMeasured,
+        lines, parentKensaId, replacedBy: null,
+        printedAt: b.printedAt || new Date().toISOString(),
+        printedBy: b.printedBy || null, copies: Number(b.copies) || 1, layoutId: b.layoutId || null,
+        kensaRecordId: null, void: null, createdAt: new Date().toISOString()
+      };
+      try {
+        await col.insertOne(doc);
+      } catch (e) {
+        if (e && e.code === 11000) {   // same boxUid arrived twice at once: give back and return the first
+          await _kensaRelease(db, taken, kensaId);
+          await _kensaReopenParent(col, parentKensaId, kensaId);
+          const again = await col.findOne({ boxUid });
+          if (again) return res.json({ ...again, existing: true });
+        }
+        throw e;
+      }
+      return res.status(201).json(doc);
+    } catch (e) {
+      await _kensaRelease(db, taken, kensaId);
+      await _kensaReopenParent(col, parentKensaId, kensaId);
+      throw e;
+    }
+  } catch (error) {
+    _kensaSend(res, error, "Saving Kensa box");
+  }
+});
+
+// GET /api/kensa-boxes/:kensaId[?chain=1] - the label; chain=1 adds the drafts it replaced, the input boxes and the kensaDB records.
+app.get("/api/kensa-boxes/:kensaId", async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const col = db.collection("kensaBoxDB");
+    const box = await col.findOne({ kensaId: String(req.params.kensaId || "").trim().toUpperCase() });
+    if (!box) return res.status(404).json({ error: "Kensa box not found" });
+    if (!req.query.chain) return res.json(box);
+
+    const parents = [];
+    let cur = box;
+    for (let i = 0; i < 10 && cur.parentKensaId; i++) {
+      cur = await col.findOne({ kensaId: cur.parentKensaId });
+      if (!cur) break;
+      parents.push(cur);
+    }
+    const all = [box, ...parents];
+    const boxIds = [...new Set(all.flatMap(x => (x.lines || []).map(l => l.boxId).filter(Boolean)))];
+    const srsIds = [...new Set(all.flatMap(x => (x.lines || []).map(l => l.srsId).filter(Boolean)))];
+    const pressBoxes = boxIds.length ? await db.collection("scnaBoxDB").find({ boxId: { $in: boxIds } }).toArray() : [];
+    const srsBoxes = srsIds.length ? await db.collection("srsBoxDB").find({ srsId: { $in: srsIds } }).toArray() : [];
+    const kensaRecords = await client.db("submittedDB").collection("kensaDB").find({ Kensa_Box_IDs: { $in: all.map(x => x.kensaId) } }).toArray();
+    res.json({ box, parents, pressBoxes, srsBoxes, kensaRecords });
+  } catch (error) {
+    _kensaSend(res, error, "Reading Kensa box");
+  }
+});
+
+// GET /api/kensa-inputs/:id - what the Kensa tablet scans: a DCP box (...-B###) or an SRS label (...-S###) with its remaining pieces.
+app.get("/api/kensa-inputs/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim().toUpperCase();
+    const kind = _kensaIdKind(id);
+    if (kind === "kensa") return res.status(400).json({ error: "A Kensa label cannot be used as an input", kind: "kensa", id });
+    if (!kind) return res.status(404).json({ error: "Unknown ID format (expected ...-B### or ...-S###)", id });
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const doc = await db.collection(_kensaCol(kind)).findOne({ [_kensaField(kind)]: id });
+    if (!doc) return res.status(404).json({ error: kind === "srs" ? "SRS box not found" : "Box not found", kind, id });
+    const usable = _kensaUsable(kind, doc);
+    const base = _kensaBase(doc);
+    const consumed = _kensaTaken(kind, doc);
+    let lotNumbers = [];
+    if (kind === "dcp") {
+      lotNumbers = (doc.lots || []).map(x => String((x && x.lotNumber) || "").trim()).filter(Boolean);
+    } else {
+      (doc.lines || []).forEach(l => {
+        const ls = Array.isArray(l.lotNumbers) ? l.lotNumbers : (l.lotNumber ? [l.lotNumber] : []);
+        ls.forEach(x => { x = String(x || "").trim(); if (x) lotNumbers.push(x); });
+      });
+      if (!lotNumbers.length) {   // lines that came from DCP boxes: take the box lots
+        const ids = (doc.lines || []).map(l => l.boxId).filter(Boolean);
+        if (ids.length) {
+          const boxes = await db.collection("scnaBoxDB").find({ boxId: { $in: ids } }).toArray();
+          boxes.forEach(x => (x.lots || []).forEach(l => { const v = String((l && l.lotNumber) || "").trim(); if (v) lotNumbers.push(v); }));
+        }
+      }
+    }
+    lotNumbers = [...new Set(lotNumbers)];
+    res.json({
+      kind, id, 品番: doc.品番 || "", 背番号: doc.背番号 || "", lotNumbers,
+      status: kind === "srs" ? doc.status : (doc.status || "complete"), usable,
+      base, consumed, remaining: usable ? Math.max(0, base - consumed) : 0
+    });
+  } catch (error) {
+    _kensaSend(res, error, "Reading Kensa input");
+  }
+});
+
+// GET /api/scna-trace?code=<any QR text or ID> - which processes are already done for a box, whatever QR is scanned:
+// a press box (...-B###), an SRS label (...-S###), a Kensa label (...-K###) or a legacy "品番,収容数,lot" QR (matched by lot).
+// Printing does not matter: a label counts once its ID is registered (also when it was registered without printing).
+app.get("/api/scna-trace", async (req, res) => {
+  try {
+    const code = String(req.query.code || "").trim();
+    if (!code) return res.status(400).json({ error: "code is required" });
+    const parts = code.split(/[,\s]+/).map(p => p.trim()).filter(Boolean);
+    let id = "", kind = null;
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const k = _kensaIdKind(parts[i]);
+      if (k) { id = parts[i].toUpperCase(); kind = k; parts.splice(i, 1); break; }
+    }
+    const lot = !id && parts.length >= 3 ? parts.slice(2).join("") : "";
+    if (!id && !lot) return res.status(404).json({ error: "Unknown QR format" });
+
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const live = { $in: ["complete", "draft", "superseded"] };
+    const pressIds = new Set(), srsIds = new Set(), kensaIds = new Set();
+    let hinban = parts[0] || "";
+
+    if (kind === "dcp") pressIds.add(id);
+    else if (kind === "srs") srsIds.add(id);
+    else if (kind === "kensa") kensaIds.add(id);
+    else {
+      const lotQ = { $or: [{ "lines.lotNumbers": lot }, { "lines.lotNumber": lot }], status: live };
+      (await db.collection("scnaBoxDB").find({ "lots.lotNumber": lot }).project({ boxId: 1 }).limit(200).toArray()).forEach(x => pressIds.add(x.boxId));
+      (await db.collection("srsBoxDB").find(lotQ).project({ srsId: 1 }).limit(200).toArray()).forEach(x => srsIds.add(x.srsId));
+      (await db.collection("kensaBoxDB").find(lotQ).project({ kensaId: 1 }).limit(200).toArray()).forEach(x => kensaIds.add(x.kensaId));
+    }
+
+    // walk the chain in both directions: kensa -> srs/press (lines), srs -> press (lines), press -> srs -> kensa (consumers)
+    for (let round = 0; round < 3; round++) {
+      if (kensaIds.size) {
+        for (const d of await db.collection("kensaBoxDB").find({ kensaId: { $in: [...kensaIds] } }).toArray()) {
+          hinban = hinban || d.品番 || "";
+          (d.lines || []).forEach(l => { if (l.srsId) srsIds.add(l.srsId); if (l.boxId) pressIds.add(l.boxId); });
+        }
+      }
+      if (srsIds.size) {
+        for (const d of await db.collection("srsBoxDB").find({ srsId: { $in: [...srsIds] } }).toArray()) {
+          hinban = hinban || d.品番 || "";
+          (d.lines || []).forEach(l => { if (l.boxId) pressIds.add(l.boxId); });
+        }
+        (await db.collection("kensaBoxDB").find({ "lines.srsId": { $in: [...srsIds] }, status: live }).project({ kensaId: 1 }).toArray()).forEach(x => kensaIds.add(x.kensaId));
+      }
+      if (pressIds.size) {
+        (await db.collection("srsBoxDB").find({ "lines.boxId": { $in: [...pressIds] }, status: live }).project({ srsId: 1 }).toArray()).forEach(x => srsIds.add(x.srsId));
+        (await db.collection("kensaBoxDB").find({ "lines.boxId": { $in: [...pressIds] }, status: live }).project({ kensaId: 1 }).toArray()).forEach(x => kensaIds.add(x.kensaId));
+      }
+    }
+
+    // a voided label does not count; a draft is "started" (partial), only complete/superseded-by-complete is done
+    const srsDocs = srsIds.size ? await db.collection("srsBoxDB").find({ srsId: { $in: [...srsIds] } }).project({ srsId: 1, status: 1 }).toArray() : [];
+    const kensaDocs = kensaIds.size ? await db.collection("kensaBoxDB").find({ kensaId: { $in: [...kensaIds] } }).project({ kensaId: 1, status: 1 }).toArray() : [];
+    const summarize = (docs, field) => {
+      const ok = docs.filter(d => d.status && d.status !== "voided");
+      return {
+        done: ok.some(d => d.status === "complete" || d.status === "superseded"),
+        started: ok.length > 0,
+        ids: ok.map(d => d[field])
+      };
+    };
+    res.json({
+      code, kind: kind || "legacy", id, lot, 品番: hinban,
+      processes: {
+        press: { done: pressIds.size > 0, started: pressIds.size > 0, ids: [...pressIds] },
+        srs: summarize(srsDocs, "srsId"),
+        kensa: summarize(kensaDocs, "kensaId")
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error tracing SCNA code:", error);
+    res.status(500).json({ error: "Trace failed", details: error.message });
+  }
+});
+
+// POST /api/kensa-boxes/:kensaId/void - reset after printing (leader approved on the tablet). Gives the pieces back; a draft that
+// this box replaced becomes an open draft again. A box already linked to a kensaDB record cannot be voided.
+app.post("/api/kensa-boxes/:kensaId/void", async (req, res) => {
+  try {
+    const leader = (req.body && req.body.leader) || {};
+    const leaderUser = String(leader.username || "").trim();
+    if (!leaderUser) throw new _KensaError(400, "leader.username is required");
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const col = db.collection("kensaBoxDB");
+    const kensaId = String(req.params.kensaId || "").trim().toUpperCase();
+    const box = await col.findOne({ kensaId });
+    if (!box) throw new _KensaError(404, "Kensa box not found");
+    if (box.kensaRecordId) throw new _KensaError(409, "This Kensa box is already part of a submitted kensa record");
+    if (box.status !== "complete" && box.status !== "draft") throw new _KensaError(409, `Kensa box is ${box.status}`);
+    const r = await col.updateOne({ kensaId, status: box.status, kensaRecordId: null }, { $set: {
+      status: "voided",
+      void: { at: new Date().toISOString(), reason: String((req.body && req.body.reason) || "reset"), previousStatus: box.status, leader: { username: leaderUser, name: String(leader.name || "") } }
+    } });
+    if (r.modifiedCount !== 1) throw new _KensaError(409, "Kensa box changed, try again");
+    for (const cname of ["scnaBoxDB", "srsBoxDB"]) {
+      await db.collection(cname).updateMany(
+        { "kensaConsumed.kensaId": kensaId },
+        { $set: { "kensaConsumed.$[e].void": true } },
+        { arrayFilters: [{ "e.kensaId": kensaId }] }
+      );
+    }
+    await db.collection("scnaBoxDB").updateMany(
+      { "srsConsumed.kensaId": kensaId },
+      { $set: { "srsConsumed.$[e].void": true } },
+      { arrayFilters: [{ "e.kensaId": kensaId }] }
+    );
+    if (box.parentKensaId) await _kensaReopenParent(col, box.parentKensaId, kensaId);
+    res.json({ ok: true, kensaId, status: "voided" });
+  } catch (error) {
+    _kensaSend(res, error, "Voiding Kensa box");
+  }
+});
+
+let _kensaDbIndexReady = false;
+async function _ensureKensaDbIndex(kensaDB) {
+  if (_kensaDbIndexReady) return;
+  await kensaDB.createIndex({ Submit_UID: 1 }, { unique: true, partialFilterExpression: { Submit_UID: { $type: "string" } } });
+  await kensaDB.createIndex({ Kensa_Box_IDs: 1 });
+  await kensaDB.createIndex({ Box_IDs: 1 });
+  _kensaDbIndexReady = true;
+}
+
+// POST /submitToKensaDBInteractive - the inspection record (legacy kensaDB fields + Kensa/box links). Photos use the same payload as the
+// DCP interactive submit: images:[{ base64, label:'初物チェック'|'終物チェック', sebanggo, date, worker, factory, machine }].
+app.post("/submitToKensaDBInteractive", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("submittedDB");
+    const kensaDB = database.collection("kensaDB");
+    const formData = req.body || {};
+    try { await _ensureKensaDbIndex(kensaDB); } catch (e) { console.error("kensaDB indexes failed:", e.message); }
+
+    const submitUid = String(formData.Submit_UID || "").trim();
+    if (submitUid) {
+      const done = await kensaDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+      if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+    }
+
+    const requiredFields = ["品番", "背番号", "Total", "工場", "Worker_Name", "Process_Quantity", "Remaining_Quantity",
+      "Date", "Time_start", "Time_end", "設備", "Counters", "Total_NG", "製造ロット", "Cycle_Time"];
+    const missing = requiredFields.filter(f => formData[f] === undefined || formData[f] === null);
+    if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(", ")}` });
+
+    const cleanIds = (v) => Array.isArray(v) ? [...new Set(v.map(x => String(x || "").trim().toUpperCase()).filter(Boolean))] : [];
+    const kensaIds = cleanIds(formData.Kensa_Box_IDs);
+    const boxIds = cleanIds(formData.Box_IDs);
+    formData.Kensa_Box_IDs = kensaIds;
+    formData.Box_IDs = boxIds;
+
+    const boxDb = client.db(DB_NAME);
+    if (kensaIds.length) {   // labels printed in this session: valid, still open, not linked to another record
+      const labels = await boxDb.collection("kensaBoxDB").find({ kensaId: { $in: kensaIds } }).toArray();
+      const byId = new Map(labels.map(x => [x.kensaId, x]));
+      const bad = kensaIds.filter(id => {
+        const x = byId.get(id);
+        return !x || (x.status !== "complete" && x.status !== "draft") || x.kensaRecordId;
+      });
+      if (bad.length) {
+        return res.status(409).json({
+          error: `Kensa label cannot be submitted: ${bad.map(id => `${id} (${byId.get(id) ? (byId.get(id).kensaRecordId ? "already submitted" : byId.get(id).status) : "not found"})`).join(", ")}`,
+          kensaIds: bad
+        });
+      }
+    }
+
+    // photos: 初物 is required, 終物 is optional
+    const images = (Array.isArray(formData.images) ? formData.images : []).concat(Array.isArray(formData.photos) ? formData.photos : []);
+    delete formData.images;
+    delete formData.photos;
+    if (!images.some(i => i && i.label === "初物チェック" && i.base64)) {
+      return res.status(400).json({ error: "初物チェック (first-piece) photo is required" });
+    }
+    const labelToField = { "初物チェック": "初物チェック画像", "終物チェック": "終物チェック画像" };
+    const safe = (v) => String(v === undefined || v === null || v === "" ? "x" : v).replace(/[\\/]+/g, "_");
+    const bucket = admin.storage().bucket();
+    for (const img of images) {
+      if (!img || !img.base64 || !labelToField[img.label]) continue;
+      try {
+        const buffer = Buffer.from(img.base64, "base64");
+        const factory = safe(img.factory || formData.工場);
+        const fileName = `${safe(img.sebanggo || formData.背番号)}_${safe(img.date || formData.Date)}_${safe(img.worker || formData.Worker_Name)}_${factory}_${safe(img.machine || formData.設備)}_${img.label}.jpg`;
+        const file = bucket.file(`CycleCheck/${factory}/${fileName}`);
+        const downloadToken = "masterDBToken69";
+        await uploadToFirebaseWithRetry(file, buffer, {
+          metadata: { contentType: "image/jpeg", metadata: { firebaseStorageDownloadTokens: downloadToken } }
+        });
+        formData[labelToField[img.label]] = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+      } catch (uploadError) {
+        console.error(`❌ Kensa interactive: photo upload failed (${img.label}):`, uploadError.message);
+      }
+    }
+    if (!formData["初物チェック画像"]) {
+      return res.status(502).json({ error: "初物チェック photo upload failed, please retry" });
+    }
+
+    formData.createdAt = new Date().toISOString();
+    let result;
+    try {
+      result = await kensaDB.insertOne(formData);
+    } catch (e) {
+      if (e && e.code === 11000 && submitUid) {   // the same submit arrived twice at once
+        const done = await kensaDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+        if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+      }
+      throw e;
+    }
+    _invalidateFinancialsCache("kensaDB insert");
+    _invalidateFactoryOverviewCache("kensaDB insert");
+
+    // The record is saved; what follows is bookkeeping, so a failure is logged and not returned as a submit error.
+    if (kensaIds.length) {
+      try {
+        await boxDb.collection("kensaBoxDB").updateMany(
+          { kensaId: { $in: kensaIds } },
+          { $set: { kensaRecordId: result.insertedId, submittedAt: formData.createdAt } }
+        );
+      } catch (e) { console.error("Kensa label link failed (kensaDB record saved):", e.message); }
+    }
+    // NG found after the last print: those pieces are gone from the input too
+    const lateNg = Array.isArray(formData.Kensa_Unlabelled_NG) ? formData.Kensa_Unlabelled_NG : [];
+    for (const x of lateNg) {
+      const id = String((x && (x.boxId || x.srsId || x.id)) || "").trim().toUpperCase();
+      const ng = Number(x && x.ngTotal) || 0;
+      const kind = _kensaIdKind(id);
+      if (!id || ng <= 0 || (kind !== "dcp" && kind !== "srs")) continue;
+      try {
+        const push = { kensaConsumed: { kensaId: null, recordId: result.insertedId, good: 0, ng, pieces: ng, at: formData.createdAt } };
+        if (kind === "dcp") push.srsConsumed = { srsId: null, kensaId: null, viaKensa: true, recordId: result.insertedId, good: 0, ng, pieces: ng, at: formData.createdAt };
+        await boxDb.collection(_kensaCol(kind)).updateOne({ [_kensaField(kind)]: id }, { $push: push });
+      } catch (e) { console.error(`Kensa late NG for ${id} failed:`, e.message); }
+    }
+    // Write the result back onto each input so a box lookup shows who inspected it, where and when.
+    if (boxIds.length) {
+      const run = {
+        kensaRecordId: result.insertedId, kensaIds,
+        machine: formData.設備 || "", workers: formData.Worker_Name || "",
+        date: formData.Date || "", timeStart: formData.Time_start || "", timeEnd: formData.Time_end || "",
+        submittedAt: formData.createdAt
+      };
+      for (const kind of ["dcp", "srs"]) {
+        const ids = boxIds.filter(id => _kensaIdKind(id) === kind);
+        if (!ids.length) continue;
+        try {
+          await boxDb.collection(_kensaCol(kind)).updateMany(
+            { [_kensaField(kind)]: { $in: ids } },
+            { $set: { kensa: run }, $push: { kensaRuns: run } }
+          );
+        } catch (e) { console.error("Kensa box write-back failed (kensaDB record saved):", e.message); }
+      }
+    }
+
+    res.status(201).json({ message: "Data and images successfully saved to kensaDB", insertedId: result.insertedId });
+  } catch (error) {
+    console.error("Error saving data to kensaDB (interactive):", error);
+    res.status(500).json({ error: "Error saving data to kensaDB" });
+  }
+});
+// ==== KENSA BOXES END ====================================================
+
+
+app.get("/api/scna-label-layouts", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const process = req.query.process ? _requestedProcess(req.query.process) : null;
+    if (req.query.process && !process) return res.status(400).json({ error: "unknown process" });
+    const list = await database.collection("labelLayouts")
+      .find(process ? { processes: process } : {}).sort({ name: 1 }).toArray();
+    res.json(list);
+  } catch (error) {
+    console.error("❌ Error listing label layouts:", error);
+    res.status(500).json({ error: "Failed to list label layouts", details: error.message });
+  }
+});
+
+app.post("/api/scna-label-layouts", async (req, res) => {
+  try {
+    const { name, customers, isDefault, layout, username } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: "name is required" });
+    const processes = _cleanProcesses(req.body?.processes);
+    if (!processes.length) return res.status(400).json({ error: "at least one process is required" });
+    const err = _validateLabelLayout(layout);
+    if (err) return res.status(400).json({ error: err });
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const col = database.collection("labelLayouts");
+    const trimmed = String(name).trim();
+    if (await col.findOne({ name: trimmed, processes: { $in: processes } })) {
+      return res.status(409).json({ error: `A layout named "${trimmed}" already exists in this process` });
+    }
+    const layoutId = `lbl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const cleanCustomers = _cleanCustomers(customers);
+    const now = new Date().toISOString();
+    await _applyLabelLayoutExclusivity(col, layoutId, cleanCustomers, !!isDefault, processes);
+    await col.insertOne({
+      layoutId, name: trimmed, processes, customers: cleanCustomers, isDefault: !!isDefault, layout, layoutHash: _layoutHash(layout),
+      createdBy: username || null, createdAt: now, updatedAt: now,
+    });
+    res.json({ success: true, layoutId });
+  } catch (error) {
+    console.error("❌ Error creating label layout:", error);
+    res.status(500).json({ error: "Failed to create label layout", details: error.message });
+  }
+});
+
+app.put("/api/scna-label-layouts/:layoutId", async (req, res) => {
+  try {
+    const { name, customers, isDefault, layout, username } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: "name is required" });
+    const err = _validateLabelLayout(layout);
+    if (err) return res.status(400).json({ error: err });
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const col = database.collection("labelLayouts");
+    const layoutId = req.params.layoutId;
+    const trimmed = String(name).trim();
+    const existing = await col.findOne({ layoutId });
+    if (!existing) return res.status(404).json({ error: "Layout not found" });
+    // processes is optional on save; omitted keeps what the layout has.
+    const processes = Array.isArray(req.body?.processes) ? _cleanProcesses(req.body.processes) : (existing.processes || ["press"]);
+    if (!processes.length) return res.status(400).json({ error: "at least one process is required" });
+    if (await col.findOne({ name: trimmed, layoutId: { $ne: layoutId }, processes: { $in: processes } })) {
+      return res.status(409).json({ error: `A layout named "${trimmed}" already exists in this process` });
+    }
+    // Items are bound via masterDB.labelLayoutId now; `customers` is only touched when a caller still sends it,
+    // so saving a layout never wipes customer bindings that have not been migrated yet.
+    const cleanCustomers = _cleanCustomers(customers);
+    await _applyLabelLayoutExclusivity(col, layoutId, cleanCustomers, !!isDefault, processes);
+    // A process taken off the layout also drops its item bindings, so the tablet never offers a layout the
+    // process no longer lists.
+    const removedProcesses = (existing.processes || ["press"]).filter(p => !processes.includes(p));
+    for (const p of removedProcesses) {
+      await database.collection("masterDB").updateMany(
+        { 工場: "SCNA", [`labelLayoutByProcess.${p}`]: layoutId },
+        { $pull: { [`labelLayoutByProcess.${p}`]: layoutId } }
+      );
+    }
+    const $set = {
+      name: trimmed, processes, isDefault: !!isDefault, layout, layoutHash: _layoutHash(layout),
+      updatedBy: username || null, updatedAt: new Date().toISOString(),
+    };
+    if (Array.isArray(customers)) $set.customers = cleanCustomers;
+    await col.updateOne({ layoutId }, { $set });
+    res.json({ success: true, layoutId });
+  } catch (error) {
+    console.error("❌ Error updating label layout:", error);
+    res.status(500).json({ error: "Failed to update label layout", details: error.message });
+  }
+});
+
+// Preview image rendered by the admin page when a layout is saved (kept in Firebase Storage so the explorer
+// never has to draw every layout on the fly).
+app.put("/api/scna-label-layouts/:layoutId/thumbnail", async (req, res) => {
+  try {
+    const imageBase64 = String(req.body?.imageBase64 || "");
+    const m = /^data:image\/png;base64,(.+)$/.exec(imageBase64);
+    if (!m) return res.status(400).json({ error: "imageBase64 must be a PNG data URL" });
+    const buffer = Buffer.from(m[1], "base64");
+    if (!buffer.length || buffer.length > 4 * 1024 * 1024) return res.status(400).json({ error: "thumbnail is empty or too large (max 4MB)" });
+
+    await client.connect();
+    const col = client.db(DB_NAME).collection("labelLayouts");
+    const layoutId = req.params.layoutId;
+    const doc = await col.findOne({ layoutId });
+    if (!doc) return res.status(404).json({ error: "Layout not found" });
+    const hash = doc.layoutHash || _layoutHash(doc.layout);
+
+    const file = admin.storage().bucket().file(`labelLayoutThumbnails/${layoutId}.png`);
+    await file.save(buffer, {
+      metadata: { contentType: "image/png", cacheControl: "public, max-age=31536000", metadata: { firebaseStorageDownloadTokens: "labelLayoutThumbToken" } },
+      public: true,
+    });
+    const thumbnailUrl = `https://storage.googleapis.com/${file.bucket.name}/${encodeURIComponent(file.name)}?alt=media&token=labelLayoutThumbToken&v=${hash}`;
+    await col.updateOne({ layoutId }, { $set: { layoutHash: hash, thumbnailUrl, thumbnailHash: hash, thumbnailAt: new Date().toISOString() } });
+    res.json({ success: true, thumbnailUrl });
+  } catch (error) {
+    console.error("❌ Error saving label layout thumbnail:", error);
+    res.status(500).json({ error: "Failed to save thumbnail", details: error.message });
+  }
+});
+
+// Copy a layout into other processes as an independent layout (own layoutId, own drawing). Body:
+// { processes: [...], name?, copyBindings?, fromProcess?, username }. With copyBindings the items bound to the
+// source in fromProcess (default: the source's first process) are bound to the copy in every target process.
+app.post("/api/scna-label-layouts/:layoutId/duplicate", async (req, res) => {
+  try {
+    const processes = _cleanProcesses(req.body?.processes);
+    if (!processes.length) return res.status(400).json({ error: "at least one target process is required" });
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const col = database.collection("labelLayouts");
+    const src = await col.findOne({ layoutId: req.params.layoutId });
+    if (!src) return res.status(404).json({ error: "Layout not found" });
+
+    let name = String(req.body?.name || "").trim() || `${src.name} (${processes.join(", ")})`;
+    const base = name;
+    for (let n = 2; await col.findOne({ name, processes: { $in: processes } }); n++) name = `${base} ${n}`;
+
+    const layoutId = `lbl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const now = new Date().toISOString();
+    await col.insertOne({
+      layoutId, name, processes, customers: [], isDefault: false, layout: src.layout, layoutHash: _layoutHash(src.layout),
+      copiedFrom: src.layoutId, createdBy: req.body?.username || null, createdAt: now, updatedAt: now,
+    });
+
+    let bound = 0;
+    if (req.body?.copyBindings) {
+      const fromProcess = _requestedProcess(req.body?.fromProcess || (src.processes || ["press"])[0]);
+      if (fromProcess) {
+        const itemsCol = database.collection("masterDB");
+        const filter = { 工場: "SCNA", [`labelLayoutByProcess.${fromProcess}`]: src.layoutId };
+        const $addToSet = Object.fromEntries(processes.map(p => [`labelLayoutByProcess.${p}`, layoutId]));
+        bound = (await itemsCol.updateMany(filter, { $addToSet })).modifiedCount;
+      }
+    }
+    res.json({ success: true, layoutId, name, bound });
+  } catch (error) {
+    console.error("❌ Error duplicating label layout:", error);
+    res.status(500).json({ error: "Failed to duplicate label layout", details: error.message });
+  }
+});
+
+app.delete("/api/scna-label-layouts/:layoutId", async (req, res) => {
+  try {
+    await client.connect();
+    const result = await client.db(DB_NAME).collection("labelLayouts")
+      .deleteOne({ layoutId: req.params.layoutId });
+    if (!result.deletedCount) return res.status(404).json({ error: "Layout not found" });
+    admin.storage().bucket().file(`labelLayoutThumbnails/${req.params.layoutId}.png`).delete().catch(() => {});
+    await _ensureLabelProcesses(client.db(DB_NAME));
+    for (const p of SCNA_LABEL_PROCESSES) {
+      await client.db(DB_NAME).collection("masterDB").updateMany(
+        { 工場: "SCNA", [`labelLayoutByProcess.${p}`]: req.params.layoutId },
+        { $pull: { [`labelLayoutByProcess.${p}`]: req.params.layoutId } }
+      );
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete label layout", details: error.message });
+  }
+});
+
+
+// Item binding: masterDB.labelLayoutByProcess = { PSA: [ids], press: [ids], SRS: [ids], kensa: [ids] } (SCNA items
+// only). An item can have several layouts per process and the tablet operator picks one when printing. The old
+// labelLayoutIds / labelLayoutId fields are folded into `press` by _ensureLabelProcesses. The print server resolves,
+// in order: the layoutId the tablet asked for, the item's layouts for the process, the old customer rule, then the
+// process default layout.
+function _itemLayoutIds(item, process) {
+  const ids = item.labelLayoutByProcess && item.labelLayoutByProcess[process];
+  return Array.isArray(ids) ? ids.slice() : [];
+}
+
+// Lightweight list for the label explorer / assign modal, so paging and search work client-side.
+app.get("/api/scna-label-layouts/items", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const rows = await database.collection("masterDB").find(
+      { 工場: "SCNA" },
+      { projection: { _id: 0, 背番号: 1, 品番: 1, 品名: 1, "顧客/納入先": 1, labelLayoutByProcess: 1 } }
+    ).sort({ 背番号: 1 }).toArray();
+    res.json(rows.map(({ labelLayoutByProcess, ...rest }) => ({
+      ...rest,
+      layoutIdsByProcess: Object.fromEntries(SCNA_LABEL_PROCESSES.map(p => [p, _itemLayoutIds({ labelLayoutByProcess }, p)])),
+    })));
+  } catch (error) {
+    console.error("❌ Error listing label layout items:", error);
+    res.status(500).json({ error: "Failed to list items", details: error.message });
+  }
+});
+
+// Layouts the tablet can offer for one item. Same order the print server uses, so the list never disagrees
+// with what would print: assigned layouts, else the old customer rule, else the default layout.
+app.get("/api/scna-label-layouts/for-item", async (req, res) => {
+  try {
+    const sebanggo = String(req.query.sebanggo || "").trim();
+    if (!sebanggo) return res.status(400).json({ error: "sebanggo is required" });
+    const process = _requestedProcess(req.query.process);
+    if (!process) return res.status(400).json({ error: "unknown process" });
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const item = await database.collection("masterDB").findOne({ 工場: "SCNA", 背番号: sebanggo });
+    if (!item) return res.status(404).json({ error: "Item not found" });
+    const layoutsCol = database.collection("labelLayouts");
+    const pick = (d) => ({ layoutId: d.layoutId, name: d.name });
+    const sortByName = (a, b) => String(a.name).localeCompare(String(b.name), "ja");
+
+    const ids = _itemLayoutIds(item, process);
+    if (ids.length) {
+      const docs = await layoutsCol.find({ layoutId: { $in: ids }, processes: process }).toArray();
+      if (docs.length) return res.json({ source: "assigned", layouts: docs.map(pick).sort(sortByName) });
+    }
+    const customer = String(item["顧客/納入先"] || "").trim();
+    if (customer) {
+      const docs = await layoutsCol.find({ customers: customer, processes: process }).toArray();
+      if (docs.length) return res.json({ source: "customer", layouts: docs.map(pick).sort(sortByName) });
+    }
+    const def = await layoutsCol.findOne({ isDefault: true, processes: process });
+    if (def) return res.json({ source: "default", layouts: [pick(def)] });
+    res.json({ source: "none", layouts: [] });
+  } catch (error) {
+    console.error("❌ Error resolving item label layouts:", error);
+    res.status(500).json({ error: "Failed to resolve layouts", details: error.message });
+  }
+});
+
+app.put("/api/scna-label-layouts/:layoutId/assign", async (req, res) => {
+  try {
+    const clean = (a) => (Array.isArray(a) ? [...new Set(a.map(v => String(v || "").trim()).filter(Boolean))] : []);
+    const add = clean(req.body?.add);
+    const remove = clean(req.body?.remove);
+    const process = _requestedProcess(req.body?.process);
+    if (!process) return res.status(400).json({ error: "unknown process" });
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const layoutId = req.params.layoutId;
+    await _ensureLabelProcesses(database);
+    const layoutDoc = await database.collection("labelLayouts").findOne({ layoutId });
+    if (!layoutDoc) return res.status(404).json({ error: "Layout not found" });
+    if (add.length && !(layoutDoc.processes || []).includes(process)) {
+      return res.status(400).json({ error: `This layout is not enabled for ${process}` });
+    }
+    const items = database.collection("masterDB");
+    const path = `labelLayoutByProcess.${process}`;
+    let assigned = 0, removed = 0;
+    if (add.length) {
+      const r = await items.updateMany({ 工場: "SCNA", 背番号: { $in: add } }, { $addToSet: { [path]: layoutId } });
+      assigned = r.modifiedCount;
+    }
+    if (remove.length) {
+      const r = await items.updateMany({ 工場: "SCNA", 背番号: { $in: remove } }, { $pull: { [path]: layoutId } });
+      removed = r.modifiedCount;
+    }
+    res.json({ success: true, assigned, removed });
+  } catch (error) {
+    console.error("❌ Error assigning label layout items:", error);
+    res.status(500).json({ error: "Failed to assign items", details: error.message });
+  }
+});
+
+// One-time migration of the old customer binding: items whose 顧客/納入先 is listed on a layout get that layout
+// added to labelLayoutIds (items that already have a layout are left alone). The customer list moves to
+// `legacyCustomers` as a record, so layouts no longer carry a live customer rule. { dryRun: true } only counts.
+app.post("/api/scna-label-layouts/migrate-customers", async (req, res) => {
+  try {
+    const dryRun = !!req.body?.dryRun;
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const layoutsCol = database.collection("labelLayouts");
+    const items = database.collection("masterDB");
+    await _ensureLabelProcesses(database);
+    const withCustomers = await layoutsCol.find({ "customers.0": { $exists: true } }).toArray();
+    const report = [];
+    for (const l of withCustomers) {
+      const filter = {
+        工場: "SCNA",
+        "顧客/納入先": { $in: l.customers },
+        $or: [{ "labelLayoutByProcess.press": { $exists: false } }, { "labelLayoutByProcess.press": { $size: 0 } }],
+      };
+      let matched;
+      if (dryRun) {
+        matched = await items.countDocuments(filter);
+      } else {
+        matched = (await items.updateMany(filter, { $addToSet: { "labelLayoutByProcess.press": l.layoutId } })).modifiedCount;
+        await layoutsCol.updateOne({ layoutId: l.layoutId }, {
+          $set: { legacyCustomers: l.customers, customers: [], migratedAt: new Date().toISOString() },
+        });
+      }
+      report.push({ layoutId: l.layoutId, name: l.name, customers: l.customers, items: matched });
+    }
+    res.json({ success: true, dryRun, layouts: report });
+  } catch (error) {
+    console.error("❌ Error migrating label layout customers:", error);
+    res.status(500).json({ error: "Failed to migrate customers", details: error.message });
+  }
+});
+
+// Field display names for the label designer. The script and layouts use the real masterDB
+// field names; this collection only holds the English/Japanese names the editor shows.
+//   labelFieldNames: { field, labelEn, labelJa, updatedAt }
+// GET returns every field found on SCNA masterDB items (so new columns appear automatically)
+// together with whatever names have been saved for them.
+app.get("/api/scna-label-fields", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const factory = String(req.query.factory || "SCNA").trim() || "SCNA";
+    const rows = await database.collection("masterDB").aggregate([
+      { $match: { 工場: factory } },
+      { $project: { kv: { $objectToArray: "$$ROOT" } } },
+      { $unwind: "$kv" },
+      { $group: { _id: "$kv.k" } },
+    ]).toArray();
+    const fields = rows.map(r => r._id).filter(k => k !== "_id").sort();
+    const names = await database.collection("labelFieldNames").find({}).toArray();
+    res.json({ fields, names });
+  } catch (error) {
+    console.error("❌ Error listing label fields:", error);
+    res.status(500).json({ error: "Failed to list label fields", details: error.message });
+  }
+});
+
+app.put("/api/scna-label-fields", async (req, res) => {
+  try {
+    const { names, username } = req.body || {};
+    if (!Array.isArray(names) || names.length > 500) {
+      return res.status(400).json({ error: "names must be an array (max 500)" });
+    }
+    const now = new Date().toISOString();
+    const ops = [];
+    for (const n of names) {
+      const field = String(n?.field || "").trim();
+      if (!field || field === "_id") continue;
+      const labelEn = String(n?.labelEn || "").trim();
+      const labelJa = String(n?.labelJa || "").trim();
+      ops.push(labelEn || labelJa
+        ? { updateOne: { filter: { field }, update: { $set: { field, labelEn, labelJa, updatedAt: now, updatedBy: username || null } }, upsert: true } }
+        : { deleteOne: { filter: { field } } });
+    }
+    if (ops.length) {
+      await client.connect();
+      await client.db(DB_NAME).collection("labelFieldNames").bulkWrite(ops);
+    }
+    res.json({ success: true, saved: ops.length });
+  } catch (error) {
+    console.error("❌ Error saving label field names:", error);
+    res.status(500).json({ error: "Failed to save label field names", details: error.message });
+  }
+});
+
+// ==================== END SCNA LABEL LAYOUTS ====================
 
 // Get unique machine names for filter dropdown
 app.get('/api/scna/machines', async (req, res) => {
@@ -38724,6 +41542,492 @@ app.post('/api/production/sync-excel-save', async (req, res) => {
   } catch (error) {
     console.error('Error saving Excel data:', error);
     res.status(500).json({ error: 'Failed to save Excel data', details: error.message });
+  }
+});
+
+// ==========================================
+// Analytics: Material Lots (材料ロット) Usage, Meters, Shots & Traceability
+// ==========================================
+// MasterDB In-Memory Cache for Material Analytics
+let cachedMasterItems = null;
+let lastMasterItemsFetchTime = 0;
+const MASTER_ITEMS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+async function getMasterItemsMap(masterCollection) {
+  const now = Date.now();
+  if (cachedMasterItems && (now - lastMasterItemsFetchTime < MASTER_ITEMS_CACHE_TTL)) {
+    return cachedMasterItems;
+  }
+  const items = await masterCollection.find({}, {
+    projection: {
+      "品番": 1,
+      "背番号": 1,
+      "品名": 1,
+      "材料背番号": 1,
+      "材料品番": 1,
+      "材料": 1,
+      "色": 1,
+      "imageURL": 1
+    }
+  }).toArray();
+
+  const masterByHinban = new Map();
+  const masterBySeiban = new Map();
+  for (const item of items) {
+    if (item['品番']) masterByHinban.set(String(item['品番']).trim(), item);
+    if (item['背番号']) masterBySeiban.set(String(item['背番号']).trim(), item);
+  }
+
+  cachedMasterItems = { masterByHinban, masterBySeiban };
+  lastMasterItemsFetchTime = now;
+  return cachedMasterItems;
+}
+
+async function handleMaterialLotAnalytics(req, res) {
+  try {
+    const params = req.method === 'POST' ? req.body : req.query;
+    const {
+      startDate,
+      endDate,
+      factory,
+      machine,
+      lotNumber,
+      materialSeiban,
+      materialHinban,
+      hinban,
+      seiban,
+      worker,
+      search
+    } = params;
+
+    const db = client.db('submittedDB');
+    const collection = db.collection('pressDB');
+    const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
+
+    // 1. Fetch MasterDB items with in-memory caching
+    const { masterByHinban, masterBySeiban } = await getMasterItemsMap(masterCollection);
+
+    // 2. Build PressDB Query - Only process documents that have Lot_Details
+    const query = {
+      "Lot_Details": { $exists: true, $type: 'array', $ne: [] }
+    };
+
+    // Date range filter on "Date" string field (YYYY-MM-DD)
+    if (startDate && endDate) {
+      query.Date = { $gte: String(startDate), $lte: String(endDate) };
+    } else if (startDate) {
+      query.Date = { $gte: String(startDate) };
+    } else if (endDate) {
+      query.Date = { $lte: String(endDate) };
+    } else {
+      // Defensive fallback: default to 1 week (past 7 days) if no date provided
+      const now = new Date();
+      const past7 = new Date(now);
+      past7.setDate(now.getDate() - 6);
+      const fmt = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
+      };
+      query.Date = { $gte: fmt(past7), $lte: fmt(now) };
+    }
+
+    if (factory) {
+      query['工場'] = factory;
+    }
+    if (machine) {
+      query.$or = [
+        { '設備': { $regex: machine, $options: 'i' } },
+        { 'Lot_Details.machine': { $regex: machine, $options: 'i' } }
+      ];
+    }
+    if (hinban) {
+      query['品番'] = { $regex: hinban, $options: 'i' };
+    }
+    if (seiban) {
+      query['背番号'] = { $regex: seiban, $options: 'i' };
+    }
+    if (worker) {
+      query['Worker_Name'] = { $regex: worker, $options: 'i' };
+    }
+    if (lotNumber) {
+      const lotRegex = { $regex: lotNumber, $options: 'i' };
+      query.$or = [
+        { '材料ロット': lotRegex },
+        { 'Lot_Details.lotNumber': lotRegex }
+      ];
+    }
+
+    if (search && String(search).trim()) {
+      const s = String(search).trim();
+      const sRegex = { $regex: s, $options: 'i' };
+      const searchClauses = [
+        { '材料ロット': sRegex },
+        { 'Lot_Details.lotNumber': sRegex },
+        { '品番': sRegex },
+        { '背番号': sRegex },
+        { '設備': sRegex },
+        { '工場': sRegex },
+        { 'Worker_Name': sRegex },
+        { 'Comment': sRegex }
+      ];
+      if (query.$or) {
+        query.$and = query.$and || [];
+        query.$and.push({ $or: query.$or });
+        query.$and.push({ $or: searchClauses });
+        delete query.$or;
+      } else {
+        query.$or = searchClauses;
+      }
+    }
+
+    // Sort by latest Date first
+    const records = await collection.find(query, {
+      projection: {
+        _id: 1,
+        "工場": 1,
+        "品番": 1,
+        "背番号": 1,
+        "Worker_Name": 1,
+        "Date": 1,
+        "Time_start": 1,
+        "Time_end": 1,
+        "設備": 1,
+        "Total_NG": 1,
+        "Comment": 1,
+        "createdAt": 1,
+        "materialLabelImages": 1,
+        "材料ラベル画像": 1,
+        "初物チェック画像": 1,
+        "終物チェック画像": 1,
+        "Lot_Details": 1
+      }
+    }).sort({ Date: -1, createdAt: -1, _id: -1 }).limit(3000).toArray();
+
+    // Aggregations
+    const lotMap = new Map();
+    const flatRuns = [];
+    const allFactories = new Set();
+    const allMachines = new Set();
+    const allHinbans = new Set();
+    const allSeibans = new Set();
+    const allWorkers = new Set();
+    const allLotNumbers = new Set();
+    const allMaterialSeibans = new Set();
+    const allMaterialHinbans = new Set();
+    const allMaterialNames = new Set();
+
+    let totalMetersOverall = 0;
+    let totalShotsOverall = 0;
+    let totalPiecesOverall = 0;
+    let totalImagesCountOverall = 0;
+    let totalDefectImagesCountOverall = 0;
+
+    for (const doc of records) {
+      const docId = doc._id ? doc._id.toString() : '';
+      const docFactory = doc['工場'] || '—';
+      const docHinban = String(doc['品番'] || '').trim();
+      const docSeiban = String(doc['背番号'] || '').trim();
+      const docWorker = doc['Worker_Name'] || '—';
+      const docDate = doc['Date'] || '';
+      const docTimeStart = doc['Time_start'] || '';
+      const docTimeEnd = doc['Time_end'] || '';
+      const docEquipment = doc['設備'] || '—';
+      const docTotalNg = Number(doc['Total_NG']) || 0;
+      const docComment = doc['Comment'] || '';
+      const docCreatedAt = doc.createdAt || '';
+
+      // Lookup Material & Product Info from MasterDB
+      const masterInfo = (docHinban ? masterByHinban.get(docHinban) : null)
+        || (docSeiban ? masterBySeiban.get(docSeiban) : null)
+        || {};
+
+      const matSeiban = masterInfo['材料背番号'] || '—';
+      const matHinban = masterInfo['材料品番'] || '—';
+      const matName = masterInfo['材料'] || '—';
+      const prodName = masterInfo['品名'] || '—';
+      const prodImage = masterInfo.imageURL || '';
+      const prodColor = masterInfo['色'] || '';
+
+      const firstCheckImg = doc['初物チェック画像'] || null;
+      const lastCheckImg = doc['終物チェック画像'] || null;
+
+      if (docFactory && docFactory !== '—') allFactories.add(docFactory);
+      if (docHinban) allHinbans.add(docHinban);
+      if (docSeiban) allSeibans.add(docSeiban);
+      if (docWorker && docWorker !== '—') allWorkers.add(docWorker);
+      if (docEquipment && docEquipment !== '—') {
+        docEquipment.split(',').map(m => m.trim()).filter(Boolean).forEach(m => allMachines.add(m));
+      }
+
+      const lotDetails = Array.isArray(doc.Lot_Details) ? doc.Lot_Details : [];
+
+      for (let lotIdx = 0; lotIdx < lotDetails.length; lotIdx++) {
+        const item = lotDetails[lotIdx];
+        const rawLotNum = String(item.lotNumber || '').trim();
+        if (!rawLotNum) continue;
+
+        allLotNumbers.add(rawLotNum);
+        const itemMachine = item.machine || docEquipment || '—';
+        if (itemMachine && itemMachine !== '—') {
+          itemMachine.split(',').map(m => m.trim()).filter(Boolean).forEach(m => allMachines.add(m));
+        }
+
+        const itemShots = Number(item.shots) || 0;
+        const itemMeters = Number(item.meters) || 0;
+        const itemPieces = Number(item.pieces) || 0;
+        const itemFeedPitch = item.feedPitch !== undefined && item.feedPitch !== null ? Number(item.feedPitch) : null;
+        const itemPcPerCycle = item.pcPerCycle !== undefined && item.pcPerCycle !== null ? Number(item.pcPerCycle) : null;
+
+        // Material Seiban: prefer item.materialSeiban from scanned QR, fallback to MasterDB matSeiban
+        const effectiveMatSeiban = (item.materialSeiban && String(item.materialSeiban).trim() && String(item.materialSeiban).trim() !== '—')
+          ? String(item.materialSeiban).trim()
+          : matSeiban;
+
+        if (effectiveMatSeiban && effectiveMatSeiban !== '—') allMaterialSeibans.add(effectiveMatSeiban);
+        if (matHinban && matHinban !== '—') allMaterialHinbans.add(matHinban);
+        if (matName && matName !== '—') allMaterialNames.add(matName);
+
+        // Filter by materialSeiban or materialHinban if requested
+        if (materialSeiban && effectiveMatSeiban.toLowerCase() !== String(materialSeiban).toLowerCase()) {
+          continue;
+        }
+        if (materialHinban && matHinban.toLowerCase() !== String(materialHinban).toLowerCase()) {
+          continue;
+        }
+
+        totalMetersOverall += itemMeters;
+        totalShotsOverall += itemShots;
+        totalPiecesOverall += itemPieces;
+
+        // Per-lot Images from new Lot_Details structure:
+        // 1. Label Image: item.image, fallback to doc.materialLabelImages[lotIdx] or doc['材料ラベル画像']
+        let lotItemLabelImage = item.image || null;
+        if (!lotItemLabelImage) {
+          if (Array.isArray(doc.materialLabelImages) && doc.materialLabelImages[lotIdx]) {
+            lotItemLabelImage = doc.materialLabelImages[lotIdx];
+          } else if (doc['材料ラベル画像'] && lotIdx === 0) {
+            lotItemLabelImage = doc['材料ラベル画像'];
+          }
+        }
+
+        // 2. Defect Images: item.defectImage (can be array or string)
+        let lotItemDefectImages = [];
+        if (Array.isArray(item.defectImage)) {
+          lotItemDefectImages = item.defectImage.filter(Boolean);
+        } else if (item.defectImage) {
+          lotItemDefectImages = [item.defectImage];
+        }
+
+        const runItem = {
+          pressId: docId,
+          rawRecord: doc,
+          lotNumber: rawLotNum,
+          factory: docFactory,
+          machine: itemMachine,
+          hinban: docHinban,
+          seiban: docSeiban,
+          productName: prodName,
+          productImage: prodImage,
+          productColor: prodColor,
+          materialSeiban: effectiveMatSeiban,
+          materialHinban: matHinban,
+          materialName: matName,
+          worker: docWorker,
+          date: docDate,
+          timeStart: docTimeStart,
+          timeEnd: docTimeEnd,
+          shots: itemShots,
+          feedPitch: itemFeedPitch,
+          pcPerCycle: itemPcPerCycle,
+          meters: itemMeters,
+          pieces: itemPieces,
+          totalNg: docTotalNg,
+          comment: docComment,
+          labelImage: lotItemLabelImage,
+          defectImages: lotItemDefectImages,
+          materialLabelImages: lotItemLabelImage ? [lotItemLabelImage] : [],
+          firstCheckImage: firstCheckImg,
+          lastCheckImage: lastCheckImg,
+          scannedQR: item.scannedQR || '',
+          timestamp: item.timestamp || '',
+          createdAt: docCreatedAt
+        };
+
+        flatRuns.push(runItem);
+
+        const lotKey = `${effectiveMatSeiban || 'UNKNOWN'}__${rawLotNum}`;
+
+        if (!lotMap.has(lotKey)) {
+          lotMap.set(lotKey, {
+            key: lotKey,
+            lotNumber: rawLotNum,
+            materialSeiban: effectiveMatSeiban,
+            materialHinban: matHinban,
+            materialName: matName,
+            totalMeters: 0,
+            totalShots: 0,
+            totalPieces: 0,
+            products: new Map(), // key: seiban+hinban -> { seiban, hinban, productName, productImage, shots, meters, pieces }
+            machines: new Set(),
+            factories: new Set(),
+            workers: new Set(),
+            dates: new Set(),
+            labelImages: new Set(),
+            defectImages: new Set(),
+            latestDate: docDate || '',
+            runs: []
+          });
+        }
+
+        const lotAgg = lotMap.get(lotKey);
+        lotAgg.totalMeters += itemMeters;
+        lotAgg.totalShots += itemShots;
+        lotAgg.totalPieces += itemPieces;
+
+        // In case earlier record didn't have material info but this one does
+        if (effectiveMatSeiban && effectiveMatSeiban !== '—' && (!lotAgg.materialSeiban || lotAgg.materialSeiban === '—')) lotAgg.materialSeiban = effectiveMatSeiban;
+        if (matHinban && matHinban !== '—' && (!lotAgg.materialHinban || lotAgg.materialHinban === '—')) lotAgg.materialHinban = matHinban;
+        if (matName && matName !== '—' && (!lotAgg.materialName || lotAgg.materialName === '—')) lotAgg.materialName = matName;
+
+        const prodKey = `${docSeiban}::${docHinban}`;
+        if (!lotAgg.products.has(prodKey)) {
+          lotAgg.products.set(prodKey, {
+            seiban: docSeiban,
+            hinban: docHinban,
+            productName: prodName,
+            productImage: prodImage,
+            productColor: prodColor,
+            totalShots: 0,
+            totalMeters: 0,
+            totalPieces: 0,
+            machines: new Set()
+          });
+        }
+        const prodSummary = lotAgg.products.get(prodKey);
+        prodSummary.totalShots += itemShots;
+        prodSummary.totalMeters += itemMeters;
+        prodSummary.totalPieces += itemPieces;
+        if (itemMachine && itemMachine !== '—') prodSummary.machines.add(itemMachine);
+
+        if (itemMachine && itemMachine !== '—') {
+          itemMachine.split(',').map(m => m.trim()).filter(Boolean).forEach(m => lotAgg.machines.add(m));
+        }
+        if (docFactory && docFactory !== '—') lotAgg.factories.add(docFactory);
+        if (docWorker && docWorker !== '—') lotAgg.workers.add(docWorker);
+        if (docDate) {
+          lotAgg.dates.add(docDate);
+          if (!lotAgg.latestDate || docDate > lotAgg.latestDate) {
+            lotAgg.latestDate = docDate;
+          }
+        }
+
+        if (lotItemLabelImage) {
+          lotAgg.labelImages.add(lotItemLabelImage);
+          totalImagesCountOverall++;
+        }
+        lotItemDefectImages.forEach(img => {
+          lotAgg.defectImages.add(img);
+          totalDefectImagesCountOverall++;
+        });
+
+        lotAgg.runs.push(runItem);
+      }
+    }
+
+    // Convert lotMap to sorted array: sort by latest Date first, then highest meters
+    const lots = Array.from(lotMap.values()).map(lot => {
+      const datesArr = Array.from(lot.dates).sort().reverse();
+      const labelImgs = Array.from(lot.labelImages);
+      const defectImgs = Array.from(lot.defectImages);
+      return {
+        key: lot.key,
+        lotNumber: lot.lotNumber,
+        materialSeiban: lot.materialSeiban || '—',
+        materialHinban: lot.materialHinban || '—',
+        materialName: lot.materialName || '—',
+        displayTitle: lot.materialSeiban && lot.materialSeiban !== '—' ? `${lot.materialSeiban} - ${lot.lotNumber}` : lot.lotNumber,
+        totalMeters: Number(lot.totalMeters.toFixed(2)),
+        totalShots: lot.totalShots,
+        totalPieces: lot.totalPieces,
+        latestDate: datesArr[0] || lot.latestDate || '',
+        products: Array.from(lot.products.values()).map(p => ({
+          ...p,
+          totalMeters: Number(p.totalMeters.toFixed(2)),
+          machines: Array.from(p.machines)
+        })),
+        machines: Array.from(lot.machines),
+        factories: Array.from(lot.factories),
+        workers: Array.from(lot.workers),
+        dates: datesArr,
+        runsCount: lot.runs.length,
+        labelImages: labelImgs,
+        defectImages: defectImgs,
+        images: [...labelImgs, ...defectImgs],
+        runs: lot.runs.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '') || (b.createdAt || '').localeCompare(a.createdAt || ''))
+      };
+    }).sort((a, b) => (b.latestDate || '').localeCompare(a.latestDate || '') || b.totalMeters - a.totalMeters);
+
+    res.json({
+      success: true,
+      summary: {
+        totalDistinctLots: lots.length,
+        totalMeters: Number(totalMetersOverall.toFixed(2)),
+        totalShots: totalShotsOverall,
+        totalPieces: totalPiecesOverall,
+        totalPressRuns: records.length,
+        totalImagesCount: totalImagesCountOverall,
+        totalDefectImagesCount: totalDefectImagesCountOverall
+      },
+      lots,
+      runs: flatRuns.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '') || (b.createdAt || '').localeCompare(a.createdAt || '')),
+      filterOptions: {
+        materialSeibans: Array.from(allMaterialSeibans).sort(),
+        materialHinbans: Array.from(allMaterialHinbans).sort(),
+        materialNames: Array.from(allMaterialNames).sort(),
+        factories: Array.from(allFactories).sort(),
+        machines: Array.from(allMachines).sort(),
+        hinbanList: Array.from(allHinbans).sort(),
+        seibanList: Array.from(allSeibans).sort(),
+        workers: Array.from(allWorkers).sort(),
+        lotNumbers: Array.from(allLotNumbers).sort()
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in /api/analytics/material-lots:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch material lots analytics', details: error.message });
+  }
+}
+
+app.get('/api/analytics/material-lots', handleMaterialLotAnalytics);
+app.post('/api/analytics/material-lots', handleMaterialLotAnalytics);
+
+// ── FREYA Industrial AI Copilot ───────────────────────────────────────────────
+const { processCopilotPrompt } = require('./aiCopilotService');
+
+app.post('/api/ai/copilot', async (req, res) => {
+  try {
+    const { prompt, currentPersona, kpiContext, history } = req.body || {};
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Missing prompt in request body' });
+    }
+
+    const result = await processCopilotPrompt({
+      prompt,
+      currentPersona,
+      kpiContext,
+      history,
+      client
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [copilot-route] Error processing AI prompt:', error);
+    res.status(500).json({
+      error: 'AI Copilot processing failed',
+      details: error.message
+    });
   }
 });
 
