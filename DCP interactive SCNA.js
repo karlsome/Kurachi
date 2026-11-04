@@ -2399,6 +2399,9 @@
     printer:  { ja: 'プリンター', en: 'Printer', pt: 'Impressora' },
     printerTitle: { ja: 'プリンター設定', en: 'Printer Settings', pt: 'Configurações da impressora' },
     selected: { ja: '選択中', en: 'Selected', pt: 'Selecionada' },
+    ip:       { ja: 'IPアドレス', en: 'IP Address', pt: 'Endereço IP' },
+    ipTitle:  { ja: 'IPアドレス(確認用)', en: 'IP Address (view only)', pt: 'Endereço IP (somente leitura)' },
+    ipNone:   { ja: '未設定', en: 'Not set', pt: 'Não definido' },
     noIp:     { ja: '設備IPが未設定です: ', en: 'No IP configured for ', pt: 'Nenhum IP configurado para ' }
   };
   function stx(key) {
@@ -2410,7 +2413,8 @@
 
   function openPrinterSettings() {
     var SETTINGS_PAGES = [
-      { id: 'printer', label: stx('printer'), title: stx('printerTitle'), render: renderPrinterPage }
+      { id: 'printer', label: stx('printer'), title: stx('printerTitle'), render: renderPrinterPage },
+      { id: 'ip', label: stx('ip'), title: stx('ipTitle'), render: renderIpPage }
     ];
     var activePage = SETTINGS_PAGES[0].id;
 
@@ -2448,6 +2452,31 @@
           '<span style="font-size:.875rem;font-weight:700;min-height:1.2em;">' + (on ? stx('selected') : '') + '</span>';
         card.onclick = function () { SCNA.setPrinterMachine(m); renderPrinterPage(body); };
         body.appendChild(card);
+      });
+    }
+
+    // Read-only: the mini-PC IP of every machine on this tablet. Uses the IPs the page already loaded;
+    // a machine whose IP is not loaded yet is looked up the same way the page does it.
+    function renderIpPage(body) {
+      body.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+      body.innerHTML = '';
+      SCNA.machines.forEach(function (m) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:var(--card-radius);box-shadow:var(--shadow-card);';
+        var name = document.createElement('span');
+        name.style.cssText = 'font-size:1.25rem;font-weight:800;';
+        name.textContent = m.replace('-', ' ');
+        var val = document.createElement('span');
+        val.style.cssText = 'font-size:1.25rem;font-weight:700;font-family:ui-monospace,Menlo,monospace;user-select:text;-webkit-user-select:text;';
+        var ip = listenerIP(m);
+        val.textContent = ip || '…';
+        row.appendChild(name); row.appendChild(val); body.appendChild(row);
+        if (!ip) {
+          fetch(ipURL + '?filter=' + encodeURIComponent(m))
+            .then(function (r) { return r.ok ? r.text() : ''; })
+            .then(function (t) { val.textContent = String(t || '').replace(/"/g, '').trim() || stx('ipNone'); })
+            .catch(function () { val.textContent = stx('ipNone'); });
+        }
       });
     }
 
