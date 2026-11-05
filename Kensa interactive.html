@@ -74,6 +74,10 @@
         .header-title-section { display: flex; align-items: center; gap: 12px; }
         header h1 { font-size: 1.125rem; font-weight: 800; }
         .status-tag { font-size: 0.8125rem; font-weight: 700; padding: 5px 12px; border-radius: 6px; background: var(--blue-soft); color: var(--blue); }
+        .bt-tag { border: 0; cursor: pointer; font-family: inherit; background: var(--blue-soft); color: var(--text-muted); }
+        .bt-tag.ok { color: #15803d; }
+        .bt-tag.off { color: #b45309; }
+        .bt-tag.busy { color: var(--blue); }
         .freya-center-mark {
             position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
             font-size: 0.625rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-soft);
@@ -297,6 +301,7 @@
         /* ---------------- Modals / toast ---------------- */
         .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); display: none; align-items: center; justify-content: center; z-index: 5000; padding: 20px; }
         .modal-overlay.show { display: flex; }
+        #alertModal, #confirmModal { z-index: 10030; }   /* above the "i" sidebar and the settings screen */
         .modal { background: var(--bg-surface); border-radius: 14px; box-shadow: var(--shadow-pop); width: 100%; max-width: 580px; max-height: 90vh; overflow-y: auto; padding: 20px; }
         .modal h3 { font-size: 1.0625rem; font-weight: 800; margin-bottom: 12px; text-align: center; }
         .modal p { white-space: pre-line; font-size: 0.9375rem; color: var(--text-muted); line-height: 1.5; }
@@ -329,7 +334,11 @@
             position: fixed; top: 0; right: -400px; width: 380px; max-width: 92vw; height: 100vh; height: 100dvh; background: var(--bg-surface);
             border-left: 1px solid var(--border); z-index: 10005; padding: 24px; display: flex; flex-direction: column; gap: 16px;
             box-shadow: var(--shadow-pop); transition: right var(--transition-smooth); overflow-y: auto;
+            /* scrolls when the content is taller than the screen; the extra bottom padding keeps the Settings button clear of the Android navigation bar */
+            padding-bottom: calc(24px + 88px + env(safe-area-inset-bottom, 0px));
+            overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y;
         }
+        .info-sidebar > * { flex-shrink: 0; }
         .info-sidebar.open { right: 0; }
         .sidebar-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
         .sidebar-header h2 { font-size: 1.0625rem; font-weight: 800; }
@@ -449,6 +458,7 @@
         </div>
         <span class="freya-center-mark">Freya System v4</span>
         <div class="header-action-section">
+            <button type="button" class="status-tag bt-tag" id="btPrinterBtn" style="display:none"></button>
             <span class="clock" id="clock">--:--</span>
             <div class="language-selector">
                 <select id="languageSelector">
@@ -849,8 +859,11 @@
 
     <script src="html5-qrcode.min.js"></script>
     <script src="i18n.js"></script>
-    <script src="Kensa interactive i18n.js"></script>
-    <script src="Kensa interactive SCNA.js"></script>
+    <script src="Kensa interactive i18n.js?v=bt5"></script>
+    <script src="qrcode.min.js"></script>
+    <script src="JsBarcode.code128.min.js"></script>
+    <script src="kensa-bt-print.js?v=bt5"></script>
+    <script src="Kensa interactive SCNA.js?v=bt5"></script>
 </body>
 
 </html>
