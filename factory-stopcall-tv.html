@@ -316,6 +316,63 @@
             }
         }
 
+        /* SCNA only: CNC physically paused (reported by the machine's Python listener). */
+        .tile.paused {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            grid-template-rows: auto auto;
+            align-items: center;
+            align-content: center;
+            justify-items: center;
+            column-gap: 1vw;
+            row-gap: 0.2vh;
+            padding: 0 1vw;
+            background: #3A1608;
+            border-color: #F97316;
+            animation: chillPulsePause 2.2s ease-in-out infinite;
+        }
+
+        .tile.paused .name {
+            grid-column: 1;
+            grid-row: 1 / -1;
+            justify-self: start;
+            text-align: left;
+            font-size: clamp(22px, 3vw, 50px);
+        }
+
+        .tile.paused .status {
+            display: none;
+        }
+
+        .tile.paused .seb-mini {
+            display: block;
+            color: #FDBA74;
+        }
+
+        .tile.paused .big-mode {
+            display: block;
+            color: #FFB070;
+        }
+
+        .tile.paused .elapsed {
+            left: 50%;
+            transform: none;
+            padding-left: 4px;
+            text-align: left;
+        }
+
+        @keyframes chillPulsePause {
+
+            0%,
+            100% {
+                box-shadow: inset 0 0 0 rgba(249, 115, 22, 0);
+            }
+
+            50% {
+                box-shadow: inset 0 0 80px rgba(249, 115, 22, 0.38), 0 0 30px rgba(249, 115, 22, 0.2);
+            }
+        }
+
         @keyframes chillPulseAmber {
 
             0%,
@@ -986,6 +1043,9 @@
         const L = (s) => { if (!EN) return s; const i = s.lastIndexOf(' / '); return i < 0 ? s : s.slice(i + 3); };
         const T = (ja, en) => EN ? en : ja;
         if (EN) document.documentElement.lang = 'en';
+        // CNC "PAUSED" display is SCNA-only; DCP / 小瀬 tiles never go through this path.
+        const IS_SCNA = FACTORY.toUpperCase() === 'SCNA';
+        const isCncPaused = (ms) => IS_SCNA && !!ms && ms.mode === 'running' && !!ms.cnc && ms.cnc.state === 'PAUSED';
 
         // Per-factory machine roster (mirrors chooseMachine.html). Office/entrance ignored.
         // Row-major: 6 rows x 5 columns (2 tile cols, GAP col, 2 tile cols).
@@ -1193,7 +1253,9 @@
                     reNotifiedIntervals.delete(machine);
                     const ms = machineState.get(machine);
                     if (ms) {
-                        if (ms.mode === 'running') {
+                        if (isCncPaused(ms)) {
+                            text = fmtWait(Math.max(0, now - (ms.cnc.since || now)));
+                        } else if (ms.mode === 'running') {
                             const prod = (ms.prodAccumMs || 0) + (ms.runSince ? (now - ms.runSince) : 0);
                             text = fmtWait(prod);
                         } else if (ms.mode === 'break' || ms.mode === 'maintenance' || ms.mode === 'check') {
@@ -1260,7 +1322,7 @@
             const tile = tileByMachine.get(machine);
             if (!tile) return;
             const idx = activeList.findIndex(it => it.machine === machine);
-            tile.classList.remove('running', 'idle', 'brk', 'maint', 'check');
+            tile.classList.remove('running', 'idle', 'brk', 'maint', 'check', 'paused');
             if (idx >= 0) {
                 const item = activeList[idx];
                 tile.classList.add('calling');
@@ -1338,18 +1400,24 @@
                     devBadgeEl.remove();
                 }
 
-                tile.classList.add(mode === 'break' ? 'brk' : mode === 'maintenance' ? 'maint' : mode === 'check' ? 'check' : mode === 'running' ? 'running' : 'idle');
+                const cncPaused = isCncPaused(ms);
+                tile.classList.add(cncPaused ? 'paused' : mode === 'break' ? 'brk' : mode === 'maintenance' ? 'maint' : mode === 'check' ? 'check' : mode === 'running' ? 'running' : 'idle');
                 // Running shows the 背番号 big & centered; idle shows nothing big.
                 const sebEl = tile.querySelector('.seb');
-                sebEl.textContent = (mode === 'running') ? (ms.sebanggo || '') : '';
-                if (mode === 'running' && ms.sebanggo) fitSeb(tile, ms.sebanggo);
+                sebEl.textContent = (mode === 'running' && !cncPaused) ? (ms.sebanggo || '') : '';
+                if (mode === 'running' && !cncPaused && ms.sebanggo) fitSeb(tile, ms.sebanggo);
                 tile.querySelector('.status').textContent =
                     mode === 'running' ? L('稼働 / RUNNING') :
                         mode === 'check' ? L('点検 / CHECK') : L('停止 / IDLE');
                 // Break/maintenance/check: big mode word in the center, small 背番号 bottom-left
                 const bigMode = tile.querySelector('.big-mode');
                 const sebMini = tile.querySelector('.seb-mini');
-                if (mode === 'break' || mode === 'maintenance' || mode === 'check') {
+                if (cncPaused) {
+                    const word = T('一時停止', 'PAUSED');
+                    bigMode.textContent = word;
+                    fitText(bigMode, word, valueColumnWidth(tile), valueColumnHeight(tile), 96);
+                    sebMini.textContent = ms.sebanggo || '';
+                } else if (mode === 'break' || mode === 'maintenance' || mode === 'check') {
                     const word = mode === 'break' ? T('休憩中', 'BREAK') : mode === 'maintenance' ? T('整備中', 'MAINTENANCE') : 'Check';
                     bigMode.textContent = word;
                     fitText(bigMode, word, valueColumnWidth(tile), valueColumnHeight(tile), 96);
@@ -1392,7 +1460,8 @@
                     runSince: m.runSince || 0,
                     modeSince: m.modeSince || 0,
                     totalNG: m.totalNG || 0,
-                    deviceCount: m.deviceCount || 0
+                    deviceCount: m.deviceCount || 0,
+                    cnc: m.cnc || null
                 });
             });
             if (rosterChanged) renderRoster(); // renderRoster re-applies all tiles

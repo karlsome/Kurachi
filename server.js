@@ -349,7 +349,10 @@ function machineStateView(id, st) {
     // Break/maintenance/check elapsed = now - modeSince.
     modeSince: (mode === 'break' || mode === 'maintenance' || mode === 'check') ? (st.modeSince || 0) : 0,
     totalNG: st.totalNG || 0,
-    deviceCount: st.activeDevices ? st.activeDevices.size : 0
+    deviceCount: st.activeDevices ? st.activeDevices.size : 0,
+    // SCNA only: physical CNC state reported by the machine's Python listener.
+    // Absent for every machine that never reported one, so other factories are unaffected.
+    ...(st.cnc ? { cnc: st.cnc } : {})
   };
 }
 
@@ -1092,6 +1095,144 @@ app.post("/api/machine-assert", (req, res) => {
   }
   res.json({ ok: true });
 });
+
+// ============================================
+// SCNA physical CNC state (source of truth = machine's Python listener).
+// The listener POSTs {factory, machine, state, reason, since, online} on every
+// change plus a keepalive. The tablet stays the source of truth for leader call,
+// break, maintenance and cycle end; this only adds a separate `cnc` field to the
+// existing machine_state broadcast. Pauses are logged to Mongo (scnaPauseLogDB).
+// ============================================
+const CNC_STATE_STALE_MS = 45000;       // no heartbeat for this long -> state becomes OFFLINE
+const CNC_PAUSE_LOG_COLLECTION = 'scnaPauseLogDB';
+const CNC_VALID_STATES = new Set(['CUTTING', 'PAUSED', 'DRAG / TRAVEL', 'IDLE / STOPPED', 'UNKNOWN', 'OFFLINE']);
+
+function cncPauseLogCollection() {
+  return client.db('Sasaki_Coating_MasterDB').collection(CNC_PAUSE_LOG_COLLECTION);
+}
+
+// Pause-log writes are chained per machine so overlapping heartbeats cannot double-insert.
+const cncPauseQueues = new Map();
+function enqueueCncPauseWrite(key, fn) {
+  const next = (cncPauseQueues.get(key) || Promise.resolve()).then(fn).catch((e) => {
+    console.error(`❌ pause log write failed for ${key}:`, e.message);
+  });
+  cncPauseQueues.set(key, next);
+  return next;
+}
+
+// Open a pause record or keep the existing one alive. After a server restart the derived start
+// time can differ by a few ms/seconds, so an open record within 10s of it counts as the same pause.
+function logCncPauseHeartbeat(factory, machine, startedAt, reason, sebanggo, now) {
+  return enqueueCncPauseWrite(`${factory}/${machine}`, async () => {
+    const col = cncPauseLogCollection();
+    const open = await col.findOne({
+      factory, machine, endedAt: null,
+      startedAt: { $gte: new Date(startedAt - 10000), $lte: new Date(startedAt + 10000) }
+    });
+    if (open) {
+      await col.updateOne({ _id: open._id }, { $set: { reason, lastSeenAt: new Date(now) } });
+      return;
+    }
+    // Any other still-open record for this machine is stale (e.g. missed resume): close it first.
+    await closeCncPauseLogNow(factory, machine, startedAt, true);
+    await col.insertOne({
+      factory, machine, startedAt: new Date(startedAt), endedAt: null, durationMs: null,
+      reason, sebanggo: sebanggo || '', lastSeenAt: new Date(now), interrupted: false
+    });
+  });
+}
+
+// Close any open pause for this machine. endedAt defaults to now.
+async function closeCncPauseLogNow(factory, machine, endedAtMs, interrupted = false) {
+  const col = cncPauseLogCollection();
+  const open = await col.find({ factory, machine, endedAt: null }).toArray();
+  for (const doc of open) {
+    const end = Math.max(endedAtMs, doc.startedAt.getTime());
+    await col.updateOne(
+      { _id: doc._id, endedAt: null },
+      { $set: { endedAt: new Date(end), durationMs: end - doc.startedAt.getTime(), interrupted } }
+    );
+  }
+}
+function closeCncPauseLog(factory, machine, endedAtMs, interrupted = false) {
+  return enqueueCncPauseWrite(`${factory}/${machine}`, () => closeCncPauseLogNow(factory, machine, endedAtMs, interrupted));
+}
+
+app.post('/api/machine-physical-state', (req, res) => {
+  const factory = String(req.body?.factory || '').trim();
+  const machine = String(req.body?.machine || '').trim().toUpperCase();
+  const state = String(req.body?.state || '').trim().toUpperCase();
+  const reason = String(req.body?.reason || '').trim();
+  if (!factory || !machine) return res.status(400).json({ error: 'factory and machine are required' });
+  // SCNA only for now: keeps this feature away from the DCP / 小瀬 data path.
+  if (factory.toUpperCase() !== 'SCNA') return res.status(400).json({ error: 'only SCNA is supported' });
+  if (!CNC_VALID_STATES.has(state)) return res.status(400).json({ error: 'invalid state' });
+
+  const now = Date.now();
+  const elapsedRaw = Number(req.body?.elapsedMs);
+  const elapsedMs = Number.isFinite(elapsedRaw) ? Math.min(Math.max(0, elapsedRaw), 24 * 3600 * 1000) : 0;
+
+  const map = getMachineStateMap(factory);
+  const st = map.get(machine) || {
+    sebanggo: '', hinban: '', worker: '',
+    breakActive: false, maintActive: false,
+    runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: 0, lastSeen: 0, totalNG: 0
+  };
+  const prev = st.cnc || null;
+  const prevState = prev ? prev.state : null;
+  const prevReason = prev ? prev.reason : '';
+  const prevSince = prev ? prev.since : 0;
+
+  // `since` is computed on this server's clock. While the state is unchanged it stays fixed;
+  // a PAUSED reason change (operator <-> gate) is still the same pause.
+  const sameState = prevState === state && prevState !== 'OFFLINE';
+  const since = sameState && prevSince ? prevSince : now - elapsedMs;
+  st.cnc = { state, reason: state === 'PAUSED' ? reason : '', since, receivedAt: now };
+  map.set(machine, st);
+
+  const changed = prevState !== state || prevReason !== st.cnc.reason;
+  if (changed) {
+    broadcastToFactory(factory, {
+      type: 'machine_state', factory,
+      machines: [machineStateView(machine, st)]
+    });
+  }
+
+  // Pause log: open/keep-alive while PAUSED, close on any other state. First heartbeat
+  // after a server restart (prev === null) also closes stale open records.
+  if (state === 'PAUSED') {
+    logCncPauseHeartbeat(factory, machine, since, reason, st.sebanggo, now);
+  } else if (prevState === null || prevState === 'PAUSED') {
+    closeCncPauseLog(factory, machine, now, false);
+  }
+
+  res.json({ ok: true });
+});
+
+// Stale sweep: a listener that stops reporting (PC off, network down) must not leave a
+// machine looking paused/cutting forever. Marks it OFFLINE and closes any open pause.
+setInterval(() => {
+  const now = Date.now();
+  const map = factoryMachineState.get('SCNA');
+  if (!map) return;
+  const updated = [];
+  map.forEach((st, id) => {
+    if (!st.cnc || st.cnc.state === 'OFFLINE') return;
+    if (now - (st.cnc.receivedAt || 0) <= CNC_STATE_STALE_MS) return;
+    const wasPaused = st.cnc.state === 'PAUSED';
+    const lastSeen = st.cnc.receivedAt || now;
+    st.cnc = { state: 'OFFLINE', reason: '', since: lastSeen, receivedAt: st.cnc.receivedAt };
+    updated.push(id);
+    if (wasPaused) closeCncPauseLog('SCNA', id, lastSeen, true);
+  });
+  if (updated.length) {
+    broadcastToFactory('SCNA', {
+      type: 'machine_state', factory: 'SCNA',
+      machines: updated.map(id => machineStateView(id, map.get(id)))
+    });
+  }
+}, 15000);
 
 // Idle sweep: if a machine hasn't been seen (no tablet log AND no re-assert)
 // for a while, its tablet is off/closed — show it as idle rather than stale.
