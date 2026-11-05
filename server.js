@@ -13962,12 +13962,40 @@ function getDigitalTwinProductionDay(nowMs = Date.now()) {
   };
 }
 
-// cycleCountDB timestamps are naive JST (Python datetime.now().isoformat())
-function parseDigitalTwinTimestamp(value) {
+// cycleCountDB timestamps are naive local time (JST by default; see DIGITAL_TWIN_FACTORY_TIMEZONES) (Python datetime.now().isoformat())
+// Factories whose machine PCs write naive LOCAL timestamps outside Japan (IANA zone; DST handled).
+const DIGITAL_TWIN_FACTORY_TIMEZONES = { SCNA: 'America/Indiana/Indianapolis' };
+
+// Epoch ms of a naive wall-clock string interpreted in an IANA timezone.
+function naiveToEpochInZone(str, timeZone) {
+  const asUtc = Date.parse(`${str}Z`);
+  if (!Number.isFinite(asUtc)) return null;
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const offsetAt = (t) => {
+      const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+      return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(t / 1000) * 1000;
+    };
+    let guess = asUtc - offsetAt(asUtc);
+    guess = asUtc - offsetAt(guess); // second pass settles DST boundaries
+    return guess;
+  } catch (e) {
+    return null;
+  }
+}
+
+function parseDigitalTwinTimestamp(value, timeZone = null) {
   if (!value) return null;
   if (value instanceof Date) return value.getTime();
   const str = String(value).trim();
   const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(str);
+  if (!hasZone && timeZone) {
+    const zoned = naiveToEpochInZone(str, timeZone);
+    if (zoned !== null) return zoned;
+  }
   const ms = Date.parse(hasZone ? str : `${str}+09:00`);
   return Number.isFinite(ms) ? ms : null;
 }
@@ -14268,7 +14296,7 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       const id = String(doc.machine || '').trim();
       if (!id) return;
       const m = ensureMachine(id);
-      const ts = parseDigitalTwinTimestamp(doc.timestamp);
+      const ts = parseDigitalTwinTimestamp(doc.timestamp, DIGITAL_TWIN_FACTORY_TIMEZONES[factory] || null);
       if (m.lastCycleMs !== null && ts !== null && ts < m.lastCycleMs) return;
       m.hasCycleSensor = true;
       m.cycleRaw = Number(doc.cycle) || 0;
