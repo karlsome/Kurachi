@@ -13944,6 +13944,7 @@ app.get('/api/factory-status/machines/:factoryName', async (req, res) => {
 //          masterDB (pcPerCycle), setsubiDB (heads/table length/pairs), productionGoalsDB
 // ============================================
 const DIGITAL_TWIN_IDLE_MS = 10 * 60 * 1000;       // no cycle for 10 min => idle
+const DIGITAL_TWIN_WORKING_FRESH_MS = 30 * 1000;   // listeners that send `working` heartbeat every ~10s; older than this => not trusted
 const DIGITAL_TWIN_OFF_MS = 60 * 60 * 1000;        // no activity for 60 min => off
 const DIGITAL_TWIN_RESET_HOUR_JST = 2;             // ioT listener resets cycles at 02:00
 const DIGITAL_TWIN_JST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -14304,6 +14305,8 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       m.hasCycleSensor = true;
       m.cycleRaw = Number(doc.cycle) || 0;
       m.lastCycleMs = ts;
+      // New listeners also report whether the CNC is actively working (near-real-time run/stop).
+      m.workingFlag = typeof doc.working === 'boolean' ? doc.working : null;
     });
 
     // ── Tablet log replay (oldest → newest) for alerts, worker, 背番号 ──
@@ -14403,6 +14406,12 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       else if (m.cncCancelAt) status = 'cncCancel';
       else if (m.maintenanceAt) status = 'maintenance';
       else if (m.breakAt) status = 'break';
+      // New listeners: `working` heartbeat (<30s old) => running; working=false or stale => falls through to idle/off.
+      else if (m.workingFlag !== null && m.workingFlag !== undefined) {
+        if (m.workingFlag === true && cycleIsToday && nowMs - m.lastCycleMs < DIGITAL_TWIN_WORKING_FRESH_MS) status = 'running';
+        else if (lastActivityMs && nowMs - lastActivityMs < DIGITAL_TWIN_OFF_MS) status = 'idle';
+      }
+      // Legacy listeners (no `working` flag): a cycle in the last 10 min => running
       else if (cycleIsToday && nowMs - m.lastCycleMs < DIGITAL_TWIN_IDLE_MS) status = 'running';
       // No cycle sensor: tablet logs go quiet during a run, so an open session (start set, end not yet set) = running
       else if (!m.hasCycleSensor && m.sessionStartMs && !m.endTimeSet) status = 'running';
