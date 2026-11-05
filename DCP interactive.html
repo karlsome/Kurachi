@@ -7256,7 +7256,16 @@
 
                     const base = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
 
+                    // Grouped SCNA tablets (e.g. AOL-2 + AOL-3) track defects per machine; send each machine its own NG.
+                    let perMachineNG = null;
+                    try {
+                        if (window.SCNA && typeof window.SCNA.defectPayload === 'function') perMachineNG = window.SCNA.defectPayload();
+                    } catch (e) { perMachineNG = null; }
+
                     machines.forEach(m => {
+                        const mTotalNG = (perMachineNG && perMachineNG[m] && Number.isFinite(Number(perMachineNG[m].Total_NG)))
+                            ? Number(perMachineNG[m].Total_NG)
+                            : totalNG;
                         const isLotScanned = (typeof window.isMachineLotScanned === 'function')
                             ? window.isMachineLotScanned(m)
                             : false;
@@ -7304,7 +7313,7 @@
                                 mode: mMode,
                                 modeStartedAt: mModeStartedAt,
                                 runStartedAt: (mMode === 'running' || mMode === 'break' || mMode === 'maintenance') ? prodStart : 0,
-                                totalNG,
+                                totalNG: mTotalNG,
                                 pageInstanceId,
                                 cycleStopActive: isCycleStopOpen,
                                 worker: activeWorker
