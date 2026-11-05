@@ -2152,6 +2152,36 @@
     } catch (e) { console.warn('SCNA markLotStart failed:', e); }
   }
 
+  // A lot's start reading is empty when the listener could not be read at the moment the lot was entered. Rebuild it
+  // from the listener's timestamped cycle log: the cycles_total at the time the lot was entered (mark.at).
+  var healing = {};
+  async function healStartReadings(machine, st) {
+    if (healing[machine] || !st || !st.auto || !st.log) return;
+    var marks = cycleMarks(), list = marks[machine] || [];
+    if (!list.some(function (x) { return x.start == null && x.at; })) return;
+    healing[machine] = true;
+    try {
+      var log = await fetchCycleLog(st, 0);
+      if (!log || !log.length) return;
+      log = log.slice().sort(function (a, b) { return a.n - b.n; });
+      var changed = false;
+      list.forEach(function (mk) {
+        if (mk.start != null || !mk.at) return;
+        var t = Date.parse(mk.at);
+        if (!isFinite(t)) return;
+        var before = null;
+        for (var i = 0; i < log.length; i++) { if (Date.parse(log[i].ts) <= t) before = log[i]; else break; }
+        var start = null;
+        if (before) start = before.n;                                   // last cycle finished before the lot was entered
+        else if (log[0].n >= 1 && Date.parse(log[0].ts) > t) start = log[0].n - 1;   // lot entered before the log's first cycle
+        if (start == null || start > st.total) return;
+        mk.start = start; mk.healed = true; changed = true;
+      });
+      if (changed) lsSet(CYCLE_MARKS_KEY, marks);
+    } catch (e) { console.warn('SCNA start reading backfill skipped:', e); }
+    finally { healing[machine] = false; }
+  }
+
   // The end reading of a lot: stored end > next lot's start > a fresh reading (last lot of the machine)
   async function lotEndReading(machine, lot) {
     var found = lastMark(cycleMarks(), machine, lot);
@@ -2296,7 +2326,18 @@
     var cap = boxCapacity();
     var rows = [];
     if (haveLots && autoMachines.length) {
-      autoMachines.forEach(function (m) { rows.push(m + ': ' + pcsOf(m) + ' cc: ' + ccOf(m)); });
+      autoMachines.forEach(function (m) {
+        var row = m + ': ' + pcsOf(m) + ' cc: ' + ccOf(m);
+        // Say why a machine sits at 0 although its listener is online (instead of a silent "0 cc: 0")
+        if (!pcsOf(m) && !ccOf(m)) {
+          var mk = cycleMarks()[m] || [];
+          var mine = r.lots.filter(function (l) { return l.machine === m; });
+          if (!mk.length) row += ' (no lot)';
+          else if (mk.some(function (x) { return x.start == null; })) row += ' (no start reading)';
+          else if (mine.some(function (l) { return l.pieces == null; })) row += ' (no pcs/cycle)';
+        }
+        rows.push(row);
+      });
       rows.push('S: ' + spareSum + ' To: ' + total);
     }
     var html = rows.map(esc).join('<br>');
@@ -2307,7 +2348,10 @@
 
   function updateCountBadge() {
     var list = SCNA.activeMachines();
-    Promise.all(list.map(function (m) { return fetchCycleState(m).then(function (st) { SCNA.cycleStatus[m] = { auto: st.auto, total: st.total, at: Date.now() }; }); }))
+    Promise.all(list.map(function (m) { return fetchCycleState(m).then(function (st) {
+      SCNA.cycleStatus[m] = { auto: st.auto, total: st.total, at: Date.now() };
+      return healStartReadings(m, st);
+    }); }))
       .then(function () {
         updateCountCell(list);
         updateLiveQty(list);
