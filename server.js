@@ -13964,7 +13964,10 @@ function getDigitalTwinProductionDay(nowMs = Date.now()) {
 
 // cycleCountDB timestamps are naive local time (JST by default; see DIGITAL_TWIN_FACTORY_TIMEZONES) (Python datetime.now().isoformat())
 // Factories whose machine PCs write naive LOCAL timestamps outside Japan (IANA zone; DST handled).
-const DIGITAL_TWIN_FACTORY_TIMEZONES = { SCNA: 'America/Indiana/Indianapolis' };
+// SCNA: the factory is in Indianapolis (Eastern) but the machine PCs' clocks run on US Pacific time
+// (verified 2026-11-05: naive '04:58' arrived at 12:58Z). Match the PCs, not the factory location.
+// If the PC clocks/timezones are ever corrected, change this to 'America/Indiana/Indianapolis'.
+const DIGITAL_TWIN_FACTORY_TIMEZONES = { SCNA: 'America/Los_Angeles' };
 
 // Epoch ms of a naive wall-clock string interpreted in an IANA timezone.
 function naiveToEpochInZone(str, timeZone) {
