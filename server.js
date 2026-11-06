@@ -1105,7 +1105,7 @@ app.post("/api/machine-assert", (req, res) => {
 // ============================================
 const CNC_STATE_STALE_MS = 45000;       // no heartbeat for this long -> state becomes OFFLINE
 const CNC_PAUSE_LOG_COLLECTION = 'scnaPauseLogDB';
-const CNC_VALID_STATES = new Set(['CUTTING', 'PAUSED', 'DRAG / TRAVEL', 'IDLE / STOPPED', 'UNKNOWN', 'OFFLINE']);
+const CNC_VALID_STATES = new Set(['CUTTING', 'PAUSED', 'DRAG / TRAVEL', 'IDLE / STOPPED', 'UNKNOWN', 'OFFLINE', 'POWER_OFF']);
 
 function cncPauseLogCollection() {
   return client.db('Sasaki_Coating_MasterDB').collection(CNC_PAUSE_LOG_COLLECTION);
