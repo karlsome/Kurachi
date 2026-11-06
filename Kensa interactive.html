@@ -460,6 +460,25 @@
         .gallery-dot { position: absolute; top: 6px; right: 6px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; z-index: 2; }
         .gallery-thumb .thumb-del-btn { position: absolute; top: 6px; left: 6px; z-index: 3; width: 32px; height: 32px; border-radius: 50%; background: rgba(16, 24, 40, 0.66); color: #fff; border: none; font-size: 1rem; font-weight: 800; cursor: pointer; }
         .gallery-count { font-size: 0.72rem; font-weight: 700; color: var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 2px 9px; margin-left: 8px; }
+        .validation-errors-card { background: var(--red-soft); border: 1px solid #F4C9CB; border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+        .validation-errors-card h4 { color: var(--red); margin: 0 0 12px; font-size: 0.95rem; }
+        .validation-success-card { background: var(--brand-soft); border: 1px solid #C4E7D8; border-radius: 14px; padding: 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+        .validation-success-card .ok-mark { color: var(--brand); font-size: 1.4rem; font-weight: 800; }
+        .validation-success-card p { margin: 0; font-weight: 700; color: var(--brand); }
+        .validation-list { list-style: none; display: flex; flex-direction: column; gap: 8px; padding: 0; }
+        .validation-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px; border-radius: var(--btn-radius); font-size: 0.875rem; font-weight: 600; cursor: pointer; background: var(--bg-surface); border: 1px solid var(--border); border-left: 3px solid var(--red); }
+        .validation-item .fix-btn { font-size: 0.75rem; font-weight: 800; color: var(--brand); background: var(--brand-soft); padding: 5px 10px; border-radius: 999px; white-space: nowrap; }
+        .summary-details-grid { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 0; }
+        .summary-details-grid h3 { font-size: 0.9375rem; font-weight: 800; margin-bottom: 12px; color: var(--text-main); }
+        .summary-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 0.875rem; }
+        .summary-row:last-child { border-bottom: none; }
+        .summary-row .lbl { color: var(--text-muted); font-weight: 600; }
+        .summary-row .val { font-weight: 700; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+        .summary-row .val small { display: block; font-weight: 600; color: var(--text-muted); }
+        .summary-row .row-edit-btn { border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--brand); border-radius: 8px; padding: 4px 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
+        .summary-row .row-edit-btn:active { transform: translateY(1px); }
+        .flash-highlight { animation: highlightFlash 1.5s ease-out; }
+        @keyframes highlightFlash { 0% { box-shadow: 0 0 0 3px var(--red); border-color: var(--red); } 100% { box-shadow: 0 0 0 0 transparent; } }
         .img-preview-modal { position: fixed; inset: 0; z-index: 10050; background: rgba(0, 0, 0, 0.88); display: none; align-items: center; justify-content: center; padding: 16px; }
         .img-preview-modal.open { display: flex; }
         .img-preview-modal img { max-width: 100%; max-height: 100%; border-radius: 10px; }
@@ -690,21 +709,12 @@
             </div>
         </div>
         <div id="subBody" style="display:none">
-            <div class="glass-card">
-                <h3 data-i18n="kensa_sub_title">送信内容の確認</h3>
-                <div class="product"><div class="name" id="subProdName"></div><div class="meta" id="subProdMeta"></div></div>
-                <div class="totals4" style="margin-top:12px; grid-template-columns:repeat(3,1fr)">
-                    <div class="total-box"><div class="k" data-i18n="kensa_l_proc">加工数</div><div class="v" id="subProc">0</div></div>
-                    <div class="total-box good"><div class="k" data-i18n="kensa_l_good">良品</div><div class="v" id="subGood">0</div></div>
-                    <div class="total-box ng"><div class="k" data-i18n="kensa_l_ng_real">NG (累計)</div><div class="v" id="subNg">0</div></div>
-                    <div class="total-box"><div class="k" data-i18n="kensa_lbl_title">検査ラベル</div><div class="v" id="subLabels">0</div></div>
-                    <div class="total-box"><div class="k" data-i18n="kensa_sp_title">スペアからの部分数</div><div class="v" id="subSpare">0</div></div>
-                    <div class="total-box good"><div class="k" data-i18n="kensa_l_total_spare">合計（良品＋スペア）</div><div class="v" id="subTotal">0</div></div>
-                </div>
-                <div class="pill-info" id="subCycle" style="margin-top:10px"></div>
-            </div>
-            <!-- Times / lot / spare -->
-            <div class="glass-card">
+            <!-- DCP interactive style: required-items card (tap to fix) + summary list with Edit buttons + calculated values -->
+            <div id="subChecks"></div>
+            <div class="summary-details-grid" id="subSummary"></div>
+            <div class="summary-details-grid" id="subCalc" style="margin-top:16px"></div>
+            <!-- Times / lot / spare (the Edit buttons above jump here) -->
+            <div class="glass-card" style="margin-top:16px">
                 <div class="field-row">
                     <div class="field"><label for="inspStart" data-i18n="kensa_l_start">検査開始</label><input type="time" id="inspStart"></div>
                     <div class="field"><label for="inspEnd" data-i18n="kensa_l_end">検査終了</label><input type="time" id="inspEnd"></div>
@@ -716,10 +726,6 @@
                 </div>
             </div>
 
-            <div class="glass-card">
-                <h3 data-i18n="kensa_sub_checks">確認項目</h3>
-                <div id="subChecks"></div>
-            </div>
         </div>
 
         <!-- Action buttons (like DCP interactive): Submit, then a full-width red Reset; always visible -->
@@ -905,11 +911,11 @@
 
     <script src="html5-qrcode.min.js"></script>
     <script src="i18n.js"></script>
-    <script src="Kensa interactive i18n.js?v=bt17"></script>
+    <script src="Kensa interactive i18n.js?v=bt19"></script>
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt18"></script>
+    <script src="Kensa interactive SCNA.js?v=bt19"></script>
 </body>
 
 </html>

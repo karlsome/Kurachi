@@ -717,28 +717,83 @@ window.serverURL = serverURL;
     renderSubmit();
   }
 
-  // Submit tab: summary of what will be sent + the same checks validate() makes, shown live
+  // Submit tab, DCP interactive style: a card with what still has to be filled in (tap = go there), the summary as a list with an
+  // Edit button on each row, and the calculated values.
+  var goTimer = null;
+  function goToField(tab, id) {
+    if (tab === 'worker') { workerConfirmed = false; switchTab('scan'); showStep0(); return; }
+    switchTab(tab);
+    clearTimeout(goTimer);
+    goTimer = setTimeout(function () {
+      var el = document.getElementById(id); if (!el) return;
+      try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { }
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !el.readOnly) { try { el.focus({ preventScroll: true }); } catch (e) { } }
+      el.classList.add('flash-highlight'); setTimeout(function () { el.classList.remove('flash-highlight'); }, 1800);
+    }, 300);
+  }
+  // what is missing, with where to fix it: [{ text, tab, id }]
+  function validateIssues() {
+    var b = state.bench, m = [];
+    if (!state.workers.length) m.push({ text: T('kensa_v_operator'), tab: 'worker' });
+    if (!b.boxes.length) m.push({ text: T('kensa_v_box'), tab: 'scan', id: 'startStep1Scan' });
+    if (b.pendingPrint) m.push({ text: T('kensa_v_pending'), tab: TAB_INSPECT, id: 'lblList' });
+    if (!photoBlobs[PHOTO_FIRST]) m.push({ text: T('kensa_v_hatsumono'), tab: 'images', id: 'imageGallery' });
+    if (!b.start) m.push({ text: T('kensa_v_start'), tab: 'submit', id: 'inspStart' });
+    if (!b.end) m.push({ text: T('kensa_v_end'), tab: 'submit', id: 'inspEnd' });
+    if (procQty(b) <= 0) m.push({ text: T('kensa_v_qty'), tab: TAB_INSPECT, id: 'counterGrid' });
+    if (ngTotal(b) > procQty(b)) m.push({ text: T('kensa_v_ng_over'), tab: TAB_INSPECT, id: 'counterGrid' });
+    if (spanMin(b.start, b.end) < breakTotal() + maintTotal()) m.push({ text: T('kensa_v_break_over'), tab: 'submit', id: 'inspStart' });
+    return m;
+  }
   function renderSubmit() {
     var b = state.bench, has = hasWork(b);
     $('subEmpty').style.display = has ? 'none' : '';
     $('subBody').style.display = has ? 'block' : 'none';
     if (!has) return;
-    $('subProdName').textContent = b.hinban;
-    $('subProdMeta').textContent = [b.sebango, b.lotNumbers].filter(Boolean).join(' · ');
-    $('subProc').textContent = procQty(b); $('subGood').textContent = goodQty(b); $('subNg').textContent = ngTotal(b);
-    $('subLabels').textContent = livePrinted(b).length;
-    var spn2 = spareSum(spareAll(b)); $('subSpare').textContent = spn2; $('subTotal').textContent = goodQty(b) + spn2;
-    var c = cycleSec(b);
-    $('subCycle').textContent = c ? T('kensa_cycle', c, breakTotal() + maintTotal()) : '';
-    var host = $('subChecks'), miss = validate();
-    host.innerHTML = '';
-    var row = document.createElement('div'); row.className = 'lbl-row';
-    row.textContent = miss.length ? '⚠ ' + T('kensa_v_head') + ' ' + miss.join(' / ') : '✅ ' + T('kensa_sub_ok');
-    host.appendChild(row);
-    if (printRequired && !livePrinted(b).length && !miss.length) {
-      var w = document.createElement('div'); w.className = 'lbl-row'; w.textContent = 'ℹ ' + T('kensa_ld_nolabel');
-      host.appendChild(w);
+    var issues = validateIssues(), html = '';
+    if (issues.length) {
+      html = '<div class="validation-errors-card"><h4>' + esc(T('kensa_sum_required')) + '</h4><ul class="validation-list">' +
+        issues.map(function (x) { return '<li class="validation-item" data-go="' + esc(x.tab) + '" data-id="' + esc(x.id || '') + '"><span>' + esc(x.text) + '</span><span class="fix-btn">' + esc(T('kensa_sum_fix')) + '</span></li>'; }).join('') +
+        '</ul></div>';
+    } else {
+      html = '<div class="validation-success-card"><span class="ok-mark">✓</span><p>' + esc(T('kensa_sub_ok')) + '</p></div>';
+      if (printRequired && !livePrinted(b).length) html += '<div class="lbl-row" style="margin-bottom:16px">ℹ ' + esc(T('kensa_ld_nolabel')) + '</div>';
     }
+    $('subChecks').innerHTML = html;
+
+    var edit = function (tab, id) { return '<button type="button" class="row-edit-btn" data-go="' + esc(tab) + '" data-id="' + esc(id || '') + '">' + esc(T('kensa_edit')) + '</button>'; };
+    var row = function (label, val, btn) { return '<div class="summary-row"><span class="lbl">' + esc(label) + '</span><span class="val"><span>' + val + '</span>' + (btn || '') + '</span></div>'; };
+    var spn = spareSum(spareAll(b)), live = livePrinted(b), nd = defectIds().length;
+    var ngDetail = NG_FIELDS.map(function (f, i) { var n = b.boxes.reduce(function (a, x) { return a + toInt(x.ng[f]); }, 0); return n ? ngLabel(i) + ':' + n : ''; }).filter(Boolean).join(' / ');
+    var spLots = spareAll(b).map(function (e) { return esc(e.lotNumber) + ' ×' + toInt(e.pieces); }).join(' / ');
+    var mark = function (ok) { return ok ? '<span style="color:var(--brand)">✓</span>' : '<span style="color:var(--red)">✗</span>'; };
+    var h = '<h3>' + esc(T('kensa_sum_title')) + '</h3>';
+    h += row(T('kensa_sum_sebango'), esc(b.sebango || '---'));
+    h += row(T('kensa_sum_hinban'), esc(b.hinban || '---'));
+    h += row(T('kensa_sum_worker'), esc(workerString() || '---'), edit('worker'));
+    h += row(T('kensa_sum_date'), esc(b.date || todayStr()));
+    h += row(T('kensa_sum_time'), esc(b.start || '--:--') + ' ~ ' + esc(b.end || '--:--'), edit('submit', 'inspStart'));
+    h += row(T('kensa_l_lot'), esc(b.lotNumbers || '---'), edit('submit', 'inspLot'));
+    h += row(T('kensa_l_proc'), procQty(b));
+    h += row(T('kensa_l_ng_real'), ngTotal(b) + (ngDetail ? '<small>' + esc(ngDetail) + '</small>' : ''), edit(TAB_INSPECT, 'counterGrid'));
+    h += row(T('kensa_l_good'), '<span style="color:var(--brand)">' + goodQty(b) + '</span>');
+    h += row(T('kensa_sp_title'), spn + (spLots ? '<small>' + spLots + '</small>' : ''), edit(TAB_INSPECT, 'spField'));
+    h += row(T('kensa_l_total_spare'), '<span style="color:var(--brand)">' + (goodQty(b) + spn) + '</span>');
+    h += row(T('kensa_lbl_title'), live.length ? live.map(function (e) { return esc(e.kensaId); }).join('<br>') : '0', edit(TAB_INSPECT, 'lblList'));
+    h += row(T('kensa_checks_title'), T('kensa_first_check') + ' ' + mark(!!photoBlobs[PHOTO_FIRST]) + ' | ' + T('kensa_last_check') + ' ' + mark(!!photoBlobs[PHOTO_LAST]), edit('images', 'imageGallery'));
+    h += row(T('kensa_def_section'), nd + ' / ' + MAX_DEFECT, edit('images', 'imageGallery'));
+    h += row(T('kensa_l_comment'), esc(b.comment || '---'), edit(TAB_INSPECT, 'inspComment'));
+    $('subSummary').innerHTML = h;
+
+    var gross = spanMin(b.start, b.end), brk = breakTotal(), mt = maintTotal(), net = Math.max(0, gross - brk - mt), c = cycleSec(b);
+    var hm = function (m) { return String(Math.floor(m / 60)).padStart(2, '0') + 'h ' + String(m % 60).padStart(2, '0') + 'm'; };
+    var k = '<h3>' + esc(T('kensa_sum_calc')) + '</h3>';
+    k += row(T('kensa_sum_cycle'), c ? c + 's' : '---');
+    k += row(T('kensa_sum_gross'), hm(Math.max(0, gross)));
+    k += row(T('kensa_sum_break'), T('kensa_min', brk));
+    if (mt) k += row(T('kensa_sum_maint'), T('kensa_min', mt));
+    k += row(T('kensa_sum_work'), '<span style="color:var(--brand)">' + hm(net) + '</span>');
+    $('subCalc').innerHTML = k;
   }
 
   function bindStatic() {
@@ -768,6 +823,9 @@ window.serverURL = serverURL;
       };
     });
     bindSpare();
+    $('panel-submit').addEventListener('click', function (ev) {
+      var t = ev.target.closest && ev.target.closest('[data-go]'); if (t) goToField(t.getAttribute('data-go'), t.getAttribute('data-id'));
+    });
     $('defectPhotoBtn').onclick = function () { if (defectIds().length >= MAX_DEFECT) return toast(T('kensa_def_full', MAX_DEFECT)); $('defectFileInput').click(); };
     $('defectFileInput').onchange = function () { var inp = this; if (inp.files && inp.files[0]) addDefectPhoto(inp.files[0]); inp.value = ''; };
     $('imgPreviewClose').onclick = function () { $('imgPreviewModal').classList.remove('open'); };
@@ -1328,19 +1386,7 @@ window.serverURL = serverURL;
     save(); renderBreakList(); renderMaintList(); renderBench(); renderScanStatus(); renderSidebar(); updateBadge(); assertMachineState();
   }
 
-  function validate() {
-    var b = state.bench, miss = [];
-    if (!state.workers.length) miss.push(T('kensa_v_operator'));
-    if (!b.boxes.length) miss.push(T('kensa_v_box'));
-    if (b.pendingPrint) miss.push(T('kensa_v_pending'));
-    if (!photoBlobs[PHOTO_FIRST]) miss.push(T('kensa_v_hatsumono'));
-    if (!b.start) miss.push(T('kensa_v_start'));
-    if (!b.end) miss.push(T('kensa_v_end'));
-    if (procQty(b) <= 0) miss.push(T('kensa_v_qty'));
-    if (ngTotal(b) > procQty(b)) miss.push(T('kensa_v_ng_over'));
-    if (spanMin(b.start, b.end) < breakTotal() + maintTotal()) miss.push(T('kensa_v_break_over'));
-    return miss;
-  }
+  function validate() { return validateIssues().map(function (x) { return x.text; }); }
 
   var submitting = false;
   async function submitBench() {
