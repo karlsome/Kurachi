@@ -626,6 +626,7 @@ window.serverURL = serverURL;
   function renderSpare() {
     var all = spareAll(state.bench), n = spareSum(all), f = $('spField');
     f.value = n > 0 ? String(n) : ''; f.placeholder = T('kensa_sp_tap');
+    if (typeof updateDerived === 'function' && $('totAll')) updateDerived();
   }
   // Same flow as DCP interactive: tap the field -> list of spare entries (+ add / done) -> keypad for the quantity -> keypad for the lot
   function spOverlay(id, html) {
@@ -710,6 +711,7 @@ window.serverURL = serverURL;
     var b = state.bench;
     $('totProc').textContent = procQty(b); $('totGood').textContent = goodQty(b);
     $('totNg').textContent = ngShownTotal(b); $('totNgReal').textContent = ngTotal(b);
+    var spn = spareSum(spareAll(b)); $('totAll').textContent = goodQty(b) + spn; $('totAllNote').textContent = spn ? goodQty(b) + ' + ' + spn : '';
     var c = cycleSec(b);
     $('inspCycle').textContent = c ? T('kensa_cycle', c, breakTotal() + maintTotal()) : '';
     renderSubmit();
