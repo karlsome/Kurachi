@@ -153,7 +153,7 @@ window.serverURL = serverURL;
     $('panel-scan').classList.toggle('active', name === 'scan');
     $('panel-production').classList.toggle('active', name === 'production');
     $('panel-submit').classList.toggle('active', name === 'submit');
-    $('panel-maintenance').classList.toggle('active', name === 'maintenance');
+    $('panel-images').classList.toggle('active', name === 'images');
     if (name === 'submit') renderSubmit();
     try { localStorage.setItem(DRAFT_KEY + ':tab', name); } catch (e) { }   // remembered across reloads
   }
@@ -767,6 +767,8 @@ window.serverURL = serverURL;
       };
     });
     bindSpare();
+    $('imgPreviewClose').onclick = function () { $('imgPreviewModal').classList.remove('open'); };
+    $('imgPreviewModal').onclick = function (e) { if (e.target === this) this.classList.remove('open'); };
     [['hatsumonoButton', 'hatsumonoFileInput', PHOTO_FIRST], ['atomonoButton', 'atomonoFileInput', PHOTO_LAST]].forEach(function (c) {
       $(c[0]).onclick = function () { $(c[1]).click(); };
       $(c[1]).onchange = function () {
@@ -865,15 +867,41 @@ window.serverURL = serverURL;
       img.src = url;
     });
   }
+  // Inspect tab: a check button disappears once its photo is taken (retake from the Images tab); Images tab: the gallery
+  var CHECKS = [
+    { id: PHOTO_FIRST, btn: 'hatsumonoButton', input: 'hatsumonoFileInput', tag: 'kensa_first_check' },
+    { id: PHOTO_LAST, btn: 'atomonoButton', input: 'atomonoFileInput', tag: 'kensa_last_check' }
+  ];
   function renderPhoto() {
-    [[PHOTO_FIRST, 'hatsumono', 'First Cycle'], [PHOTO_LAST, 'atomono', 'Last Cycle']].forEach(function (c) {
-      var has = !!photoBlobs[c[0]], img = $(c[1] + 'Pic'), u = photoUrl(c[0]);
-      $(c[1] + 'Label').textContent = has ? 'TRUE' : 'FALSE';
-      $(c[1] + 'Button').classList.toggle('done', has);
-      $(c[1] + 'Sub').textContent = has ? T('kensa_hatsumono_retake') : c[2];
-      if (u) { img.src = u; img.classList.add('has'); } else { img.removeAttribute('src'); img.classList.remove('has'); }
-    });
+    CHECKS.forEach(function (c) { $(c.btn).style.display = photoBlobs[c.id] ? 'none' : ''; });
+    $('checkCard').style.display = CHECKS.every(function (c) { return photoBlobs[c.id]; }) ? 'none' : '';
+    renderGallery();
     if ($('subChecks')) renderSubmit();
+  }
+  function renderGallery() {
+    var g = document.getElementById('imageGallery'); if (!g) return;
+    g.innerHTML = '';
+    CHECKS.forEach(function (c) {
+      var u = photoBlobs[c.id] ? photoUrl(c.id) : '', tag = T(c.tag);
+      var sec = document.createElement('div'); sec.className = 'gallery-section';
+      var head = document.createElement('div'); head.className = 'gallery-section-head'; head.textContent = tag;
+      var grid = document.createElement('div'); grid.className = 'image-gallery';
+      var th = document.createElement('div');
+      if (u) {
+        th.className = 'gallery-thumb';
+        th.innerHTML = '<span class="gallery-dot" style="background:var(--brand)"></span><button type="button" class="thumb-edit-btn">✎ ' + esc(T('kensa_img_edit')) + '</button><img alt="' + esc(tag) + '"><span class="thumb-tag">' + esc(tag) + '</span>';
+        th.querySelector('img').src = u;
+        th.onclick = function () { $('imgPreviewTarget').src = u; $('imgPreviewModal').classList.add('open'); };
+        th.querySelector('.thumb-edit-btn').onclick = function (ev) { ev.stopPropagation(); $(c.input).click(); };
+      } else {
+        th.className = 'gallery-thumb empty';
+        th.innerHTML = '<span class="gallery-dot" style="background:var(--red)"></span>' +
+          '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" style="stroke:var(--red);" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
+          '<span style="color:var(--red);margin-top:6px;text-align:center;font-weight:800;font-size:.8rem">' + esc(tag) + ' ' + esc(T('kensa_img_not')) + '<br><small style="font-weight:700">' + esc(T('kensa_img_tap')) + '</small></span>';
+        th.onclick = function () { $(c.input).click(); };
+      }
+      grid.appendChild(th); sec.appendChild(head); sec.appendChild(grid); g.appendChild(sec);
+    });
   }
 
   // ============================================================

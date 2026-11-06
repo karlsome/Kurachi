@@ -446,9 +446,21 @@
         .prod-check-btn.done { background: var(--brand-soft); border-color: var(--brand); }
         .prod-check-btn.done .check-ico { background: var(--brand); color: #fff; }
         .prod-check-btn.done .check-txt, .prod-check-btn.done .check-txt small { color: var(--brand); }
-        .check-pics { display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
-        .check-pics img { width: 96px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-inset); display: none; }
-        .check-pics img.has { display: block; }
+        .gallery-sub { color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; margin-bottom: 16px; }
+        .gallery-sections { display: flex; flex-direction: column; gap: 18px; }
+        .gallery-section-head { font-weight: 800; font-size: 0.85rem; color: var(--text-main); margin-bottom: 8px; }
+        .image-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+        .gallery-thumb { position: relative; aspect-ratio: 1; border-radius: var(--btn-radius); overflow: hidden; border: 1px solid var(--border); cursor: pointer; background: var(--bg-inset); }
+        .gallery-thumb:active { transform: scale(0.98); }
+        .gallery-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .gallery-thumb .thumb-tag { position: absolute; left: 0; bottom: 0; right: 0; background: rgba(16, 24, 40, 0.62); color: #fff; font-size: 0.7rem; font-weight: 700; padding: 4px 6px; text-align: center; }
+        .gallery-thumb .thumb-edit-btn { position: absolute; top: 6px; left: 6px; z-index: 3; background: rgba(16, 24, 40, 0.66); color: #fff; border: none; border-radius: 7px; padding: 5px 9px; font-size: 0.7rem; font-weight: 800; cursor: pointer; font-family: inherit; }
+        .gallery-thumb.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed var(--red); background: var(--red-soft); }
+        .gallery-dot { position: absolute; top: 6px; right: 6px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; z-index: 2; }
+        .img-preview-modal { position: fixed; inset: 0; z-index: 10050; background: rgba(0, 0, 0, 0.88); display: none; align-items: center; justify-content: center; padding: 16px; }
+        .img-preview-modal.open { display: flex; }
+        .img-preview-modal img { max-width: 100%; max-height: 100%; border-radius: 10px; }
+        .img-preview-close { position: absolute; top: 14px; right: 18px; background: none; border: none; color: #fff; font-size: 2.4rem; line-height: 1; cursor: pointer; }
         .footer-actions { display: flex; gap: 10px; margin-top: 4px; }
         .alloc-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.875rem; font-weight: 700; }
         .alloc-row > span, .alloc-row > b { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -498,9 +510,9 @@
             <span class="tab-label" data-i18n="kensa_tab_inspect">Inspect</span>
             <span class="tab-badge" id="prodBadge">0</span>
         </button>
-        <button type="button" class="tab-btn" data-tab="maintenance">
-            <span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.7 2.7-2-2 2.7-2.7z" /></svg></span>
-            <span class="tab-label" data-i18n="maintenance_tab">Maintenance</span>
+        <button type="button" class="tab-btn" data-tab="images">
+            <span class="tab-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9.5" r="1.6" /><polyline points="4 17 9 12 13 16 16.5 12.5 20 16" /></svg></span>
+            <span class="tab-label" data-i18n="kensa_tab_images">Images</span>
         </button>
         <button type="button" class="tab-btn" data-tab="submit">
             <span class="tab-icon"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7" /></svg></span>
@@ -623,7 +635,7 @@
             </div>
 
             <!-- 初物 / 終物 first / last piece photos (same buttons as DCP interactive; 初物 is required to submit, 終物 is optional) -->
-            <div class="glass-card">
+            <div class="glass-card" id="checkCard">
                 <h3 data-i18n="kensa_checks_title">初物・終物チェック</h3>
                 <div class="prod-check-grid">
                     <button type="button" id="hatsumonoButton" class="prod-check-btn">
@@ -635,13 +647,6 @@
                         <span class="check-txt"><span data-i18n="kensa_last_check">終物チェック</span><small id="atomonoSub">Last Cycle</small></span>
                     </button>
                 </div>
-                <input type="file" id="hatsumonoFileInput" accept="image/*" capture="environment" style="display:none">
-                <input type="file" id="atomonoFileInput" accept="image/*" capture="environment" style="display:none">
-                <div class="check-pics">
-                    <img id="hatsumonoPic" src="" alt="初物チェック">
-                    <img id="atomonoPic" src="" alt="終物チェック">
-                </div>
-                <span id="hatsumonoLabel" style="display:none">FALSE</span><span id="atomonoLabel" style="display:none">FALSE</span>
             </div>
 
             <!-- Kensa labels -->
@@ -719,18 +724,19 @@
     </div>
 
     <!-- ===================== TAB 3: MAINTENANCE ===================== -->
-    <div class="tab-panel" id="panel-maintenance">
+    <!-- ===================== TAB: IMAGES (first / last piece photos, like DCP interactive) ===================== -->
+    <div class="tab-panel" id="panel-images">
         <div class="glass-card">
-            <h3 data-i18n="machine_trouble_title">機械故障時間</h3>
-            <button type="button" id="maintenanceStartButton" class="btn btn-primary btn-full" style="height:56px; font-size:1.05rem; margin-bottom:12px">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.7 2.7-2-2 2.7-2.7z" /></svg>
-                <span data-i18n="maintenance_start_btn">故障タイマー開始</span>
-            </button>
-            <button type="button" id="add-maintenance-btn" class="btn btn-secondary btn-full" style="margin-bottom:20px" data-i18n="maintenance_add_manual">手動で追加</button>
-            <div id="maintenance-records-container" style="margin-bottom:20px"></div>
-            <div class="total-trouble"><span data-i18n="total_trouble_time">合計故障時間:</span><span id="total-trouble-display">0分</span></div>
+            <h3 data-i18n="kensa_img_title">撮影画像</h3>
+            <p class="gallery-sub" data-i18n="kensa_img_desc">初物・終物の写真はここに集約されます。サムネイルをタップで拡大</p>
+            <div id="imageGallery" class="gallery-sections"></div>
         </div>
+    </div>
+    <input type="file" id="hatsumonoFileInput" accept="image/*" capture="environment" style="display:none">
+    <input type="file" id="atomonoFileInput" accept="image/*" capture="environment" style="display:none">
+    <div id="imgPreviewModal" class="img-preview-modal">
+        <button type="button" class="img-preview-close" id="imgPreviewClose">&times;</button>
+        <img id="imgPreviewTarget" src="" alt="preview">
     </div>
 
     <!-- Break full-screen overlay -->
@@ -892,11 +898,11 @@
 
     <script src="html5-qrcode.min.js"></script>
     <script src="i18n.js"></script>
-    <script src="Kensa interactive i18n.js?v=bt14"></script>
+    <script src="Kensa interactive i18n.js?v=bt15"></script>
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt14"></script>
+    <script src="Kensa interactive SCNA.js?v=bt15"></script>
 </body>
 
 </html>
