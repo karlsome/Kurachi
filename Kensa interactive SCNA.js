@@ -436,7 +436,7 @@ window.serverURL = serverURL;
     var dup = b.boxes.some(function (x) { return q.id ? x.id === q.id : (!x.id && x.qr === q.raw); });
     if (dup) return fail(T('kensa_e_box_dup', q.id || q.raw));
 
-    var hinban = q.hinban, qty = q.qty, base = q.qty, lots = q.lot ? [q.lot] : [], kind = q.kind;
+    var hinban = q.hinban, qty = q.qty, base = q.qty, lots = q.lot ? [q.lot] : [], kind = q.kind, lotDetails = null;
     if (q.id) {
       // 2. DCP / SRS input: the server holds the pieces still unused (shared pool)
       var inp;
@@ -452,6 +452,7 @@ window.serverURL = serverURL;
       qty = toInt(inp.remaining); base = toInt(inp.base);
       lots = (inp.lotNumbers || []).filter(Boolean);
       if (!lots.length && q.lot) lots = [q.lot];
+      lotDetails = (inp.lots || []).filter(function (x) { return x && x.lotNumber; }).map(function (x) { return { lotNumber: x.lotNumber, pieces: x.pieces == null ? null : toInt(x.pieces) }; });
     }
     if (!hinban) return fail(T('kensa_e_no_hinban'));
     if (!qty) return fail(T('kensa_e_no_qty'));
@@ -468,7 +469,8 @@ window.serverURL = serverURL;
 
     // 4. accept
     if (!b.boxes.length && !b.start) b.start = nowHM();
-    b.boxes.push({ id: q.id, kind: kind, qr: q.raw, legacy: !q.id, qty: qty, used: 0, base: base, lots: lots, ng: {}, ngBase: {} });
+    if (!lotDetails || !lotDetails.length) lotDetails = lots.map(function (l) { return { lotNumber: l, pieces: lots.length === 1 ? qty : null }; });   // legacy QR: its one lot holds the whole quantity
+    b.boxes.push({ id: q.id, kind: kind, qr: q.raw, legacy: !q.id, qty: qty, used: 0, base: base, lots: lots, lotDetails: lotDetails, ng: {}, ngBase: {} });
     b.cur = b.boxes.length - 1;
     b.qtyOverride = null;
     var known = b.lotNumbers ? b.lotNumbers.split(/\s*,\s*/) : [];
@@ -773,7 +775,7 @@ window.serverURL = serverURL;
     h += row(T('kensa_sum_worker'), esc(workerString() || '---'), edit('worker'));
     h += row(T('kensa_sum_date'), esc(b.date || todayStr()));
     h += row(T('kensa_sum_time'), esc(b.start || '--:--') + ' ~ ' + esc(b.end || '--:--'), edit('submit', 'inspStart'));
-    h += row(T('kensa_l_lot'), esc(b.lotNumbers || '---'), edit('submit', 'inspLot'));
+    h += row(T('kensa_l_lot'), sidebarLots(b).map(function (l) { return esc(l.lotNumber) + (l.pieces != null ? ' ×' + l.pieces : ''); }).join('<br>') || '---');
     h += row(T('kensa_l_proc'), procQty(b));
     h += row(T('kensa_l_ng_real'), ngTotal(b) + (ngDetail ? '<small>' + esc(ngDetail) + '</small>' : ''), edit(TAB_INSPECT, 'counterGrid'));
     h += row(T('kensa_l_good'), '<span style="color:var(--brand)">' + goodQty(b) + '</span>');
@@ -1425,7 +1427,7 @@ window.serverURL = serverURL;
         Tablet_Home: MACHINE,
         Kensa_Box_IDs: live.map(function (e) { return e.kensaId; }),
         Box_IDs: ids('dcp').concat(ids('srs')),      // contract: DCP + SRS input ids
-        Lot_Details: b.boxes.map(function (x) { return { boxId: x.kind === 'dcp' ? x.id : null, srsId: x.kind === 'srs' ? x.id : null, legacy: !x.id, qty: x.qty, lots: x.lots || [], ng: Object.assign({}, x.ng), ngTotal: inNg(x) }; }),
+        Lot_Details: b.boxes.map(function (x) { return { boxId: x.kind === 'dcp' ? x.id : null, srsId: x.kind === 'srs' ? x.id : null, legacy: !x.id, qty: x.qty, lots: x.lots || [], lotDetails: x.lotDetails || [], ng: Object.assign({}, x.ng), ngTotal: inNg(x) }; }),
         Kensa_Label_Bypass: live.length ? null : b.bypass,
         Submit_UID: b.submitUid || (b.submitUid = newUid('sub-')),
         Kensa_Unlabelled_NG: b.boxes.filter(function (x) { return inNgShownTotal(x) > 0; }).map(function (x) { return { boxId: x.kind === 'dcp' ? x.id : null, srsId: x.kind === 'srs' ? x.id : null, legacy: !x.id, ng: ngObjShown(x), ngTotal: inNgShownTotal(x) }; }),
@@ -1701,16 +1703,30 @@ window.serverURL = serverURL;
     sb.classList.toggle('open', show); $('sidebarBackdrop').classList.toggle('open', show);
     if (show) renderSidebar();
   }
+  // production lots of every input on the bench with the pieces each one brought: [{ lotNumber, pieces|null }]
+  function sidebarLots(b) {
+    var map = {}, order = [];
+    b.boxes.forEach(function (x) {
+      var det = x.lotDetails && x.lotDetails.length ? x.lotDetails : (x.lots || []).map(function (l) { return { lotNumber: l, pieces: null }; });
+      det.forEach(function (d) {
+        if (!(d.lotNumber in map)) { map[d.lotNumber] = null; order.push(d.lotNumber); }
+        if (d.pieces != null) map[d.lotNumber] = (map[d.lotNumber] || 0) + d.pieces;
+      });
+    });
+    return order.map(function (l) { return { lotNumber: l, pieces: map[l] }; });
+  }
   function renderSidebar() {
     var host = $('infoLanes'), b = state.bench;
     if (!benchOpen(b)) { host.innerHTML = '<div class="info-lane"><span class="lane-badge">' + esc(MACHINE) + '</span><div class="info-empty">' + esc(T('kensa_idle')) + '</div></div>'; return; }
     var rows = [
       ['kensa_i_hinban', b.hinban], ['kensa_i_sebango', b.sebango], ['kensa_i_hinmei', b.hinmei], ['kensa_i_model', b.model], ['kensa_i_shape', b.shape],
-      ['kensa_i_cap', b.cap || ''], ['kensa_i_inputs', b.boxes.length ? b.boxes.length + ' · ' + boxQty(b) + 'pcs' : '---'], ['kensa_i_lot', b.lotNumbers || '---']
+      ['kensa_i_cap', b.cap || ''], ['kensa_i_inputs', b.boxes.length ? b.boxes.length + ' · ' + boxQty(b) + 'pcs' : '---']
     ];
+    var lotRows = sidebarLots(b);
     host.innerHTML = '<div class="info-lane"><span class="lane-badge">' + esc(MACHINE) + '</span>' +
       (b.imageURL ? '<img src="' + esc(b.imageURL) + '" alt="">' : '') +
-      rows.map(function (r) { return '<div class="info-row"><label>' + esc(T(r[0])) + '</label><div>' + esc(r[1] || '---') + '</div></div>'; }).join('') + '</div>';
+      rows.map(function (r) { return '<div class="info-row"><label>' + esc(T(r[0])) + '</label><div>' + esc(r[1] || '---') + '</div></div>'; }).join('') +
+      '<div class="info-row"><label>' + esc(T('kensa_i_lot')) + '</label><div>' + (lotRows.length ? lotRows.map(function (l) { return '<div>' + esc(l.lotNumber) + (l.pieces != null ? ' <span style="color:var(--text-muted);font-weight:700">· ' + l.pieces + 'pcs</span>' : '') + '</div>'; }).join('') : esc(b.lotNumbers || '---')) + '</div></div></div>';
   }
   $('infoBtn').onclick = function () { toggleSidebar(); };
   $('sidebarClose').onclick = function () { toggleSidebar(false); };

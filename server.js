@@ -28735,8 +28735,28 @@ app.get("/api/kensa-inputs/:id", async (req, res) => {
       }
     }
     lotNumbers = [...new Set(lotNumbers)];
+    // lots with how many pieces each contributed (null = not known): shown on the Kensa tablet's info sidebar
+    const lotMap = new Map();
+    const addLot = (lot, pcs) => {
+      lot = String(lot || "").trim(); if (!lot) return;
+      const n = Number(pcs);
+      const cur = lotMap.get(lot);
+      if (Number.isFinite(n) && n >= 0 && pcs !== null && pcs !== undefined && pcs !== "") lotMap.set(lot, (cur || 0) + n);
+      else if (cur === undefined) lotMap.set(lot, null);
+    };
+    if (kind === "dcp") {
+      (doc.lots || []).forEach(x => addLot(x && x.lotNumber, x && x.pieces));
+    } else {
+      (doc.lines || []).forEach(l => {
+        const ls = (Array.isArray(l.lotNumbers) ? l.lotNumbers : (l.lotNumber ? String(l.lotNumber).split(",") : [])).map(x => String(x || "").trim()).filter(Boolean);
+        if (ls.length === 1) addLot(ls[0], l.good);
+        else ls.forEach(x => addLot(x, null));
+      });
+    }
+    lotNumbers.forEach(x => addLot(x, null));
+    const lots = [...lotMap.entries()].map(([lotNumber, pieces]) => ({ lotNumber, pieces }));
     res.json({
-      kind, id, 品番: doc.品番 || "", 背番号: doc.背番号 || "", lotNumbers,
+      kind, id, 品番: doc.品番 || "", 背番号: doc.背番号 || "", lotNumbers, lots,
       status: kind === "srs" ? doc.status : (doc.status || "complete"), usable,
       base, consumed, remaining: usable ? Math.max(0, base - consumed) : 0
     });
