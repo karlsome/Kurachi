@@ -31,6 +31,10 @@
   header .logo { width: 38px; height: 38px; border-radius: 11px; background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   header .logo svg { width: 22px; height: 22px; stroke: #fff; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
   header h1 { font-size: 1.15rem; font-weight: 800; line-height: 1.2; }
+  header h1 { flex: 1; min-width: 0; }
+  .langpick { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; flex-shrink: 0; background: #fff; }
+  .langpick button { border: 0; background: none; padding: 8px 12px; font: inherit; font-weight: 800; font-size: 0.8rem; color: var(--muted); cursor: pointer; min-height: 38px; }
+  .langpick button.on { background: var(--brand); color: #fff; }
   header small { display: block; color: var(--muted); font-weight: 600; font-size: 0.75rem; }
 
   .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
@@ -43,7 +47,7 @@
   .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
   .btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
   .btn .lbl { display: inline; }
-  @media (max-width: 480px) { .btn.scan .lbl { display: none; } .btn { padding: 0 14px; } }
+  @media (max-width: 480px) { .btn.scan .lbl, #resetBtn .lbl { display: none; } .btn { padding: 0 14px; } }
   .recent { display: flex; gap: 6px; flex-wrap: wrap; }
   .recent:empty { display: none; }
   .chip { border: 1px solid var(--border); background: var(--subtle); border-radius: 999px; padding: 5px 11px; font-size: 0.78rem; font-weight: 700; color: var(--muted); cursor: pointer; }
@@ -120,20 +124,22 @@
 <div class="wrap">
   <header>
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M4 17v2a1 1 0 0 0 1 1h2M20 7V5a1 1 0 0 0-1-1h-2M20 17v2a1 1 0 0 1-1 1h-2" /><line x1="4" y1="12" x2="20" y2="12" /></svg></div>
-    <h1>Info Scanner<small>QR / ID → 全工程の情報 / all process data</small></h1>
+    <h1>Info Scanner<small data-i18n="subtitle"></small></h1>
+    <div class="langpick" role="group" aria-label="Language"><button type="button" data-lang="ja">日本語</button><button type="button" data-lang="en">English</button></div>
   </header>
 
   <div class="card search">
     <div class="search-row">
-      <input id="code" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Box / SRS / Kensa ID  or  QR text">
-      <button class="btn primary" id="go" type="button" aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg><span class="lbl">Search</span></button>
-      <button class="btn scan" id="scanBtn" type="button" aria-label="Scan"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg><span class="lbl">Scan</span></button>
+      <input id="code" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" data-i18n-ph="placeholder">
+      <button class="btn primary" id="go" type="button" aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg><span class="lbl" data-i18n="search"></span></button>
+      <button class="btn" id="resetBtn" type="button" aria-label="Reset"><svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10" /><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10" /></svg><span class="lbl" data-i18n="reset"></span></button>
+      <button class="btn scan" id="scanBtn" type="button" aria-label="Scan"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg><span class="lbl" data-i18n="scan"></span></button>
     </div>
     <div class="recent" id="recent"></div>
     <div id="scanBox">
       <div id="reader"></div>
-      <div class="scan-hint" id="scanHint">QRコードをカメラに向けてください / Point the camera at the QR code</div>
-      <div class="toolbar"><button class="btn" id="scanStop" type="button">✕ Close camera</button></div>
+      <div class="scan-hint" id="scanHint" data-i18n="hint"></div>
+      <div class="toolbar"><button class="btn" id="scanStop" type="button" data-i18n="closeCam"></button></div>
     </div>
   </div>
 
@@ -158,6 +164,42 @@
     return 'http://' + h + ':3000';
   }
   var SERVER = pickServer();
+
+  // ---------------- language ----------------
+  var I18N = {
+    ja: { subtitle: 'QR / ID → 全工程の情報', placeholder: '箱 / SRS / 検査ID または QRテキスト', search: '検索', reset: 'リセット', scan: 'スキャン', hint: 'QRコードをカメラに向けてください', closeCam: '✕ カメラを閉じる',
+      loading: '読み込み中…', unreachable: 'サーバーに接続できません', needHttps: 'カメラには https が必要です。IDを入力してください。', noLib: 'スキャナーを読み込めませんでした', camera: 'カメラ',
+      kind_dcp: '切断ボックス', kind_srs: 'SRSラベル', kind_kensa: '検査ラベル', kind_legacy: 'ロットQR',
+      pressBoxes: 'プレス箱', labels: 'ラベル', records: '提出記録', noData: 'この工程の記録はありません', labelBox: 'ラベル/箱', record: '記録',
+      expand: 'すべて開く', collapse: 'すべて閉じる', p_cutting: '切断', p_srs: 'SRS', p_kensa: '検査' },
+    en: { subtitle: 'QR / ID → all process data', placeholder: 'Box / SRS / Kensa ID  or  QR text', search: 'Search', reset: 'Reset', scan: 'Scan', hint: 'Point the camera at the QR code', closeCam: '✕ Close camera',
+      loading: 'Loading…', unreachable: 'Cannot reach the server', needHttps: 'Camera needs https (or localhost). Type the ID instead.', noLib: 'Scanner library not loaded', camera: 'Camera',
+      kind_dcp: 'Cutting box', kind_srs: 'SRS label', kind_kensa: 'Kensa label', kind_legacy: 'Lot QR',
+      pressBoxes: 'Press boxes', labels: 'Labels', records: 'Submitted records', noData: 'No data for this process', labelBox: 'label/box', record: 'record',
+      expand: 'Expand all', collapse: 'Collapse all', p_cutting: 'Cutting', p_srs: 'SRS', p_kensa: 'Kensa' }
+  };
+  var LANG = (function () { try { var l = localStorage.getItem('infoScannerLang'); if (l === 'ja' || l === 'en') return l; } catch (e) { } return /^ja/i.test(navigator.language || '') ? 'ja' : 'en'; })();
+  function T(k) { return (I18N[LANG] && I18N[LANG][k]) || I18N.en[k] || k; }
+  function procName(p) { return T('p_' + p.key) === 'p_' + p.key ? p.title : T('p_' + p.key); }
+  function applyLang() {
+    document.documentElement.lang = LANG;
+    document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = T(el.getAttribute('data-i18n')); });
+    document.querySelectorAll('[data-i18n-ph]').forEach(function (el) { el.placeholder = T(el.getAttribute('data-i18n-ph')); });
+    document.querySelectorAll('.langpick button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-lang') === LANG); });
+  }
+
+  // ---------------- local time ----------------
+  // ISO timestamps that carry an offset / Z are shown in the viewer's own time zone
+  var ISO_RE = /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)$/;
+  function localTime(s) {
+    var d = new Date(s); if (isNaN(d)) return s;
+    try {
+      var p = {}; new Intl.DateTimeFormat(LANG === 'ja' ? 'ja-JP-u-nu-latn' : 'en-US', { hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short' })
+        .formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+      return p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute + ':' + p.second + ' (' + p.timeZoneName + ')';
+    } catch (e) { return d.toLocaleString(); }
+  }
+  function showVal(v) { return typeof v === 'string' && ISO_RE.test(v) ? localTime(v) : v; }
 
   var $ = function (id) { return document.getElementById(id); };
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -191,7 +233,7 @@
         var arr = Array.isArray(v);
         if (arr && v.length && v.every(isImg)) { html += '<div class="row"><span class="k">' + esc(k) + '</span><span class="v">' + thumbs(v) + '</span></div>'; return; }
         if (arr && !v.some(function (x) { return x !== null && typeof x === 'object'; })) {
-          html += '<div class="row' + (v.length ? '' : ' empty') + '"><span class="k">' + esc(k) + '</span><span class="v">' + (v.length ? v.map(linkIfId).join(', ') : '---') + '</span></div>'; return;
+          html += '<div class="row' + (v.length ? '' : ' empty') + '"><span class="k">' + esc(k) + '</span><span class="v">' + (v.length ? v.map(function (x) { return linkIfId(showVal(x)); }).join(', ') : '---') + '</span></div>'; return;
         }
         (arr ? v : [v]).forEach(function (x, i) {
           html += '<div class="sub">' + esc(k) + (arr ? ' [' + (i + 1) + ']' : '') + '</div>';
@@ -200,13 +242,13 @@
       } else if (isImg(v)) {
         html += '<div class="row"><span class="k">' + esc(k) + '</span><span class="v">' + thumbs([v]) + '</span></div>';
       } else {
-        var txt = v === null || v === undefined ? '' : String(v);
+        var txt = v === null || v === undefined ? '' : String(showVal(v));
         html += '<div class="row' + (txt === '' ? ' empty' : '') + '"><span class="k">' + esc(k) + '</span><span class="v">' + (txt === '' ? '---' : linkIfId(txt)) + '</span></div>';
       }
     });
     return html;
   }
-  function fmtDate(s) { if (!s) return ''; var d = new Date(s); return isNaN(d) ? String(s) : d.toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+  function fmtDate(s) { if (!s) return ''; var d = new Date(s); return isNaN(d) ? String(s) : (ISO_RE.test(String(s)) ? localTime(s).replace(/:\d\d \(/, ' (') : d.toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })); }
   function idOf(d) { return d.kensaId || d.srsId || d.boxId || d.Submit_UID || d.Run_ID || String(d._id || ''); }
 
   function docCard(doc, hitId, kindLabel, open) {
@@ -217,17 +259,19 @@
       '<div class="doc-body"><div class="rows">' + rowsOf(doc) + '</div></div></details>';
   }
 
+  var lastData = null;
   function render(d) {
+    lastData = d;
     var hit = (d.id || '').toUpperCase(), procs = d.processes || [], html = '';
     var counts = procs.map(function (p) { return p.boxes.length + p.records.length; });
 
     // header: what was scanned + the process flow
-    html += '<div class="card summary"><div class="top"><span class="kind">' + esc({ dcp: 'Cutting box', srs: 'SRS label', kensa: 'Kensa label', legacy: 'Lot QR' }[d.kind] || d.kind) + '</span>' +
+    html += '<div class="card summary"><div class="top"><span class="kind">' + esc(T('kind_' + d.kind) === 'kind_' + d.kind ? d.kind : T('kind_' + d.kind)) + '</span>' +
       '<b>' + esc(d.id || d.code) + '</b></div><div class="top">' +
       '<span class="kv">背番号 <span>' + esc(d.背番号 || '---') + '</span></span><span class="kv">品番 <span>' + esc(d.品番 || '---') + '</span></span>' +
       (d.lot ? '<span class="kv">Lot <span>' + esc(d.lot) + '</span></span>' : '') + '</div>' +
       '<div class="flow"><a class="' + (d.masterDB ? 'has' : '') + '" data-to="p-master">masterDB</a>' +
-      procs.map(function (p, i) { return '<span class="arrow">→</span><a class="' + (counts[i] ? 'has' : '') + '" data-to="p-' + p.key + '">' + esc(p.title) + ' <span class="n">' + counts[i] + '</span></a>'; }).join('') + '</div></div>';
+      procs.map(function (p, i) { return '<span class="arrow">→</span><a class="' + (counts[i] ? 'has' : '') + '" data-to="p-' + p.key + '">' + esc(procName(p)) + ' <span class="n">' + counts[i] + '</span></a>'; }).join('') + '</div></div>';
 
     // masterDB
     html += '<div class="proc' + (d.masterDB ? '' : ' empty') + '" id="p-master"><div class="proc-title">masterDB<small>' + esc(d.背番号 || '') + '</small></div><div class="proc-body">';
@@ -239,14 +283,14 @@
 
     // processes in order
     procs.forEach(function (p, i) {
-      html += '<div class="proc' + (counts[i] ? '' : ' empty') + '" id="p-' + p.key + '"><div class="proc-title">' + esc(p.title) + '<small>' + p.boxes.length + ' label/box · ' + p.records.length + ' record</small></div><div class="proc-body">';
-      if (!counts[i]) html += '<div class="none">この工程の記録はありません / No data for this process</div>';
+      html += '<div class="proc' + (counts[i] ? '' : ' empty') + '" id="p-' + p.key + '"><div class="proc-title">' + esc(procName(p)) + '<small>' + p.boxes.length + ' ' + T('labelBox') + ' · ' + p.records.length + ' ' + T('record') + '</small></div><div class="proc-body">';
+      if (!counts[i]) html += '<div class="none">' + T('noData') + '</div>';
       var boxName = { cutting: 'Box', srs: 'SRS', kensa: 'Kensa' }[p.key];
-      if (p.boxes.length) html += '<div class="group-title">' + (p.key === 'cutting' ? 'Press boxes / 箱' : 'Labels / ラベル') + '</div>' + p.boxes.map(function (b) { return docCard(b, hit, '', p.boxes.length === 1); }).join('');
-      if (p.records.length) html += '<div class="group-title">Submitted records / 提出記録</div>' + p.records.map(function (r) { return docCard(r, hit, '', false); }).join('');
+      if (p.boxes.length) html += '<div class="group-title">' + (p.key === 'cutting' ? T('pressBoxes') : T('labels')) + '</div>' + p.boxes.map(function (b) { return docCard(b, hit, '', p.boxes.length === 1); }).join('');
+      if (p.records.length) html += '<div class="group-title">' + T('records') + '</div>' + p.records.map(function (r) { return docCard(r, hit, '', false); }).join('');
       html += '</div></div>';
     });
-    html += '<div class="toolbar"><button class="btn" id="expandAll" type="button">Expand all</button><button class="btn" id="collapseAll" type="button">Collapse all</button></div>';
+    html += '<div class="toolbar"><button class="btn" id="expandAll" type="button">' + T('expand') + '</button><button class="btn" id="collapseAll" type="button">' + T('collapse') + '</button></div>';
 
     var host = $('result'); host.innerHTML = '<button class="btn back' + (stack.length ? ' show' : '') + '" id="backBtn" type="button">← ' + esc(stack.length ? stack[stack.length - 1] : '') + '</button>' + html; host.style.display = 'block';
     $('backBtn').onclick = function () { var prev = stack.pop(); if (prev) { $('code').value = prev; search(prev, true); } };
@@ -266,7 +310,7 @@
     if (!fromLink) stack = [];      // a new scan / typed code starts over; only taps on IDs keep a way back
     stopScan();
     $('result').style.display = 'none';
-    $('status').className = 'status'; $('status').innerHTML = '<div class="spinner"></div>読み込み中… / Loading…';
+    $('status').className = 'status'; $('status').innerHTML = '<div class="spinner"></div>' + T('loading');
     try {
       var r = await fetch(SERVER + '/api/scna-info?code=' + encodeURIComponent(code));
       var j = await r.json().catch(function () { return {}; });
@@ -278,10 +322,18 @@
       window.scrollTo({ top: 0 });
     } catch (e) {
       if (ticket !== busy) return;
-      $('status').className = 'status error'; $('status').textContent = '⚠ ' + (e.message === 'Failed to fetch' ? 'Cannot reach the server (' + SERVER + ')' : e.message);
+      $('status').className = 'status error'; $('status').textContent = '⚠ ' + (e.message === 'Failed to fetch' ? T('unreachable') + ' (' + SERVER + ')' : e.message);
     }
   }
   $('go').onclick = function () { search(); };
+  $('resetBtn').onclick = function () {
+    busy++; stack = []; current = ''; lastData = null;
+    stopScan();
+    $('code').value = ''; $('result').style.display = 'none'; $('result').innerHTML = '';
+    $('status').textContent = ''; $('status').className = 'status';
+    try { history.replaceState(null, '', location.pathname + (qs.get('server') ? '?server=' + encodeURIComponent(qs.get('server')) : '')); } catch (e) { }
+    window.scrollTo({ top: 0 }); $('code').focus();
+  };
   $('code').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); $('code').blur(); search(); } });
 
   // ---------------- camera ----------------
@@ -295,8 +347,8 @@
   $('scanStop').onclick = stopScan;
   $('scanBtn').onclick = function () {
     if (scanner) return stopScan();
-    if (typeof Html5Qrcode === 'undefined') { $('status').className = 'status error'; $('status').textContent = '⚠ Scanner library not loaded'; return; }
-    if (!window.isSecureContext) { $('status').className = 'status error'; $('status').textContent = '⚠ Camera needs https (or localhost). Type the ID instead.'; return; }
+    if (typeof Html5Qrcode === 'undefined') { $('status').className = 'status error'; $('status').textContent = '⚠ ' + T('noLib'); return; }
+    if (!window.isSecureContext) { $('status').className = 'status error'; $('status').textContent = '⚠ ' + T('needHttps'); return; }
     $('status').textContent = ''; $('status').className = 'status';
     $('scanBox').classList.add('show');
     scanner = new Html5Qrcode('reader');
@@ -306,11 +358,18 @@
       $('code').value = text; search(text);
     }, function () { }).catch(function (e) {
       scanner = null; $('scanBox').classList.remove('show');
-      $('status').className = 'status error'; $('status').textContent = '⚠ Camera: ' + (e && e.message ? e.message : e);
+      $('status').className = 'status error'; $('status').textContent = '⚠ ' + T('camera') + ': ' + (e && e.message ? e.message : e);
     });
   };
 
   // ---------------- start ----------------
+  document.querySelectorAll('.langpick button').forEach(function (b) {
+    b.onclick = function () {
+      LANG = b.getAttribute('data-lang'); try { localStorage.setItem('infoScannerLang', LANG); } catch (e) { }
+      applyLang(); if (lastData && $('result').style.display !== 'none') render(lastData);
+    };
+  });
+  applyLang();
   renderRecent();
   var first = qs.get('code');
   if (first) { $('code').value = first; search(first); }
