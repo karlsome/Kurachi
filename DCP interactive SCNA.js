@@ -1321,6 +1321,30 @@
   }
   SCNA.clearQualityCall = function () { notifyQualityCall('clear'); };
 
+  // Alert sound: same file factory3D uses for the quality call (src/2hourReminder.mp3). Loops until Done / Snooze.
+  var qualityAudio = null, qualityAudioGuard = null;
+  function stopQualitySound() {
+    if (qualityAudioGuard) { clearInterval(qualityAudioGuard); qualityAudioGuard = null; }
+    if (qualityAudio) { try { qualityAudio.pause(); qualityAudio.currentTime = 0; } catch (e) { } }
+  }
+  function startQualitySound() {
+    try {
+      if (!qualityAudio) { qualityAudio = new Audio('src/2hourReminder.mp3'); qualityAudio.loop = true; qualityAudio.preload = 'auto'; }
+      var tryPlay = function () {
+        var pr = qualityAudio.play();
+        if (pr && pr.catch) pr.catch(function () { /* autoplay blocked: retried on next tap / guard tick */ });
+      };
+      tryPlay();
+      // Safety net: retry if blocked, and stop automatically if the modal disappeared (e.g. form reset).
+      document.addEventListener('pointerdown', tryPlay, { once: true });
+      if (qualityAudioGuard) clearInterval(qualityAudioGuard);
+      qualityAudioGuard = setInterval(function () {
+        if (!$('scnaTwoHourModal')) { stopQualitySound(); return; }
+        if (qualityAudio.paused) tryPlay();
+      }, 3000);
+    } catch (e) { }
+  }
+
   function showTwoHourModal() {
     var names = (typeof workerNamesData !== 'undefined' && Array.isArray(workerNamesData)) ? workerNamesData : [];
     var field = names.length
@@ -1339,6 +1363,7 @@
       '分後に再通知 / Snooze ' + SNOOZE_MIN + ' min</button>');
     el.style.zIndex = '100250';
     notifyQualityCall('activate');
+    startQualitySound();
     $('scnaThDone').onclick = function () {
       var name = ($('scnaThInspector').value || '').trim();
       if (!name) { toast('検査者名を選択してください / Please select an inspector'); return; }
@@ -1351,12 +1376,14 @@
       lsSet('scnaTwoHourChecks', list);
       lsDel('scnaTwoHourSnooze');
       el.remove();
+      stopQualitySound();
       notifyQualityCall('clear');
       updateTwoHourDisplay();
     };
     $('scnaThSnooze').onclick = function () {
       lsSet('scnaTwoHourSnooze', Date.now() + SNOOZE_MIN * 60000);
       el.remove();
+      stopQualitySound();
       notifyQualityCall('clear');   // the call comes back when the reminder reappears
     };
   }
