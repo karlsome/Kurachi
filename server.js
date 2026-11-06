@@ -28963,8 +28963,8 @@ app.post("/submitToKensaDBInteractive", async (req, res) => {
         console.error(`❌ Kensa interactive: defect photo ${di + 1} upload failed:`, uploadError.message);
       }
     }
-    formData["不良画像"] = defectUrls;
-    formData["不良画像枚数"] = defectUrls.length;
+    formData.defectImages = defectUrls;                 // array of Firebase Storage links, in the order taken
+    formData.defectImagesCount = defectUrls.length;
 
     formData.createdAt = new Date().toISOString();
     let result;
