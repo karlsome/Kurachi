@@ -1188,14 +1188,27 @@ window.serverURL = serverURL;
     });
   }
 
-  function labelOverrides(entry) {
-    var ov = { qr_1: '{品番},' + entry.qty + ',{lotNumber},' + entry.kensaId, box_id: entry.kensaId, text_9: '{lotNumber} - ' + entry.kensaId, text_6: String(entry.qty) };
+  // Label text drops a trailing "-WIP" (62480-70010-C0-WIP -> 62480-70010-C0); the master 品番 and stored data keep it.
+  function labelHinban(v) { return String(v == null ? '' : v).trim().replace(/[\s-]*WIP\s*$/i, ''); }
+
+  function labelOverrides(entry, hinban) {
+    var stripped = hinban && labelHinban(hinban) !== String(hinban).trim() ? labelHinban(hinban) : null;
+    var ov = { qr_1: (stripped || '{品番}') + ',' + entry.qty + ',{lotNumber},' + entry.kensaId, box_id: entry.kensaId, text_9: '{lotNumber} - ' + entry.kensaId, text_6: String(entry.qty) };
     if (entry.status === 'draft') ov.text_10 = '仮';
     return ov;
   }
 
   async function sendPrint(b, entry, ip) {
-    var ov = labelOverrides(entry);
+    var ov = labelOverrides(entry, b.hinban);
+    // The mini-PC fills {品番} itself from masterDB, so for a -WIP item every text element showing {品番} gets an override.
+    if (labelHinban(b.hinban) !== String(b.hinban || '').trim() && entry.layoutId) {
+      var lay = await loadLayoutBody(entry.layoutId);
+      (lay.elements || []).forEach(function (el) {
+        if (!el.name || el.name in ov) return;
+        var t = el.bind || el.text || '';
+        if (String(t).indexOf('{品番}') >= 0) ov[el.name] = String(t).split('{品番}').join(labelHinban(b.hinban));
+      });
+    }
     var prm = { filename: b.sebango, qty: '1', process: LABEL_PROCESS, overrides: JSON.stringify(ov) };
     if (entry.layoutId) prm.layoutId = entry.layoutId;
     var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 10000);
@@ -1269,6 +1282,7 @@ window.serverURL = serverURL;
     var n = new Date(), pad = function (x) { return (x < 10 ? '0' : '') + x; };
     var lot = '' + n.getFullYear() + pad(n.getMonth() + 1) + pad(n.getDate());
     var pn = String(rec['品番'] == null ? '' : rec['品番']).trim(), qty = String(rec['収容数'] == null ? '' : rec['収容数']).trim(), desc = String(rec['品名'] == null ? '' : rec['品名']).trim();
+    pn = labelHinban(pn);
     d.lotNumber = lot; d['品番'] = pn; d['収容数'] = qty; d['品名'] = desc;
     d.productNumber = pn; d.qty = qty; d.description = desc; d.banumber = String(rec['背番号'] == null ? '' : rec['背番号']);
     return d;
@@ -1278,7 +1292,7 @@ window.serverURL = serverURL;
     var layout = await loadLayoutBody(entry.layoutId), rec = await loadItemRecord(b.sebango);
     setBt('busy', 0);
     try {
-      await KensaBT.printLayout(layout, labelData(rec), labelOverrides(entry), { onProgress: function (p) { setBt('busy', p); } });
+      await KensaBT.printLayout(layout, labelData(rec), labelOverrides(entry, b.hinban), { onProgress: function (p) { setBt('busy', p); } });
       setBt('ok');
     } catch (e) { setBt('off'); throw e; }
   }
