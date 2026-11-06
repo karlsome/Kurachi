@@ -102,6 +102,9 @@
   @media (max-width: 420px) { .row { flex-direction: column; gap: 2px; } .row .k, .row .v { flex: none; text-align: left; } }
   .sub { grid-column: 1 / -1; margin: 10px 0 2px; padding: 6px 10px; border-left: 3px solid var(--brand); background: var(--brand-soft); border-radius: 4px; font-weight: 800; font-size: 0.8rem; color: var(--brand); }
   .nest { grid-column: 1 / -1; margin-left: 10px; padding-left: 12px; border-left: 2px solid var(--border); }
+  a.idlink { color: var(--blue); font-weight: 800; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; cursor: pointer; display: inline-block; margin: 0 2px; padding: 2px 0; }
+  .back { display: none; margin-top: 12px; }
+  .back.show { display: inline-flex; }
   .thumbs { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   .thumbs img { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); background: var(--subtle); cursor: zoom-in; }
 
@@ -176,6 +179,9 @@
   var IMG_RE = /^https?:\/\/.+\.(?:jpe?g|png|gif|webp)(?:\?.*)?$/i;
   function isImg(v) { return typeof v === 'string' && (IMG_RE.test(v) || /^https:\/\/firebasestorage\.googleapis\.com\/.+alt=media/i.test(v)); }
 
+  // an ID (box / SRS / Kensa) becomes a link: tapping it shows only that box
+  var ID_RE = /^[A-Za-z0-9._]+(?:-[A-Za-z0-9._]+)*-[BSK]\d+$/i;
+  function linkIfId(v) { v = String(v); return ID_RE.test(v) ? '<a class="idlink" data-id="' + esc(v.toUpperCase()) + '">' + esc(v) + '</a>' : esc(v); }
   function thumbs(urls) { return '<div class="thumbs">' + urls.map(function (u) { return '<img loading="lazy" src="' + esc(u) + '" data-zoom="' + esc(u) + '" alt="">'; }).join('') + '</div>'; }
   function rowsOf(obj) {
     var html = '';
@@ -185,7 +191,7 @@
         var arr = Array.isArray(v);
         if (arr && v.length && v.every(isImg)) { html += '<div class="row"><span class="k">' + esc(k) + '</span><span class="v">' + thumbs(v) + '</span></div>'; return; }
         if (arr && !v.some(function (x) { return x !== null && typeof x === 'object'; })) {
-          html += '<div class="row' + (v.length ? '' : ' empty') + '"><span class="k">' + esc(k) + '</span><span class="v">' + esc(v.length ? v.join(', ') : '---') + '</span></div>'; return;
+          html += '<div class="row' + (v.length ? '' : ' empty') + '"><span class="k">' + esc(k) + '</span><span class="v">' + (v.length ? v.map(linkIfId).join(', ') : '---') + '</span></div>'; return;
         }
         (arr ? v : [v]).forEach(function (x, i) {
           html += '<div class="sub">' + esc(k) + (arr ? ' [' + (i + 1) + ']' : '') + '</div>';
@@ -195,7 +201,7 @@
         html += '<div class="row"><span class="k">' + esc(k) + '</span><span class="v">' + thumbs([v]) + '</span></div>';
       } else {
         var txt = v === null || v === undefined ? '' : String(v);
-        html += '<div class="row' + (txt === '' ? ' empty' : '') + '"><span class="k">' + esc(k) + '</span><span class="v">' + esc(txt === '' ? '---' : txt) + '</span></div>';
+        html += '<div class="row' + (txt === '' ? ' empty' : '') + '"><span class="k">' + esc(k) + '</span><span class="v">' + (txt === '' ? '---' : linkIfId(txt)) + '</span></div>';
       }
     });
     return html;
@@ -242,7 +248,9 @@
     });
     html += '<div class="toolbar"><button class="btn" id="expandAll" type="button">Expand all</button><button class="btn" id="collapseAll" type="button">Collapse all</button></div>';
 
-    var host = $('result'); host.innerHTML = html; host.style.display = 'block';
+    var host = $('result'); host.innerHTML = '<button class="btn back' + (stack.length ? ' show' : '') + '" id="backBtn" type="button">← ' + esc(stack.length ? stack[stack.length - 1] : '') + '</button>' + html; host.style.display = 'block';
+    $('backBtn').onclick = function () { var prev = stack.pop(); if (prev) { $('code').value = prev; search(prev, true); } };
+    host.querySelectorAll('a.idlink').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); var id = a.getAttribute('data-id'); if (id !== (current || '').toUpperCase()) stack.push(current); $('code').value = id; search(id, true); }; });
     host.querySelectorAll('[data-to]').forEach(function (a) { a.onclick = function () { var t = $(a.getAttribute('data-to')); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; });
     host.querySelectorAll('[data-zoom]').forEach(function (im) { im.onclick = function () { $('lightbox').querySelector('img').src = im.getAttribute('data-zoom'); $('lightbox').classList.add('show'); }; });
     $('expandAll').onclick = function () { host.querySelectorAll('details.doc').forEach(function (x) { x.open = true; }); };
@@ -251,10 +259,11 @@
   $('lightbox').onclick = function () { this.classList.remove('show'); };
 
   // ---------------- search ----------------
-  var busy = 0;
-  async function search(code) {
+  var busy = 0, current = '', stack = [];
+  async function search(code, fromLink) {
     code = String(code || $('code').value || '').trim(); if (!code) return;
     var ticket = ++busy;
+    if (!fromLink) stack = [];      // a new scan / typed code starts over; only taps on IDs keep a way back
     stopScan();
     $('result').style.display = 'none';
     $('status').className = 'status'; $('status').innerHTML = '<div class="spinner"></div>読み込み中… / Loading…';
@@ -264,7 +273,7 @@
       if (ticket !== busy) return;
       if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
       $('status').textContent = ''; $('status').className = 'status';
-      addRecent(code); render(j);
+      current = code; addRecent(code); render(j);
       try { history.replaceState(null, '', '?code=' + encodeURIComponent(code) + (qs.get('server') ? '&server=' + encodeURIComponent(qs.get('server')) : '')); } catch (e) { }
       window.scrollTo({ top: 0 });
     } catch (e) {
