@@ -14494,6 +14494,13 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
           m.maintenanceAt = null;
           m.sessionStartMs = null;
           m.endTimeSet = false;
+          // A finished job (Reset, or completed Submit) means nothing is running any more:
+          // drop the 背番号 so the 3D badge does not keep showing the last job after it was submitted.
+          if (action === 'Reset button pressed' || (action === 'Submit button pressed' && log.Status === 'Completed')) {
+            m.sebanggo = '';
+            m.hinban = '';
+            m.sebanggoAt = log.ms;
+          }
         }
         if (log.Status === 'Completed' || log.Status === 'Reset') {
           m.sessionStartMs = null;
@@ -28508,7 +28515,7 @@ function _cleanKensaLines(lines) {
     const good = _kensaInt(l.good || 0, `lines[${i}].good`);
     const lotNumber = String(l.lotNumber || (Array.isArray(l.lotNumbers) ? l.lotNumbers.filter(Boolean).join(",") : "") || "").trim();
     if (!inputId && !lotNumber) throw new _KensaError(400, `lines[${i}]: a legacy input needs a lot number`);
-    return { boxId, srsId, legacy: !inputId, 品番: String(l.品番 || "").trim(), lotNumber, carried, good, ng, ngTotal };
+    return { boxId, srsId, legacy: !inputId, 品番: String(l.品番 || "").trim(), lotNumber, carried, good, ng, ngTotal, ...(l.spare ? { spare: true } : {}) };   // spare: pieces added from another lot to top the box up
   });
 }
 

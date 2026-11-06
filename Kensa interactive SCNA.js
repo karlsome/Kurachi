@@ -55,7 +55,8 @@ window.serverURL = serverURL;
       submitUid: '',
       resume: null,         // draft label being finished: { kensaId, qty, lines:[{boxId, srsId, legacy, 品番, lotNumber, good, ng, ngTotal}] }
       bypass: null,         // leader approval to submit without a printed label { leader, at }
-      spare: 0, lotNumbers: '', comment: ''
+      spare: 0, lotNumbers: '', comment: '',
+      spareList: []         // Partial from Spare: [{ id, lotNumber, pieces, at, worker, consumedByBoxUid }] pieces from other lots that top the box up
     };
   }
   function benchOpen(b) { return !!b.hinban; }
@@ -423,7 +424,7 @@ window.serverURL = serverURL;
     var ng = {}; NG_FIELDS.forEach(function (f) { ng[f] = toInt((x.ng || {})[f]); });
     return {
       boxId: x.boxId || null, srsId: x.srsId || null, legacy: !!x.legacy || (!x.boxId && !x.srsId), 品番: x.品番 || state.bench.hinban,
-      lotNumber: x.lotNumber || '', carried: true, good: toInt(x.good), ng: ng, ngTotal: NG_FIELDS.reduce(function (a, f) { return a + ng[f]; }, 0)
+      lotNumber: x.lotNumber || '', carried: true, spare: !!x.spare, good: toInt(x.good), ng: ng, ngTotal: NG_FIELDS.reduce(function (a, f) { return a + ng[f]; }, 0)
     };
   }
 
@@ -616,7 +617,40 @@ window.serverURL = serverURL;
     var cb = b.boxes[ci];
     $('inspCurInfo').textContent = cb ? T('kensa_chip_left', Math.max(0, cb.qty - toInt(cb.used))) + (cb.legacy ? ' · ' + T('kensa_kind_legacy') : ' · ' + T(cb.kind === 'srs' ? 'kensa_kind_srs' : 'kensa_kind_dcp')) : '';
     setVal('inspStart', b.start); setVal('inspEnd', b.end); setVal('inspLot', b.lotNumbers); setVal('inspSpare', toInt(b.spare) || ''); setVal('inspComment', b.comment);
-    renderCounters(); renderLabels(); updateDerived();
+    renderCounters(); renderSpare(); renderLabels(); updateDerived();
+  }
+  // ---------- Partial from Spare ----------
+  function spareAll(b) { return Array.isArray(b.spareList) ? b.spareList : (b.spareList = []); }
+  function sparePending(b) { return spareAll(b).filter(function (e) { return !e.consumedByBoxUid; }); }
+  function spareSum(list) { return list.reduce(function (a, e) { return a + toInt(e.pieces); }, 0); }
+  function renderSpare() {
+    var b = state.bench, host = $('spList'); host.innerHTML = '';
+    var all = spareAll(b);
+    if (!all.length) { var n = document.createElement('div'); n.className = 'lbl-none'; n.textContent = T('kensa_sp_none'); host.appendChild(n); }
+    all.forEach(function (e) {
+      var used = !!e.consumedByBoxUid, row = document.createElement('div'); row.className = 'lbl-row';
+      row.innerHTML = '<b>' + esc(e.lotNumber) + '</b><span>' + toInt(e.pieces) + ' pcs</span><span class="lbl-tag ' + (used ? 'ok' : 'draft') + '">' + T(used ? 'kensa_sp_used' : 'kensa_sp_next') + '</span>' +
+        (used ? '' : '<button type="button" class="btn btn-alert btn-sm">✕</button>');
+      if (!used) row.querySelector('button').onclick = function () { b.spareList = all.filter(function (x) { return x !== e; }); save(); renderSpare(); };
+      host.appendChild(row);
+    });
+    $('spTotal').textContent = T('kensa_sp_total', spareSum(all));
+  }
+  function openSpareModal() {
+    $('spQty').value = ''; $('spLot').value = ''; $('spError').classList.remove('show');
+    $('spareModal').classList.add('show'); setTimeout(function () { $('spQty').focus(); }, 50);
+  }
+  function bindSpare() {
+    var err = function (m) { var e = $('spError'), p = e.querySelector('p'); if (p) p.textContent = m || ''; e.classList.toggle('show', !!m); };
+    $('spAddBtn').onclick = function () { if (state.bench.boxes.length) openSpareModal(); };
+    $('spCancel').onclick = function () { $('spareModal').classList.remove('show'); };
+    $('spOk').onclick = function () {
+      var qty = toInt($('spQty').value), lot = $('spLot').value.trim();
+      if (!(qty > 0)) return err(T('kensa_sp_e_qty'));
+      if (!lot) return err(T('kensa_sp_e_lot'));
+      spareAll(state.bench).push({ id: newUid('sp'), lotNumber: lot, pieces: qty, at: new Date().toISOString(), worker: workerString(), consumedByBoxUid: null });
+      save(); renderSpare(); $('spareModal').classList.remove('show');
+    };
   }
   function renderCounters() {
     var b = state.bench, cb = b.boxes.length ? curBox(b) : null;
@@ -681,6 +715,7 @@ window.serverURL = serverURL;
         save(); updateDerived(); renderChipsOnly();
       };
     });
+    bindSpare();
     $('hatsumonoButton').onclick = function () { $('hatsumonoFileInput').click(); };
     $('hatsumonoFileInput').onchange = function () {
       var inp = this; if (!inp.files || !inp.files[0]) return;
@@ -866,12 +901,14 @@ window.serverURL = serverURL;
 
   // allocation dialog (static #printModal) -> { qtyLabel, qtyMeasured, lines, map } | null
   function allocDialog(b, mode) {
-    var cap = toInt(b.cap), cs = carriedSum(b), left = mode === 'complete' ? Math.max(0, cap - cs) : Infinity, def = [];
+    var cap = toInt(b.cap), sp = sparePending(b), cs = carriedSum(b) + spareSum(sp), left = mode === 'complete' ? Math.max(0, cap - cs) : Infinity, def = [];
     b.boxes.forEach(function (x, i) { var g = Math.min(freeGood(x), left); def[i] = g; left -= g; });
     $('printTitle').textContent = mode === 'complete' ? T('kensa_pd_title_c', cap) : T('kensa_pd_title_d');
-    $('printInfo').textContent = b.resume ? T('kensa_resume_line', cs) : '';
+    $('printInfo').textContent = b.resume ? T('kensa_resume_line', carriedSum(b)) : '';
     $('printQtyWrap').style.display = 'none';
-    $('printAlloc').innerHTML = b.boxes.map(function (x, i) {
+    $('printAlloc').innerHTML = sp.map(function (e) {      // spare pieces always go in (remove them on the Inspect tab if not wanted)
+      return '<div class="lbl-row"><span class="lbl-tag draft">+</span><span>' + esc(T('kensa_sp_alloc', toInt(e.pieces), e.lotNumber)) + '</span></div>';
+    }).join('') + b.boxes.map(function (x, i) {
       var ng = inNgShownTotal(x);
       return '<div class="field"><label>' + esc(boxLabel(x)) + ' · ' + T('kensa_pd_avail', freeGood(x)) + (ng ? ' · ' + T('kensa_pd_ng_note', ng) : '') + '</label>' +
         '<input type="number" inputmode="numeric" min="0" max="' + freeGood(x) + '" data-pa="' + i + '" value="' + def[i] + '"></div>';
@@ -896,6 +933,10 @@ window.serverURL = serverURL;
         if (mode === 'complete' && total !== cap && !(await confirmBox(T('kensa_lbl_print_complete'), T('kensa_pd_mismatch', total, cap), T('kensa_pd_print')))) return resolve(null);
         var lines = [], map = [];
         if (b.resume) b.resume.lines.forEach(function (x) { lines.push(Object.assign({}, x, { carried: true })); map.push(-1); });
+        sp.forEach(function (e) {
+          lines.push({ boxId: null, srsId: null, legacy: true, 品番: b.hinban, lotNumber: e.lotNumber, lotNumbers: [e.lotNumber], carried: false, spare: true, spareId: e.id, good: toInt(e.pieces), ng: {}, ngTotal: 0 });
+          map.push(-1);
+        });
         b.boxes.forEach(function (x, i) {
           var ng = ngObjShown(x), nt = sumNg(ng);
           if (!good[i] && !nt) return;
@@ -905,7 +946,7 @@ window.serverURL = serverURL;
           });
           map.push(i);
         });
-        resolve({ qtyLabel: mode === 'complete' ? cap : total, qtyMeasured: total, lines: lines, map: map });
+        resolve({ qtyLabel: mode === 'complete' ? cap : total, qtyMeasured: total, lines: lines, map: map, spareIds: sp.map(function (e) { return e.id; }) });
       };
     });
   }
@@ -1046,7 +1087,7 @@ window.serverURL = serverURL;
       if (!pend) {
         var a = await allocDialog(b, mode); if (!a) return;
         pend = b.pendingPrint = {
-          boxUid: newUid('kensa-'), mode: mode, map: a.map,
+          boxUid: newUid('kensa-'), mode: mode, map: a.map, spareIds: a.spareIds || [],
           payload: {
             boxUid: '', 背番号: b.sebango, 品番: b.hinban, machine: MACHINE, workers: workerString(), status: mode,
             qtyLabel: a.qtyLabel, qtyMeasured: a.qtyMeasured, lines: a.lines,
@@ -1075,6 +1116,7 @@ window.serverURL = serverURL;
         x.used = toInt(x.used) + line.good + toInt(line.ngTotal);
       });
       b.boxes.forEach(function (x) { x.ngBase = Object.assign({}, x.ng); });      // shown NG back to 0, real total kept
+      spareAll(b).forEach(function (e) { if ((pend.spareIds || []).indexOf(e.id) >= 0 && !e.consumedByBoxUid) e.consumedByBoxUid = pend.boxUid; });   // spare is on a label now
       var entry = { kensaId: box.kensaId || box.id, boxUid: pend.boxUid, status: box.status || mode, qty: box.qtyLabel, measured: box.qtyMeasured, mismatch: !!box.mismatch, layoutId: layoutId, printedOk: false, at: new Date().toISOString() };
       b.printed.push(entry); b.pendingPrint = null; b.resume = null; save();
       renderBench(); renderSidebar();
@@ -1209,6 +1251,8 @@ window.serverURL = serverURL;
         Date: b.date || todayStr(), Time_start: b.start, Time_end: b.end, 設備: MACHINE,
         Counters: counters, Total_NG: ngTotal(b),
         Cycle_Time: cycleSec(b), 製造ロット: b.lotNumbers, Comment: b.comment, Spare: toInt(b.spare),
+        'スペアからの部分数': spareSum(spareAll(b)),        // Partial from Spare (same field name as DCP interactive)
+        Spare_Lots: spareAll(b).map(function (e) { return { lotNumber: e.lotNumber, pieces: toInt(e.pieces), at: e.at, worker: e.worker, consumedByBoxUid: e.consumedByBoxUid || null }; }),
         // new
         Tablet_Home: MACHINE,
         Kensa_Box_IDs: live.map(function (e) { return e.kensaId; }),

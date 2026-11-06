@@ -602,6 +602,15 @@
                 <div class="pill-info" id="inspCycle" style="margin-top:10px"></div>
             </div>
 
+            <!-- Partial from Spare: pieces from other lots that top the box up to the standard quantity -->
+            <div class="glass-card">
+                <h3 data-i18n="kensa_sp_title">スペアからの部分数</h3>
+                <div class="counter-who" data-i18n="kensa_sp_hint"></div>
+                <div id="spList"></div>
+                <div class="print-sum" id="spTotal"></div>
+                <button type="button" class="btn btn-secondary btn-full" id="spAddBtn" style="margin-top:8px" data-i18n="kensa_sp_add">＋ スペアを追加</button>
+            </div>
+
             <!-- Comment (saved with the submission) -->
             <div class="glass-card">
                 <h3 data-i18n="kensa_l_comment">コメント</h3>
@@ -803,6 +812,20 @@
         </div>
     </div>
 
+    <!-- Add a spare entry (quantity + lot number) -->
+    <div class="modal-overlay" id="spareModal">
+        <div class="modal" style="max-width:420px">
+            <h3 data-i18n="kensa_sp_title">スペアからの部分数</h3>
+            <div class="field" style="margin-top:10px"><label for="spQty" data-i18n="kensa_sp_qty">数量 (個)</label><input type="number" id="spQty" inputmode="numeric" min="1"></div>
+            <div class="field" style="margin-top:10px"><label for="spLot" data-i18n="kensa_sp_lot">スペアのロット番号</label><input type="text" id="spLot" autocomplete="off"></div>
+            <div class="step-error" id="spError"><p></p></div>
+            <div class="actions">
+                <button type="button" class="btn btn-secondary btn-grow" id="spCancel" data-i18n="cancel">キャンセル</button>
+                <button type="button" class="btn btn-primary btn-grow" id="spOk">OK</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Leader QR dialog (submit without label / reset with printed labels) -->
     <div class="modal-overlay" id="leaderModal">
         <div class="modal" style="max-width:420px">
@@ -868,11 +891,11 @@
 
     <script src="html5-qrcode.min.js"></script>
     <script src="i18n.js"></script>
-    <script src="Kensa interactive i18n.js?v=bt5"></script>
+    <script src="Kensa interactive i18n.js?v=bt10"></script>
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt9"></script>
+    <script src="Kensa interactive SCNA.js?v=bt10"></script>
 </body>
 
 </html>
