@@ -2545,15 +2545,130 @@
     showPage(activePage);
   }
 
+  // "More info" (same idea as Kensa interactive): every masterDB field of the current item + the active work order.
+  var MI_TEXT = {
+    more:    { ja: 'もっと見る', en: 'More info', pt: 'Mais informações' },
+    title:   { ja: '品目情報', en: 'Item info', pt: 'Informações do item' },
+    loading: { ja: '読み込み中…', en: 'Loading…', pt: 'Carregando…' },
+    none:    { ja: '品目が選択されていません', en: 'No item selected yet', pt: 'Nenhum item selecionado' },
+    fail:    { ja: '読み込み失敗: ', en: 'Load failed: ', pt: 'Falha ao carregar: ' },
+    wo:      { ja: '作業指示', en: 'Work order', pt: 'Ordem de trabalho' }
+  };
+  function mit(k) {
+    var lang = 'ja';
+    try { lang = (typeof getCurrentLanguage === 'function' ? getCurrentLanguage() : localStorage.getItem('appLanguage')) || 'ja'; } catch (e) { }
+    return MI_TEXT[k][lang] || MI_TEXT[k].en;
+  }
+  function miEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+  function miRows(obj, depth) {
+    var html = '';
+    Object.keys(obj).filter(function (k) { return k !== '_id'; }).forEach(function (k) {
+      var v = obj[k], pad = depth ? ' style="padding-left:' + (depth * 14) + 'px"' : '';
+      if (v !== null && typeof v === 'object') {
+        var list = Array.isArray(v) ? v : [v];
+        if (Array.isArray(v) && !v.some(function (x) { return x !== null && typeof x === 'object'; })) {
+          html += '<div class="scna-mi-row' + (v.length ? '' : ' empty') + '"' + pad + '><span class="k">' + miEsc(k) + '</span><span class="v">' + miEsc(v.length ? v.join(', ') : '---') + '</span></div>';
+        } else {
+          list.forEach(function (x, i) {
+            html += '<div class="scna-mi-sub"' + pad + '>' + miEsc(k) + (Array.isArray(v) ? ' [' + (i + 1) + ']' : '') + '</div>' +
+              (x !== null && typeof x === 'object' ? miRows(x, depth + 1) : '<div class="scna-mi-row"' + pad + '><span class="v">' + miEsc(x) + '</span></div>');
+          });
+        }
+      } else {
+        var txt = v === null || v === undefined ? '' : String(v);
+        html += '<div class="scna-mi-row' + (txt === '' ? ' empty' : '') + '"' + pad + '><span class="k">' + miEsc(k) + '</span><span class="v">' + miEsc(txt === '' ? '---' : txt) + '</span></div>';
+      }
+    });
+    return html;
+  }
+  function miSection(title, sub, obj) {
+    return '<div class="scna-mi-sec"><span>' + miEsc(title) + '</span>' + (sub ? '<small>' + miEsc(sub) + '</small>' : '') + '</div>' + miRows(obj, 0);
+  }
+  function ensureMoreInfoModal() {
+    if ($('scnaMoreInfoModal')) return $('scnaMoreInfoModal');
+    var st = document.createElement('style');
+    st.textContent =
+      '.scna-mi-row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid #E5E7EB;font-size:.875rem}' +
+      '.scna-mi-row .k{color:#6B7280;font-weight:600;flex:0 0 38%}' +
+      '.scna-mi-row .v{font-weight:700;text-align:right;word-break:break-all;white-space:pre-wrap;flex:1}' +
+      '.scna-mi-row.empty .v{color:#9CA3AF;font-weight:600}' +
+      '.scna-mi-sec{display:flex;align-items:baseline;gap:10px;margin:18px 0 4px;padding:8px 12px;border-left:4px solid #2563EB;background:#EFF6FF;border-radius:6px;font-weight:800;font-size:.95rem}' +
+      '.scna-mi-sec small{font-weight:700;color:#6B7280;font-size:.78rem;word-break:break-all}' +
+      '.scna-mi-sub{font-weight:800;font-size:.8rem;color:#2563EB;margin:8px 0 2px}' +
+      '.scna-mi-img{display:block;margin:0 auto 10px;max-width:100%;max-height:200px;object-fit:contain;border:1px solid #E5E7EB;border-radius:10px;background:#fff;cursor:zoom-in}';
+    document.head.appendChild(st);
+    var ov = document.createElement('div');
+    ov.id = 'scnaMoreInfoModal';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(16,24,40,.45);display:none;align-items:center;justify-content:center;z-index:10030;padding:16px;';
+    ov.innerHTML = '<div style="background:#fff;border-radius:14px;width:100%;max-width:640px;max-height:88vh;display:flex;flex-direction:column;padding:20px;box-sizing:border-box;">' +
+      '<h3 id="scnaMoreInfoTitle" style="margin:0 0 4px;"></h3>' +
+      '<div id="scnaMoreInfoBody" style="overflow:auto;margin-top:8px;flex:1;-webkit-overflow-scrolling:touch;"></div>' +
+      '<button type="button" id="scnaMoreInfoClose" class="btn btn-primary btn-full" style="margin-top:12px;"></button></div>';
+    document.body.appendChild(ov);
+    var close = function () { ov.style.display = 'none'; };
+    $('scnaMoreInfoClose').onclick = close;
+    ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    return ov;
+  }
+  async function openMoreInfo() {
+    var ov = ensureMoreInfoModal(), body = $('scnaMoreInfoBody');
+    $('scnaMoreInfoTitle').textContent = mit('title');
+    $('scnaMoreInfoClose').textContent = stx('close');
+    body.innerHTML = '<p style="text-align:center;color:#6B7280;margin:20px 0">' + miEsc(mit('loading')) + '</p>';
+    ov.style.display = 'flex';
+    var cp = (typeof currentProductDetails !== 'undefined' && currentProductDetails) || {};
+    var seb = cp.sebanggo || (currentWO && currentWO.sebanggo) || '';
+    var hin = cp.hinban || (($('product-number') || {}).value) || (currentWO && currentWO.sku) || '';
+    var html = '';
+    try {
+      if (!seb && !hin) { body.innerHTML = '<p style="text-align:center;color:#6B7280;margin:20px 0">' + miEsc(mit('none')) + '</p>'; return; }
+      var rec = null;
+      var queries = [];
+      if (seb) queries.push({ 背番号: seb });
+      if (hin) queries.push({ 品番: String(hin).replace(/^P(?=\d)/i, '') }, { 品番: hin });
+      for (var i = 0; i < queries.length && !rec; i++) {
+        var res = await fetch(window.serverURL + '/queries', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dbName: 'Sasaki_Coating_MasterDB', collectionName: 'masterDB', query: queries[i] })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var rows = await res.json();
+        rec = (rows || []).filter(function (r) { return r.工場 === 'SCNA'; })[0] || (rows || [])[0] || null;
+      }
+      if (rec) {
+        if (rec.imageURL) html += '<img class="scna-mi-img" src="' + miEsc(rec.imageURL) + '" alt="">';
+        var copy = Object.assign({}, rec); delete copy.imageURL;
+        html += miSection('masterDB', rec.背番号 || seb, copy);
+      }
+      if (currentWO) html += miSection(mit('wo'), currentWO.number, currentWO);
+      body.innerHTML = html || '<p style="text-align:center;color:#6B7280;margin:20px 0">' + miEsc(mit('none')) + '</p>';
+      var im = body.querySelector('.scna-mi-img');
+      if (im) im.onclick = function () {
+        var t = $('imgPreviewTarget'), m = $('imgPreviewModal');
+        if (t && m) { t.src = im.getAttribute('src'); m.classList.add('open'); }
+      };
+    } catch (e) {
+      body.innerHTML = '<p style="text-align:center;color:#DC2626;margin:20px 0">' + miEsc(mit('fail') + e.message) + '</p>';
+    }
+  }
+
   function injectSettingsButton() {
     var side = document.querySelector('.info-sidebar');
     if (!side || $('scnaSettingsBtn')) return;
+    var mb = document.createElement('button');
+    mb.type = 'button'; mb.id = 'scnaMoreInfoBtn';
+    mb.className = 'btn btn-secondary btn-full';
+    mb.textContent = mit('more');
+    mb.style.cssText = 'margin-top:auto;';
+    document.addEventListener('languageChanged', function () { mb.textContent = mit('more'); });
+    mb.onclick = openMoreInfo;
+    side.appendChild(mb);
     var b = document.createElement('button');
     b.type = 'button'; b.id = 'scnaSettingsBtn';
     b.className = 'btn btn-secondary btn-full';
     b.textContent = '⚙ ' + stx('settings');
     document.addEventListener('languageChanged', function () { b.textContent = '⚙ ' + stx('settings'); });
-    b.style.cssText = 'margin-top:auto;';
+    b.style.cssText = 'margin-top:0;';
     b.onclick = openPrinterSettings;
     side.appendChild(b);
   }
