@@ -7447,6 +7447,14 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     return;
   }
 
+  // SCNA: confirm material used (per machine, last lot) before the real submit. Cancel returns to the form.
+  if (window.SCNA && typeof window.SCNA.confirmMaterialUsage === 'function') {
+    if (document.getElementById('scnaUsageModal')) return;
+    let proceed = true;
+    try { proceed = await window.SCNA.confirmMaterialUsage(); } catch (e) { console.warn('Usage confirm failed:', e); }
+    if (!proceed) return;
+  }
+
   uploadingModal.style.display = 'flex';
   updateUploadProgress(0, '');
 

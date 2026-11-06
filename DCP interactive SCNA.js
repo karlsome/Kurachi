@@ -1427,6 +1427,52 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* 9b. Confirm-before-submit: material used per machine (last lot)     */
+  /* ------------------------------------------------------------------ */
+
+  // Called by the backend submit handler after validation, before the upload starts.
+  // Resolves true (Submit) or false (Cancel). Shows the newest lot of every assigned machine
+  // (earlier lots are finished; the newest one is the roll still in progress).
+  SCNA.confirmMaterialUsage = function () {
+    return new Promise(function (resolve) {
+      var machines = [];
+      try {
+        if (typeof groupedMachines !== 'undefined' && groupedMachines.length) machines = groupedMachines.slice();
+      } catch (e) { }
+      if (!machines.length) { var pm = $('process'); if (pm && pm.value) machines = [pm.value]; }
+      var recs = [];
+      try { recs = window.getAllLotRecords ? window.getAllLotRecords() : []; } catch (e) { }
+      var matEl = $('material');
+      var material = (matEl && matEl.value ? matEl.value : '').trim();
+
+      var rows = machines.map(function (m) {
+        var mine = recs.filter(function (r) { return r && r.machine === m && r.lotNumber; });
+        mine.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
+        var last = mine.length ? mine[mine.length - 1] : null;
+        var meters = last && last.meters != null && !isNaN(last.meters) ? Number(last.meters).toFixed(2) + ' m' : '—';
+        return '<div style="padding:12px 4px;border-bottom:1px solid #E5E7EB;">' +
+          '<div style="font-weight:800;font-size:1.1rem;">' + esc(m) + '</div>' +
+          '<div style="color:#6B7280;font-size:.88rem;margin-top:2px;">' + tr('材料', 'Material') + ': ' + esc(material || '—') + '</div>' +
+          '<div style="display:flex;justify-content:space-between;gap:10px;margin-top:4px;font-size:1.05rem;">' +
+          '<span style="font-weight:700;">' + esc(last ? last.lotNumber : '—') + '</span>' +
+          '<span style="font-weight:800;color:#1D4ED8;">' + esc(meters) + '</span></div></div>';
+      }).join('');
+
+      var el = overlay('scnaUsageModal',
+        '<div style="font-size:44px;text-align:center;">📏</div>' +
+        '<h3 style="text-align:center;margin:6px 0 10px;">' + tr('使用した材料の長さ', 'Material used') + '</h3>' +
+        rows +
+        '<button type="button" id="scnaUsageOk" style="' + btnCss('#16A34A', '#fff') + '">' + tr('送信 / Submit', 'Submit') + '</button>' +
+        '<button type="button" id="scnaUsageCancel" style="' + btnCss('#fff', '#374151', '#D1D5DB') + '">' + tr('キャンセル', 'Cancel') + '</button>');
+      el.style.zIndex = '100260';
+      var done = false;
+      function finish(v) { if (done) return; done = true; el.remove(); resolve(v); }
+      $('scnaUsageOk').onclick = function () { this.disabled = true; finish(true); };
+      $('scnaUsageCancel').onclick = function () { finish(false); };
+    });
+  };
+
+  /* ------------------------------------------------------------------ */
   /* 10. Return to the tablet's home after submit / reset                */
   /* ------------------------------------------------------------------ */
 
