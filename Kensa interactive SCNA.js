@@ -624,34 +624,83 @@ window.serverURL = serverURL;
   function sparePending(b) { return spareAll(b).filter(function (e) { return !e.consumedByBoxUid; }); }
   function spareSum(list) { return list.reduce(function (a, e) { return a + toInt(e.pieces); }, 0); }
   function renderSpare() {
-    var b = state.bench, host = $('spList'); host.innerHTML = '';
-    var all = spareAll(b);
-    if (!all.length) { var n = document.createElement('div'); n.className = 'lbl-none'; n.textContent = T('kensa_sp_none'); host.appendChild(n); }
-    all.forEach(function (e) {
-      var used = !!e.consumedByBoxUid, row = document.createElement('div'); row.className = 'lbl-row';
-      row.innerHTML = '<b>' + esc(e.lotNumber) + '</b><span>' + toInt(e.pieces) + ' pcs</span><span class="lbl-tag ' + (used ? 'ok' : 'draft') + '">' + T(used ? 'kensa_sp_used' : 'kensa_sp_next') + '</span>' +
-        (used ? '' : '<button type="button" class="btn btn-alert btn-sm">✕</button>');
-      if (!used) row.querySelector('button').onclick = function () { b.spareList = all.filter(function (x) { return x !== e; }); save(); renderSpare(); };
-      host.appendChild(row);
+    var all = spareAll(state.bench), n = spareSum(all), f = $('spField');
+    f.value = n > 0 ? String(n) : ''; f.placeholder = T('kensa_sp_tap');
+  }
+  // Same flow as DCP interactive: tap the field -> list of spare entries (+ add / done) -> keypad for the quantity -> keypad for the lot
+  function spOverlay(id, html) {
+    var old = document.getElementById(id); if (old) old.remove();
+    var el = document.createElement('div'); el.id = id;
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.72);z-index:10040;display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit;';
+    el.innerHTML = '<div style="background:var(--bg-surface,#fff);color:var(--text-main,#101828);border-radius:16px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:22px;box-shadow:0 12px 40px rgba(0,0,0,.35);">' + html + '</div>';
+    document.body.appendChild(el); return el;
+  }
+  function spBtn(bg, fg, border) {
+    return 'display:block;width:100%;padding:14px;margin-top:10px;border-radius:12px;font-size:1rem;font-weight:700;cursor:pointer;background:' + bg + ';color:' + fg + ';border:1.5px solid ' + (border || bg) + ';';
+  }
+  function spKeypad(title, sub, allowHyphen, cb) {
+    var el = spOverlay('kSpareKeypad',
+      '<h3 style="margin:0;font-size:1.2rem;text-align:center;">' + esc(title) + '</h3>' +
+      '<div style="text-align:center;color:var(--text-muted,#475467);font-weight:600;margin:4px 0 10px;">' + esc(sub) + '</div>' +
+      '<input id="kSpareDisp" type="text" readonly inputmode="none" style="width:100%;box-sizing:border-box;font-size:2.2rem;font-weight:900;text-align:center;padding:10px;border:3px solid var(--brand,#1F9D6B);border-radius:10px;background:var(--bg-surface,#fff);color:inherit;">' +
+      '<div id="kSpareKeys" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;"></div>' +
+      '<button type="button" data-ok="1" style="' + spBtn('var(--brand,#1F9D6B)', '#fff') + '">OK</button>' +
+      '<button type="button" data-cancel="1" style="' + spBtn('var(--bg-surface,#fff)', 'var(--text-main,#344054)', 'var(--border-strong,#D0D5DD)') + '">' + esc(T('cancel')) + '</button>');
+    var disp = document.getElementById('kSpareDisp');
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', allowHyphen ? '-' : 'C', '0', '⌫'].forEach(function (k) {
+      var b = document.createElement('button'); b.type = 'button'; b.textContent = k;
+      b.style.cssText = 'padding:16px;font-size:1.3rem;font-weight:800;border:1px solid var(--border-strong,#D0D5DD);border-radius:10px;background:var(--bg-subtle,#F9FAFB);color:inherit;cursor:pointer;';
+      b.onclick = function () { if (k === '⌫') disp.value = disp.value.slice(0, -1); else if (k === 'C') disp.value = ''; else disp.value += k; };
+      document.getElementById('kSpareKeys').appendChild(b);
     });
-    $('spTotal').textContent = T('kensa_sp_total', spareSum(all));
+    el.addEventListener('click', function (ev) {
+      var b = ev.target.closest && ev.target.closest('button'); if (!b) return;
+      if (b.hasAttribute('data-cancel')) { el.remove(); return; }
+      if (b.hasAttribute('data-ok')) { var v = disp.value.trim(); if (!v) return; el.remove(); cb(v); }
+    });
   }
-  function openSpareModal() {
-    $('spQty').value = ''; $('spLot').value = ''; $('spError').classList.remove('show');
-    $('spareModal').classList.add('show'); setTimeout(function () { $('spQty').focus(); }, 50);
+  function addSpareEntry(onDone) {
+    spKeypad(T('kensa_sp_qty_title'), T('kensa_sp_qty_sub'), false, function (qty) {
+      var pieces = toInt(qty);
+      if (!(pieces > 0)) return toast(T('kensa_sp_e_qty'));
+      spKeypad(T('kensa_sp_lot'), pieces + ' pcs', true, function (lot) {
+        spareAll(state.bench).push({ id: newUid('sp'), lotNumber: lot, pieces: pieces, at: new Date().toISOString(), worker: workerString(), consumedByBoxUid: null });
+        save(); renderSpare(); if (onDone) onDone();
+      });
+    });
   }
-  function bindSpare() {
-    var err = function (m) { var e = $('spError'), p = e.querySelector('p'); if (p) p.textContent = m || ''; e.classList.toggle('show', !!m); };
-    $('spAddBtn').onclick = function () { if (state.bench.boxes.length) openSpareModal(); };
-    $('spCancel').onclick = function () { $('spareModal').classList.remove('show'); };
-    $('spOk').onclick = function () {
-      var qty = toInt($('spQty').value), lot = $('spLot').value.trim();
-      if (!(qty > 0)) return err(T('kensa_sp_e_qty'));
-      if (!lot) return err(T('kensa_sp_e_lot'));
-      spareAll(state.bench).push({ id: newUid('sp'), lotNumber: lot, pieces: qty, at: new Date().toISOString(), worker: workerString(), consumedByBoxUid: null });
-      save(); renderSpare(); $('spareModal').classList.remove('show');
+  function openSpareManager() {
+    var el = spOverlay('kSpareManager', '<div id="kSpareBody"></div>');
+    var draw = function () {
+      var all = spareAll(state.bench);
+      var rows = all.map(function (e) {
+        var used = !!e.consumedByBoxUid;
+        return '<div style="display:flex;align-items:center;gap:8px;margin-top:10px;padding:10px;border:1px solid var(--border,#E4E7EC);border-radius:10px;' + (used ? 'background:var(--bg-subtle,#F2F4F7);opacity:.75;' : '') + '">' +
+          '<div style="flex:1;"><div style="font-weight:800;">' + esc(e.lotNumber || '—') + '</div>' +
+          '<div style="font-size:.85rem;">' + toInt(e.pieces) + ' pcs · ' + esc(T(used ? 'kensa_sp_used' : 'kensa_sp_next')) + '</div></div>' +
+          (used ? '' : '<button type="button" data-del="' + esc(e.id) + '" style="' + spBtn('var(--red-soft,#FEE4E2)', 'var(--red,#B42318)', 'var(--red,#FDA29B)') + 'margin:0;width:56px;">✕</button>') + '</div>';
+      }).join('');
+      document.getElementById('kSpareBody').innerHTML =
+        '<h3 style="margin:0;font-size:1.2rem;text-align:center;">' + esc(T('kensa_sp_title')) + '</h3>' +
+        (rows || '<p style="color:var(--text-muted,#6B7280);margin:12px 0;text-align:center;">' + esc(T('kensa_sp_none')) + '</p>') +
+        '<div style="text-align:right;font-weight:800;margin-top:10px;">' + esc(T('kensa_sp_total', spareSum(all))) + '</div>' +
+        '<button type="button" data-add="1" style="' + spBtn('var(--bg-surface,#fff)', 'var(--brand,#1F9D6B)', 'var(--brand,#1F9D6B)') + '">' + esc(T('kensa_sp_add')) + '</button>' +
+        '<button type="button" data-done="1" style="' + spBtn('var(--brand,#1F9D6B)', '#fff') + '">' + esc(T('kensa_sp_done')) + '</button>';
     };
+    draw();
+    el.addEventListener('click', function (ev) {
+      var b = ev.target.closest && ev.target.closest('button');
+      if (!b) { if (ev.target === el) el.remove(); return; }
+      if (b.hasAttribute('data-done')) { el.remove(); return; }
+      if (b.hasAttribute('data-add')) { addSpareEntry(draw); return; }
+      if (b.hasAttribute('data-del')) {
+        var id = b.getAttribute('data-del'), st = state.bench;
+        st.spareList = spareAll(st).filter(function (e) { return e.id !== id || e.consumedByBoxUid; });
+        save(); renderSpare(); draw();
+      }
+    });
   }
+  function bindSpare() { $('spField').onclick = function () { if (state.bench.boxes.length) openSpareManager(); }; }
   function renderCounters() {
     var b = state.bench, cb = b.boxes.length ? curBox(b) : null;
     $('counterInputName').textContent = cb ? boxLabel(cb) : '--';
