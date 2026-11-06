@@ -249,12 +249,21 @@
     return html;
   }
   function fmtDate(s) { if (!s) return ''; var d = new Date(s); return isNaN(d) ? String(s) : (ISO_RE.test(String(s)) ? localTime(s).replace(/:\d\d \(/, ' (') : d.toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })); }
-  function idOf(d) { return d.kensaId || d.srsId || d.boxId || d.Submit_UID || d.Run_ID || String(d._id || ''); }
+  function idOf(d) {
+    if (d.kensaId || d.srsId || d.boxId) return d.kensaId || d.srsId || d.boxId;
+    var l = d.Kensa_Box_IDs || d.Srs_Box_IDs;                       // submitted records: name them by their labels
+    if (Array.isArray(l) && l.length) return l.join(', ');
+    return d.Run_ID || d.Submit_UID || String((d._id && d._id.$oid) || d._id || '');
+  }
+  function hasId(d, id) { return [d.kensaId, d.srsId, d.boxId].indexOf(id) >= 0 || [d.Kensa_Box_IDs, d.Srs_Box_IDs, d.Box_IDs].some(function (a) { return Array.isArray(a) && a.some(function (x) { return String(x).toUpperCase() === id; }); }); }
 
   function docCard(doc, hitId, kindLabel, open) {
-    var id = idOf(doc), hit = hitId && (doc.kensaId === hitId || doc.srsId === hitId || doc.boxId === hitId);
+    var id = idOf(doc), hit = hitId && hasId(doc, hitId);
     var status = doc.status ? '<span class="tag ' + esc(doc.status) + '">' + esc(doc.status) + '</span>' : '';
-    var meta = [doc.qtyLabel != null ? doc.qtyLabel + 'pcs' : '', doc.Process_Quantity != null ? doc.Process_Quantity + 'pcs' : '', fmtDate(doc.printedAt || doc.finishedAt || doc.createdAt || doc.Date)].filter(Boolean).join(' · ');
+    var isKensaRec = doc.Kensa_Box_IDs !== undefined && doc.Total_NG !== undefined;
+    var meta = (isKensaRec
+      ? [doc.設備, doc.Worker_Name, 'OK ' + doc.Total, 'NG ' + doc.Total_NG, (doc.Date || '') + (doc.Time_start ? ' ' + doc.Time_start + '–' + (doc.Time_end || '') : '')]
+      : [doc.qtyLabel != null ? doc.qtyLabel + 'pcs' : '', doc.Process_Quantity != null ? doc.Process_Quantity + 'pcs' : '', fmtDate(doc.printedAt || doc.finishedAt || doc.createdAt || doc.Date)]).filter(Boolean).join(' · ');
     return '<details class="doc' + (hit ? ' hit' : '') + '"' + (open ? ' open' : '') + '><summary><span class="id">' + esc(kindLabel ? kindLabel + ' ' : '') + esc(id) + '</span>' + status + '<span class="meta">' + esc(meta) + '</span></summary>' +
       '<div class="doc-body"><div class="rows">' + rowsOf(doc) + '</div></div></details>';
   }
