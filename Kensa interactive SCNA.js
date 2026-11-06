@@ -769,18 +769,29 @@ window.serverURL = serverURL;
     var ngDetail = NG_FIELDS.map(function (f, i) { var n = b.boxes.reduce(function (a, x) { return a + toInt(x.ng[f]); }, 0); return n ? ngLabel(i) + ':' + n : ''; }).filter(Boolean).join(' / ');
     var spLots = spareAll(b).map(function (e) { return esc(e.lotNumber) + ' ×' + toInt(e.pieces); }).join(' / ');
     var mark = function (ok) { return ok ? '<span style="color:var(--brand)">✓</span>' : '<span style="color:var(--red)">✗</span>'; };
+    var sec = function (key) { return '<div class="sum-sec">' + esc(T(key)) + '</div>'; };
+    var tile = function (cls, label, val, sub, btn) { return '<div class="sum-tile ' + cls + '"><div class="k"><span>' + esc(label) + '</span>' + (btn || '') + '</div><div class="v">' + val + '</div>' + (sub ? '<div class="sub">' + sub + '</div>' : '') + '</div>'; };
+    var lotsHtml = sidebarLots(b).map(function (l) { return esc(l.lotNumber) + (l.pieces != null ? ' · ' + l.pieces + 'pcs' : ''); }).join('<br>') || '---';
     var h = '<h3>' + esc(T('kensa_sum_title')) + '</h3>';
+    h += sec('kensa_sum_sec_info');
     h += row(T('kensa_sum_sebango'), esc(b.sebango || '---'));
     h += row(T('kensa_sum_hinban'), esc(b.hinban || '---'));
     h += row(T('kensa_sum_worker'), esc(workerString() || '---'), edit('worker'));
     h += row(T('kensa_sum_date'), esc(b.date || todayStr()));
     h += row(T('kensa_sum_time'), esc(b.start || '--:--') + ' ~ ' + esc(b.end || '--:--'), edit('submit', 'inspStart'));
-    h += row(T('kensa_l_lot'), sidebarLots(b).map(function (l) { return esc(l.lotNumber) + (l.pieces != null ? ' ×' + l.pieces : ''); }).join('<br>') || '---');
-    h += row(T('kensa_l_proc'), procQty(b));
-    h += row(T('kensa_l_ng_real'), ngTotal(b) + (ngDetail ? '<small>' + esc(ngDetail) + '</small>' : ''), edit(TAB_INSPECT, 'counterGrid'));
-    h += row(T('kensa_l_good'), '<span style="color:var(--brand)">' + goodQty(b) + '</span>');
-    h += row(T('kensa_sp_title'), spn + (spLots ? '<small>' + spLots + '</small>' : ''), edit(TAB_INSPECT, 'spField'));
-    h += row(T('kensa_l_total_spare'), '<span style="color:var(--brand)">' + (goodQty(b) + spn) + '</span>');
+    h += sec('kensa_sum_sec_lot');      // production lot (from the last process, read-only) and the spare that was added, side by side
+    h += '<div class="sum-tiles">' +
+      tile('', T('kensa_l_lot'), '<span style="font-size:1rem">' + lotsHtml + '</span>', '') +
+      tile('spare', T('kensa_sp_title'), spn + '<span style="font-size:.8rem;font-weight:700"> pcs</span>', spLots || esc(T('kensa_sp_none')), edit(TAB_INSPECT, 'spField')) +
+      '</div>';
+    h += sec('kensa_sum_sec_qty');
+    h += '<div class="sum-tiles q4">' +
+      tile('', T('kensa_l_proc'), procQty(b), '') +
+      tile('', T('kensa_l_good'), '<span style="color:var(--brand)">' + goodQty(b) + '</span>', '') +
+      tile('ng', T('kensa_l_ng_real'), ngTotal(b), esc(ngDetail), edit(TAB_INSPECT, 'counterGrid')) +
+      tile('spare', T('kensa_l_total_spare'), '<span style="color:var(--brand)">' + (goodQty(b) + spn) + '</span>', goodQty(b) + ' + ' + spn) +
+      '</div>';
+    h += sec('kensa_sum_sec_rec');
     h += row(T('kensa_lbl_title'), live.length ? live.map(function (e) { return esc(e.kensaId); }).join('<br>') : '0', edit(TAB_INSPECT, 'lblList'));
     h += row(T('kensa_checks_title'), T('kensa_first_check') + ' ' + mark(!!photoBlobs[PHOTO_FIRST]) + ' | ' + T('kensa_last_check') + ' ' + mark(!!photoBlobs[PHOTO_LAST]), edit('images', 'imageGallery'));
     h += row(T('kensa_def_section'), nd + ' / ' + MAX_DEFECT, edit('images', 'imageGallery'));
