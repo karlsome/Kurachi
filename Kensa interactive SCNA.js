@@ -1915,7 +1915,25 @@ window.serverURL = serverURL;
 
     function renderBtPage(body) {
       body.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
-      if (!btOn) { body.innerHTML = '<div style="padding:16px;border:1px solid var(--border-strong);border-radius:var(--card-radius);background:var(--bg-surface);font-weight:700;line-height:1.5;">' + esc(T('kensa_set_unsupported')) + '</div>'; return; }
+      if (!btOn) {
+        var FLAG_URL = 'chrome://flags/#enable-web-bluetooth-new-permissions-backend';
+        var step = function (n, k) { return '<li style="margin-bottom:6px;">' + esc(T(k)) + '</li>'; };
+        body.innerHTML = '<div style="padding:16px;border:1px solid var(--border-strong);border-radius:var(--card-radius);background:var(--bg-surface);font-weight:700;line-height:1.5;">' +
+          '<p style="margin:0 0 10px;">' + esc(T('kensa_set_unsupported')) + '</p>' +
+          (window.isSecureContext === false ? '<p style="margin:0 0 10px;color:var(--red,#d92d20);">' + esc(T('kensa_set_nohttps')) + '</p>' : '') +
+          '<button type="button" id="kFlagCopy" class="btn btn-secondary btn-full">' + esc(T('kensa_set_flag_copy')) + '</button>' +
+          '<code style="display:block;margin:8px 0 12px;font-size:.75rem;word-break:break-all;color:var(--text-soft);">' + esc(FLAG_URL) + '</code>' +
+          '<ol style="margin:0;padding-left:20px;font-size:.9375rem;">' + step(1, 'kensa_set_flag_s1') + step(2, 'kensa_set_flag_s2') + step(3, 'kensa_set_flag_s3') + step(4, 'kensa_set_flag_s4') + '</ol></div>';
+        $('kFlagCopy').onclick = function () {
+          var done = function () { toast(T('kensa_set_flag_copied'), 4000); };
+          try { navigator.clipboard.writeText(FLAG_URL).then(done, fallback); } catch (e) { fallback(); }
+          function fallback() {
+            var ta = document.createElement('textarea'); ta.value = FLAG_URL; document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); done(); } catch (e) { } document.body.removeChild(ta);
+          }
+        };
+        return;
+      }
       body.innerHTML = '<div id="kBtList" style="display:flex;flex-direction:column;gap:12px;"></div>' +
         '<div style="display:flex;gap:10px;flex-wrap:wrap;"><button type="button" class="btn btn-secondary btn-grow" id="kBtSearch"></button><button type="button" class="btn btn-secondary btn-grow" id="kBtTest"></button></div>' +
         '<button type="button" id="kBtAll" style="align-self:flex-start;border:0;background:none;color:var(--blue);font-weight:800;font-size:.8125rem;padding:4px 0;cursor:pointer;text-decoration:underline;"></button>' +
