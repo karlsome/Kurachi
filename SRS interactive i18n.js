@@ -131,7 +131,7 @@
       srs_choose_machine: 'Choose machine',
       srs_maint_record: 'Trouble record', srs_start: 'Start', srs_end: 'End', srs_maint_comment: 'What happened / comment', srs_save: 'Save',
       srs_leader_scan: 'Scan the leader QR code', srs_leader_not: 'Not a leader', srs_leader_err: 'Verification error',
-      srs_i_hinban: 'Product no.', srs_i_sebango: 'Item code', srs_i_hinmei: 'Product name', srs_i_model: 'Model', srs_i_shape: 'Shape',
+      srs_i_hinban: 'Product Number', srs_i_sebango: 'Product Code', srs_i_hinmei: 'Product Name', srs_i_model: 'Model', srs_i_shape: 'Shape',
       srs_i_wo: 'Work order', srs_i_boxes: 'Boxes / qty', srs_i_lot: 'Production lot'
     },
     pt: {

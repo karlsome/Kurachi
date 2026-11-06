@@ -1788,6 +1788,7 @@ window.serverURL = serverURL;
   }
   // "More info": everything known about the item and where it came from, in sections: masterDB, then every process the
   // scanned inputs went through before Kensa (Cutting = the DCP press box, SRS = the SRS label and its records).
+  function miLab(k) { try { return window.fieldLabel ? window.fieldLabel(k, getCurrentLanguage() === 'ja' ? 'ja' : 'en') : k; } catch (e) { return k; } }
   function miRows(obj, depth) {
     var html = '';
     Object.keys(obj).filter(function (k) { return k !== '_id'; }).forEach(function (k) {
@@ -1795,15 +1796,15 @@ window.serverURL = serverURL;
       if (v !== null && typeof v === 'object') {
         var list = Array.isArray(v) ? v : [v];
         if (Array.isArray(v) && !v.some(function (x) { return x !== null && typeof x === 'object'; })) {
-          html += '<div class="mi-row' + (v.length ? '' : ' empty') + '"' + pad + '><span class="k">' + esc(k) + '</span><span class="v">' + esc(v.length ? v.join(', ') : '---') + '</span></div>';
+          html += '<div class="mi-row' + (v.length ? '' : ' empty') + '"' + pad + '><span class="k">' + esc(miLab(k)) + '</span><span class="v">' + esc(v.length ? v.join(', ') : '---') + '</span></div>';
         } else {
           list.forEach(function (x, i) {
-            html += '<div class="mi-sub"' + pad + '>' + esc(k) + (Array.isArray(v) ? ' [' + (i + 1) + ']' : '') + '</div>' + (x !== null && typeof x === 'object' ? miRows(x, depth + 1) : '<div class="mi-row"' + pad + '><span class="v">' + esc(String(x)) + '</span></div>');
+            html += '<div class="mi-sub"' + pad + '>' + esc(miLab(k)) + (Array.isArray(v) ? ' [' + (i + 1) + ']' : '') + '</div>' + (x !== null && typeof x === 'object' ? miRows(x, depth + 1) : '<div class="mi-row"' + pad + '><span class="v">' + esc(String(x)) + '</span></div>');
           });
         }
       } else {
         var txt = v === null || v === undefined ? '' : String(v);
-        html += '<div class="mi-row' + (txt === '' ? ' empty' : '') + '"' + pad + '><span class="k">' + esc(k) + '</span><span class="v">' + esc(txt === '' ? '---' : txt) + '</span></div>';
+        html += '<div class="mi-row' + (txt === '' ? ' empty' : '') + '"' + pad + '><span class="k">' + esc(miLab(k)) + '</span><span class="v">' + esc(txt === '' ? '---' : txt) + '</span></div>';
       }
     });
     return html;

@@ -150,6 +150,7 @@
 <div id="lightbox"><button type="button" aria-label="close">&times;</button><img alt=""></div>
 
 <script src="html5-qrcode.min.js"></script>
+<script src="field-labels.js"></script>
 <script>
 (function () {
   'use strict';
@@ -178,7 +179,9 @@
       pressBoxes: 'Press boxes', labels: 'Labels', records: 'Submitted records', noData: 'No data for this process', labelBox: 'label/box', record: 'record',
       expand: 'Expand all', lnSpare: 'Spare', lnBox: 'Box', lnLot: 'Lot', lot: 'lot', good: 'good', pcs: 'pcs', noDefects: 'no defects', collapse: 'Collapse all', p_cutting: 'Cutting', p_srs: 'SRS', p_kensa: 'Kensa' }
   };
-  var LANG = (function () { try { var l = localStorage.getItem('infoScannerLang'); if (l === 'ja' || l === 'en') return l; } catch (e) { } return /^ja/i.test(navigator.language || '') ? 'ja' : 'en'; })();
+  var LANG = (function () { try { var l = localStorage.getItem('infoScannerLang') || localStorage.getItem('appLanguage'); if (l === 'ja' || l === 'en') return l; } catch (e) { } return /^ja/i.test(navigator.language || '') ? 'ja' : 'en'; })();
+  function lab(k) { return window.fieldLabel ? window.fieldLabel(k, LANG) : k; }
+  function labHtml(k) { var l = lab(k); return '<span class="k"' + (l !== k ? ' title="' + esc(k) + '"' : '') + '>' + esc(l) + '</span>'; }
   function T(k) { return (I18N[LANG] && I18N[LANG][k]) || I18N.en[k] || k; }
   function procName(p) { return T('p_' + p.key) === 'p_' + p.key ? p.title : T('p_' + p.key); }
   function applyLang() {
@@ -235,7 +238,7 @@
       var good = x.good !== undefined ? x.good : x.qty, ng = x.ngTotal !== undefined ? x.ngTotal : null;
       return (i + 1) + '. ' + src + ' · ' + good + ' ' + (x.good !== undefined ? T('good') : T('pcs')) + (ng !== null ? ' · ' + ng + ' NG' : '');
     }
-    return k + ' [' + (i + 1) + ']';
+    return lab(k) + ' [' + (i + 1) + ']';
   }
   function rowsOf(obj) {
     var html = '';
@@ -243,24 +246,24 @@
       var v = obj[k];
       if (v !== null && typeof v === 'object') {
         var arr = Array.isArray(v);
-        if (arr && v.length && v.every(isImg)) { html += '<div class="row"><span class="k">' + esc(k) + '</span><span class="v">' + thumbs(v) + '</span></div>'; return; }
+        if (arr && v.length && v.every(isImg)) { html += '<div class="row">' + labHtml(k) + '<span class="v">' + thumbs(v) + '</span></div>'; return; }
         if (arr && !v.some(function (x) { return x !== null && typeof x === 'object'; })) {
-          html += '<div class="row' + (v.length ? '' : ' empty') + '"><span class="k">' + esc(k) + '</span><span class="v">' + (v.length ? v.map(function (x) { return linkIfId(showVal(x)); }).join(', ') : '---') + '</span></div>'; return;
+          html += '<div class="row' + (v.length ? '' : ' empty') + '">' + labHtml(k) + '<span class="v">' + (v.length ? v.map(function (x) { return linkIfId(showVal(x)); }).join(', ') : '---') + '</span></div>'; return;
         }
         if (!arr && isCounters(v)) {      // defect counters: only the ones that are not 0
           var nz = Object.keys(v).filter(function (c) { return Number(v[c]) !== 0; }).sort(function (a, b) { return parseInt(a.split('-')[1], 10) - parseInt(b.split('-')[1], 10); });
-          html += '<div class="row' + (nz.length ? '' : ' empty') + '"><span class="k">' + esc(k) + '</span><span class="v">' + (nz.length ? nz.map(function (c) { return esc(c + ': ' + v[c]); }).join('\n') : '0 (' + esc(T('noDefects')) + ')') + '</span></div>';
+          html += '<div class="row' + (nz.length ? '' : ' empty') + '">' + labHtml(k) + '<span class="v">' + (nz.length ? nz.map(function (c) { return esc(lab(c) + ': ' + v[c]); }).join('\n') : '0 (' + esc(T('noDefects')) + ')') + '</span></div>';
           return;
         }
         (arr ? v : [v]).forEach(function (x, i) {
-          html += '<div class="sub">' + (arr ? esc(lineTitle(k, x, i)) : esc(k)) + '</div>';
+          html += '<div class="sub">' + (arr ? esc(lineTitle(k, x, i)) : esc(lab(k))) + '</div>';
           html += x !== null && typeof x === 'object' ? '<div class="nest"><div class="rows">' + rowsOf(x) + '</div></div>' : '<div class="row"><span class="v">' + esc(String(x)) + '</span></div>';
         });
       } else if (isImg(v)) {
-        html += '<div class="row"><span class="k">' + esc(k) + '</span><span class="v">' + thumbs([v]) + '</span></div>';
+        html += '<div class="row">' + labHtml(k) + '<span class="v">' + thumbs([v]) + '</span></div>';
       } else {
         var txt = v === null || v === undefined ? '' : String(showVal(v));
-        html += '<div class="row' + (txt === '' ? ' empty' : '') + '"><span class="k">' + esc(k) + '</span><span class="v">' + (txt === '' ? '---' : linkIfId(txt)) + '</span></div>';
+        html += '<div class="row' + (txt === '' ? ' empty' : '') + '">' + labHtml(k) + '<span class="v">' + (txt === '' ? '---' : linkIfId(txt)) + '</span></div>';
       }
     });
     return html;
@@ -294,7 +297,7 @@
     // header: what was scanned + the process flow
     html += '<div class="card summary"><div class="top"><span class="kind">' + esc(T('kind_' + d.kind) === 'kind_' + d.kind ? d.kind : T('kind_' + d.kind)) + '</span>' +
       '<b>' + esc(d.id || d.code) + '</b></div><div class="top">' +
-      '<span class="kv">背番号 <span>' + esc(d.背番号 || '---') + '</span></span><span class="kv">品番 <span>' + esc(d.品番 || '---') + '</span></span>' +
+      '<span class="kv">' + esc(lab('背番号')) + ' <span>' + esc(d.背番号 || '---') + '</span></span><span class="kv">' + esc(lab('品番')) + ' <span>' + esc(d.品番 || '---') + '</span></span>' +
       (d.lot ? '<span class="kv">Lot <span>' + esc(d.lot) + '</span></span>' : '') + '</div>' +
       '<div class="flow"><a class="' + (d.masterDB ? 'has' : '') + '" data-to="p-master">masterDB</a>' +
       procs.map(function (p, i) { return '<span class="arrow">→</span><a class="' + (counts[i] ? 'has' : '') + '" data-to="p-' + p.key + '">' + esc(procName(p)) + ' <span class="n">' + counts[i] + '</span></a>'; }).join('') + '</div></div>';
@@ -391,7 +394,7 @@
   // ---------------- start ----------------
   document.querySelectorAll('.langpick button').forEach(function (b) {
     b.onclick = function () {
-      LANG = b.getAttribute('data-lang'); try { localStorage.setItem('infoScannerLang', LANG); } catch (e) { }
+      LANG = b.getAttribute('data-lang'); try { localStorage.setItem('infoScannerLang', LANG); localStorage.setItem('appLanguage', LANG); } catch (e) { }
       applyLang(); if (lastData && $('result').style.display !== 'none') render(lastData);
     };
   });
