@@ -25,7 +25,7 @@ window.serverURL = serverURL;
   var FACTORY = 'SCNA';
   var NG_FIELDS = [];                       // 'counter-1' .. 'counter-12' (same names/order as newKensa iReporter)
   for (var ci = 1; ci <= 12; ci++) NG_FIELDS.push('counter-' + ci);
-  var PHOTO_FIRST = 'hatsumonoPic', PHOTO_LAST = 'atomonoPic';   // same ids DCP uses; 初物 is required, 終物 optional
+  var PHOTO_FIRST = 'hatsumonoPic', PHOTO_LAST = 'atomonoPic';   // same ids DCP uses; both 初物 and 終物 are required to submit
 
   // ---------- machine (URL is the source of truth) ----------
   var params = new URLSearchParams(location.search);
@@ -750,6 +750,7 @@ window.serverURL = serverURL;
     if (!b.boxes.length) m.push({ text: T('kensa_v_box'), tab: 'scan', id: 'startStep1Scan' });
     if (b.pendingPrint) m.push({ text: T('kensa_v_pending'), tab: TAB_INSPECT, id: 'lblList' });
     if (!photoBlobs[PHOTO_FIRST]) m.push({ text: T('kensa_v_hatsumono'), tab: 'images', id: 'imageGallery' });
+    if (!photoBlobs[PHOTO_LAST]) m.push({ text: T('kensa_v_atomono'), tab: 'images', id: 'imageGallery' });
     if (!b.start) m.push({ text: T('kensa_v_start'), tab: TAB_INSPECT, id: 'inspStart' });
     if (!b.end) m.push({ text: T('kensa_v_end'), tab: TAB_INSPECT, id: 'inspEnd' });
     if (procQty(b) <= 0) m.push({ text: T('kensa_v_qty'), tab: TAB_INSPECT, id: 'counterGrid' });
