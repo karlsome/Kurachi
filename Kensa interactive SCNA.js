@@ -15,8 +15,8 @@
 // Tablet link: Kensa interactive.html?filter=SCNA&machine=IT1
 
 //const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
-const serverURL = "http://10.50.33.39:3000";
+const serverURL = "http://localhost:3000";
+//const serverURL = "http://10.50.33.39:3000";
 window.serverURL = serverURL;
 
 (function () {
@@ -620,7 +620,7 @@ window.serverURL = serverURL;
   function renderCounters() {
     var b = state.bench, cb = b.boxes.length ? curBox(b) : null;
     $('counterInputName').textContent = cb ? boxLabel(cb) : '--';
-    NG_FIELDS.forEach(function (f) { $(f).value = cb ? inNgShown(cb, f) : 0; });
+    NG_FIELDS.forEach(function (f) { var n = cb ? inNgShown(cb, f) : 0; paintNg(f, n); });
   }
   function updateDerived() {
     var b = state.bench;
@@ -669,12 +669,14 @@ window.serverURL = serverURL;
       $(p[0]).oninput = function () { b()[p[1]] = this.value; save(); updateDerived(); if (p[1] === 'lotNumbers') renderSidebar(); };
     });
     $('inspSpare').oninput = function () { b().spare = toInt(this.value); save(); };
-    document.querySelectorAll('[data-ng]').forEach(function (btn) {
-      btn.onclick = function () {
+    document.querySelectorAll('.tap-counter[data-ng]').forEach(function (card) {
+      card.onclick = function (ev) {
         var bb = b(); if (!bb.boxes.length) return;
-        var f = NG_FIELDS[+btn.getAttribute('data-ng') - 1], cb = curBox(bb), d = btn.classList.contains('minus-btn') ? -1 : 1;
+        var minus = !!(ev.target.closest && ev.target.closest('.tap-minus')), d = minus ? -1 : 1;
+        var f = NG_FIELDS[+card.getAttribute('data-ng') - 1], cb = curBox(bb);
         cb.ng[f] = toInt(cb.ngBase[f]) + Math.max(0, inNgShown(cb, f) + d);
-        $(f).value = inNgShown(cb, f);
+        paintNg(f, inNgShown(cb, f));
+        if (!minus) { card.classList.remove('bump'); void card.offsetWidth; card.classList.add('bump'); }
         save(); updateDerived(); renderChipsOnly();
       };
     });
@@ -686,6 +688,10 @@ window.serverURL = serverURL;
         .catch(function (e) { console.warn('Kensa: photo', e); toast(T('kensa_t_photo_fail')); });
       inp.value = '';
     };
+  }
+  function paintNg(f, n) {      // one tap-counter card: hidden input + big number + red when > 0
+    $(f).value = n; $(f + '-display').textContent = n;
+    var card = document.getElementById('counter-box-' + f.split('-')[1]); if (card) card.classList.toggle('has-count', n > 0);
   }
   function renderChipsOnly() {      // keep the NG badge on the chips in step with the counters
     var b = state.bench, chips = $('inspChips').children;
