@@ -477,6 +477,10 @@
         .summary-row .val small { display: block; font-weight: 600; color: var(--text-muted); }
         .summary-row .row-edit-btn { border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--brand); border-radius: 8px; padding: 4px 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
         .summary-row .row-edit-btn:active { transform: translateY(1px); }
+        .time-input-wrapper { display: flex; align-items: center; gap: 8px; }
+        .time-input-wrapper input[type="time"] { flex: 1; min-width: 0; }
+        .time-input-wrapper input[type="time"].locked { background: var(--bg-inset); color: var(--text-muted); cursor: not-allowed; }
+        .time-input-wrapper .row-edit-btn { padding: 10px 14px; margin: 0; }
         .flash-highlight { animation: highlightFlash 1.5s ease-out; }
         @keyframes highlightFlash { 0% { box-shadow: 0 0 0 3px var(--red); border-color: var(--red); } 100% { box-shadow: 0 0 0 0 transparent; } }
         .img-preview-modal { position: fixed; inset: 0; z-index: 10050; background: rgba(0, 0, 0, 0.88); display: none; align-items: center; justify-content: center; padding: 16px; }
@@ -648,8 +652,8 @@
             <!-- Inspection start / end (end fills with the current time when tapped, like DCP interactive) -->
             <div class="glass-card">
                 <div class="field-row">
-                    <div class="field"><label for="inspStart" data-i18n="kensa_l_start">検査開始</label><input type="time" id="inspStart"></div>
-                    <div class="field"><label for="inspEnd" data-i18n="kensa_l_end">検査終了</label><input type="time" id="inspEnd"></div>
+                    <div class="field"><label for="inspStart" data-i18n="kensa_l_start">検査開始</label><div class="time-input-wrapper"><input type="time" id="inspStart"><button type="button" class="row-edit-btn" id="editStart" style="display:none" data-i18n="kensa_edit">編集</button></div></div>
+                    <div class="field"><label for="inspEnd" data-i18n="kensa_l_end">検査終了</label><div class="time-input-wrapper"><input type="time" id="inspEnd"><button type="button" class="row-edit-btn" id="editEnd" style="display:none" data-i18n="kensa_edit">編集</button></div></div>
                 </div>
             </div>
 
@@ -909,7 +913,7 @@
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt25"></script>
+    <script src="Kensa interactive SCNA.js?v=bt26"></script>
 </body>
 
 </html>

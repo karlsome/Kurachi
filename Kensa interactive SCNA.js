@@ -619,6 +619,7 @@ window.serverURL = serverURL;
     var cb = b.boxes[ci];
     $('inspCurInfo').textContent = cb ? T('kensa_chip_left', Math.max(0, cb.qty - toInt(cb.used))) + (cb.legacy ? ' · ' + T('kensa_kind_legacy') : ' · ' + T(cb.kind === 'srs' ? 'kensa_kind_srs' : 'kensa_kind_dcp')) : '';
     setVal('inspStart', b.start); setVal('inspEnd', b.end); setVal('inspComment', b.comment);
+    updateTimeLocks();
     renderCounters(); renderSpare(); renderLabels(); updateDerived();
   }
   // ---------- Partial from Spare ----------
@@ -704,6 +705,14 @@ window.serverURL = serverURL;
     });
   }
   function bindSpare() { $('spField').onclick = function () { if (state.bench.boxes.length) openSpareManager(); }; }
+  var TIME_LOCKS = [['inspStart', 'editStart'], ['inspEnd', 'editEnd']];
+  function setTimeLock(id, btnId, lock) {
+    var inp = document.getElementById(id), btn = document.getElementById(btnId); if (!inp) return;
+    inp.classList.toggle('locked', lock); inp.readOnly = lock; inp.style.pointerEvents = lock ? 'none' : 'auto';
+    if (btn) btn.style.display = lock ? '' : 'none';
+  }
+  function updateTimeLocks() { TIME_LOCKS.forEach(function (c) { var i = document.getElementById(c[0]); if (i && document.activeElement === i && !i.classList.contains('locked')) return; setTimeLock(c[0], c[1], !!(i && i.value)); }); }   // never re-lock a time that is being edited
+  function unlockTime(id) { TIME_LOCKS.forEach(function (c) { if (c[0] === id) setTimeLock(c[0], c[1], false); }); }
   function renderCounters() {
     var b = state.bench, cb = b.boxes.length ? curBox(b) : null;
     $('counterInputName').textContent = cb ? boxLabel(cb) : '--';
@@ -728,6 +737,7 @@ window.serverURL = serverURL;
     clearTimeout(goTimer);
     goTimer = setTimeout(function () {
       var el = document.getElementById(id); if (!el) return;
+      if (id === 'inspStart' || id === 'inspEnd') unlockTime(id);      // like DCP: Edit from the summary unlocks the time
       try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { }
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !el.readOnly) { try { el.focus({ preventScroll: true }); } catch (e) { } }
       el.classList.add('flash-highlight'); setTimeout(function () { el.classList.remove('flash-highlight'); }, 1800);
@@ -808,8 +818,17 @@ window.serverURL = serverURL;
     $('printCompleteBtn').onclick = function () { printLabel('complete'); };
     $('printDraftBtn').onclick = function () { printLabel('draft'); };
     $('registerOnlyBtn').onclick = function () { registerOnly(); };
-    $('inspEnd').onfocus = function () { if (!this.value) { this.value = nowHM(); b().end = this.value; save(); updateDerived(); } };      // like DCP: tapping an empty end time fills the current time
-    $('inspStart').onfocus = function () { if (!this.value) { this.value = nowHM(); b().start = this.value; save(); updateDerived(); } };
+    // Start / end time work like DCP interactive: tapping an empty one fills the current time, a filled one is locked (greyed,
+    // Edit button) so it cannot be changed by accident; Edit unlocks it for a manual correction and it locks again once changed
+    [['inspStart', 'editStart', 'start'], ['inspEnd', 'editEnd', 'end']].forEach(function (c) {
+      var inp = $(c[0]);
+      inp.onfocus = function () {
+        if (inp.classList.contains('locked')) { inp.blur(); return; }
+        if (!inp.value) { inp.value = nowHM(); b()[c[2]] = inp.value; save(); updateDerived(); setTimeout(updateTimeLocks, 100); }
+      };
+      inp.addEventListener('change', function () { setTimeout(updateTimeLocks, 100); });
+      $(c[1]).onclick = function () { unlockTime(c[0]); inp.focus(); };
+    });
     [['inspStart', 'start'], ['inspEnd', 'end'], ['inspComment', 'comment']].forEach(function (p) {
       $(p[0]).oninput = function () { b()[p[1]] = this.value; save(); updateDerived(); };
     });
