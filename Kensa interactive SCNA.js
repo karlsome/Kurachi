@@ -727,6 +727,7 @@ window.serverURL = serverURL;
     $('subProdMeta').textContent = [b.sebango, b.lotNumbers].filter(Boolean).join(' · ');
     $('subProc').textContent = procQty(b); $('subGood').textContent = goodQty(b); $('subNg').textContent = ngTotal(b);
     $('subLabels').textContent = livePrinted(b).length;
+    var spn2 = spareSum(spareAll(b)); $('subSpare').textContent = spn2; $('subTotal').textContent = goodQty(b) + spn2;
     var c = cycleSec(b);
     $('subCycle').textContent = c ? T('kensa_cycle', c, breakTotal() + maintTotal()) : '';
     var host = $('subChecks'), miss = validate();

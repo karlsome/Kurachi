@@ -693,11 +693,13 @@
             <div class="glass-card">
                 <h3 data-i18n="kensa_sub_title">送信内容の確認</h3>
                 <div class="product"><div class="name" id="subProdName"></div><div class="meta" id="subProdMeta"></div></div>
-                <div class="totals4" style="margin-top:12px">
+                <div class="totals4" style="margin-top:12px; grid-template-columns:repeat(3,1fr)">
                     <div class="total-box"><div class="k" data-i18n="kensa_l_proc">加工数</div><div class="v" id="subProc">0</div></div>
                     <div class="total-box good"><div class="k" data-i18n="kensa_l_good">良品</div><div class="v" id="subGood">0</div></div>
                     <div class="total-box ng"><div class="k" data-i18n="kensa_l_ng_real">NG (累計)</div><div class="v" id="subNg">0</div></div>
                     <div class="total-box"><div class="k" data-i18n="kensa_lbl_title">検査ラベル</div><div class="v" id="subLabels">0</div></div>
+                    <div class="total-box"><div class="k" data-i18n="kensa_sp_title">スペアからの部分数</div><div class="v" id="subSpare">0</div></div>
+                    <div class="total-box good"><div class="k" data-i18n="kensa_l_total_spare">合計（良品＋スペア）</div><div class="v" id="subTotal">0</div></div>
                 </div>
                 <div class="pill-info" id="subCycle" style="margin-top:10px"></div>
             </div>
@@ -907,7 +909,7 @@
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt17"></script>
+    <script src="Kensa interactive SCNA.js?v=bt18"></script>
 </body>
 
 </html>
