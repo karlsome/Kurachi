@@ -14,8 +14,8 @@
 //
 // Tablet link: Kensa interactive.html?filter=SCNA&machine=IT1
 
-//const serverURL = "https://kurachi.onrender.com";
-const serverURL = "http://localhost:3000";
+const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://localhost:3000";
 //const serverURL = "http://10.50.33.39:3000";
 window.serverURL = serverURL;
 
