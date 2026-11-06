@@ -458,6 +458,8 @@
         .gallery-thumb .thumb-edit-btn { position: absolute; top: 6px; left: 6px; z-index: 3; background: rgba(16, 24, 40, 0.66); color: #fff; border: none; border-radius: 7px; padding: 5px 9px; font-size: 0.7rem; font-weight: 800; cursor: pointer; font-family: inherit; }
         .gallery-thumb.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed var(--red); background: var(--red-soft); }
         .gallery-dot { position: absolute; top: 6px; right: 6px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; z-index: 2; }
+        .gallery-thumb .thumb-del-btn { position: absolute; top: 6px; left: 6px; z-index: 3; width: 32px; height: 32px; border-radius: 50%; background: rgba(16, 24, 40, 0.66); color: #fff; border: none; font-size: 1rem; font-weight: 800; cursor: pointer; }
+        .gallery-count { font-size: 0.72rem; font-weight: 700; color: var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 2px 9px; margin-left: 8px; }
         .img-preview-modal { position: fixed; inset: 0; z-index: 10050; background: rgba(0, 0, 0, 0.88); display: none; align-items: center; justify-content: center; padding: 16px; }
         .img-preview-modal.open { display: flex; }
         .img-preview-modal img { max-width: 100%; max-height: 100%; border-radius: 10px; }
@@ -614,6 +616,7 @@
                     <div class="tap-counter" id="counter-box-11" data-ng="11"><button type="button" class="tap-minus" data-minus="1" aria-label="minus">&minus;</button><div class="tap-count" id="counter-11-display">0</div><div class="tap-label">11</div><input readonly id="counter-11" value="0" type="number" style="display:none;"></div>
                     <div class="tap-counter" id="counter-box-12" data-ng="12"><button type="button" class="tap-minus" data-minus="1" aria-label="minus">&minus;</button><div class="tap-count" id="counter-12-display">0</div><div class="tap-label" data-i18n="kensa_ng_other">その他</div><input readonly id="counter-12" value="0" type="number" style="display:none;"></div>
                 </div>
+                <button type="button" class="btn btn-secondary btn-full" id="defectPhotoBtn" style="margin-top:12px"><span data-i18n="kensa_def_btn">📷 不良画像を撮影</span> <span id="defectPhotoCount"></span></button>
                 <div class="totals4" style="grid-template-columns:repeat(3,1fr)">
                     <div class="total-box"><div class="k" data-i18n="kensa_l_proc">加工数</div><div class="v" id="totProc">0</div></div>
                     <div class="total-box good"><div class="k" data-i18n="kensa_l_good">良品</div><div class="v" id="totGood">0</div></div>
@@ -734,6 +737,7 @@
         </div>
     </div>
     <input type="file" id="hatsumonoFileInput" accept="image/*" capture="environment" style="display:none">
+    <input type="file" id="defectFileInput" accept="image/*" capture="environment" style="display:none">
     <input type="file" id="atomonoFileInput" accept="image/*" capture="environment" style="display:none">
     <div id="imgPreviewModal" class="img-preview-modal">
         <button type="button" class="img-preview-close" id="imgPreviewClose">&times;</button>
@@ -899,11 +903,11 @@
 
     <script src="html5-qrcode.min.js"></script>
     <script src="i18n.js"></script>
-    <script src="Kensa interactive i18n.js?v=bt15"></script>
+    <script src="Kensa interactive i18n.js?v=bt17"></script>
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt16"></script>
+    <script src="Kensa interactive SCNA.js?v=bt17"></script>
 </body>
 
 </html>

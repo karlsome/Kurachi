@@ -767,6 +767,8 @@ window.serverURL = serverURL;
       };
     });
     bindSpare();
+    $('defectPhotoBtn').onclick = function () { if (defectIds().length >= MAX_DEFECT) return toast(T('kensa_def_full', MAX_DEFECT)); $('defectFileInput').click(); };
+    $('defectFileInput').onchange = function () { var inp = this; if (inp.files && inp.files[0]) addDefectPhoto(inp.files[0]); inp.value = ''; };
     $('imgPreviewClose').onclick = function () { $('imgPreviewModal').classList.remove('open'); };
     $('imgPreviewModal').onclick = function (e) { if (e.target === this) this.classList.remove('open'); };
     [['hatsumonoButton', 'hatsumonoFileInput', PHOTO_FIRST], ['atomonoButton', 'atomonoFileInput', PHOTO_LAST]].forEach(function (c) {
@@ -827,7 +829,7 @@ window.serverURL = serverURL;
     return idb('readwrite', function (s) { return s.put({ id: id, blob: blob, timestamp: new Date().toISOString() }); }).catch(function (e) { console.warn('Kensa: photo not persisted', e); });
   }
   function clearPhotos() {
-    [PHOTO_FIRST, PHOTO_LAST].forEach(function (id) { if (photoUrls[id]) { try { URL.revokeObjectURL(photoUrls[id]); } catch (e) { } } });
+    Object.keys(photoUrls).forEach(function (id) { try { URL.revokeObjectURL(photoUrls[id]); } catch (e) { } });
     photoBlobs = {}; photoUrls = {};
     return idb('readwrite', function (s) { return s.clear(); }).catch(function () { });
   }
@@ -872,9 +874,26 @@ window.serverURL = serverURL;
     { id: PHOTO_FIRST, btn: 'hatsumonoButton', input: 'hatsumonoFileInput', tag: 'kensa_first_check' },
     { id: PHOTO_LAST, btn: 'atomonoButton', input: 'atomonoFileInput', tag: 'kensa_last_check' }
   ];
+  // ---------- optional defect photos (max 25, kept in IndexedDB like 初物/終物, sent to Firebase Storage on submit) ----------
+  var MAX_DEFECT = 25, DEFECT_PREFIX = 'defect-';
+  function defectIds() { return Object.keys(photoBlobs).filter(function (k) { return k.indexOf(DEFECT_PREFIX) === 0; }).sort(); }
+  function addDefectPhoto(file) {
+    if (defectIds().length >= MAX_DEFECT) return Promise.resolve(toast(T('kensa_def_full', MAX_DEFECT)));
+    var id = DEFECT_PREFIX + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    return compressImageFile(file).then(function (blob) { return setPhoto(id, blob); })
+      .then(function () { renderPhoto(); toast(T('kensa_t_photo_ok')); })
+      .catch(function (e) { console.warn('Kensa: defect photo', e); toast(T('kensa_t_photo_fail')); });
+  }
+  function removeDefectPhoto(id) {
+    if (photoUrls[id]) { try { URL.revokeObjectURL(photoUrls[id]); } catch (e) { } delete photoUrls[id]; }
+    delete photoBlobs[id];
+    return idb('readwrite', function (st) { return st.delete(id); }).catch(function () { }).then(renderPhoto);
+  }
   function renderPhoto() {
     CHECKS.forEach(function (c) { $(c.btn).style.display = photoBlobs[c.id] ? 'none' : ''; });
     $('checkCard').style.display = CHECKS.every(function (c) { return photoBlobs[c.id]; }) ? 'none' : '';
+    var nd = defectIds().length;
+    $('defectPhotoCount').textContent = nd ? '(' + nd + '/' + MAX_DEFECT + ')' : '';
     renderGallery();
     if ($('subChecks')) renderSubmit();
   }
@@ -902,6 +921,25 @@ window.serverURL = serverURL;
       }
       grid.appendChild(th); sec.appendChild(head); sec.appendChild(grid); g.appendChild(sec);
     });
+    var dids = defectIds();      // optional defect photos: only shown once there is one
+    if (dids.length) {
+      var ds = document.createElement('div'); ds.className = 'gallery-section';
+      var dh = document.createElement('div'); dh.className = 'gallery-section-head';
+      dh.innerHTML = esc(T('kensa_def_section')) + '<span class="gallery-count">' + dids.length + '/' + MAX_DEFECT + '</span>';
+      var dg = document.createElement('div'); dg.className = 'image-gallery';
+      dids.forEach(function (id, i) {
+        var u = photoUrl(id), t = document.createElement('div'); t.className = 'gallery-thumb';
+        t.innerHTML = '<button type="button" class="thumb-del-btn" aria-label="delete">✕</button><img alt=""><span class="thumb-tag">' + esc(T('kensa_def_section')) + ' ' + (i + 1) + '</span>';
+        t.querySelector('img').src = u;
+        t.onclick = function () { $('imgPreviewTarget').src = u; $('imgPreviewModal').classList.add('open'); };
+        t.querySelector('.thumb-del-btn').onclick = async function (ev) {
+          ev.stopPropagation();
+          if (await confirmBox(T('kensa_def_del_title'), T('kensa_def_del_text'), T('kensa_def_del_btn'), true)) removeDefectPhoto(id);
+        };
+        dg.appendChild(t);
+      });
+      ds.appendChild(dh); ds.appendChild(dg); g.appendChild(ds);
+    }
   }
 
   // ============================================================
@@ -1351,12 +1389,20 @@ window.serverURL = serverURL;
       save();     // keeps Submit_UID so a retry after a lost response returns the saved record
       // 初物 / 終物 photos, same shape as DCP's submit (base64 without prefix + metadata)
       body.images = [];
-      var meta = [[PHOTO_FIRST, '初物チェック'], [PHOTO_LAST, '終物チェック']], idx = 0;
+      var meta = [[PHOTO_FIRST, '初物チェック'], [PHOTO_LAST, '終物チェック']], idx = 0, defectQueue = [];
       for (var i = 0; i < meta.length; i++) {
         var blob = photoBlobs[meta[i][0]]; if (!blob) continue;
         body.images.push({
           base64: await blobToBase64(blob), label: meta[i][1], id: meta[i][0] + '-' + Date.now() + '-' + (idx++), imgId: meta[i][0],
           factory: FACTORY, machine: MACHINE, worker: workerString(), date: body.Date, sebanggo: b.sebango, timestamp: Date.now() + idx
+        });
+      }
+      defectIds().forEach(function (id) { defectQueue.push(id); });
+      for (var di = 0; di < defectQueue.length; di++) {
+        var dblob = photoBlobs[defectQueue[di]]; if (!dblob) continue;
+        body.images.push({
+          base64: await blobToBase64(dblob), label: '不良画像', id: defectQueue[di], imgId: defectQueue[di],
+          factory: FACTORY, machine: MACHINE, worker: workerString(), date: body.Date, sebanggo: b.sebango, timestamp: Date.now() + idx + di
         });
       }
       var sentCalls = state.stopCalls.length;

@@ -28944,6 +28944,28 @@ app.post("/submitToKensaDBInteractive", async (req, res) => {
       return res.status(502).json({ error: "初物チェック photo upload failed, please retry" });
     }
 
+    // optional defect photos taken during the inspection (max 25): a failed one is logged and skipped, it never blocks the submit
+    const defectUrls = [];
+    const defectImgs = images.filter(i => i && i.label === "不良画像" && i.base64).slice(0, 25);
+    for (let di = 0; di < defectImgs.length; di++) {
+      const img = defectImgs[di];
+      try {
+        const buffer = Buffer.from(img.base64, "base64");
+        const factory = safe(img.factory || formData.工場);
+        const fileName = `${safe(img.sebanggo || formData.背番号)}_${safe(img.date || formData.Date)}_${safe(img.worker || formData.Worker_Name)}_${factory}_${safe(img.machine || formData.設備)}_不良画像_${di + 1}_${safe(img.id || Date.now())}.jpg`;
+        const file = bucket.file(`CycleCheck/${factory}/${fileName}`);
+        const downloadToken = "masterDBToken69";
+        await uploadToFirebaseWithRetry(file, buffer, {
+          metadata: { contentType: "image/jpeg", metadata: { firebaseStorageDownloadTokens: downloadToken } }
+        });
+        defectUrls.push(`https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`);
+      } catch (uploadError) {
+        console.error(`❌ Kensa interactive: defect photo ${di + 1} upload failed:`, uploadError.message);
+      }
+    }
+    formData["不良画像"] = defectUrls;
+    formData["不良画像枚数"] = defectUrls.length;
+
     formData.createdAt = new Date().toISOString();
     let result;
     try {
