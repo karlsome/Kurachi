@@ -1148,7 +1148,9 @@ window.serverURL = serverURL;
       }
     }
     await clearPhotos();
-    state.bench = emptyBench(); afterBenchCleared();
+    state.bench = emptyBench(); workerConfirmed = false;   // keep the worker name, but ask "still this worker?" again
+    afterBenchCleared();
+    switchTab('scan'); showStep0();
   }
   function afterBenchCleared() {
     state.breaks = []; state.maint = []; state.stopCalls = [];
