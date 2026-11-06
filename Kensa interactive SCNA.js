@@ -154,6 +154,7 @@ window.serverURL = serverURL;
     $('panel-submit').classList.toggle('active', name === 'submit');
     $('panel-maintenance').classList.toggle('active', name === 'maintenance');
     if (name === 'submit') renderSubmit();
+    try { localStorage.setItem(DRAFT_KEY + ':tab', name); } catch (e) { }   // remembered across reloads
   }
   document.querySelectorAll('.tab-btn').forEach(function (b) { b.onclick = function () { switchTab(b.getAttribute('data-tab')); }; });
   function updateBadge() {
@@ -1692,6 +1693,10 @@ window.serverURL = serverURL;
     loadWorkers();
     loadPrintRule();
     showStep0();
+    try {      // reopen on the tab that was open before the reload
+      var lastTab = localStorage.getItem(DRAFT_KEY + ':tab');
+      if (lastTab && lastTab !== 'scan' && document.getElementById('panel-' + lastTab)) switchTab(lastTab);
+    } catch (e) { }
     tickClock(); setInterval(tickClock, 15000);
     setTimeout(assertMachineState, 3000);
     setInterval(assertMachineState, 30000);
