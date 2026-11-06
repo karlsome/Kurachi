@@ -618,7 +618,7 @@ window.serverURL = serverURL;
     });
     var cb = b.boxes[ci];
     $('inspCurInfo').textContent = cb ? T('kensa_chip_left', Math.max(0, cb.qty - toInt(cb.used))) + (cb.legacy ? ' · ' + T('kensa_kind_legacy') : ' · ' + T(cb.kind === 'srs' ? 'kensa_kind_srs' : 'kensa_kind_dcp')) : '';
-    setVal('inspStart', b.start); setVal('inspEnd', b.end); setVal('inspLot', b.lotNumbers); setVal('inspSpare', toInt(b.spare) || ''); setVal('inspComment', b.comment);
+    setVal('inspStart', b.start); setVal('inspEnd', b.end); setVal('inspLot', b.lotNumbers); setVal('inspComment', b.comment);
     renderCounters(); renderSpare(); renderLabels(); updateDerived();
   }
   // ---------- Partial from Spare ----------
@@ -812,7 +812,6 @@ window.serverURL = serverURL;
     [['inspStart', 'start'], ['inspEnd', 'end'], ['inspLot', 'lotNumbers'], ['inspComment', 'comment']].forEach(function (p) {
       $(p[0]).oninput = function () { b()[p[1]] = this.value; save(); updateDerived(); if (p[1] === 'lotNumbers') renderSidebar(); };
     });
-    $('inspSpare').oninput = function () { b().spare = toInt(this.value); save(); };
     document.querySelectorAll('.tap-counter[data-ng]').forEach(function (card) {
       card.onclick = function (ev) {
         var bb = b(); if (!bb.boxes.length) return;
@@ -1420,7 +1419,8 @@ window.serverURL = serverURL;
         Process_Quantity: procQty(b), Remaining_Quantity: goodQty(b),
         Date: b.date || todayStr(), Time_start: b.start, Time_end: b.end, 設備: MACHINE,
         Counters: counters, Total_NG: ngTotal(b),
-        Cycle_Time: cycleSec(b), 製造ロット: b.lotNumbers, Comment: b.comment, Spare: toInt(b.spare),
+        Cycle_Time: cycleSec(b), 製造ロット: b.lotNumbers, Comment: b.comment, Spare: spareSum(spareAll(b)),        // total of all Partial from Spare entries
+       
         'スペアからの部分数': spareSum(spareAll(b)),        // Partial from Spare (same field name as DCP interactive)
         Spare_Lots: spareAll(b).map(function (e) { return { lotNumber: e.lotNumber, pieces: toInt(e.pieces), at: e.at, worker: e.worker, consumedByBoxUid: e.consumedByBoxUid || null }; }),
         // new
@@ -1715,6 +1715,17 @@ window.serverURL = serverURL;
     });
     return order.map(function (l) { return { lotNumber: l, pieces: map[l] }; });
   }
+  // boxes opened before the per-lot pieces existed (draft kept on the tablet): ask the server once and fill them in
+  function backfillLotDetails() {
+    state.bench.boxes.forEach(function (x) {
+      if (!x.id || (x.lotDetails && x.lotDetails.some(function (d) { return d.pieces != null; }))) return;
+      fetch(serverURL + '/api/kensa-inputs/' + encodeURIComponent(x.id)).then(function (r) { return r.ok ? r.json() : null; }).then(function (inp) {
+        if (!inp || !inp.lots || !inp.lots.length) return;
+        x.lotDetails = inp.lots.map(function (l) { return { lotNumber: l.lotNumber, pieces: l.pieces == null ? null : toInt(l.pieces) }; });
+        save(); renderSidebar(); renderSubmit();
+      }).catch(function () { });
+    });
+  }
   function renderSidebar() {
     var host = $('infoLanes'), b = state.bench;
     if (!benchOpen(b)) { host.innerHTML = '<div class="info-lane"><span class="lane-badge">' + esc(MACHINE) + '</span><div class="info-empty">' + esc(T('kensa_idle')) + '</div></div>'; return; }
@@ -1928,6 +1939,7 @@ window.serverURL = serverURL;
     if (state.activeStopCallStart) { openStopCallOverlay(); notifyStopCall('activate'); }   // a leader call was open: keep the TV blinking
     loadWorkers();
     loadPrintRule();
+    backfillLotDetails();
     showStep0();
     try {      // reopen on the tab that was open before the reload
       var lastTab = localStorage.getItem(DRAFT_KEY + ':tab');
