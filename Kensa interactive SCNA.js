@@ -852,6 +852,7 @@ window.serverURL = serverURL;
     $('defectFileInput').onchange = function () { var inp = this; if (inp.files && inp.files[0]) addDefectPhoto(inp.files[0]); inp.value = ''; };
     $('prodInfoThumb').onclick = function () { openPreview(this.getAttribute('src')); };
     $('prodInfoText').onclick = function () { toggleSidebar(true); };
+    $('moreInfoClose').onclick = function () { $('moreInfoModal').classList.remove('show'); };
     $('imgPreviewClose').onclick = function () { $('imgPreviewModal').classList.remove('open'); };
     $('imgPreviewModal').onclick = function (e) { if (e.target === this) this.classList.remove('open'); };
     [['hatsumonoButton', 'hatsumonoFileInput', PHOTO_FIRST], ['atomonoButton', 'atomonoFileInput', PHOTO_LAST]].forEach(function (c) {
@@ -1749,6 +1750,22 @@ window.serverURL = serverURL;
       }).catch(function () { });
     });
   }
+  // "More info": every field of the item's masterDB record in a pop-up (fetched fresh, cached for a minute)
+  async function openMoreInfo() {
+    var b = state.bench, body = $('moreInfoBody');
+    body.innerHTML = '<p style="text-align:center;color:var(--text-muted);margin:20px 0">' + esc(T('kensa_more_loading')) + '</p>';
+    $('moreInfoModal').classList.add('show');
+    try {
+      var rec = await loadItemRecord(b.sebango), html = '';
+      if (rec.imageURL) html += '<img class="mi-img" src="' + esc(rec.imageURL) + '" alt="">';
+      Object.keys(rec).filter(function (k) { return k !== '_id' && k !== 'imageURL'; }).forEach(function (k) {
+        var v = rec[k], txt = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+        html += '<div class="mi-row' + (txt === '' ? ' empty' : '') + '"><span class="k">' + esc(k) + '</span><span class="v">' + esc(txt === '' ? '---' : txt) + '</span></div>';
+      });
+      body.innerHTML = html;
+      var im = body.querySelector('.mi-img'); if (im) im.onclick = function () { openPreview(im.getAttribute('src')); };
+    } catch (e) { body.innerHTML = '<p style="text-align:center;color:var(--red);margin:20px 0">' + esc(T('kensa_more_fail', e.message)) + '</p>'; }
+  }
   // enlarge a picture (same full-screen viewer as the Images tab)
   function openPreview(src) { if (!src) return; $('imgPreviewTarget').src = src; $('imgPreviewModal').classList.add('open'); }
   function renderSidebar() {
@@ -1764,6 +1781,8 @@ window.serverURL = serverURL;
       rows.map(function (r) { return '<div class="info-row"><label>' + esc(T(r[0])) + '</label><div>' + esc(r[1] || '---') + '</div></div>'; }).join('') +
       '<div class="info-row"><label>' + esc(T('kensa_i_lot')) + '</label><div>' + (lotRows.length ? lotRows.map(function (l) { return '<div>' + esc(l.lotNumber) + (l.pieces != null ? ' <span style="color:var(--text-muted);font-weight:700">· ' + l.pieces + 'pcs</span>' : '') + '</div>'; }).join('') : esc(b.lotNumbers || '---')) + '</div></div></div>';
     var pic = host.querySelector('.info-lane img'); if (pic) pic.onclick = function () { openPreview(pic.getAttribute('src')); };
+    var more = document.createElement('button'); more.type = 'button'; more.className = 'btn btn-secondary btn-full'; more.style.marginTop = '4px'; more.textContent = T('kensa_more_info');
+    more.onclick = openMoreInfo; host.querySelector('.info-lane').appendChild(more);
   }
   $('infoBtn').onclick = function () { toggleSidebar(); };
   $('sidebarClose').onclick = function () { toggleSidebar(false); };
