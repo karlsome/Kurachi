@@ -25,7 +25,7 @@ window.serverURL = serverURL;
   var FACTORY = 'SCNA';
   var NG_FIELDS = [];                       // 'counter-1' .. 'counter-12' (same names/order as newKensa iReporter)
   for (var ci = 1; ci <= 12; ci++) NG_FIELDS.push('counter-' + ci);
-  var PHOTO_FIRST = 'hatsumonoPic', PHOTO_LAST = 'atomonoPic';   // same ids DCP uses; only 初物 has UI (終物 optional, not asked for)
+  var PHOTO_FIRST = 'hatsumonoPic', PHOTO_LAST = 'atomonoPic';   // same ids DCP uses; 初物 is required, 終物 optional
 
   // ---------- machine (URL is the source of truth) ----------
   var params = new URLSearchParams(location.search);
@@ -767,14 +767,16 @@ window.serverURL = serverURL;
       };
     });
     bindSpare();
-    $('hatsumonoButton').onclick = function () { $('hatsumonoFileInput').click(); };
-    $('hatsumonoFileInput').onchange = function () {
-      var inp = this; if (!inp.files || !inp.files[0]) return;
-      compressImageFile(inp.files[0]).then(function (blob) { return setPhoto(PHOTO_FIRST, blob); })
-        .then(function () { renderPhoto(); toast(T('kensa_t_photo_ok')); })
-        .catch(function (e) { console.warn('Kensa: photo', e); toast(T('kensa_t_photo_fail')); });
-      inp.value = '';
-    };
+    [['hatsumonoButton', 'hatsumonoFileInput', PHOTO_FIRST], ['atomonoButton', 'atomonoFileInput', PHOTO_LAST]].forEach(function (c) {
+      $(c[0]).onclick = function () { $(c[1]).click(); };
+      $(c[1]).onchange = function () {
+        var inp = this; if (!inp.files || !inp.files[0]) return;
+        compressImageFile(inp.files[0]).then(function (blob) { return setPhoto(c[2], blob); })
+          .then(function () { renderPhoto(); toast(T('kensa_t_photo_ok')); })
+          .catch(function (e) { console.warn('Kensa: photo', e); toast(T('kensa_t_photo_fail')); });
+        inp.value = '';
+      };
+    });
   }
   function paintNg(f, n) {      // one tap-counter card: hidden input + big number + red when > 0
     $(f).value = n; $(f + '-display').textContent = n;
@@ -864,11 +866,13 @@ window.serverURL = serverURL;
     });
   }
   function renderPhoto() {
-    var has = !!photoBlobs[PHOTO_FIRST], img = $('hatsumonoPic'), u = photoUrl(PHOTO_FIRST);
-    $('hatsumonoLabel').textContent = has ? 'TRUE' : 'FALSE';
-    var ind = $('hatsumonoStatusIndicator'); ind.textContent = has ? 'TRUE' : 'FALSE'; ind.classList.toggle('ok', has);
-    if (u) { img.src = u; img.style.display = 'block'; } else { img.removeAttribute('src'); img.style.display = 'none'; }
-    $('hatsumonoButton').textContent = T(has ? 'kensa_hatsumono_retake' : 'kensa_hatsumono_btn');
+    [[PHOTO_FIRST, 'hatsumono', 'First Cycle'], [PHOTO_LAST, 'atomono', 'Last Cycle']].forEach(function (c) {
+      var has = !!photoBlobs[c[0]], img = $(c[1] + 'Pic'), u = photoUrl(c[0]);
+      $(c[1] + 'Label').textContent = has ? 'TRUE' : 'FALSE';
+      $(c[1] + 'Button').classList.toggle('done', has);
+      $(c[1] + 'Sub').textContent = has ? T('kensa_hatsumono_retake') : c[2];
+      if (u) { img.src = u; img.classList.add('has'); } else { img.removeAttribute('src'); img.classList.remove('has'); }
+    });
     if ($('subChecks')) renderSubmit();
   }
 

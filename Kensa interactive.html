@@ -436,11 +436,19 @@
         .tap-counter .tap-minus:active { opacity: .6; border-color: var(--red); color: var(--red); }
         .counter-who { font-size: 0.8125rem; font-weight: 700; color: var(--text-muted); margin-bottom: 10px; }
         .totals4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
-        .hatsumono-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .hatsumono-row img { width: 96px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-inset); display: none; }
-        .hatsumono-row img.has { display: block; }
-        .photo-status-indicator { font-size: 0.75rem; font-weight: 800; padding: 3px 10px; border-radius: 6px; background: var(--red-soft); color: var(--red); }
-        .photo-status-indicator.ok { background: var(--brand-soft); color: var(--brand); }
+        .prod-check-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .prod-check-btn { display: flex; align-items: center; gap: 12px; padding: 16px; min-height: 64px; background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--btn-radius); cursor: pointer; font-family: inherit; color: var(--text-main); text-align: left; touch-action: manipulation; }
+        .prod-check-btn:active { transform: translateY(1px); }
+        .prod-check-btn .check-ico { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; background: var(--bg-inset); color: var(--text-soft); }
+        .prod-check-btn .check-ico svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .prod-check-btn .check-txt { display: flex; flex-direction: column; font-weight: 700; font-size: 0.95rem; line-height: 1.25; }
+        .prod-check-btn .check-txt small { font-weight: 600; font-size: 0.72rem; color: var(--text-soft); }
+        .prod-check-btn.done { background: var(--brand-soft); border-color: var(--brand); }
+        .prod-check-btn.done .check-ico { background: var(--brand); color: #fff; }
+        .prod-check-btn.done .check-txt, .prod-check-btn.done .check-txt small { color: var(--brand); }
+        .check-pics { display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+        .check-pics img { width: 96px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-inset); display: none; }
+        .check-pics img.has { display: block; }
         .footer-actions { display: flex; gap: 10px; margin-top: 4px; }
         .alloc-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.875rem; font-weight: 700; }
         .alloc-row > span, .alloc-row > b { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -614,16 +622,26 @@
                 <textarea id="inspComment" rows="3" style="height:auto; min-height:96px; resize:vertical"></textarea>
             </div>
 
-            <!-- 初物 first-piece photo (required before submit) -->
+            <!-- 初物 / 終物 first / last piece photos (same buttons as DCP interactive; 初物 is required to submit, 終物 is optional) -->
             <div class="glass-card">
-                <h3 data-i18n="kensa_hatsumono_title">初物チェック写真</h3>
-                <div class="hatsumono-row">
-                    <button type="button" id="hatsumonoButton" class="btn btn-secondary" data-i18n="kensa_hatsumono_btn">初物を撮影</button>
-                    <input type="file" id="hatsumonoFileInput" accept="image/*" capture="environment" style="display:none">
-                    <div class="photo-status-indicator" id="hatsumonoStatusIndicator">FALSE</div>
-                    <span id="hatsumonoLabel" style="display:none">FALSE</span>
-                    <img id="hatsumonoPic" src="" alt="初物チェック">
+                <h3 data-i18n="kensa_checks_title">初物・終物チェック</h3>
+                <div class="prod-check-grid">
+                    <button type="button" id="hatsumonoButton" class="prod-check-btn">
+                        <span class="check-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 12l2 2 4-4" /></svg></span>
+                        <span class="check-txt"><span data-i18n="kensa_first_check">初物チェック</span><small id="hatsumonoSub">First Cycle</small></span>
+                    </button>
+                    <button type="button" id="atomonoButton" class="prod-check-btn">
+                        <span class="check-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 12l2 2 4-4" /></svg></span>
+                        <span class="check-txt"><span data-i18n="kensa_last_check">終物チェック</span><small id="atomonoSub">Last Cycle</small></span>
+                    </button>
                 </div>
+                <input type="file" id="hatsumonoFileInput" accept="image/*" capture="environment" style="display:none">
+                <input type="file" id="atomonoFileInput" accept="image/*" capture="environment" style="display:none">
+                <div class="check-pics">
+                    <img id="hatsumonoPic" src="" alt="初物チェック">
+                    <img id="atomonoPic" src="" alt="終物チェック">
+                </div>
+                <span id="hatsumonoLabel" style="display:none">FALSE</span><span id="atomonoLabel" style="display:none">FALSE</span>
             </div>
 
             <!-- Kensa labels -->
@@ -874,11 +892,11 @@
 
     <script src="html5-qrcode.min.js"></script>
     <script src="i18n.js"></script>
-    <script src="Kensa interactive i18n.js?v=bt12"></script>
+    <script src="Kensa interactive i18n.js?v=bt14"></script>
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt13"></script>
+    <script src="Kensa interactive SCNA.js?v=bt14"></script>
 </body>
 
 </html>
