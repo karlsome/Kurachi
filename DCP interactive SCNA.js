@@ -2008,11 +2008,36 @@
     return res.json();
   }
 
-  function askBoxChoice(lastId, printed) {
+  // Boxes printed today on this tablet (survives submit/Reset, which clear the run). Used by the reprint picker.
+  var TODAY_BOXES_KEY = 'scnaTodayBoxes';
+  function todayStr() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function todayBoxes() {
+    var s = lsGet(TODAY_BOXES_KEY, null);
+    return (s && s.date === todayStr() && Array.isArray(s.boxes)) ? s.boxes : [];
+  }
+  function rememberTodayBox(entry) {
+    var boxes = todayBoxes().filter(function (b) { return b.boxId !== entry.boxId; });
+    boxes.push(entry);
+    lsSet(TODAY_BOXES_KEY, { date: todayStr(), boxes: boxes });
+  }
+  function markTodayBoxPrinted(boxId) {
+    var boxes = todayBoxes();
+    boxes.forEach(function (b) { if (b.boxId === boxId) b.printed = true; });
+    lsSet(TODAY_BOXES_KEY, { date: todayStr(), boxes: boxes });
+  }
+
+  // -> { reprint: boxId } | { fresh: true } | null (cancelled)
+  function askBoxChoice(boxes) {
     return new Promise(function (resolve) {
+      var rows = boxes.slice().reverse().map(function (b) {
+        var t = new Date(b.printedAt), hm = isNaN(t) ? '' : ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2);
+        var sub = [b.sebanggo, b.qty ? b.qty + '個' : '', b.printed ? '' : '印刷未完了 / not finished'].filter(Boolean).join(' · ');
+        return '<button type="button" data-r="' + esc(b.boxId) + '" style="' + btnCss('#fff', '#2E6FF2', '#2E6FF2') + 'text-align:left;">' +
+          '<b>' + esc(hm) + '</b> &nbsp; ' + esc(b.boxId) + (sub ? '<br><span style="font-size:.85rem;opacity:.8;">' + esc(sub) + '</span>' : '') + '</button>';
+      }).join('');
       var el = overlay('scnaBoxChoice',
-        '<h3 style="margin:0;font-size:1.2rem;text-align:center;">' + esc(lastId) + (printed ? ' は印刷済み / already printed' : ' (印刷未完了 / print not finished)') + '</h3>' +
-        '<button type="button" data-r="1" style="' + btnCss('#fff', '#2E6FF2', '#2E6FF2') + '">同じ箱を再印刷 / Reprint ' + esc(lastId) + '</button>' +
+        '<h3 style="margin:0;font-size:1.2rem;text-align:center;">再印刷 / Reprint (本日 / today)</h3>' +
+        '<div style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow-y:auto;">' + rows + '</div>' +
         '<button type="button" data-n="1" style="' + btnCss('#2E6FF2', '#fff') + '">新しい箱 / New box</button>' +
         '<button type="button" data-x="1" style="' + btnCss('#fff', '#344054', '#D0D5DD') + '">キャンセル / Cancel</button>');
       el.style.zIndex = '100300';
@@ -2020,7 +2045,9 @@
         var b = ev.target.closest && ev.target.closest('button');
         if (!b) return;
         el.remove();
-        resolve(b.hasAttribute('data-r') ? 'reprint' : b.hasAttribute('data-n') ? 'new' : null);
+        if (b.hasAttribute('data-r')) resolve({ reprint: b.getAttribute('data-r') });
+        else if (b.hasAttribute('data-n')) resolve({ fresh: true });
+        else resolve(null);
       });
     });
   }
@@ -2028,12 +2055,14 @@
   // -> box ID to print, or null (cancelled / blocked). Sets SCNA.boxId.
   async function prepareBox() {
     var run = getRun();
-    var choice = 'new';
-    if (!run.pendingBox && run.lastPrinted) {
-      choice = await askBoxChoice(run.lastPrinted.boxId, run.lastPrinted.printed);
-      if (!choice) return null;
+    if (!run.pendingBox) {
+      var boxes = todayBoxes();
+      if (boxes.length) {
+        var choice = await askBoxChoice(boxes);
+        if (!choice) return null;
+        if (choice.reprint) { SCNA.boxId = choice.reprint; return SCNA.boxId; }
+      }
     }
-    if (choice === 'reprint') { SCNA.boxId = run.lastPrinted.boxId; return SCNA.boxId; }
 
     var pending = run.pendingBox;
     if (!pending) {
@@ -2062,6 +2091,8 @@
     run.lastPrinted = { boxId: box.boxId, boxUid: pending.payload.boxUid, printedAt: new Date().toISOString(), printed: false };
     run.pendingBox = null;
     saveRun(run);
+    rememberTodayBox({ boxId: box.boxId, printedAt: run.lastPrinted.printedAt, printed: false,
+      sebanggo: pending.payload['背番号'] || '', qty: pending.payload.qtyMeasured != null ? pending.payload.qtyMeasured : (pending.payload.qtyLabel || null) });
     SCNA.boxId = box.boxId;
     return box.boxId;
   }
@@ -2069,6 +2100,7 @@
   function markBoxPrinted() {
     var run = getRun();
     if (run.lastPrinted) { run.lastPrinted.printed = true; saveRun(run); }
+    if (SCNA.boxId) markTodayBoxPrinted(SCNA.boxId);
   }
 
   SCNA.runPayload = function () {
