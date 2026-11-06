@@ -593,10 +593,9 @@
                     <div class="tap-counter" id="counter-box-11" data-ng="11"><button type="button" class="tap-minus" data-minus="1" aria-label="minus">&minus;</button><div class="tap-count" id="counter-11-display">0</div><div class="tap-label">11</div><input readonly id="counter-11" value="0" type="number" style="display:none;"></div>
                     <div class="tap-counter" id="counter-box-12" data-ng="12"><button type="button" class="tap-minus" data-minus="1" aria-label="minus">&minus;</button><div class="tap-count" id="counter-12-display">0</div><div class="tap-label" data-i18n="kensa_ng_other">その他</div><input readonly id="counter-12" value="0" type="number" style="display:none;"></div>
                 </div>
-                <div class="totals4">
+                <div class="totals4" style="grid-template-columns:repeat(3,1fr)">
                     <div class="total-box"><div class="k" data-i18n="kensa_l_proc">加工数</div><div class="v" id="totProc">0</div></div>
                     <div class="total-box good"><div class="k" data-i18n="kensa_l_good">良品</div><div class="v" id="totGood">0</div></div>
-                    <div class="total-box ng"><div class="k" data-i18n="kensa_l_ng_shown">NG (表示)</div><div class="v" id="totNg">0</div></div>
                     <div class="total-box ng"><div class="k" data-i18n="kensa_l_ng_real">NG (累計)</div><div class="v" id="totNgReal">0</div></div>
                 </div>
                 <div class="total-box good" style="margin-top:8px"><div class="k" data-i18n="kensa_l_total_spare">合計（良品＋スペア）</div><div class="v" id="totAll">0</div><div class="k" id="totAllNote" style="margin-top:2px"></div></div>
@@ -879,7 +878,7 @@
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt12"></script>
+    <script src="Kensa interactive SCNA.js?v=bt13"></script>
 </body>
 
 </html>
