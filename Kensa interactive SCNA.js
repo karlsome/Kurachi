@@ -607,8 +607,8 @@ window.serverURL = serverURL;
     $('inspEmpty').style.display = has ? 'none' : '';
     $('inspBody').classList.toggle('show', has);
     if (!has) return;
-    $('inspProdName').textContent = b.hinban;
-    $('inspProdMeta').textContent = [b.sebango, b.cap ? T('kensa_i_cap') + ' ' + b.cap : '', b.lotNumbers].filter(Boolean).join(' · ');
+    $('prodInfoSebanggo').textContent = b.sebango || '—'; $('prodInfoHinban').textContent = b.hinban || '—';
+    var th = $('prodInfoThumb'); if (b.imageURL) { if (th.getAttribute('src') !== b.imageURL) th.src = b.imageURL; th.style.display = ''; } else { th.removeAttribute('src'); th.style.display = 'none'; }
     var ci = Math.min(toInt(b.cur), b.boxes.length - 1), chips = $('inspChips'); chips.innerHTML = '';
     b.boxes.forEach(function (x, i) {
       var c = document.createElement('button'); c.type = 'button'; c.className = 'chip' + (i === ci ? ' cur' : '');
@@ -850,6 +850,8 @@ window.serverURL = serverURL;
     });
     $('defectPhotoBtn').onclick = function () { if (defectIds().length >= MAX_DEFECT) return toast(T('kensa_def_full', MAX_DEFECT)); $('defectFileInput').click(); };
     $('defectFileInput').onchange = function () { var inp = this; if (inp.files && inp.files[0]) addDefectPhoto(inp.files[0]); inp.value = ''; };
+    $('prodInfoThumb').onclick = function () { openPreview(this.getAttribute('src')); };
+    $('prodInfoText').onclick = function () { toggleSidebar(true); };
     $('imgPreviewClose').onclick = function () { $('imgPreviewModal').classList.remove('open'); };
     $('imgPreviewModal').onclick = function (e) { if (e.target === this) this.classList.remove('open'); };
     [['hatsumonoButton', 'hatsumonoFileInput', PHOTO_FIRST], ['atomonoButton', 'atomonoFileInput', PHOTO_LAST]].forEach(function (c) {
@@ -1747,6 +1749,8 @@ window.serverURL = serverURL;
       }).catch(function () { });
     });
   }
+  // enlarge a picture (same full-screen viewer as the Images tab)
+  function openPreview(src) { if (!src) return; $('imgPreviewTarget').src = src; $('imgPreviewModal').classList.add('open'); }
   function renderSidebar() {
     var host = $('infoLanes'), b = state.bench;
     if (!benchOpen(b)) { host.innerHTML = '<div class="info-lane"><span class="lane-badge">' + esc(MACHINE) + '</span><div class="info-empty">' + esc(T('kensa_idle')) + '</div></div>'; return; }
@@ -1759,6 +1763,7 @@ window.serverURL = serverURL;
       (b.imageURL ? '<img src="' + esc(b.imageURL) + '" alt="">' : '') +
       rows.map(function (r) { return '<div class="info-row"><label>' + esc(T(r[0])) + '</label><div>' + esc(r[1] || '---') + '</div></div>'; }).join('') +
       '<div class="info-row"><label>' + esc(T('kensa_i_lot')) + '</label><div>' + (lotRows.length ? lotRows.map(function (l) { return '<div>' + esc(l.lotNumber) + (l.pieces != null ? ' <span style="color:var(--text-muted);font-weight:700">· ' + l.pieces + 'pcs</span>' : '') + '</div>'; }).join('') : esc(b.lotNumbers || '---')) + '</div></div></div>';
+    var pic = host.querySelector('.info-lane img'); if (pic) pic.onclick = function () { openPreview(pic.getAttribute('src')); };
   }
   $('infoBtn').onclick = function () { toggleSidebar(); };
   $('sidebarClose').onclick = function () { toggleSidebar(false); };
