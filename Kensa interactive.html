@@ -439,6 +439,7 @@
         .prod-check-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
         .prod-check-btn { display: flex; align-items: center; gap: 12px; padding: 16px; min-height: 64px; background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--btn-radius); cursor: pointer; font-family: inherit; color: var(--text-main); text-align: left; touch-action: manipulation; }
         .prod-check-btn:active { transform: translateY(1px); }
+        .prod-check-btn:not(.done) { border-color: rgba(229, 72, 77, 0.8); background-color: rgba(229, 72, 77, 0.12); }   /* red until the photo is taken, like DCP interactive */
         .prod-check-btn .check-ico { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; background: var(--bg-inset); color: var(--text-soft); }
         .prod-check-btn .check-ico svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
         .prod-check-btn .check-txt { display: flex; flex-direction: column; font-weight: 700; font-size: 0.95rem; line-height: 1.25; }
@@ -902,7 +903,7 @@
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt15"></script>
+    <script src="Kensa interactive SCNA.js?v=bt16"></script>
 </body>
 
 </html>
