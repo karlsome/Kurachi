@@ -141,6 +141,38 @@ window.serverURL = serverURL;
   function postJSON(path, body) {
     return fetch(serverURL + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
+  // POST with upload progress (photos make the body large); resolves like fetch's Response
+  function postJSONProgress(path, body, onProgress) {
+    return new Promise(function (resolve, reject) {
+      var x = new XMLHttpRequest();
+      x.open('POST', serverURL + path); x.setRequestHeader('Content-Type', 'application/json');
+      x.upload.onprogress = function (e) { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+      x.onload = function () { resolve({ ok: x.status >= 200 && x.status < 300, status: x.status, json: function () { return Promise.resolve().then(function () { return JSON.parse(x.responseText); }); } }); };
+      x.onerror = function () { reject(new Error('Failed to fetch')); };
+      x.ontimeout = x.onerror;
+      x.send(JSON.stringify(body));
+    });
+  }
+  // full-screen "submitting" indicator: blocks double taps and shows what is happening
+  function showSubmitOverlay(text, frac) {
+    var el = document.getElementById('kSubmitOverlay');
+    if (!el) {
+      el = document.createElement('div'); el.id = 'kSubmitOverlay';
+      el.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(17,24,39,.55);display:flex;align-items:center;justify-content:center;padding:24px;';
+      el.innerHTML = '<style>@keyframes kSpin{to{transform:rotate(360deg)}}</style>' +
+        '<div style="background:#fff;border-radius:16px;padding:26px 28px;min-width:240px;max-width:90vw;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.3)">' +
+        '<div style="width:46px;height:46px;margin:0 auto 14px;border:5px solid #E7F5EF;border-top-color:#1F9D6B;border-radius:50%;animation:kSpin .8s linear infinite"></div>' +
+        '<div id="kSubmitText" style="font-weight:800;font-size:1.05rem;color:#111827"></div>' +
+        '<div id="kSubmitBarWrap" style="height:8px;background:#E5E7EB;border-radius:99px;margin-top:14px;overflow:hidden;display:none"><div id="kSubmitBar" style="height:100%;width:0;background:#1F9D6B;transition:width .15s"></div></div></div>';
+      document.body.appendChild(el);
+    }
+    el.style.display = 'flex';
+    document.getElementById('kSubmitText').textContent = text;
+    var wrap = document.getElementById('kSubmitBarWrap');
+    wrap.style.display = frac == null ? 'none' : 'block';
+    if (frac != null) document.getElementById('kSubmitBar').style.width = Math.round(frac * 100) + '%';
+  }
+  function hideSubmitOverlay() { var el = document.getElementById('kSubmitOverlay'); if (el) el.style.display = 'none'; }
   function queryDB(dbName, collectionName, query) {
     return postJSON('/queries', { dbName: dbName, collectionName: collectionName, query: query })
       .then(function (r) { if (!r.ok) throw new Error('queries ' + r.status); return r.json(); });
@@ -1433,6 +1465,7 @@ window.serverURL = serverURL;
 
     submitting = true;
     var btn = $('submitBtn'); btn.disabled = true;
+    showSubmitOverlay(T('kensa_submitting_prep'));
     try {
       var counters = {}; NG_FIELDS.forEach(function (f) { counters[f] = b.boxes.reduce(function (a, x) { return a + toInt(x.ng[f]); }, 0); });
       var ids = function (kind) { return b.boxes.filter(function (x) { return x.id && x.kind === kind; }).map(function (x) { return x.id; }); };
@@ -1479,7 +1512,10 @@ window.serverURL = serverURL;
         });
       }
       var sentCalls = state.stopCalls.length;
-      var r = await postJSON('/submitToKensaDBInteractive', body);
+      showSubmitOverlay(T('kensa_submitting_send'), 0);
+      var r = await postJSONProgress('/submitToKensaDBInteractive', body, function (f) {
+        showSubmitOverlay(f >= 1 ? T('kensa_submitting_save') : T('kensa_submitting_send') + ' ' + Math.round(f * 100) + '%', f >= 1 ? null : f);
+      });
       if (!r.ok) {
         var detail = ''; try { detail = (await r.json()).error || ''; } catch (e) { }
         throw new Error(detail || 'HTTP ' + r.status);
@@ -1492,7 +1528,7 @@ window.serverURL = serverURL;
     } catch (e) {
       // draft stays untouched so nothing is lost; the operator can press Submit again
       showAlert(T('kensa_e_submit_fail', e.message));
-    } finally { submitting = false; btn.disabled = false; }
+    } finally { submitting = false; btn.disabled = false; hideSubmitOverlay(); }
   }
 
   // ============================================================
