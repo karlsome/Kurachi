@@ -645,6 +645,14 @@
                 <div class="pill-info" id="inspCycle" style="margin-top:10px"></div>
             </div>
 
+            <!-- Inspection start / end (end fills with the current time when tapped, like DCP interactive) -->
+            <div class="glass-card">
+                <div class="field-row">
+                    <div class="field"><label for="inspStart" data-i18n="kensa_l_start">検査開始</label><input type="time" id="inspStart"></div>
+                    <div class="field"><label for="inspEnd" data-i18n="kensa_l_end">検査終了</label><input type="time" id="inspEnd"></div>
+                </div>
+            </div>
+
             <!-- Partial from Spare: pieces from other lots that top the box up to the standard quantity (tap -> list + keypad, like DCP interactive) -->
             <div class="glass-card">
                 <div class="field"><label for="spField" data-i18n="kensa_sp_title">スペアからの部分数</label>
@@ -713,18 +721,6 @@
             <div id="subChecks"></div>
             <div class="summary-details-grid" id="subSummary"></div>
             <div class="summary-details-grid" id="subCalc" style="margin-top:16px"></div>
-            <!-- Times / lot / spare (the Edit buttons above jump here) -->
-            <div class="glass-card" style="margin-top:16px">
-                <div class="field-row">
-                    <div class="field"><label for="inspStart" data-i18n="kensa_l_start">検査開始</label><input type="time" id="inspStart"></div>
-                    <div class="field"><label for="inspEnd" data-i18n="kensa_l_end">検査終了</label><input type="time" id="inspEnd"></div>
-                </div>
-                <button type="button" class="btn btn-secondary btn-sm" id="inspEndNow" style="margin-top:8px" data-i18n="kensa_end_now">終了 = 今</button>
-                <div class="field-row" style="margin-top:12px">
-                    <div class="field"><label for="inspLot" data-i18n="kensa_l_lot">製造ロット</label><input type="text" id="inspLot" autocomplete="off" readonly style="background:var(--bg-inset); cursor:default"></div>
-                </div>
-            </div>
-
         </div>
 
         <!-- Action buttons (like DCP interactive): Submit, then a full-width red Reset; always visible -->
@@ -734,7 +730,6 @@
         </div>
     </div>
 
-    <!-- ===================== TAB 3: MAINTENANCE ===================== -->
     <!-- ===================== TAB: IMAGES (first / last piece photos, like DCP interactive) ===================== -->
     <div class="tab-panel" id="panel-images">
         <div class="glass-card">
@@ -914,7 +909,7 @@
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt24"></script>
+    <script src="Kensa interactive SCNA.js?v=bt25"></script>
 </body>
 
 </html>

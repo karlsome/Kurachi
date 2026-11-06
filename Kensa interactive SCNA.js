@@ -618,7 +618,7 @@ window.serverURL = serverURL;
     });
     var cb = b.boxes[ci];
     $('inspCurInfo').textContent = cb ? T('kensa_chip_left', Math.max(0, cb.qty - toInt(cb.used))) + (cb.legacy ? ' · ' + T('kensa_kind_legacy') : ' · ' + T(cb.kind === 'srs' ? 'kensa_kind_srs' : 'kensa_kind_dcp')) : '';
-    setVal('inspStart', b.start); setVal('inspEnd', b.end); setVal('inspLot', b.lotNumbers); setVal('inspComment', b.comment);
+    setVal('inspStart', b.start); setVal('inspEnd', b.end); setVal('inspComment', b.comment);
     renderCounters(); renderSpare(); renderLabels(); updateDerived();
   }
   // ---------- Partial from Spare ----------
@@ -740,11 +740,11 @@ window.serverURL = serverURL;
     if (!b.boxes.length) m.push({ text: T('kensa_v_box'), tab: 'scan', id: 'startStep1Scan' });
     if (b.pendingPrint) m.push({ text: T('kensa_v_pending'), tab: TAB_INSPECT, id: 'lblList' });
     if (!photoBlobs[PHOTO_FIRST]) m.push({ text: T('kensa_v_hatsumono'), tab: 'images', id: 'imageGallery' });
-    if (!b.start) m.push({ text: T('kensa_v_start'), tab: 'submit', id: 'inspStart' });
-    if (!b.end) m.push({ text: T('kensa_v_end'), tab: 'submit', id: 'inspEnd' });
+    if (!b.start) m.push({ text: T('kensa_v_start'), tab: TAB_INSPECT, id: 'inspStart' });
+    if (!b.end) m.push({ text: T('kensa_v_end'), tab: TAB_INSPECT, id: 'inspEnd' });
     if (procQty(b) <= 0) m.push({ text: T('kensa_v_qty'), tab: TAB_INSPECT, id: 'counterGrid' });
     if (ngTotal(b) > procQty(b)) m.push({ text: T('kensa_v_ng_over'), tab: TAB_INSPECT, id: 'counterGrid' });
-    if (spanMin(b.start, b.end) < breakTotal() + maintTotal()) m.push({ text: T('kensa_v_break_over'), tab: 'submit', id: 'inspStart' });
+    if (spanMin(b.start, b.end) < breakTotal() + maintTotal()) m.push({ text: T('kensa_v_break_over'), tab: TAB_INSPECT, id: 'inspStart' });
     return m;
   }
   function renderSubmit() {
@@ -774,7 +774,7 @@ window.serverURL = serverURL;
     h += row(T('kensa_sum_hinban'), esc(b.hinban || '---'));
     h += row(T('kensa_sum_worker'), esc(workerString() || '---'), edit('worker'));
     h += row(T('kensa_sum_date'), esc(b.date || todayStr()));
-    h += row(T('kensa_sum_time'), esc(b.start || '--:--') + ' ~ ' + esc(b.end || '--:--'), edit('submit', 'inspStart'));
+    h += row(T('kensa_sum_time'), esc(b.start || '--:--') + ' ~ ' + esc(b.end || '--:--'), edit(TAB_INSPECT, 'inspStart'));
     h += row(T('kensa_l_lot'), sidebarLots(b).map(function (l) { return esc(l.lotNumber) + (l.pieces != null ? ' ×' + l.pieces : ''); }).join('<br>') || '---');
     h += row(T('kensa_sp_title'), spn + (spLots ? '<small>' + spLots + '</small>' : ''), edit(TAB_INSPECT, 'spField'));
     h += row(T('kensa_l_proc'), procQty(b));
@@ -808,9 +808,10 @@ window.serverURL = serverURL;
     $('printCompleteBtn').onclick = function () { printLabel('complete'); };
     $('printDraftBtn').onclick = function () { printLabel('draft'); };
     $('registerOnlyBtn').onclick = function () { registerOnly(); };
-    $('inspEndNow').onclick = function () { b().end = nowHM(); save(); $('inspEnd').value = b().end; updateDerived(); };
-    [['inspStart', 'start'], ['inspEnd', 'end'], ['inspLot', 'lotNumbers'], ['inspComment', 'comment']].forEach(function (p) {
-      $(p[0]).oninput = function () { b()[p[1]] = this.value; save(); updateDerived(); if (p[1] === 'lotNumbers') renderSidebar(); };
+    $('inspEnd').onfocus = function () { if (!this.value) { this.value = nowHM(); b().end = this.value; save(); updateDerived(); } };      // like DCP: tapping an empty end time fills the current time
+    $('inspStart').onfocus = function () { if (!this.value) { this.value = nowHM(); b().start = this.value; save(); updateDerived(); } };
+    [['inspStart', 'start'], ['inspEnd', 'end'], ['inspComment', 'comment']].forEach(function (p) {
+      $(p[0]).oninput = function () { b()[p[1]] = this.value; save(); updateDerived(); };
     });
     document.querySelectorAll('.tap-counter[data-ng]').forEach(function (card) {
       card.onclick = function (ev) {
