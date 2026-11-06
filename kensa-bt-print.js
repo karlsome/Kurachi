@@ -156,26 +156,93 @@
   }
 
   // ------------------------------------------------------------------ TSPL
-  function bitmapBytes(cv) {
-    var W = HEAD_DOTS, wb = W / 8, H = cv.height;
-    var src = cv.getContext('2d').getImageData(0, 0, Math.min(cv.width, W), H).data, sw = Math.min(cv.width, W);
-    var out = new Uint8Array(wb * H);
-    out.fill(0xff);                                              // TSPL BITMAP: 1 = white, 0 = black
+  // A full 4x6 bitmap is ~123 KB and BLE moves ~5 KB/s, so the label is sent compactly instead:
+  //   * long solid black runs (box borders, rules) become native TSPL BAR commands (a few bytes each)
+  //   * what is left (text, barcode, QR) is cut into small BITMAP tiles that cover only the inked areas
+  // pack() works on a plain 0/1 mask so it can be checked without a canvas; the result is lossless.
+  var BAR_MIN = 120;                   // a black run at least this long (dots) is sent as a BAR
+  var GAP_Y = 8, GAP_X = 24;           // blank rows / columns that still keep two inked areas in one tile
+
+  function maskFromCanvas(cv) {
+    var W = HEAD_DOTS, H = cv.height, sw = Math.min(cv.width, W);
+    var src = cv.getContext('2d').getImageData(0, 0, sw, H).data;
+    var mask = new Uint8Array(W * H);
     for (var y = 0; y < H; y++) for (var x = 0; x < sw; x++) {
       var i = (y * sw + x) * 4;
-      var g = src[i] * 0.3 + src[i + 1] * 0.59 + src[i + 2] * 0.11;
-      if (g < BLACK_BELOW) out[y * wb + (x >> 3)] &= ~(0x80 >> (x & 7));
+      if (src[i] * 0.3 + src[i + 1] * 0.59 + src[i + 2] * 0.11 < BLACK_BELOW) mask[y * W + x] = 1;
     }
-    return { wb: wb, h: H, data: out };
+    return { mask: mask, W: W, H: H };
   }
+
+  // -> { bars: [{x,y,w,h}], tiles: [{x,y,wb,h,data}] }  (mask is consumed)
+  function pack(mask, W, H) {
+    var bars = [], x, y, k, run, act;
+    // horizontal runs, merged downwards when the same span repeats on the next row (thick lines = one BAR)
+    act = {};
+    for (y = 0; y < H; y++) {
+      var seen = {};
+      for (x = 0; x < W;) {
+        if (!mask[y * W + x]) { x++; continue; }
+        var x0 = x; while (x < W && mask[y * W + x]) x++;
+        if (x - x0 < BAR_MIN) continue;
+        k = x0 + ':' + x; seen[k] = 1;
+        if (act[k]) act[k].h++; else { act[k] = { x: x0, y: y, w: x - x0, h: 1 }; bars.push(act[k]); }
+        for (var c = x0; c < x; c++) mask[y * W + c] = 0;
+      }
+      for (k in act) if (!seen[k]) delete act[k];
+    }
+    // vertical runs of what is left (the sides of boxes), merged sideways
+    act = {};
+    for (x = 0; x < W; x++) {
+      var seenV = {};
+      for (y = 0; y < H;) {
+        if (!mask[y * W + x]) { y++; continue; }
+        var y0 = y; while (y < H && mask[y * W + x]) y++;
+        if (y - y0 < BAR_MIN) continue;
+        k = y0 + ':' + y; seenV[k] = 1;
+        if (act[k]) act[k].w++; else { act[k] = { x: x, y: y0, w: 1, h: y - y0 }; bars.push(act[k]); }
+        for (var r = y0; r < y; r++) mask[r * W + x] = 0;
+      }
+      for (k in act) if (!seenV[k]) delete act[k];
+    }
+    // remaining ink -> tiles: bands of rows, then runs of columns inside each band
+    var rowInk = new Uint8Array(H), tiles = [];
+    for (y = 0; y < H; y++) for (x = 0; x < W; x++) if (mask[y * W + x]) { rowInk[y] = 1; break; }
+    for (y = 0; y < H;) {
+      if (!rowInk[y]) { y++; continue; }
+      var top = y, last = y, gap = 0;
+      for (; y < H; y++) { if (rowInk[y]) { last = y; gap = 0; } else if (++gap > GAP_Y) break; }
+      var bh = last - top + 1, colInk = new Uint8Array(W);
+      for (var yy = top; yy <= last; yy++) for (x = 0; x < W; x++) if (mask[yy * W + x]) colInk[x] = 1;
+      for (x = 0; x < W;) {
+        if (!colInk[x]) { x++; continue; }
+        var cs = x, ce = x, g = 0;
+        for (; x < W; x++) { if (colInk[x]) { ce = x; g = 0; } else if (++g > GAP_X) break; }
+        var bx = cs >> 3 << 3, wb = (ce >> 3) + 1 - (bx >> 3), data = new Uint8Array(wb * bh);
+        data.fill(0xff);                                           // TSPL BITMAP: 1 = white, 0 = black
+        for (var ty = 0; ty < bh; ty++) for (var tx = 0; tx < wb * 8; tx++) {
+          if (bx + tx < W && mask[(top + ty) * W + bx + tx]) data[ty * wb + (tx >> 3)] &= ~(0x80 >> (tx & 7));
+        }
+        tiles.push({ x: bx, y: top, wb: wb, h: bh, data: data });
+      }
+    }
+    return { bars: bars, tiles: tiles };
+  }
+
   function buildTspl(cv, copies) {
-    var enc = new TextEncoder(), b = bitmapBytes(cv);
-    var head = enc.encode(
+    var enc = new TextEncoder(), m = maskFromCanvas(cv), p = pack(m.mask, m.W, m.H);
+    var parts = [enc.encode(
       'SIZE ' + LABEL_W_MM + ' mm,' + LABEL_H_MM + ' mm\r\nGAP ' + settings.gapMm + ' mm,0 mm\r\nDENSITY ' + settings.density +
-      '\r\nSPEED ' + settings.speed + '\r\nDIRECTION 0\r\nCLS\r\nBITMAP 0,0,' + b.wb + ',' + b.h + ',0,');
-    var tail = enc.encode('\r\nPRINT 1,' + (copies || 1) + '\r\n');
-    var all = new Uint8Array(head.length + b.data.length + tail.length);
-    all.set(head, 0); all.set(b.data, head.length); all.set(tail, head.length + b.data.length);
+      '\r\nSPEED ' + settings.speed + '\r\nDIRECTION 0\r\nCLS\r\n')];
+    // bitmaps first (they overwrite their own area, tiles never overlap), bars last so nothing can paint over them
+    p.tiles.forEach(function (t) {
+      parts.push(enc.encode('BITMAP ' + t.x + ',' + t.y + ',' + t.wb + ',' + t.h + ',0,'), t.data, enc.encode('\r\n'));
+    });
+    p.bars.forEach(function (b) { parts.push(enc.encode('BAR ' + b.x + ',' + b.y + ',' + b.w + ',' + b.h + '\r\n')); });
+    parts.push(enc.encode('PRINT 1,' + (copies || 1) + '\r\n'));
+    var n = 0; parts.forEach(function (a) { n += a.length; });
+    var all = new Uint8Array(n), o = 0;
+    parts.forEach(function (a) { all.set(a, o); o += a.length; });
     return all;
   }
 
@@ -336,7 +403,7 @@
 
   root.KensaBT = {
     settings: settings, renderLabel: renderLabel, buildTspl: buildTspl, connect: connect, pick: pick, listPaired: listPaired, status: status, select: select, forget: forget, watch: watch, testPrint: testPrint,
-    printCanvas: printCanvas, printLayout: printLayout, HEAD_DOTS: HEAD_DOTS,
+    printCanvas: printCanvas, printLayout: printLayout, HEAD_DOTS: HEAD_DOTS, _pack: pack,
     isSupported: function () { return !!(navigator.bluetooth && navigator.bluetooth.getDevices); },
   };
 })(typeof window !== 'undefined' ? window : this);
