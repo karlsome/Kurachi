@@ -1206,7 +1206,8 @@ window.serverURL = serverURL;
       (lay.elements || []).forEach(function (el) {
         if (!el.name || el.name in ov) return;
         var t = el.bind || el.text || '';
-        if (String(t).indexOf('{品番}') >= 0) ov[el.name] = String(t).split('{品番}').join(labelHinban(b.hinban));
+        var re = /\{\s*(品番|productNumber)\s*\}/g;   // the layout may use either name for the part number
+        if (re.test(String(t))) ov[el.name] = String(t).replace(re, labelHinban(b.hinban));
       });
     }
     var prm = { filename: b.sebango, qty: '1', process: LABEL_PROCESS, overrides: JSON.stringify(ov) };
@@ -1282,7 +1283,9 @@ window.serverURL = serverURL;
     var n = new Date(), pad = function (x) { return (x < 10 ? '0' : '') + x; };
     var lot = '' + n.getFullYear() + pad(n.getMonth() + 1) + pad(n.getDate());
     var pn = String(rec['品番'] == null ? '' : rec['品番']).trim(), qty = String(rec['収容数'] == null ? '' : rec['収容数']).trim(), desc = String(rec['品名'] == null ? '' : rec['品名']).trim();
+    var rawPn = pn;
     pn = labelHinban(pn);
+    Object.keys(d).forEach(function (k) { if (d[k] === rawPn) d[k] = pn; });   // any other field carrying the part number
     d.lotNumber = lot; d['品番'] = pn; d['収容数'] = qty; d['品名'] = desc;
     d.productNumber = pn; d.qty = qty; d.description = desc; d.banumber = String(rec['背番号'] == null ? '' : rec['背番号']);
     return d;
