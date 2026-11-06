@@ -475,20 +475,8 @@
         .summary-row .lbl { color: var(--text-muted); font-weight: 600; }
         .summary-row .val { font-weight: 700; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
         .summary-row .val small { display: block; font-weight: 600; color: var(--text-muted); }
-        .row-edit-btn { border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--brand); border-radius: 8px; padding: 4px 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
-        .row-edit-btn:active { transform: translateY(1px); }
-        .sum-sec { font-size: 0.72rem; font-weight: 800; letter-spacing: .04em; color: var(--text-soft); text-transform: uppercase; margin: 18px 0 6px; }
-        .sum-sec:first-of-type { margin-top: 0; }
-        .sum-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-        .sum-tiles.q4 { grid-template-columns: repeat(4, 1fr); }
-        @media (max-width: 640px) { .sum-tiles.q4 { grid-template-columns: repeat(2, 1fr); } }
-        .sum-tile { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-subtle); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-        .sum-tile.spare { background: var(--brand-soft); border-color: var(--brand); }
-        .sum-tile.ng { background: var(--red-soft); border-color: #F4C9CB; }
-        .sum-tile .k { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-        .sum-tile .v { font-size: 1.35rem; font-weight: 800; line-height: 1.1; }
-        .sum-tile .sub { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); line-height: 1.35; word-break: break-all; }
-        .sum-tile .row-edit-btn { padding: 2px 9px; margin: 0; }
+        .summary-row .row-edit-btn { border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--brand); border-radius: 8px; padding: 4px 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
+        .summary-row .row-edit-btn:active { transform: translateY(1px); }
         .flash-highlight { animation: highlightFlash 1.5s ease-out; }
         @keyframes highlightFlash { 0% { box-shadow: 0 0 0 3px var(--red); border-color: var(--red); } 100% { box-shadow: 0 0 0 0 transparent; } }
         .img-preview-modal { position: fixed; inset: 0; z-index: 10050; background: rgba(0, 0, 0, 0.88); display: none; align-items: center; justify-content: center; padding: 16px; }
@@ -922,11 +910,11 @@
 
     <script src="html5-qrcode.min.js"></script>
     <script src="i18n.js"></script>
-    <script src="Kensa interactive i18n.js?v=bt22"></script>
+    <script src="Kensa interactive i18n.js?v=bt19"></script>
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>
     <script src="kensa-bt-print.js?v=bt6"></script>
-    <script src="Kensa interactive SCNA.js?v=bt23"></script>
+    <script src="Kensa interactive SCNA.js?v=bt21"></script>
 </body>
 
 </html>
