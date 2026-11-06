@@ -1750,21 +1750,64 @@ window.serverURL = serverURL;
       }).catch(function () { });
     });
   }
-  // "More info": every field of the item's masterDB record in a pop-up (fetched fresh, cached for a minute)
+  // "More info": everything known about the item and where it came from, in sections: masterDB, then every process the
+  // scanned inputs went through before Kensa (Cutting = the DCP press box, SRS = the SRS label and its records).
+  function miRows(obj, depth) {
+    var html = '';
+    Object.keys(obj).filter(function (k) { return k !== '_id'; }).forEach(function (k) {
+      var v = obj[k], pad = depth ? ' style="padding-left:' + (depth * 14) + 'px"' : '';
+      if (v !== null && typeof v === 'object') {
+        var list = Array.isArray(v) ? v : [v];
+        if (Array.isArray(v) && !v.some(function (x) { return x !== null && typeof x === 'object'; })) {
+          html += '<div class="mi-row' + (v.length ? '' : ' empty') + '"' + pad + '><span class="k">' + esc(k) + '</span><span class="v">' + esc(v.length ? v.join(', ') : '---') + '</span></div>';
+        } else {
+          list.forEach(function (x, i) {
+            html += '<div class="mi-sub"' + pad + '>' + esc(k) + (Array.isArray(v) ? ' [' + (i + 1) + ']' : '') + '</div>' + (x !== null && typeof x === 'object' ? miRows(x, depth + 1) : '<div class="mi-row"' + pad + '><span class="v">' + esc(String(x)) + '</span></div>');
+          });
+        }
+      } else {
+        var txt = v === null || v === undefined ? '' : String(v);
+        html += '<div class="mi-row' + (txt === '' ? ' empty' : '') + '"' + pad + '><span class="k">' + esc(k) + '</span><span class="v">' + esc(txt === '' ? '---' : txt) + '</span></div>';
+      }
+    });
+    return html;
+  }
+  function miSection(title, sub, obj) { return '<div class="mi-sec"><span>' + esc(title) + '</span>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>' + miRows(obj, 0); }
   async function openMoreInfo() {
     var b = state.bench, body = $('moreInfoBody');
     body.innerHTML = '<p style="text-align:center;color:var(--text-muted);margin:20px 0">' + esc(T('kensa_more_loading')) + '</p>';
     $('moreInfoModal').classList.add('show');
+    var html = '';
     try {
-      var rec = await loadItemRecord(b.sebango), html = '';
+      var rec = await loadItemRecord(b.sebango);
       if (rec.imageURL) html += '<img class="mi-img" src="' + esc(rec.imageURL) + '" alt="">';
-      Object.keys(rec).filter(function (k) { return k !== '_id' && k !== 'imageURL'; }).forEach(function (k) {
-        var v = rec[k], txt = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
-        html += '<div class="mi-row' + (txt === '' ? ' empty' : '') + '"><span class="k">' + esc(k) + '</span><span class="v">' + esc(txt === '' ? '---' : txt) + '</span></div>';
-      });
-      body.innerHTML = html;
-      var im = body.querySelector('.mi-img'); if (im) im.onclick = function () { openPreview(im.getAttribute('src')); };
-    } catch (e) { body.innerHTML = '<p style="text-align:center;color:var(--red);margin:20px 0">' + esc(T('kensa_more_fail', e.message)) + '</p>'; }
+      var copy = Object.assign({}, rec); delete copy.imageURL;
+      html += miSection('masterDB', rec.背番号 || b.sebango, copy);
+    } catch (e) { html += '<p style="text-align:center;color:var(--red);margin:20px 0">' + esc(T('kensa_more_fail', e.message)) + '</p>'; }
+    body.innerHTML = html + '<p id="miMore" style="text-align:center;color:var(--text-muted);margin:16px 0">' + esc(T('kensa_more_loading')) + '</p>';
+    var im = body.querySelector('.mi-img'); if (im) im.onclick = function () { openPreview(im.getAttribute('src')); };
+
+    // earlier processes of every input on the bench, in process order: Cutting (press box) first, then SRS
+    var cutting = {}, cutOrder = [], srs = [], srsRecs = [], seen = {};
+    await Promise.all(b.boxes.filter(function (x) { return x.id; }).map(async function (x) {
+      try {
+        if (x.kind === 'srs') {
+          var r = await fetch(serverURL + '/api/srs-boxes/' + encodeURIComponent(x.id) + '?chain=1'); if (!r.ok) return;
+          var d = await r.json();
+          (d.pressBoxes || []).forEach(function (pb) { if (!cutting[pb.boxId]) { cutting[pb.boxId] = pb; cutOrder.push(pb.boxId); } });
+          [d.box].concat(d.parents || []).forEach(function (sb) { if (sb && !seen[sb.srsId]) { seen[sb.srsId] = 1; srs.push(sb); } });
+          (d.srsRecords || []).forEach(function (rr) { srsRecs.push(rr); });
+        } else {
+          var r2 = await fetch(serverURL + '/api/scna-boxes/' + encodeURIComponent(x.id)); if (!r2.ok) return;
+          var pb2 = await r2.json(); if (!cutting[pb2.boxId]) { cutting[pb2.boxId] = pb2; cutOrder.push(pb2.boxId); }
+        }
+      } catch (e) { }
+    }));
+    var more = '';
+    cutOrder.forEach(function (id) { more += miSection('Cutting', id, cutting[id]); });
+    srs.forEach(function (sb, i) { more += miSection('SRS', sb.srsId + (i ? ' (previous draft)' : ''), sb); });
+    var shown = {}; srsRecs.forEach(function (rr) { var k = String(rr._id); if (shown[k]) return; shown[k] = 1; more += miSection('SRS record', rr.Srs_Box_IDs ? [].concat(rr.Srs_Box_IDs).join(', ') : '', (function (c) { delete c.images; delete c.photos; return c; })(Object.assign({}, rr))); });
+    var tail = $('miMore'); if (tail) { if (more) tail.outerHTML = more; else tail.remove(); }
   }
   // enlarge a picture (same full-screen viewer as the Images tab)
   function openPreview(src) { if (!src) return; $('imgPreviewTarget').src = src; $('imgPreviewModal').classList.add('open'); }
