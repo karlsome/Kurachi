@@ -171,12 +171,12 @@
       loading: '読み込み中…', unreachable: 'サーバーに接続できません', needHttps: 'カメラには https が必要です。IDを入力してください。', noLib: 'スキャナーを読み込めませんでした', camera: 'カメラ',
       kind_dcp: '切断ボックス', kind_srs: 'SRSラベル', kind_kensa: '検査ラベル', kind_legacy: 'ロットQR',
       pressBoxes: 'プレス箱', labels: 'ラベル', records: '提出記録', noData: 'この工程の記録はありません', labelBox: 'ラベル/箱', record: '記録',
-      expand: 'すべて開く', collapse: 'すべて閉じる', p_cutting: '切断', p_srs: 'SRS', p_kensa: '検査' },
+      expand: 'すべて開く', lnSpare: 'スペア', lnBox: '箱', lnLot: 'ロット', lot: 'ロット', good: '良品', pcs: '個', noDefects: '不良なし', collapse: 'すべて閉じる', p_cutting: '切断', p_srs: 'SRS', p_kensa: '検査' },
     en: { subtitle: 'QR / ID → all process data', placeholder: 'Box / SRS / Kensa ID  or  QR text', search: 'Search', reset: 'Reset', scan: 'Scan', hint: 'Point the camera at the QR code', closeCam: '✕ Close camera',
       loading: 'Loading…', unreachable: 'Cannot reach the server', needHttps: 'Camera needs https (or localhost). Type the ID instead.', noLib: 'Scanner library not loaded', camera: 'Camera',
       kind_dcp: 'Cutting box', kind_srs: 'SRS label', kind_kensa: 'Kensa label', kind_legacy: 'Lot QR',
       pressBoxes: 'Press boxes', labels: 'Labels', records: 'Submitted records', noData: 'No data for this process', labelBox: 'label/box', record: 'record',
-      expand: 'Expand all', collapse: 'Collapse all', p_cutting: 'Cutting', p_srs: 'SRS', p_kensa: 'Kensa' }
+      expand: 'Expand all', lnSpare: 'Spare', lnBox: 'Box', lnLot: 'Lot', lot: 'lot', good: 'good', pcs: 'pcs', noDefects: 'no defects', collapse: 'Collapse all', p_cutting: 'Cutting', p_srs: 'SRS', p_kensa: 'Kensa' }
   };
   var LANG = (function () { try { var l = localStorage.getItem('infoScannerLang'); if (l === 'ja' || l === 'en') return l; } catch (e) { } return /^ja/i.test(navigator.language || '') ? 'ja' : 'en'; })();
   function T(k) { return (I18N[LANG] && I18N[LANG][k]) || I18N.en[k] || k; }
@@ -225,6 +225,18 @@
   var ID_RE = /^[A-Za-z0-9._]+(?:-[A-Za-z0-9._]+)*-[BSK]\d+$/i;
   function linkIfId(v) { v = String(v); return ID_RE.test(v) ? '<a class="idlink" data-id="' + esc(v.toUpperCase()) + '">' + esc(v) + '</a>' : esc(v); }
   function thumbs(urls) { return '<div class="thumbs">' + urls.map(function (u) { return '<img loading="lazy" src="' + esc(u) + '" data-zoom="' + esc(u) + '" alt="">'; }).join('') + '</div>'; }
+  function isCounters(o) { var ks = Object.keys(o); return ks.length > 0 && ks.every(function (c) { return /^counter-\d+$/.test(c) && typeof o[c] === 'number'; }); }
+  // readable heading for the items of a list; falls back to  name [n]
+  function lineTitle(k, x, i) {
+    if (x && typeof x === 'object' && (k === 'lines' || k === 'Lot_Details') && (x.good !== undefined || x.qty !== undefined)) {
+      var src = x.spare ? T('lnSpare') + ' · ' + T('lot') + ' ' + (x.lotNumber || '---')
+        : (x.boxId || x.srsId) ? (x.boxId ? T('lnBox') : 'SRS') + ' ' + (x.boxId || x.srsId)
+        : T('lnLot') + ' ' + (x.lotNumber || (Array.isArray(x.lots) ? x.lots.join(', ') : '') || '---');
+      var good = x.good !== undefined ? x.good : x.qty, ng = x.ngTotal !== undefined ? x.ngTotal : null;
+      return (i + 1) + '. ' + src + ' · ' + good + ' ' + (x.good !== undefined ? T('good') : T('pcs')) + (ng !== null ? ' · ' + ng + ' NG' : '');
+    }
+    return k + ' [' + (i + 1) + ']';
+  }
   function rowsOf(obj) {
     var html = '';
     Object.keys(obj).filter(function (k) { return k !== '_id'; }).forEach(function (k) {
@@ -235,8 +247,13 @@
         if (arr && !v.some(function (x) { return x !== null && typeof x === 'object'; })) {
           html += '<div class="row' + (v.length ? '' : ' empty') + '"><span class="k">' + esc(k) + '</span><span class="v">' + (v.length ? v.map(function (x) { return linkIfId(showVal(x)); }).join(', ') : '---') + '</span></div>'; return;
         }
+        if (!arr && isCounters(v)) {      // defect counters: only the ones that are not 0
+          var nz = Object.keys(v).filter(function (c) { return Number(v[c]) !== 0; }).sort(function (a, b) { return parseInt(a.split('-')[1], 10) - parseInt(b.split('-')[1], 10); });
+          html += '<div class="row' + (nz.length ? '' : ' empty') + '"><span class="k">' + esc(k) + '</span><span class="v">' + (nz.length ? nz.map(function (c) { return esc(c + ': ' + v[c]); }).join('\n') : '0 (' + esc(T('noDefects')) + ')') + '</span></div>';
+          return;
+        }
         (arr ? v : [v]).forEach(function (x, i) {
-          html += '<div class="sub">' + esc(k) + (arr ? ' [' + (i + 1) + ']' : '') + '</div>';
+          html += '<div class="sub">' + (arr ? esc(lineTitle(k, x, i)) : esc(k)) + '</div>';
           html += x !== null && typeof x === 'object' ? '<div class="nest"><div class="rows">' + rowsOf(x) + '</div></div>' : '<div class="row"><span class="v">' + esc(String(x)) + '</span></div>';
         });
       } else if (isImg(v)) {
