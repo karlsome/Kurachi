@@ -160,6 +160,11 @@
             gap: 12px;
         }
 
+        .header-action-section .bt-tag { border: 1px solid var(--border); cursor: pointer; font-family: inherit; background: var(--bg-inset); color: var(--text-muted); font-size: 0.75rem; font-weight: 700; padding: 5px 10px; border-radius: var(--r-pill); white-space: nowrap; }
+        .bt-tag.ok { color: #15803d; }
+        .bt-tag.off { color: #b45309; }
+        .bt-tag.busy { color: var(--blue); }
+
         /* Language Selector */
         .language-selector {
             background: transparent;
@@ -2271,6 +2276,8 @@
         </div>
         <span class="freya-center-mark">Freya System v4</span>
         <div class="header-action-section">
+            <!-- Bluetooth printer chip (SCNA only: shown by DCP interactive SCNA.js) -->
+            <button type="button" class="status-tag bt-tag" id="btPrinterBtn" style="display:none"></button>
             <!-- Language Selector -->
             <div class="language-selector">
                 <select id="languageSelector">
@@ -5882,9 +5889,12 @@
 
     <!-- Core application dependencies -->
     <script src="i18n.js"></script>
+    <script src="qrcode.min.js"></script>
+    <script src="JsBarcode.code128.min.js"></script>
+    <script src="kensa-bt-print.js?v=bt7"></script>
     <script>
         // SCNA add-on: loaded ONLY for ?filter=SCNA, and before the backend so it can normalise the machine param.
-        if (new URLSearchParams(location.search).get('filter') === 'SCNA') document.write('<script src="DCP interactive SCNA.js"><\/script>');
+        if (new URLSearchParams(location.search).get('filter') === 'SCNA') document.write('<script src="DCP interactive SCNA.js?v=bt1"><\/script>');
     </script>
     <script src="DCP interactive backend.js"></script>
     <script src="html5-qrcode.min.js"></script>

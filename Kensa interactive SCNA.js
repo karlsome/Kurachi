@@ -1301,10 +1301,11 @@ window.serverURL = serverURL;
   }
   // pick the route for this print: Bluetooth when the paired printer answers, otherwise the mini-PC (throws if neither works)
   async function choosePrinter() {
-    var btErr = '';
-    if (btOn) {
+    var btErr = '', route = window.KensaBT ? KensaBT.getRoute() : 'auto';      // Settings > Print method: auto | bt | pc
+    if (route === 'bt' && !btOn) throw new Error('Bluetooth is not available on this device');
+    if (btOn && route !== 'pc') {
       try { setBt('connecting'); await KensaBT.connect(); setBt('ok'); return { bt: true, ip: null }; }
-      catch (e) { btErr = e.message || String(e); setBt(/not paired/i.test(btErr) ? 'unpaired' : 'off'); }
+      catch (e) { btErr = e.message || String(e); setBt(/not paired/i.test(btErr) ? 'unpaired' : 'off'); if (route === 'bt') throw new Error(btErr); }
     }
     try { return { bt: false, ip: await resolvePrinterIP() }; }
     catch (e) { throw new Error(btErr ? T('kensa_e_bt_and_pc', btErr, e.message) : e.message); }
@@ -1314,7 +1315,7 @@ window.serverURL = serverURL;
     try { await sendPrintBT(b, entry); }
     catch (e) {
       var msg = e.message || String(e);
-      if (e.afterSend) throw new Error(msg);                           // sent but unconfirmed: it may have printed, do not print a second one
+      if (e.afterSend || KensaBT.getRoute() === 'bt') throw new Error(msg);                           // sent but unconfirmed: it may have printed, do not print a second one
       var ip; try { ip = await resolvePrinterIP(); } catch (e2) { throw new Error(T('kensa_e_bt_and_pc', msg, e2.message)); }
       toast(T('kensa_t_bt_fallback', msg), 4000);
       await sendPrint(b, entry, ip);
@@ -1903,6 +1904,7 @@ window.serverURL = serverURL;
   function openSettings(startPage) {
     var PAGES = [
       { id: 'bt', label: T('kensa_set_bt'), title: T('kensa_set_bt_title'), render: renderBtPage },
+      { id: 'route', label: KensaBT.routeText('label'), title: KensaBT.routeText('title'), render: KensaBT.renderRoutePage },
       { id: 'ip', label: T('kensa_set_ip'), title: T('kensa_set_ip_title'), render: renderIpPage }
     ];
     var active = PAGES.some(function (p) { return p.id === startPage; }) ? startPage : PAGES[0].id, cleanup = null;

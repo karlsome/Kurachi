@@ -401,9 +401,49 @@
     return printCanvas(renderLabel(layout, data, overrides), opts);
   }
 
+
+  // ------------------------------------------------------------------ print route (Settings > Print method)
+  // 'auto' = Bluetooth first, mini-PC if it fails (default) | 'bt' = Bluetooth only | 'pc' = mini-PC only. Kept per tablet.
+  var ROUTE_KEY = 'kensaPrintRoute';
+  function getRoute() { try { var v = localStorage.getItem(ROUTE_KEY); return v === 'bt' || v === 'pc' ? v : 'auto'; } catch (e) { return 'auto'; } }
+  function setRoute(v) { try { localStorage.setItem(ROUTE_KEY, v === 'bt' || v === 'pc' ? v : 'auto'); } catch (e) { } }
+  var ROUTE_TEXT = {
+    label: { ja: '印刷方法', en: 'Print method', pt: 'Método de impressão' },
+    title: { ja: '印刷方法の設定', en: 'Print Method Settings', pt: 'Configurações do método de impressão' },
+    selected: { ja: '選択中', en: 'Selected', pt: 'Selecionada' },
+    auto: { ja: '自動', en: 'Auto', pt: 'Automático' },
+    auto_d: { ja: 'Bluetoothを優先し、失敗したらミニPCで印刷します', en: 'Bluetooth first, mini PC if it fails', pt: 'Bluetooth primeiro, mini PC se falhar' },
+    bt: { ja: 'Bluetoothのみ', en: 'Bluetooth only', pt: 'Somente Bluetooth' },
+    bt_d: { ja: 'ミニPCには切り替えません', en: 'Never switches to the mini PC', pt: 'Nunca muda para o mini PC' },
+    pc: { ja: 'ミニPCのみ', en: 'Mini PC only', pt: 'Somente mini PC' },
+    pc_d: { ja: 'Bluetoothは使いません', en: 'Bluetooth is not used', pt: 'Bluetooth não é usado' }
+  };
+  function routeText(k) {
+    var lang = 'ja';
+    try { lang = (typeof root.getCurrentLanguage === 'function' ? root.getCurrentLanguage() : localStorage.getItem('appLanguage')) || 'ja'; } catch (e) { }
+    var e = ROUTE_TEXT[k]; return e ? (e[lang] || e.en) : k;
+  }
+  // Settings page body: one card per route, saved as soon as it is tapped (uses the pages' CSS variables)
+  function renderRoutePage(body) {
+    var cur = getRoute();
+    body.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    body.innerHTML = '';
+    ['auto', 'bt', 'pc'].forEach(function (id) {
+      var on = id === cur, card = document.createElement('button');
+      card.type = 'button';
+      card.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:16px 18px;border-radius:var(--card-radius);cursor:pointer;font-family:inherit;text-align:left;box-shadow:var(--shadow-card);' +
+        (on ? 'background:var(--brand-soft);border:2px solid var(--brand);color:var(--brand-hover);' : 'background:var(--bg-surface);border:1px solid var(--border-strong);color:var(--text-main);');
+      card.innerHTML = '<span style="font-size:1.25rem;font-weight:800;"></span><span style="font-size:.875rem;font-weight:700;"></span><span style="font-size:.8125rem;font-weight:800;min-height:1.2em;"></span>';
+      var sp = card.querySelectorAll('span');
+      sp[0].textContent = routeText(id); sp[1].textContent = routeText(id + '_d'); sp[2].textContent = on ? routeText('selected') : '';
+      card.onclick = function () { setRoute(id); renderRoutePage(body); };
+      body.appendChild(card);
+    });
+  }
+
   root.KensaBT = {
     settings: settings, renderLabel: renderLabel, buildTspl: buildTspl, connect: connect, pick: pick, listPaired: listPaired, status: status, select: select, forget: forget, watch: watch, testPrint: testPrint,
-    printCanvas: printCanvas, printLayout: printLayout, HEAD_DOTS: HEAD_DOTS, _pack: pack,
+    printCanvas: printCanvas, printLayout: printLayout, getRoute: getRoute, setRoute: setRoute, routeText: routeText, renderRoutePage: renderRoutePage, HEAD_DOTS: HEAD_DOTS, _pack: pack,
     isSupported: function () { return !!(navigator.bluetooth && navigator.bluetooth.getDevices); },
   };
 })(typeof window !== 'undefined' ? window : this);
