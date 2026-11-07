@@ -74,6 +74,11 @@
         .header-title-section { display: flex; align-items: center; gap: 12px; }
         header h1 { font-size: 1.125rem; font-weight: 800; }
         .status-tag { font-size: 0.8125rem; font-weight: 700; padding: 5px 12px; border-radius: 6px; background: var(--blue-soft); color: var(--blue); }
+        .bt-tag { border: 0; cursor: pointer; font-family: inherit; background: var(--blue-soft); color: var(--text-muted); }
+        .bt-tag.ok { color: #15803d; }
+        .bt-tag.off { color: #b45309; }
+        .bt-tag.busy { color: var(--blue); }
+        #alertModal, #confirmModal { z-index: 10030; }   /* above the "i" sidebar and the settings screen */
         .freya-center-mark {
             position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
             font-size: 0.625rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-soft);
@@ -412,6 +417,7 @@
         </div>
         <span class="freya-center-mark">Freya System v4</span>
         <div class="header-action-section">
+            <button type="button" class="status-tag bt-tag" id="btPrinterBtn" style="display:none"></button>
             <span class="clock" id="clock">--:--</span>
             <div class="language-selector">
                 <select id="languageSelector">
@@ -658,8 +664,11 @@
 
     <script src="html5-qrcode.min.js"></script>
     <script src="i18n.js"></script>
-    <script src="SRS interactive i18n.js"></script>
-    <script src="SRS interactive SCNA.js"></script>
+    <script src="SRS interactive i18n.js?v=bt1"></script>
+    <script src="qrcode.min.js"></script>
+    <script src="JsBarcode.code128.min.js"></script>
+    <script src="kensa-bt-print.js?v=bt6"></script>
+    <script src="SRS interactive SCNA.js?v=bt1"></script>
 </body>
 
 </html>

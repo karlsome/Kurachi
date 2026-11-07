@@ -914,9 +914,14 @@ window.serverURL = serverURL;
     return { qtyLabel: mode === 'complete' ? cap : total, lines: lines, map: map };
   }
 
-  async function sendPrint(l, entry, ip) {
+  function labelOverrides(entry) {
     var ov = { qr_1: '{品番},' + entry.qty + ',{lotNumber},' + entry.srsId, box_id: entry.srsId, text_9: '{lotNumber} - ' + entry.srsId, text_6: String(entry.qty) };
     if (entry.status === 'draft') ov.text_10 = '仮';
+    return ov;
+  }
+
+  async function sendPrint(l, entry, ip) {
+    var ov = labelOverrides(entry);
     var prm = { filename: l.sebango, qty: '1', process: LABEL_PROCESS, overrides: JSON.stringify(ov) };
     if (entry.layoutId) prm.layoutId = entry.layoutId;
     var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 10000);
@@ -930,6 +935,101 @@ window.serverURL = serverURL;
     } finally { clearTimeout(timer); }
   }
 
+  // ------------------------------------------------------------
+  //  Direct Bluetooth printing to the D520BT (kensa-bt-print.js), same as Kensa interactive. The tablet draws the layout
+  //  itself and sends it to the printer; the mini-PC path above stays as the fallback. Needs Chrome with
+  //  chrome://flags/#enable-web-bluetooth-new-permissions-backend enabled and the printer chosen once (header button / Settings).
+  // ------------------------------------------------------------
+  var btOn = !!(window.KensaBT && KensaBT.isSupported());
+  var btBtn = $('btPrinterBtn'), btState = '';
+  function setBt(st, pct) {
+    btState = st; if (!btBtn || !btOn) return;
+    var key = { ok: 'srs_bt_ok', off: 'srs_bt_off', unpaired: 'srs_bt_unpaired', busy: 'srs_bt_busy', connecting: 'srs_bt_connecting' }[st];
+    btBtn.className = 'status-tag bt-tag ' + (st === 'connecting' ? 'busy' : st === 'unpaired' ? 'off' : st);
+    btBtn.textContent = T(key) + (st === 'busy' && pct != null ? ' ' + Math.round(pct * 100) + '%' : '');
+    btBtn.style.display = '';
+  }
+  async function refreshBt() {
+    if (!btOn) return;
+    setBt('connecting');
+    try { await KensaBT.connect(); setBt('ok'); }
+    catch (e) { setBt(/not paired/i.test(e.message || '') ? 'unpaired' : 'off'); }
+  }
+  if (btOn && btBtn) {
+    btBtn.onclick = function () { if (!printing) openSettings('bt'); };
+    setTimeout(refreshBt, 1500);
+  }
+
+  var layoutCache = {}, layoutLoadedAt = 0, recordCache = {};
+  async function loadLayoutBody(layoutId) {
+    var now = Date.now();
+    if (!layoutCache[layoutId] || now - layoutLoadedAt > 60000) {      // admin edits show up within a minute, like the print server cache
+      var r = await fetch(serverURL + '/api/scna-label-layouts?process=' + LABEL_PROCESS);
+      if (!r.ok) throw new Error('layout HTTP ' + r.status);
+      var list = await r.json(), next = {};
+      (Array.isArray(list) ? list : []).forEach(function (d) { if (d && d.layoutId && d.layout) next[d.layoutId] = d.layout; });
+      layoutCache = next; layoutLoadedAt = now;
+    }
+    if (!layoutCache[layoutId]) throw new Error('layout ' + layoutId + ' not found');
+    return layoutCache[layoutId];
+  }
+  async function loadItemRecord(sebango) {
+    var hit = recordCache[sebango];
+    if (hit && Date.now() - hit.at < 60000) return hit.rec;
+    var r = await fetch(serverURL + '/queries', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dbName: 'Sasaki_Coating_MasterDB', collectionName: 'masterDB', query: { 工場: FACTORY, 背番号: sebango } }) });
+    if (!r.ok) throw new Error('item HTTP ' + r.status);
+    var rows = await r.json();
+    if (!Array.isArray(rows) || !rows[0]) throw new Error('item ' + sebango + ' not found');
+    recordCache[sebango] = { at: Date.now(), rec: rows[0] };
+    return rows[0];
+  }
+  // the same field set the print server hands to the layout (print_DBprinter.py generate_label_pdf)
+  function labelData(rec) {
+    var d = {};
+    Object.keys(rec || {}).forEach(function (k) {
+      var v = rec[k];
+      if (v === null || v === undefined) d[k] = '';
+      else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') d[k] = String(v);
+    });
+    var n = new Date(), pad = function (x) { return (x < 10 ? '0' : '') + x; };
+    var lot = '' + n.getFullYear() + pad(n.getMonth() + 1) + pad(n.getDate());
+    var pn = String(rec['品番'] == null ? '' : rec['品番']).trim(), qty = String(rec['収容数'] == null ? '' : rec['収容数']).trim(), desc = String(rec['品名'] == null ? '' : rec['品名']).trim();
+    d.lotNumber = lot; d['品番'] = pn; d['収容数'] = qty; d['品名'] = desc;
+    d.productNumber = pn; d.qty = qty; d.description = desc; d.banumber = String(rec['背番号'] == null ? '' : rec['背番号']);
+    return d;
+  }
+  async function sendPrintBT(l, entry) {
+    if (!entry.layoutId) throw new Error('no layout');
+    var layout = await loadLayoutBody(entry.layoutId), rec = await loadItemRecord(l.sebango);
+    setBt('busy', 0);
+    try {
+      await KensaBT.printLayout(layout, labelData(rec), labelOverrides(entry), { onProgress: function (p) { setBt('busy', p); } });
+      setBt('ok');
+    } catch (e) { setBt('off'); throw e; }
+  }
+  // pick the route for this print: Bluetooth when the paired printer answers, otherwise the mini-PC (throws if neither works)
+  async function choosePrinter() {
+    var btErr = '';
+    if (btOn) {
+      try { setBt('connecting'); await KensaBT.connect(); setBt('ok'); return { bt: true, ip: null }; }
+      catch (e) { btErr = e.message || String(e); setBt(/not paired/i.test(btErr) ? 'unpaired' : 'off'); }
+    }
+    try { return { bt: false, ip: await resolvePrinterIP() }; }
+    catch (e) { throw new Error(btErr ? T('srs_e_bt_and_pc', btErr, e.message) : e.message); }
+  }
+  async function sendLabel(l, entry, pr) {
+    if (!pr.bt) return sendPrint(l, entry, pr.ip);
+    try { await sendPrintBT(l, entry); }
+    catch (e) {
+      var msg = e.message || String(e);
+      if (e.afterSend) throw new Error(msg);                           // sent but unconfirmed: it may have printed, do not print a second one
+      var ip; try { ip = await resolvePrinterIP(); } catch (e2) { throw new Error(T('srs_e_bt_and_pc', msg, e2.message)); }
+      toast(T('srs_t_bt_fallback', msg), 4000);
+      await sendPrint(l, entry, ip);
+    }
+  }
+
   async function printLabel(name, mode, noPrint) {
     if (printing) return false;
     var l = state.lanes[name];
@@ -938,13 +1038,13 @@ window.serverURL = serverURL;
     try {
       var pend = l.pendingPrint;
       if (!pend && mode === 'complete' && !toInt(l.cap)) return showAlert(T('srs_e_no_cap', l.hinban));
-      var layouts, ip = null, layoutId = null;
+      var layouts, ip = null, pr = null, layoutId = null;
       if (!noPrint) {
         try { layouts = await fetchPrintLayouts(l.sebango); } catch (e) { return showAlert(T('srs_e_server', e.message)); }
         if (!layouts.length) return showAlert(T('srs_e_no_layout'));
         layoutId = layouts.length > 1 ? await chooseLayout(layouts) : layouts[0].layoutId;
         if (!layoutId) return;
-        try { ip = await resolvePrinterIP(); } catch (e) { return showAlert(T('srs_e_printer', e.message)); }
+        try { pr = await choosePrinter(); ip = pr.ip; } catch (e) { return showAlert(T('srs_e_printer', e.message)); }
       }
 
       if (!pend) {
@@ -956,7 +1056,7 @@ window.serverURL = serverURL;
         };
         pend.payload.boxUid = pend.boxUid; save();
       }
-      pend.payload.layoutId = layoutId; pend.payload.printedBy = { tablet: MACHINE, printerIP: ip, noPrint: !!noPrint };
+      pend.payload.layoutId = layoutId; pend.payload.printedBy = { tablet: MACHINE, printerIP: ip, bluetooth: !!(pr && pr.bt), noPrint: !!noPrint };
 
       var box;
       try {
@@ -980,7 +1080,7 @@ window.serverURL = serverURL;
       renderLane(name); renderSidebar();
       if (noPrint) { toast(T('srs_t_registered', entry.srsId)); return true; }
       try {
-        await sendPrint(l, entry, ip);
+        await sendLabel(l, entry, pr);
         entry.printedOk = true; save(); renderLane(name);
         toast(T('srs_t_printed', entry.srsId));
       } catch (e) { showAlert(T('srs_e_print_fail', e.message, entry.srsId)); }
@@ -999,9 +1099,9 @@ window.serverURL = serverURL;
     var l = state.lanes[name], entry = l.printed[idx]; if (!entry) return;
     printing = true;
     try {
-      var ip;
-      try { ip = await resolvePrinterIP(); } catch (e) { return showAlert(T('srs_e_printer', e.message)); }
-      try { await sendPrint(l, entry, ip); entry.printedOk = true; save(); renderLane(name); toast(T('srs_t_printed', entry.srsId)); }
+      var pr;
+      try { pr = await choosePrinter(); } catch (e) { return showAlert(T('srs_e_printer', e.message)); }
+      try { await sendLabel(l, entry, pr); entry.printedOk = true; save(); renderLane(name); toast(T('srs_t_printed', entry.srsId)); }
       catch (e) { showAlert(T('srs_e_print_fail', e.message, entry.srsId)); }
     } finally { printing = false; }
   }
@@ -1392,6 +1492,190 @@ window.serverURL = serverURL;
   $('infoBtn').onclick = function () { toggleSidebar(); };
   $('sidebarClose').onclick = function () { toggleSidebar(false); };
   $('sidebarBackdrop').onclick = function () { toggleSidebar(false); };
+
+  // ============================================================
+  //  "i" sidebar > Settings (same as Kensa interactive): Bluetooth printer + mini-PC IP
+  // ============================================================
+  var SIG_STALE_MS = 8000;
+  function sigLevel(rssi) { return rssi >= -60 ? 4 : rssi >= -70 ? 3 : rssi >= -80 ? 2 : rssi >= -90 ? 1 : 0; }
+  function sigName(l) { return T(['srs_set_sig_none', 'srs_set_sig_weak', 'srs_set_sig_fair', 'srs_set_sig_good', 'srs_set_sig_best'][l]); }
+  function sigBars(level) {
+    var col = level >= 3 ? 'var(--brand)' : level === 2 ? 'var(--amber)' : 'var(--red)', h = '<span style="display:inline-flex;align-items:flex-end;gap:3px;height:24px;">';
+    for (var i = 1; i <= 4; i++) h += '<span style="width:6px;height:' + (6 + i * 4) + 'px;border-radius:2px;background:' + (i <= level ? col : 'var(--border-strong)') + ';"></span>';
+    return h + '</span>';
+  }
+  var SET_PRINTER_SVG = '<svg viewBox="0 0 64 64" width="44" height="44" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">' +
+    '<rect x="16" y="6" width="32" height="16"/><rect x="6" y="22" width="52" height="24" rx="4"/>' +
+    '<rect x="16" y="38" width="32" height="20" fill="#fff"/><circle cx="48" cy="30" r="2" fill="currentColor"/></svg>';
+
+  function openSettings(startPage) {
+    var PAGES = [
+      { id: 'bt', label: T('srs_set_bt'), title: T('srs_set_bt_title'), render: renderBtPage },
+      { id: 'ip', label: T('srs_set_ip'), title: T('srs_set_ip_title'), render: renderIpPage }
+    ];
+    var active = PAGES.some(function (p) { return p.id === startPage; }) ? startPage : PAGES[0].id, cleanup = null;
+
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(16,24,40,.45);display:flex;align-items:center;justify-content:center;z-index:10020;padding:20px;';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--card-radius);box-shadow:var(--shadow-pop);color:var(--text-main);width:min(820px,100%);height:min(560px,92vh);display:flex;flex-direction:column;gap:16px;padding:20px;';
+    box.innerHTML =
+      '<div style="display:flex;gap:16px;flex:1;min-height:0;">' +
+        '<div id="kSetNav" style="width:30%;min-width:150px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--card-radius);padding:10px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;"></div>' +
+        '<div style="flex:1;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--card-radius);padding:20px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;">' +
+          '<h3 id="kSetTitle" style="margin:0;font-size:1.0625rem;font-weight:800;text-align:center;color:var(--text-main);border-bottom:1px solid var(--border);padding-bottom:12px;"></h3>' +
+          '<div id="kSetBody"></div>' +
+        '</div>' +
+      '</div>' +
+      '<button type="button" id="kSetClose" class="btn btn-secondary btn-full">' + esc(T('srs_set_close')) + '</button>';
+    overlay.appendChild(box);
+    function close() {
+      if (cleanup) { cleanup(); cleanup = null; }
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      refreshBt();                                            // the header chip follows whatever was chosen here
+    }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+    $('kSetClose').onclick = close;
+
+    function renderBtPage(body) {
+      body.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+      if (!btOn) {
+        var FLAG_URL = 'chrome://flags/#enable-web-bluetooth-new-permissions-backend';
+        var step = function (n, k) { return '<li style="margin-bottom:6px;">' + esc(T(k)) + '</li>'; };
+        body.innerHTML = '<div style="padding:16px;border:1px solid var(--border-strong);border-radius:var(--card-radius);background:var(--bg-surface);font-weight:700;line-height:1.5;">' +
+          '<p style="margin:0 0 10px;">' + esc(T('srs_set_unsupported')) + '</p>' +
+          (window.isSecureContext === false ? '<p style="margin:0 0 10px;color:var(--red,#d92d20);">' + esc(T('srs_set_nohttps')) + '</p>' : '') +
+          '<button type="button" id="kFlagCopy" class="btn btn-secondary btn-full">' + esc(T('srs_set_flag_copy')) + '</button>' +
+          '<code style="display:block;margin:8px 0 12px;font-size:.75rem;word-break:break-all;color:var(--text-soft);">' + esc(FLAG_URL) + '</code>' +
+          '<ol style="margin:0;padding-left:20px;font-size:.9375rem;">' + step(1, 'srs_set_flag_s1') + step(2, 'srs_set_flag_s2') + step(3, 'srs_set_flag_s3') + step(4, 'srs_set_flag_s4') + '</ol></div>';
+        $('kFlagCopy').onclick = function () {
+          var done = function () { toast(T('srs_set_flag_copied'), 4000); };
+          try { navigator.clipboard.writeText(FLAG_URL).then(done, fallback); } catch (e) { fallback(); }
+          function fallback() {
+            var ta = document.createElement('textarea'); ta.value = FLAG_URL; document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); done(); } catch (e) { } document.body.removeChild(ta);
+          }
+        };
+        return;
+      }
+      body.innerHTML = '<div id="kBtList" style="display:flex;flex-direction:column;gap:12px;"></div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;"><button type="button" class="btn btn-secondary btn-grow" id="kBtSearch"></button><button type="button" class="btn btn-secondary btn-grow" id="kBtTest"></button></div>' +
+        '<button type="button" id="kBtAll" style="align-self:flex-start;border:0;background:none;color:var(--blue);font-weight:800;font-size:.8125rem;padding:4px 0;cursor:pointer;text-decoration:underline;"></button>' +
+        '<p style="font-size:.8125rem;font-weight:700;color:var(--text-soft);line-height:1.5;">' + esc(T('srs_set_hint')) + '</p>';
+      $('kBtSearch').textContent = '＋ ' + T('srs_set_search'); $('kBtTest').textContent = '🖨 ' + T('srs_set_test'); $('kBtAll').textContent = T('srs_set_search_all');
+
+      var sig = {}, paired = [], stopWatch = null, dead = false, renderTimer = null, tick = null, busy = false;
+      function paint() {
+        renderTimer = null; if (dead) return;
+        var host = $('kBtList'); if (!host) return;
+        if (!paired.length) { host.innerHTML = '<div style="padding:18px;border:1px dashed var(--border-strong);border-radius:var(--card-radius);background:var(--bg-surface);font-weight:700;color:var(--text-muted);text-align:center;line-height:1.5;">' + esc(T('srs_set_none')) + '</div>'; return; }
+        host.innerHTML = '';
+        paired.forEach(function (p) {
+          var g = sig[p.id], fresh = g && g.rssi != null && Date.now() - g.at < SIG_STALE_MS, level = fresh ? sigLevel(g.rssi) : 0;
+          var card = document.createElement('div');
+          card.setAttribute('role', 'button');
+          card.style.cssText = 'display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:var(--card-radius);cursor:pointer;box-shadow:var(--shadow-card);' +
+            (p.selected ? 'background:var(--brand-soft);border:2px solid var(--brand);color:var(--brand-hover);' : 'background:var(--bg-surface);border:1px solid var(--border-strong);color:var(--text-main);');
+          card.innerHTML = SET_PRINTER_SVG +
+            '<div style="flex:1;min-width:0;"><div style="font-size:1.25rem;font-weight:800;">' + esc(p.name || 'D520') + '</div>' +
+            '<div style="font-size:.8125rem;font-weight:700;min-height:1.2em;">' + (p.selected ? esc(T('srs_set_selected')) : '') + '</div></div>' +
+            '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">' + sigBars(level) +
+            '<span style="font-size:.8125rem;font-weight:800;">' + esc(sigName(level)) + (fresh ? ' · ' + g.rssi + ' dBm' : '') + '</span></div>' +
+            '<button type="button" data-rm style="border:1px solid var(--border-strong);background:var(--bg-surface);color:var(--text-muted);border-radius:var(--btn-radius);padding:8px 10px;font-weight:800;cursor:pointer;">✕</button>';
+          card.onclick = function (e) {
+            if (e.target.closest && e.target.closest('[data-rm]')) return;
+            KensaBT.select(p.id); paired.forEach(function (q) { q.selected = q.id === p.id; }); paint();
+          };
+          card.querySelector('[data-rm]').onclick = async function (e) {
+            e.stopPropagation();
+            if (!(await confirmBox(T('srs_set_forget'), T('srs_set_forget_q'), T('srs_set_forget')))) return;
+            await KensaBT.forget(p.id); delete sig[p.id]; await reload(true);
+          };
+          host.appendChild(card);
+        });
+      }
+      function schedulePaint() { if (!renderTimer && !dead) renderTimer = setTimeout(paint, 500); }
+      async function startWatch() {
+        if (dead || stopWatch) return;
+        try { stopWatch = await KensaBT.watch(function (u) { if (u.rssi != null) sig[u.id] = { rssi: u.rssi, at: u.at }; schedulePaint(); }); }
+        catch (e) { console.warn('signal watch failed', e); }
+      }
+      function stopNow() { if (stopWatch) { try { stopWatch(); } catch (e) { } stopWatch = null; } }
+      async function reload(restart) {
+        if (restart) stopNow();
+        try { paired = await KensaBT.listPaired(); } catch (e) { paired = []; }
+        paint(); if (restart) startWatch();
+      }
+      cleanup = function () { dead = true; stopNow(); clearInterval(tick); clearTimeout(renderTimer); };
+      tick = setInterval(paint, 1500);                        // ages out printers that stopped advertising
+
+      function search(all) {
+        return async function () {
+          if (busy || printing) return; busy = true; stopNow();
+          try { await KensaBT.pick({ all: all }); }
+          catch (e) { if (e && e.name !== 'NotFoundError') showAlert(T('srs_bt_pair_fail', e.message || String(e))); }
+          busy = false; await reload(true);
+        };
+      }
+      $('kBtSearch').onclick = search(false);
+      $('kBtAll').onclick = search(true);
+      $('kBtTest').onclick = async function () {
+        if (busy || printing) return; busy = true; printing = true; stopNow();
+        var btn = $('kBtTest'); btn.disabled = true; btn.textContent = T('srs_set_testing');
+        try {
+          var st = new Date(), hh = ('0' + st.getHours()).slice(-2) + ':' + ('0' + st.getMinutes()).slice(-2);
+          await KensaBT.testPrint(MACHINE + '  ' + hh, 'D520 BT');
+          toast(T('srs_set_test_ok'));
+        } catch (e) { showAlert(T('srs_set_test_fail', e.message || String(e))); }
+        printing = false; busy = false; btn.disabled = false; btn.textContent = '🖨 ' + T('srs_set_test');
+        await reload(true);
+      };
+      reload(true);
+    }
+
+    // read-only: the mini-PC this tablet falls back to
+    function renderIpPage(body) {
+      body.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+      body.innerHTML = '';
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:var(--card-radius);box-shadow:var(--shadow-card);';
+      var name = document.createElement('span'); name.style.cssText = 'font-size:1.25rem;font-weight:800;'; name.textContent = MACHINE;
+      var val = document.createElement('span'); val.style.cssText = 'font-size:1.25rem;font-weight:700;font-family:ui-monospace,Menlo,monospace;user-select:text;-webkit-user-select:text;'; val.textContent = printerIP || '…';
+      row.appendChild(name); row.appendChild(val); body.appendChild(row);
+      if (!printerIP) resolvePrinterIP().then(function (ip) { val.textContent = ip; }, function () { val.textContent = T('srs_set_ip_none'); });
+    }
+
+    function showPage(id) {
+      if (cleanup) { cleanup(); cleanup = null; }
+      active = id;
+      var nav = $('kSetNav'); nav.innerHTML = '';
+      PAGES.forEach(function (pg) {
+        var on = pg.id === active, b = document.createElement('button');
+        b.type = 'button'; b.textContent = pg.label;
+        b.style.cssText = 'padding:14px 10px;border-radius:var(--btn-radius);font-size:1rem;font-weight:800;cursor:pointer;font-family:inherit;' +
+          (on ? 'background:var(--brand);border:1px solid var(--brand);color:#fff;' : 'background:var(--bg-surface);border:1px solid var(--border-strong);color:var(--text-main);');
+        b.onclick = function () { showPage(pg.id); };
+        nav.appendChild(b);
+      });
+      var page = PAGES.filter(function (pg) { return pg.id === active; })[0];
+      $('kSetTitle').textContent = page.title;
+      page.render($('kSetBody'));
+    }
+    showPage(active);
+  }
+
+  function injectSettingsButton() {
+    var side = $('infoSidebar');
+    if (!side || document.getElementById('kSettingsBtn')) return;
+    var b = document.createElement('button');
+    b.type = 'button'; b.id = 'kSettingsBtn'; b.className = 'btn btn-secondary btn-full'; b.style.cssText = 'margin-top:auto;';
+    b.textContent = '⚙ ' + T('srs_set_settings');
+    document.addEventListener('languageChanged', function () { b.textContent = '⚙ ' + T('srs_set_settings'); });
+    b.onclick = function () { openSettings('bt'); };
+    side.appendChild(b);
+  }
+  injectSettingsButton();
 
   // ============================================================
   //  Init
