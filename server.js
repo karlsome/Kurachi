@@ -14415,7 +14415,7 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
           cycleRaw: null, lastCycleMs: null,
           stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null,
           lastLogMs: null, lastLogStatus: null, sessionEquipment: '',
-          worker: '', sebanggo: '', hinban: '', sebanggoAt: 0,
+          worker: '', sebanggo: '', hinban: '', sebanggoAt: 0, lotStartMs: 0,
           // Tablet session: 'Start time set' opens it, 'End time set' marks wrap-up, Submit/Reset closes it
           sessionStartMs: null, endTimeSet: false,
         });
@@ -14467,6 +14467,8 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         if (sessionEquip) m.sessionEquipment = sessionEquip;
         if (log.Worker_Name) m.worker = log.Worker_Name;
         if (log.背番号 && !isSetup && log.ms >= m.sebanggoAt) {
+          // First log of a new schedule (different 背番号, or the previous one was submitted/reset)
+          if (m.sebanggo !== log.背番号) m.lotStartMs = log.ms;
           m.sebanggo = log.背番号;
           m.hinban = log.品番 || '';
           m.sebanggoAt = log.ms;
@@ -14542,11 +14544,50 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       return toDigitalTwinNumber(config?.[machineId]?.pcPerCycle) ?? toDigitalTwinNumber(product.pcPerCycle);
     };
 
+    // ── SCNA: per-schedule cycle baseline ──
+    // The listener's cycle count only resets at 02:00, so on a schedule change the monitor kept showing the
+    // previous schedule's pieces. Remember the machine's cycle count when a new schedule starts and show the
+    // difference. Baseline missing (first time seen) => 0, i.e. unchanged until the next schedule change.
+    const lotBaseline = new Map();
+    if (factory.toUpperCase() === 'SCNA') {
+      const baseCol = masterDb.collection('digitalTwinLotBaseline');
+      try {
+        const baseDocs = await baseCol.find({ factory }).toArray();
+        const baseById = new Map(baseDocs.map((d) => [d.machine, d]));
+        const ops = [];
+        machines.forEach((m) => {
+          if (!m.hasCycleSensor || m.cycleRaw === null || !m.sebanggo || !m.lotStartMs) return;
+          if (m.lastCycleMs === null || m.lastCycleMs < cutoffMs) return;
+          const key = `${m.sebanggo}|${m.lotStartMs}`;
+          const doc = baseById.get(m.id);
+          let baseline = 0;
+          if (doc && doc.key === key) {
+            baseline = Number(doc.baseline) || 0;
+            if (m.cycleRaw < baseline) baseline = 0; // listener reset its count (02:00)
+            else { lotBaseline.set(m.id, baseline); return; }
+          } else if (doc) {
+            baseline = m.cycleRaw; // new schedule seen: start counting from now
+          }
+          lotBaseline.set(m.id, baseline);
+          ops.push({ updateOne: {
+            filter: { factory, machine: m.id },
+            update: { $set: { key, baseline, updatedAt: new Date() } },
+            upsert: true,
+          } });
+        });
+        if (ops.length) await baseCol.bulkWrite(ops, { ordered: false });
+      } catch (err) {
+        console.error('Digital twin lot baseline error:', err);
+      }
+    }
+
     // ── Per-machine status, accurate piece counts, and timeline ──
     const results = new Map();
     machines.forEach((m) => {
       const cycleIsToday = m.lastCycleMs !== null && m.lastCycleMs >= cutoffMs;
       const todayCycles = cycleIsToday ? m.cycleRaw : 0;
+      const isScna = factory.toUpperCase() === 'SCNA';
+      const lotCycles = isScna ? Math.max(0, todayCycles - (lotBaseline.get(m.id) || 0)) : todayCycles;
       const lastActivityMs = Math.max(cycleIsToday ? m.lastCycleMs : 0, m.lastLogMs || 0) || null;
 
       let status = 'off';
@@ -14604,20 +14645,23 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
 
       // Active / in-progress run calculation
       const activeCycles = (cycleIsToday && m.hasCycleSensor)
-        ? Math.max(0, todayCycles - totalCompletedShots)
+        ? (isScna ? (m.sebanggo ? lotCycles : 0) : Math.max(0, todayCycles - totalCompletedShots))
         : 0;
       const activePcPerCycle = resolvePcPerCycle(productBySebanggo.get(m.sebanggo), m.id);
       const activePieces = activeCycles > 0 && activePcPerCycle ? activeCycles * activePcPerCycle : 0;
 
       let pieces = null;
-      if (totalCompletedPieces > 0 || activePieces > 0) {
+      if (isScna) {
+        // Per-schedule only: the current schedule's cycles x pcPerCycle (nothing once it is submitted/reset)
+        pieces = activePieces > 0 ? activePieces : null;
+      } else if (totalCompletedPieces > 0 || activePieces > 0) {
         pieces = totalCompletedPieces + activePieces;
       } else if (todayCycles > 0 && activePcPerCycle) {
         pieces = todayCycles * activePcPerCycle;
       }
 
       // Display cycles: sensor count if available, otherwise total shots from press records
-      const displayCycles = m.hasCycleSensor ? todayCycles : totalCompletedShots;
+      const displayCycles = isScna ? activeCycles : (m.hasCycleSensor ? todayCycles : totalCompletedShots);
 
       // Active run object (if currently in progress)
       let activeRun = null;
