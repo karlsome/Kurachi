@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>粗利計算ツール</title>
+    <!-- SheetJS for Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- html2pdf.js for PDF export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <style>
+        :root {
+            --primary: #4F46E5;
+            --primary-hover: #4338CA;
+            --bg-color: #F3F4F6;
+            --card-bg: #FFFFFF;
+            --text-main: #1F2937;
+            --text-muted: #6B7280;
+            --border-color: #E5E7EB;
+            --success: #10B981;
+            --danger: #EF4444;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 2rem;
+            color: var(--primary);
+        }
+
+        .upload-container {
+            display: flex;
+            gap: 2rem;
+            width: 100%;
+            max-width: 900px;
+            margin-bottom: 2rem;
+        }
+
+        .upload-box {
+            flex: 1;
+            background: var(--card-bg);
+            border: 2px dashed var(--primary);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .upload-box:hover {
+            background: #EEF2FF;
+            transform: translateY(-2px);
+        }
+
+        .upload-box input[type="file"] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .upload-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-desc {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .status {
+            margin-top: 1rem;
+            font-weight: 500;
+        }
+
+        .status.success { color: var(--success); }
+        .status.error { color: var(--danger); }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);
+            display: none;
+        }
+
+        button:hover {
+            background-color: var(--primary-hover);
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        button.export-btn {
+            background-color: #10B981;
+            box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2);
+        }
+
+        button.export-btn:hover {
+            background-color: #059669;
+        }
+
+        button.export-pdf-btn {
+            background-color: #EF4444;
+            box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.2);
+        }
+
+        button.export-pdf-btn:hover {
+            background-color: #DC2626;
+        }
+
+        #results-container {
+            width: 100%;
+            max-width: 1200px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            display: none;
+        }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            padding: 1rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+
+        th, td {
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--border-color);
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        th {
+            background-color: #F9FAFB;
+            font-weight: 600;
+            color: var(--text-main);
+            text-align: center;
+        }
+
+        .code-cell {
+            text-align: left;
+            font-weight: 600;
+            background-color: #F9FAFB;
+        }
+        
+        .label-cell {
+            text-align: left;
+            font-weight: 500;
+            background-color: #F9FAFB;
+        }
+
+        .highlight-row {
+            background-color: #FEF3C7; /* Yellow highlight for 納品登録/発注受入登録 */
+        }
+    </style>
+</head>
+<body>
+
+    <h1>粗利計算ツール</h1>
+
+    <div class="upload-container">
+        <div class="upload-box" id="box-nouhin">
+            <div class="upload-title">納品登録</div>
+            <div class="upload-desc">「納品登録」が含まれるExcelファイルをアップロード</div>
+            <input type="file" id="file-nouhin" accept=".xlsx, .xls, .csv">
+            <div class="status" id="status-nouhin"></div>
+        </div>
+
+        <div class="upload-box" id="box-hacchu">
+            <div class="upload-title">発注受入登録</div>
+            <div class="upload-desc">「発注受入登録」が含まれるExcelファイルをアップロード</div>
+            <input type="file" id="file-hacchu" accept=".xlsx, .xls, .csv">
+            <div class="status" id="status-hacchu"></div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="btn-process">データ処理</button>
+        <button id="btn-export-excel" class="export-btn">Excelを出力</button>
+        <button id="btn-export-pdf" class="export-pdf-btn">PDFを出力</button>
+    </div>
+
+    <div id="results-container">
+        <div class="table-responsive" id="table-wrapper">
+            <!-- Table will be injected here -->
+        </div>
+    </div>
+
+    <script src="grossProfit.js"></script>
+</body>
+</html>

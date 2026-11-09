@@ -824,7 +824,20 @@ if (selectedFactory){
   document.getElementById('selected工場').value = selectedFactory;
   document.getElementById('nippoTitle').textContent=selectedFactory + "日報";
   console.log("kojo changed to: " + selectedFactory);
+
+  const counter27Box = document.getElementById('counter-box-27');
+  const counter28Box = document.getElementById('counter-box-28');
+  if (counter27Box && counter28Box) {
+    if (selectedFactory === '肥田瀬') {
+      counter27Box.style.display = 'none';
+      counter28Box.style.display = '';
+    } else {
+      counter27Box.style.display = '';
+      counter28Box.style.display = 'none';
+    }
+  }
 }
+
 
 
 
@@ -2096,9 +2109,86 @@ document.addEventListener("DOMContentLoaded", async function() {
   }
 });
 
+// --- 肥田瀬 非不良廃棄 Modal Logic ---
+function openHidasenDisposalModal() {
+  document.getElementById('hidasenDisposalModal').style.display = 'block';
+}
+
+function closeHidasenDisposalModal() {
+  document.getElementById('hidasenDisposalModal').style.display = 'none';
+}
+
+function updateHidasenTotal() {
+  const cat1 = parseInt(document.getElementById('hidasen-cat-1').value, 10) || 0;
+  const cat2 = parseInt(document.getElementById('hidasen-cat-2').value, 10) || 0;
+  const cat3 = parseInt(document.getElementById('hidasen-cat-3').value, 10) || 0;
+  const cat4 = parseInt(document.getElementById('hidasen-cat-4').value, 10) || 0;
+  const total = cat1 + cat2 + cat3 + cat4;
+  
+  const counterElement = document.getElementById('counter-28');
+  if (counterElement) {
+    counterElement.value = total;
+    localStorage.setItem(`${uniquePrefix}counter-28`, total);
+  }
+  updateTotal();
+}
+
+function incrementHidasenCat(categoryName) {
+  const map = {
+    '初回生産品': 'hidasen-cat-1',
+    '終物': 'hidasen-cat-2',
+    'サンプル': 'hidasen-cat-3',
+    '調整用': 'hidasen-cat-4'
+  };
+  const inputId = map[categoryName];
+  if (!inputId) return;
+  const inputEl = document.getElementById(inputId);
+  if (inputEl) {
+    let val = parseInt(inputEl.value, 10) || 0;
+    val += 1;
+    inputEl.value = val;
+    localStorage.setItem(`${uniquePrefix}${inputId}`, val);
+    updateHidasenTotal();
+  }
+}
+
+function decrementHidasenCat(categoryName) {
+  const map = {
+    '初回生産品': 'hidasen-cat-1',
+    '終物': 'hidasen-cat-2',
+    'サンプル': 'hidasen-cat-3',
+    '調整用': 'hidasen-cat-4'
+  };
+  const inputId = map[categoryName];
+  if (!inputId) return;
+  const inputEl = document.getElementById(inputId);
+  if (inputEl) {
+    let val = parseInt(inputEl.value, 10) || 0;
+    if (val > 0) {
+      val -= 1;
+      inputEl.value = val;
+      localStorage.setItem(`${uniquePrefix}${inputId}`, val);
+      updateHidasenTotal();
+    }
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (getQueryParam('filter') === '肥田瀬') {
+    const counter28 = document.getElementById('counter-28');
+    if (counter28) {
+      counter28.readOnly = true;
+    }
+  }
+});
+// ------------------------------------
+
 //function for plus minus button
 function incrementCounter(counterId) {
-  
+  if (counterId === 28 && getQueryParam('filter') === '肥田瀬') {
+    openHidasenDisposalModal();
+    return;
+  }
 
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
@@ -2117,7 +2207,10 @@ function incrementCounter(counterId) {
 }
 
 function decrementCounter(counterId) {
-  
+  if (counterId === 28 && getQueryParam('filter') === '肥田瀬') {
+    openHidasenDisposalModal();
+    return;
+  }
 
   const counterElement = document.getElementById(`counter-${counterId}`);
   let currentValue = parseInt(counterElement.value, 10);
@@ -2154,7 +2247,13 @@ function updateTotal() {
   document.getElementById('Total_NG').value = totalNG;
 
   // Calculate Total
-  const total = processQuantity - totalNG;
+  const selectedFactory = document.getElementById("selected工場").value;
+  let deduction = 0;
+  if (selectedFactory === "肥田瀬") {
+      const counter28 = document.getElementById('counter-28');
+      if (counter28) deduction = parseInt(counter28.value, 10) || 0;
+  }
+  const total = processQuantity - totalNG - deduction;
 
   // Update the Total field
   document.getElementById('total').value = total;
@@ -2328,6 +2427,7 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       Time_end: document.getElementById('End Time').value,
       材料ロット: document.getElementById('材料ロット').value,
       疵引処理数: parseInt(document.getElementById('counter-27').value, 10) || 0,
+      非不良廃棄: document.getElementById('counter-28') ? (parseInt(document.getElementById('counter-28').value, 10) || 0) : 0,
       疵引不良: parseInt(document.getElementById('counter-18').value, 10) || 0,
       加工不良: parseInt(document.getElementById('counter-19').value, 10) || 0,
       その他: parseInt(document.getElementById('counter-20').value, 10) || 0,
@@ -2342,6 +2442,15 @@ document.querySelector('form[name="contact-form"]').addEventListener('submit', a
       showAlert('背番号が必要です。 / Sebanggo is required.');
       document.getElementById('uploadingModal').style.display = 'none';
       return;
+    }
+
+    if (formData.工場 === '肥田瀬') {
+      formData.非不良廃棄_詳細 = {
+        '初回生産品': parseInt(document.getElementById('hidasen-cat-1') ? document.getElementById('hidasen-cat-1').value : 0, 10) || 0,
+        '終物': parseInt(document.getElementById('hidasen-cat-2') ? document.getElementById('hidasen-cat-2').value : 0, 10) || 0,
+        'サンプル': parseInt(document.getElementById('hidasen-cat-3') ? document.getElementById('hidasen-cat-3').value : 0, 10) || 0,
+        '調整用': parseInt(document.getElementById('hidasen-cat-4') ? document.getElementById('hidasen-cat-4').value : 0, 10) || 0
+      };
     }
 
     // ==================== VALIDATION SECTION ====================
@@ -5853,6 +5962,16 @@ window.openDirectNumericKeypad = function(inputId) {
         keypadTitle.textContent = '材料ロットを入力';
       } else if (inputId === 'ProcessQuantity') {
         keypadTitle.textContent = '加工数を入力';
+      } else if (inputId === 'hidasen-cat-1') {
+        keypadTitle.textContent = '初回生産品を入力';
+      } else if (inputId === 'hidasen-cat-2') {
+        keypadTitle.textContent = '終物を入力';
+      } else if (inputId === 'hidasen-cat-3') {
+        keypadTitle.textContent = 'サンプルを入力';
+      } else if (inputId === 'hidasen-cat-4') {
+        keypadTitle.textContent = '調整用を入力';
+      } else {
+        keypadTitle.textContent = '数値を入力';
       }
     }
     
@@ -6044,6 +6163,13 @@ window.confirmDirectNumericInput = function() {
       }
     }
     
+    // For hidasen-cat inputs, default empty value to 0
+    if (window.currentDirectInputId && window.currentDirectInputId.startsWith('hidasen-cat')) {
+      if (value === '') {
+        value = '0';
+      }
+    }
+    
     // Set the value to the target input
     targetInput.value = value;
     
@@ -6059,6 +6185,13 @@ window.confirmDirectNumericInput = function() {
     // Trigger the input event to handle any event listeners
     const event = new Event('input', { bubbles: true });
     targetInput.dispatchEvent(event);
+    
+    // Explicitly update hidasen total if hidasen category input
+    if (window.currentDirectInputId && window.currentDirectInputId.startsWith('hidasen-cat')) {
+      if (typeof updateHidasenTotal === 'function') {
+        updateHidasenTotal();
+      }
+    }
     
     window.closeDirectNumericKeypad();
   }
@@ -6352,6 +6485,24 @@ window.addEventListener('load', function() {
     
     console.log('Process Quantity input configured with direct keypad');
   }
+
+  // Configure Hidasen Non-Defective Disposal (非不良廃棄) inputs with direct keypad
+  ['hidasen-cat-1', 'hidasen-cat-2', 'hidasen-cat-3', 'hidasen-cat-4'].forEach(id => {
+    const inputEl = document.getElementById(id);
+    if (inputEl) {
+      inputEl.readOnly = true;
+      inputEl.style.cursor = 'pointer';
+      if (inputEl.addEventListener) {
+        inputEl.addEventListener('click', function() {
+          window.openDirectNumericKeypad(id);
+        });
+      } else {
+        inputEl.onclick = function() {
+          window.openDirectNumericKeypad(id);
+        };
+      }
+    }
+  });
 });
 
 // ===== END OF NUMERIC KEYPAD FUNCTIONALITY =====

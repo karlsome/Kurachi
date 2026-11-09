@@ -1,6 +1,14 @@
 // This is the COMBINED version of `server.js` with all `masterUserServer.js` routes ported into it.
 // Nothing from `masterUserServer.js` is lost — everything is now under the same server, same Express instance.
 // The port used will still be 3000 (same as original `server.js`) unless you change it below.
+const dns = require('dns');
+// Fix for iPhone hotspot / cellular tethering DNS SRV resolution failure (EBADRESP)
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+} catch (e) {
+  console.warn('⚠️ Could not set custom DNS servers:', e.message);
+}
+
 const jwt = require('jsonwebtoken');
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
@@ -14,6 +22,9 @@ const bodyParser = require('body-parser');
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const bcrypt = require("bcryptjs");
+const multer = require('multer');
+const os = require('os');
+const upload = multer({ dest: os.tmpdir() });
 
 // GEN-related imports
 const path = require('path');
@@ -22,11 +33,13 @@ const { extractGENTokens } = require('./gen-token-extractor');
 const fetch = require('node-fetch');
 const heicConvert = require('heic-convert');
 const https = require('https');
+// Workaround for Render NAT / Node-fetch dropping Keep-Alive connections to Google APIs
+https.globalAgent.keepAlive = false;
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 const app = express();
 const port = 3000;
-const REQUEST_BODY_LIMIT = '100mb';
+const REQUEST_BODY_LIMIT = '1000mb';
 
 app.use(cors());
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
@@ -46,6 +59,9 @@ const factoryConnections = new Map();
 
 // Store last scan data for each machine (for persistence)
 const machineLastScan = new Map();
+
+// Store active language for each machine (for multilingual displays)
+const machineLanguage = new Map();
 
 // Store machine player state and active controller ownership for each machine session
 const machinePlayerState = new Map();
@@ -180,6 +196,172 @@ function broadcastToFactory(factoryId, data) {
   console.log(`📡 Broadcasted to ${clients.length} factory TV client(s) on ${factoryId}:`, data);
 }
 
+// ============================================
+// Stop-call (call-leader) state per factory — drives the factory TV blinking.
+// factoryStopCalls: factory -> Map(machine -> { leader: {since}, box: {since}, material: {since} })
+// ============================================
+const factoryStopCalls = new Map();
+
+function buildStopCallPayload(factoryId) {
+  const machines = factoryStopCalls.get(factoryId) || new Map();
+  const active = [];
+  
+  machines.forEach((info, machine) => {
+    let earliest = Infinity;
+    if (info.leader && info.leader.since < earliest) earliest = info.leader.since;
+    if (info.stop && info.stop.since < earliest) earliest = info.stop.since;
+    if (info.box && info.box.since < earliest) earliest = info.box.since;
+    if (info.material && info.material.since < earliest) earliest = info.material.since;
+    if (info.quality && info.quality.since < earliest) earliest = info.quality.since;
+    
+    if (earliest !== Infinity) {
+      active.push({
+        machine,
+        since: earliest,
+        leader: !!info.leader,
+        stop: !!info.stop,
+        box: !!info.box,
+        material: !!info.material,
+        quality: !!info.quality,
+        zairyoSebanggo: info.material ? info.material.zairyoSebanggo : undefined
+      });
+    }
+  });
+  
+  active.sort((a, b) => a.since - b.since); // earliest call first → #1
+  return { type: 'stopcall', factory: factoryId, active };
+}
+
+// Heartbeat: keep factory TV SSE connections alive through proxies/idle
+// timeouts and let 24/7 displays detect a dead link. Prunes any client whose
+// write fails. Runs for the lifetime of the server.
+setInterval(() => {
+  const ping = `data: ${JSON.stringify({ type: 'ping', t: Date.now() })}\n\n`;
+  factoryConnections.forEach((clients) => {
+    for (let i = clients.length - 1; i >= 0; i--) {
+      try { clients[i].write(ping); }
+      catch (e) { clients.splice(i, 1); }
+    }
+  });
+}, 25000);
+
+// ============================================
+// Live machine status per factory (drives the TV's running 背番号 / break /
+// maintenance / idle display). Derived from the tablet-log stream and replayed
+// to TVs on (re)connect so an always-on display recovers instantly.
+// factory -> Map(equipment -> { sebanggo, hinban, worker, breakActive,
+//                               maintActive, runSince, modeSince, updatedAt })
+// ============================================
+const factoryMachineState = new Map();
+
+function getMachineStateMap(factory) {
+  if (!factoryMachineState.has(factory)) factoryMachineState.set(factory, new Map());
+  return factoryMachineState.get(factory);
+}
+
+// Update in-memory machine state from one tablet log. Returns the affected
+// equipment ids (a grouped 設備 like "OZNC08,OZNC10" updates both).
+function applyTabletLogToMachineState(logEntry) {
+  if (logEntry.AdditionalData && logEntry.AdditionalData.legacyApp) {
+    return [];
+  }
+  
+  const factory = logEntry.工場;
+  const equipmentRaw = logEntry.SpecificMachine || logEntry.AdditionalData?.specificMachine || logEntry.設備 || '';
+  if (!factory || !equipmentRaw) return [];
+  const ids = equipmentRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  const ts = Date.parse(logEntry.Timestamp) || Date.now();
+  const action = String(logEntry.Action || '');
+  const status = String(logEntry.Status || '');
+  const seb = logEntry.背番号 || '';
+  const hinban = logEntry.品番 || '';
+  const worker = logEntry.Worker_Name || '';
+  const map = getMachineStateMap(factory);
+
+  ids.forEach(id => {
+    const st = map.get(id) || {
+      sebanggo: '', hinban: '', worker: '',
+      breakActive: false, maintActive: false,
+      runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: 0, lastSeen: 0, totalNG: 0
+    };
+
+    const isRunning = () => !!st.sebanggo && !st.breakActive && !st.maintActive;
+    // Accumulate the current running segment, then pause production time
+    const pauseProd = () => { if (st.runSince > 0) { st.prodAccumMs += Math.max(0, ts - st.runSince); st.runSince = 0; } };
+    // Resume production time if the machine is running again
+    const resumeProd = () => { if (isRunning() && st.runSince === 0) st.runSince = ts; };
+    // A brand-new 背番号 → fresh production session
+    const startNewRun = (s) => {
+      st.sebanggo = s; st.hinban = hinban;
+      st.prodAccumMs = 0; st.runSince = ts;
+      st.breakActive = false; st.maintActive = false; st.modeSince = 0; st.totalNG = 0;
+    };
+
+    if (action.includes('Reset button pressed') ||
+        (action.includes('Submit button pressed') && status === 'Completed')) {
+      // Session finished/cleared → machine goes idle
+      st.sebanggo = ''; st.hinban = '';
+      st.breakActive = false; st.maintActive = false;
+      st.runSince = 0; st.modeSince = 0; st.prodAccumMs = 0; st.totalNG = 0;
+    } else if (action.includes('Break started')) {
+      if (seb && seb !== st.sebanggo) startNewRun(seb);
+      pauseProd();                                  // production clock pauses during break
+      st.breakActive = true; st.modeSince = ts;
+    } else if (action.includes('Break ended')) {
+      st.breakActive = false; st.modeSince = 0;
+      resumeProd();                                 // production clock continues
+    } else if (action.includes('Maintenance started')) {
+      if (seb && seb !== st.sebanggo) startNewRun(seb);
+      pauseProd();                                  // production clock pauses during maintenance
+      st.maintActive = true; st.modeSince = ts;
+    } else if (action.includes('Maintenance ended')) {
+      st.maintActive = false; st.modeSince = 0;
+      resumeProd();
+    } else if (seb) {
+      // Any normal action carrying a 背番号 means this machine is running it
+      if (seb !== st.sebanggo) startNewRun(seb);
+      else { st.hinban = hinban; resumeProd(); }
+    }
+
+    if (worker) st.worker = worker;
+    st.updatedAt = ts;
+    st.lastSeen = Date.now(); // server-receipt time, for the idle sweep
+    map.set(id, st);
+  });
+  return ids;
+}
+
+function machineStateView(id, st) {
+  if (!st) return { equipment: id, sebanggo: '', hinban: '', worker: '', mode: 'idle', prodAccumMs: 0, runSince: 0, modeSince: 0, totalNG: 0 };
+  const mode = st.maintActive ? 'maintenance'
+    : st.breakActive ? 'break'
+      : st.checkActive ? 'check'
+        : (st.sebanggo ? 'running' : 'idle');
+  return {
+    equipment: id,
+    sebanggo: st.sebanggo || '',
+    hinban: st.hinban || '',
+    worker: st.worker || '',
+    mode,
+    // Production elapsed = prodAccumMs + (now - runSince) while running.
+    prodAccumMs: st.prodAccumMs || 0,
+    runSince: (mode === 'running') ? (st.runSince || 0) : 0,
+    // Break/maintenance/check elapsed = now - modeSince.
+    modeSince: (mode === 'break' || mode === 'maintenance' || mode === 'check') ? (st.modeSince || 0) : 0,
+    totalNG: st.totalNG || 0,
+    deviceCount: st.activeDevices ? st.activeDevices.size : 0,
+    // SCNA only: physical CNC state reported by the machine's Python listener.
+    // Absent for every machine that never reported one, so other factories are unaffected.
+    ...(st.cnc ? { cnc: st.cnc } : {})
+  };
+}
+
+function buildMachineStatePayload(factory) {
+  const map = factoryMachineState.get(factory) || new Map();
+  const machines = Array.from(map.entries()).map(([id, st]) => machineStateView(id, st));
+  return { type: 'machine_state', factory, machines };
+}
+
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: {
@@ -200,19 +382,204 @@ app.get("/", (req, res) => {
 });
 
 // ============================================
-// SSE ROUTES - Machine Display Pages
+// SSE ROUTES - Machine Display Pages & Failsafe Group Sync
 // ============================================
 
+const machineGroupPairs = [
+  ['OZNC03', 'OZNC05'],
+  ['OZNC04', 'OZNC06'],
+  ['OZNC07', 'OZNC09'],
+  ['OZNC08', 'OZNC10']
+];
+
+async function getRelatedMachineIds(machineId = '') {
+  const normalized = normalizeMachineSessionKey(machineId);
+  const related = new Set();
+  
+  if (!normalized) return [];
+
+  const tokens = normalized.split(',').map(m => m.trim().toUpperCase()).filter(Boolean);
+  tokens.forEach(t => related.add(t));
+  related.add(normalized);
+
+  // Check known hardcoded machine pairs
+  for (const pair of machineGroupPairs) {
+    const pairKey = pair.join(',');
+    const hasAny = tokens.some(t => pair.includes(t)) || normalized === pairKey;
+    if (hasAny) {
+      pair.forEach(m => related.add(m));
+      related.add(pairKey);
+    }
+  }
+
+  // Also query setsubiDB for any grouped machine definitions containing this machine
+  try {
+    const masterDb = client.db("Sasaki_Coating_MasterDB");
+    const docs = await masterDb.collection("setsubiDB").find({
+      name: { $regex: new RegExp(`(^|,)${tokens.join('|')}($|,)`, 'i') }
+    }).toArray();
+
+    docs.forEach(doc => {
+      if (doc.name && doc.name.includes(',')) {
+        const parts = doc.name.split(',').map(m => m.trim().toUpperCase()).filter(Boolean);
+        parts.forEach(p => related.add(p));
+        related.add(parts.join(','));
+      }
+    });
+  } catch (err) {
+    // Known pairs fallback
+  }
+
+  return Array.from(related);
+}
+
+async function getAuthoritativeMachineScan(machineId) {
+  const relatedIds = await getRelatedMachineIds(machineId);
+
+  // 1. Check in-memory machineLastScan for any related ID (prefer most recent timestamp)
+  let bestInMemoryScan = null;
+  for (const id of relatedIds) {
+    const scan = machineLastScan.get(id);
+    if (scan && (scan.sebanggo || scan.zuban)) {
+      if (!bestInMemoryScan || (new Date(scan.timestamp) > new Date(bestInMemoryScan.timestamp))) {
+        bestInMemoryScan = scan;
+      }
+    }
+  }
+
+  // 2. Query MongoDB submittedDB.tabletLogDB for today (Primary Source of Truth)
+  try {
+    const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const submittedDb = client.db("submittedDB");
+    const tabletLogDB = submittedDb.collection("tabletLogDB");
+
+    const latestLogs = await tabletLogDB.find({
+      Date: todayStr,
+      $or: [
+        { 設備: { $in: relatedIds } },
+        { 設備_原形式: { $in: relatedIds } }
+      ]
+    }).sort({ _id: -1 }).limit(10).toArray();
+
+    if (latestLogs && latestLogs.length > 0) {
+      const topLog = latestLogs[0];
+      const action = String(topLog.Action || '');
+      const status = String(topLog.Status || '');
+
+      const isResetOrClear = action.includes('Reset') || 
+                             status === 'Reset' || 
+                             (action.includes('Submit') && status === 'Completed') ||
+                             action.includes('clear');
+
+      if (isResetOrClear) {
+        const logTime = new Date(topLog.Timestamp || (topLog.Date + 'T' + topLog.Time)).getTime();
+        const inMemTime = bestInMemoryScan ? new Date(bestInMemoryScan.timestamp).getTime() : 0;
+        
+        if (inMemTime > logTime + 5000) {
+          return { currentScan: bestInMemoryScan, isIdle: false, relatedIds };
+        } else {
+          relatedIds.forEach(id => machineLastScan.delete(id));
+          return { currentScan: null, isIdle: true, relatedIds };
+        }
+      }
+
+      // Find latest log with valid 背番号 or 図番
+      const activeLog = latestLogs.find(l => (l.背番号 || l.図番) && l.Status !== 'Reset');
+      if (activeLog) {
+        const logTime = new Date(activeLog.Timestamp || (activeLog.Date + 'T' + activeLog.Time)).getTime();
+        const inMemTime = bestInMemoryScan ? new Date(bestInMemoryScan.timestamp).getTime() : 0;
+
+        if (bestInMemoryScan && inMemTime > logTime) {
+          return { currentScan: bestInMemoryScan, isIdle: false, relatedIds };
+        }
+
+        const dbScanData = {
+          type: 'scan',
+          action: 'scan',
+          machineId: machineId,
+          sebanggo: activeLog.背番号 || '',
+          zuban: activeLog.図番 || '',
+          hinban: activeLog.品番 || '',
+          language: machineLanguage.get(machineId) || 'ja',
+          timestamp: activeLog.Timestamp || new Date().toISOString(),
+          additionalData: {
+            factory: activeLog.工場,
+            sessionID: activeLog.sessionID,
+            Worker_Name: activeLog.Worker_Name,
+            source: 'tabletLogDB'
+          }
+        };
+
+        // Cache in memory for all related IDs
+        relatedIds.forEach(id => machineLastScan.set(id, dbScanData));
+        return { currentScan: dbScanData, isIdle: false, relatedIds };
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ Error querying tabletLogDB for authoritative state:', err);
+  }
+
+  // 3. Fallback to in-memory scan if DB query produced nothing
+  if (bestInMemoryScan) {
+    return { currentScan: bestInMemoryScan, isIdle: false, relatedIds };
+  }
+
+  // 4. Fallback to factoryMachineState
+  for (const [factory, map] of factoryMachineState.entries()) {
+    for (const id of relatedIds) {
+      const st = map.get(id);
+      if (st && st.sebanggo) {
+        const stScan = {
+          type: 'scan',
+          action: 'scan',
+          machineId,
+          sebanggo: st.sebanggo,
+          zuban: '',
+          hinban: st.hinban || '',
+          timestamp: new Date().toISOString(),
+          additionalData: { factory, source: 'factoryMachineState' }
+        };
+        relatedIds.forEach(rid => machineLastScan.set(rid, stScan));
+        return { currentScan: stScan, isIdle: false, relatedIds };
+      }
+    }
+  }
+
+  return { currentScan: null, isIdle: true, relatedIds };
+}
+
+// Endpoint to get authoritative machine current scan state (with MongoDB failsafe)
+app.get("/api/machine-current-scan/:machineId", async (req, res) => {
+  try {
+    const rawMachine = req.params.machineId;
+    const result = await getAuthoritativeMachineScan(rawMachine);
+    res.json({
+      success: true,
+      machineId: rawMachine,
+      relatedMachines: result.relatedIds,
+      currentScan: result.currentScan,
+      isIdle: result.isIdle,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error(`❌ Error in /api/machine-current-scan/${req.params.machineId}:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Debug endpoint to check stored machine states
-app.get("/api/machine-state/:machineId", (req, res) => {
+app.get("/api/machine-state/:machineId", async (req, res) => {
   const machineId = normalizeMachineSessionKey(req.params.machineId);
-  const lastScan = machineLastScan.get(machineId);
+  const authState = await getAuthoritativeMachineScan(machineId);
+  const lastScan = authState.currentScan;
   const playerState = sanitizeMachinePlayerState(getOrCreateMachinePlayerState(machineId));
   
   res.json({
     machineId,
-    hasStoredData: machineLastScan.has(machineId),
+    relatedMachines: authState.relatedIds,
+    hasStoredData: !!lastScan,
     lastScan: lastScan || null,
+    isIdle: authState.isIdle,
     connectedClients: (machineConnections.get(machineId) || []).length,
     playerState,
   });
@@ -392,7 +759,7 @@ app.post('/api/machine-player/state', (req, res) => {
 });
 
 // SSE endpoint - clients connect here to receive real-time updates
-app.get("/sse/machine/:machineId", (req, res) => {
+app.get("/sse/machine/:machineId", async (req, res) => {
   const machineId = normalizeMachineSessionKey(req.params.machineId);
   
   // Set headers for SSE
@@ -410,13 +777,21 @@ app.get("/sse/machine/:machineId", (req, res) => {
   console.log(`✅ New SSE connection established for ${machineId}. Total clients: ${machineConnections.get(machineId).length}`);
   
   // Send initial connection message
-  res.write(`data: ${JSON.stringify({ type: 'connected', machineId, timestamp: new Date().toISOString() })}\n\n`);
+  const currentMachineLang = machineLanguage.get(machineId) || machineLastScan.get(machineId)?.additionalData?.language || 'ja';
+  res.write(`data: ${JSON.stringify({ type: 'connected', machineId, language: currentMachineLang, timestamp: new Date().toISOString() })}\n\n`);
   
-  // Send last scan data if available (for persistence on page reload)
-  if (machineLastScan.has(machineId)) {
-    const lastScan = machineLastScan.get(machineId);
-    console.log(`📤 Sending last scan data to new client for ${machineId}:`, lastScan);
-    res.write(`data: ${JSON.stringify(lastScan)}\n\n`);
+  // Send authoritative last scan data if available (for persistence on page reload)
+  try {
+    const authState = await getAuthoritativeMachineScan(machineId);
+    if (authState.currentScan) {
+      console.log(`📤 Sending authoritative scan to new client for ${machineId}:`, authState.currentScan);
+      res.write(`data: ${JSON.stringify(authState.currentScan)}\n\n`);
+    } else if (authState.isIdle) {
+      console.log(`📤 Sending clear/idle state to new client for ${machineId}`);
+      res.write(`data: ${JSON.stringify({ type: 'clear', action: 'clear', machineId, timestamp: new Date().toISOString() })}\n\n`);
+    }
+  } catch (err) {
+    console.warn(`⚠️ Error sending initial scan data for ${machineId}:`, err);
   }
   
   // Handle client disconnect
@@ -452,7 +827,13 @@ app.get("/sse/factory/:factoryId", (req, res) => {
   
   // Send initial connection message
   res.write(`data: ${JSON.stringify({ type: 'connected', factoryId, timestamp: new Date().toISOString() })}\n\n`);
-  
+
+  // Send the current stop-call state so a freshly-loaded TV blinks the right machines
+  res.write(`data: ${JSON.stringify(buildStopCallPayload(factoryId))}\n\n`);
+
+  // Send the current machine status (running 背番号 / break / maintenance / idle)
+  res.write(`data: ${JSON.stringify(buildMachineStatePayload(factoryId))}\n\n`);
+
   // Handle client disconnect
   req.on('close', () => {
     const clients = factoryConnections.get(factoryId) || [];
@@ -464,16 +845,449 @@ app.get("/sse/factory/:factoryId", (req, res) => {
   });
 });
 
+// Tablet → server: a machine started or cleared a call-leader (stop) request.
+// Broadcasts the full active set to the factory TV(s) so they can rank/blink.
+const handleStopCall = (req, res) => {
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch (_) { }
+  } else if (body && typeof body === 'object') {
+    const keys = Object.keys(body);
+    if (keys.length === 1 && keys[0].startsWith('{') && keys[0].endsWith('}')) {
+      try { body = JSON.parse(keys[0]); } catch (_) { }
+    }
+  }
+  const factory = String(body?.factory || '').trim();
+  const machine = String(body?.machine || '').trim().toUpperCase();
+  const action = String(body?.action || '').trim();
+  const callType = String(body?.callType || 'leader').trim();
+
+  if (!factory || !machine) {
+    return res.status(400).json({ error: "factory and machine are required" });
+  }
+  if (action !== 'activate' && action !== 'clear') {
+    return res.status(400).json({ error: "action must be 'activate' or 'clear'" });
+  }
+
+  if (!factoryStopCalls.has(factory)) factoryStopCalls.set(factory, new Map());
+  const machines = factoryStopCalls.get(factory);
+
+  // A tablet machine id may be grouped, e.g. "OZNC04,OZNC06" — apply to each.
+  const ids = machine.split(',').map(m => m.trim()).filter(Boolean);
+  let changed = false;
+  ids.forEach(id => {
+    let info = machines.get(id) || {};
+    
+    if (action === 'activate') {
+      if (!info[callType]) {
+        info[callType] = { since: Date.now() };
+        if (callType === 'material' && req.body?.zairyoSebanggo) {
+          info[callType].zairyoSebanggo = String(req.body.zairyoSebanggo).trim();
+        }
+        changed = true;
+      }
+      machines.set(id, info);
+    } else {
+      if (info[callType]) {
+        delete info[callType];
+        changed = true;
+      }
+      
+      if (Object.keys(info).length === 0) {
+        machines.delete(id);
+      } else {
+        machines.set(id, info);
+      }
+    }
+  });
+
+  const payload = buildStopCallPayload(factory);
+  if (changed) {
+    broadcastToFactory(factory, payload);
+    console.log(`🟥 stop-call ${action} (${callType}) for ${factory}/${ids.join(',')} → ${payload.active.length} active`);
+  }
+  res.json({ ok: true, active: payload.active });
+};
+app.post("/api/stop-call", handleStopCall);
+app.post("/notifyStopCall", handleStopCall);
+
+// Tablet → server: periodic state re-assert. Keeps the live machine state
+// alive (idle sweep below) and, after a server restart when memory is empty,
+// re-establishes a machine's state without any DB read. Does NOT clobber state
+// the live tablet-log stream is already maintaining — it just refreshes
+// liveness in that case.
+app.post("/api/machine-assert", (req, res) => {
+  const factory = String(req.body?.工場 || req.body?.factory || '').trim();
+  const equipmentRaw = String(req.body?.設備 || req.body?.machine || '').trim();
+  if (!factory || !equipmentRaw) {
+    return res.status(400).json({ error: "工場 and 設備 are required" });
+  }
+  const ids = equipmentRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  const seb = String(req.body?.背番号 || '');
+  const hinban = String(req.body?.品番 || '');
+  const mode = String(req.body?.mode || 'idle');
+  const modeStartedAt = Number(req.body?.modeStartedAt) || 0;
+  const runStartedAt = Number(req.body?.runStartedAt) || 0;
+  const totalNG = Number(req.body?.totalNG) || 0;
+  const pageInstanceId = String(req.body?.pageInstanceId || '');
+  const now = Date.now();
+  const map = getMachineStateMap(factory);
+  const updated = [];
+
+  ids.forEach(id => {
+    let st = map.get(id);
+    if (!st) {
+      // Recovery: server has no record (e.g., after a restart) → adopt the
+      // tablet's snapshot as the source of truth.
+      st = {
+        sebanggo: '', hinban: '', worker: '',
+        breakActive: false, maintActive: false, checkActive: false,
+        runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: now, lastSeen: now,
+        activeDevices: new Map()
+      };
+      if (mode === 'check') {
+        st.checkActive = true;
+        st.modeSince = modeStartedAt || now;
+      } else if (mode !== 'idle' && seb) {
+        st.sebanggo = seb; st.hinban = hinban;
+        if (mode === 'break') { st.breakActive = true; st.modeSince = modeStartedAt || now; }
+        else if (mode === 'maintenance') { st.maintActive = true; st.modeSince = modeStartedAt || now; }
+        else { st.runSince = runStartedAt || now; } // running
+      }
+      map.set(id, st);
+      updated.push(id);
+    } else {
+      // The server already has a record.
+      if (mode === 'idle') {
+        if (st.sebanggo || st.runSince > 0 || st.breakActive || st.maintActive || st.checkActive) {
+          st.sebanggo = '';
+          st.hinban = '';
+          st.breakActive = false;
+          st.maintActive = false;
+          st.checkActive = false;
+          st.runSince = 0;
+          st.modeSince = 0;
+          st.prodAccumMs = 0;
+          if (!updated.includes(id)) updated.push(id);
+        }
+      } else if (mode === 'running') {
+        let changed = false;
+        if (seb && st.sebanggo !== seb) {
+          st.sebanggo = seb;
+          st.hinban = hinban;
+          changed = true;
+        }
+        if (st.breakActive || st.maintActive || st.checkActive) {
+          st.breakActive = false;
+          st.maintActive = false;
+          st.checkActive = false;
+          changed = true;
+        }
+        if (st.runSince === 0) {
+          st.runSince = runStartedAt || now;
+          changed = true;
+        }
+        if (changed && !updated.includes(id)) updated.push(id);
+      } else if (mode === 'break') {
+        let changed = false;
+        if (!st.breakActive || st.modeSince !== (modeStartedAt || now)) {
+          st.breakActive = true;
+          st.maintActive = false;
+          st.checkActive = false;
+          st.modeSince = modeStartedAt || now;
+          changed = true;
+        }
+        if (seb && st.sebanggo !== seb) {
+          st.sebanggo = seb;
+          st.hinban = hinban;
+          changed = true;
+        }
+        if (changed && !updated.includes(id)) updated.push(id);
+      } else if (mode === 'maintenance') {
+        let changed = false;
+        if (!st.maintActive || st.modeSince !== (modeStartedAt || now)) {
+          st.maintActive = true;
+          st.breakActive = false;
+          st.checkActive = false;
+          st.modeSince = modeStartedAt || now;
+          changed = true;
+        }
+        if (seb && st.sebanggo !== seb) {
+          st.sebanggo = seb;
+          st.hinban = hinban;
+          changed = true;
+        }
+        if (changed && !updated.includes(id)) updated.push(id);
+      } else if (mode === 'check') {
+        if (!st.checkActive || st.modeSince !== (modeStartedAt || now)) {
+          st.checkActive = true;
+          st.breakActive = false;
+          st.maintActive = false;
+          st.modeSince = modeStartedAt || now;
+          if (!updated.includes(id)) updated.push(id);
+        }
+      } else if (st.checkActive) {
+        st.checkActive = false;
+        st.modeSince = 0;
+        if (!updated.includes(id)) updated.push(id);
+      }
+
+      // Tablet Reload Protection: Clear ghost STOP if tablet asserts cycleStopActive is false
+      if (req.body?.cycleStopActive === false) {
+        const calls = factoryStopCalls.get(factory);
+        if (calls && calls.has(id)) {
+          const info = calls.get(id);
+          if (info && info.stop) {
+            delete info.stop;
+            if (Object.keys(info).length === 0) calls.delete(id);
+            const payload = buildStopCallPayload(factory);
+            broadcastToFactory(factory, payload);
+            console.log(`🧹 Cleared ghost STOP status for ${factory}/${id} (tablet verified cycleStopActive=false)`);
+          }
+        }
+      }
+
+      // Enforce the tablet's authoritative time!
+      // The tablet sends runStartedAt adjusted exactly for all breaks and maintenance.
+      if (mode === 'running' && runStartedAt > 0) {
+        const serverElapsed = (st.prodAccumMs || 0) + (st.runSince ? (now - st.runSince) : 0);
+        const authoritativeElapsed = Math.max(0, now - runStartedAt);
+        
+        // If drifted by more than 15 seconds, forcibly snap to the tablet's exact mathematical reality
+        if (Math.abs(serverElapsed - authoritativeElapsed) > 15000) {
+          st.prodAccumMs = 0;
+          st.runSince = runStartedAt;
+          if (!updated.includes(id)) updated.push(id);
+        }
+      }
+    }
+    
+    if (!st.activeDevices) st.activeDevices = new Map();
+    if (pageInstanceId) st.activeDevices.set(pageInstanceId, now);
+    
+    // Prune stale devices
+    const oldDeviceCount = st.activeDevices.size;
+    for (const [pId, ts] of st.activeDevices.entries()) {
+        if (now - ts > 45000) st.activeDevices.delete(pId);
+    }
+    const newDeviceCount = st.activeDevices.size;
+    
+    if (oldDeviceCount !== newDeviceCount && !updated.includes(id)) {
+        updated.push(id);
+    }
+    
+    // Update totalNG and flag for broadcast if it changed
+    const oldTotalNG = st.totalNG || 0;
+    st.totalNG = totalNG;
+    if (oldTotalNG !== totalNG && !updated.includes(id)) {
+      updated.push(id);
+    }
+    
+    // Always refresh liveness (prevents the idle sweep from idling an active machine)
+    st.lastSeen = now;
+  });
+
+  if (updated.length) {
+    broadcastToFactory(factory, {
+      type: 'machine_state', factory,
+      machines: updated.map(id => machineStateView(id, map.get(id)))
+    });
+  }
+  res.json({ ok: true });
+});
+
+// ============================================
+// SCNA physical CNC state (source of truth = machine's Python listener).
+// The listener POSTs {factory, machine, state, reason, since, online} on every
+// change plus a keepalive. The tablet stays the source of truth for leader call,
+// break, maintenance and cycle end; this only adds a separate `cnc` field to the
+// existing machine_state broadcast. Pauses are logged to Mongo (scnaPauseLogDB).
+// ============================================
+const CNC_STATE_STALE_MS = 45000;       // no heartbeat for this long -> state becomes OFFLINE
+const CNC_PAUSE_LOG_COLLECTION = 'scnaPauseLogDB';
+const CNC_VALID_STATES = new Set(['CUTTING', 'PAUSED', 'DRAG / TRAVEL', 'IDLE / STOPPED', 'UNKNOWN', 'OFFLINE', 'POWER_OFF']);
+
+function cncPauseLogCollection() {
+  return client.db('Sasaki_Coating_MasterDB').collection(CNC_PAUSE_LOG_COLLECTION);
+}
+
+// Pause-log writes are chained per machine so overlapping heartbeats cannot double-insert.
+const cncPauseQueues = new Map();
+function enqueueCncPauseWrite(key, fn) {
+  const next = (cncPauseQueues.get(key) || Promise.resolve()).then(fn).catch((e) => {
+    console.error(`❌ pause log write failed for ${key}:`, e.message);
+  });
+  cncPauseQueues.set(key, next);
+  return next;
+}
+
+// Open a pause record or keep the existing one alive. After a server restart the derived start
+// time can differ by a few ms/seconds, so an open record within 10s of it counts as the same pause.
+function logCncPauseHeartbeat(factory, machine, startedAt, reason, sebanggo, now) {
+  return enqueueCncPauseWrite(`${factory}/${machine}`, async () => {
+    const col = cncPauseLogCollection();
+    const open = await col.findOne({
+      factory, machine, endedAt: null,
+      startedAt: { $gte: new Date(startedAt - 10000), $lte: new Date(startedAt + 10000) }
+    });
+    if (open) {
+      await col.updateOne({ _id: open._id }, { $set: { reason, lastSeenAt: new Date(now) } });
+      return;
+    }
+    // Any other still-open record for this machine is stale (e.g. missed resume): close it first.
+    await closeCncPauseLogNow(factory, machine, startedAt, true);
+    await col.insertOne({
+      factory, machine, startedAt: new Date(startedAt), endedAt: null, durationMs: null,
+      reason, sebanggo: sebanggo || '', lastSeenAt: new Date(now), interrupted: false
+    });
+  });
+}
+
+// Close any open pause for this machine. endedAt defaults to now.
+async function closeCncPauseLogNow(factory, machine, endedAtMs, interrupted = false) {
+  const col = cncPauseLogCollection();
+  const open = await col.find({ factory, machine, endedAt: null }).toArray();
+  for (const doc of open) {
+    const end = Math.max(endedAtMs, doc.startedAt.getTime());
+    await col.updateOne(
+      { _id: doc._id, endedAt: null },
+      { $set: { endedAt: new Date(end), durationMs: end - doc.startedAt.getTime(), interrupted } }
+    );
+  }
+}
+function closeCncPauseLog(factory, machine, endedAtMs, interrupted = false) {
+  return enqueueCncPauseWrite(`${factory}/${machine}`, () => closeCncPauseLogNow(factory, machine, endedAtMs, interrupted));
+}
+
+app.post('/api/machine-physical-state', (req, res) => {
+  const factory = String(req.body?.factory || '').trim();
+  const machine = String(req.body?.machine || '').trim().toUpperCase();
+  const state = String(req.body?.state || '').trim().toUpperCase();
+  const reason = String(req.body?.reason || '').trim();
+  if (!factory || !machine) return res.status(400).json({ error: 'factory and machine are required' });
+  // SCNA only for now: keeps this feature away from the DCP / 小瀬 data path.
+  if (factory.toUpperCase() !== 'SCNA') return res.status(400).json({ error: 'only SCNA is supported' });
+  if (!CNC_VALID_STATES.has(state)) return res.status(400).json({ error: 'invalid state' });
+
+  const now = Date.now();
+  const elapsedRaw = Number(req.body?.elapsedMs);
+  const elapsedMs = Number.isFinite(elapsedRaw) ? Math.min(Math.max(0, elapsedRaw), 24 * 3600 * 1000) : 0;
+
+  const map = getMachineStateMap(factory);
+  const st = map.get(machine) || {
+    sebanggo: '', hinban: '', worker: '',
+    breakActive: false, maintActive: false,
+    runSince: 0, modeSince: 0, prodAccumMs: 0, updatedAt: 0, lastSeen: 0, totalNG: 0
+  };
+  const prev = st.cnc || null;
+  const prevState = prev ? prev.state : null;
+  const prevReason = prev ? prev.reason : '';
+  const prevSince = prev ? prev.since : 0;
+
+  // `since` is computed on this server's clock. While the state is unchanged it stays fixed;
+  // a PAUSED reason change (operator <-> gate) is still the same pause.
+  const sameState = prevState === state && prevState !== 'OFFLINE';
+  const since = sameState && prevSince ? prevSince : now - elapsedMs;
+  st.cnc = { state, reason: state === 'PAUSED' ? reason : '', since, receivedAt: now };
+  map.set(machine, st);
+
+  const changed = prevState !== state || prevReason !== st.cnc.reason;
+  if (changed) {
+    broadcastToFactory(factory, {
+      type: 'machine_state', factory,
+      machines: [machineStateView(machine, st)]
+    });
+  }
+
+  // Pause log: open/keep-alive while PAUSED, close on any other state. First heartbeat
+  // after a server restart (prev === null) also closes stale open records.
+  if (state === 'PAUSED') {
+    logCncPauseHeartbeat(factory, machine, since, reason, st.sebanggo, now);
+  } else if (prevState === null || prevState === 'PAUSED') {
+    closeCncPauseLog(factory, machine, now, false);
+  }
+
+  res.json({ ok: true });
+});
+
+// Stale sweep: a listener that stops reporting (PC off, network down) must not leave a
+// machine looking paused/cutting forever. Marks it OFFLINE and closes any open pause.
+setInterval(() => {
+  const now = Date.now();
+  const map = factoryMachineState.get('SCNA');
+  if (!map) return;
+  const updated = [];
+  map.forEach((st, id) => {
+    if (!st.cnc || st.cnc.state === 'OFFLINE') return;
+    if (now - (st.cnc.receivedAt || 0) <= CNC_STATE_STALE_MS) return;
+    const wasPaused = st.cnc.state === 'PAUSED';
+    const lastSeen = st.cnc.receivedAt || now;
+    st.cnc = { state: 'OFFLINE', reason: '', since: lastSeen, receivedAt: st.cnc.receivedAt };
+    updated.push(id);
+    if (wasPaused) closeCncPauseLog('SCNA', id, lastSeen, true);
+  });
+  if (updated.length) {
+    broadcastToFactory('SCNA', {
+      type: 'machine_state', factory: 'SCNA',
+      machines: updated.map(id => machineStateView(id, map.get(id)))
+    });
+  }
+}, 15000);
+
+// Idle sweep: if a machine hasn't been seen (no tablet log AND no re-assert)
+// for a while, its tablet is off/closed — show it as idle rather than stale.
+setInterval(() => {
+  const now = Date.now();
+  const STALE_MS = 600000; // 10 min — tablets sleep during production; recover on wake
+  factoryMachineState.forEach((map, factory) => {
+    const updated = [];
+    map.forEach((st, id) => {
+      let needsUpdate = false;
+      
+      // Prune active devices
+      let oldDeviceCount = st.activeDevices ? st.activeDevices.size : 0;
+      if (st.activeDevices) {
+        for (const [pId, ts] of st.activeDevices.entries()) {
+            if (now - ts > 45000) st.activeDevices.delete(pId);
+        }
+      }
+      if ((st.activeDevices ? st.activeDevices.size : 0) !== oldDeviceCount) {
+          needsUpdate = true;
+      }
+      
+      const mode = st.maintActive ? 'maintenance' : st.breakActive ? 'break' : (st.sebanggo ? 'running' : 'idle');
+      if (mode !== 'idle' && (now - (st.lastSeen || st.updatedAt || 0)) > STALE_MS) {
+        st.sebanggo = ''; st.hinban = '';
+        st.breakActive = false; st.maintActive = false;
+        st.runSince = 0; st.modeSince = 0; st.prodAccumMs = 0;
+        if (st.activeDevices) st.activeDevices.clear();
+        needsUpdate = true;
+      }
+      
+      if (needsUpdate) {
+        updated.push(id);
+      }
+    });
+    if (updated.length) {
+      broadcastToFactory(factory, {
+        type: 'machine_state', factory,
+        machines: updated.map(id => machineStateView(id, map.get(id)))
+      });
+    }
+  });
+}, 60000);
+
 // API endpoint to broadcast scan data to specific machine(s)
 // Supports both single machines (OZNC09) and grouped machines (OZNC04,OZNC06)
 app.post("/api/broadcast-scan", async (req, res) => {
-  const { machineId, sebanggo, hinban, timestamp, additionalData } = req.body;
+  const { machineId, sebanggo, hinban, zuban, timestamp, additionalData } = req.body;
   
-  // Allow empty sebanggo only if action is 'clear'
-  const isClearAction = additionalData?.action === 'clear';
+  // Allow empty sebanggo/zuban only if action is 'clear' or 'language_change'
+  const isClearAction = additionalData?.action === 'clear' || req.body.action === 'clear';
+  const isLanguageAction = additionalData?.action === 'language_change' || req.body.action === 'language_change';
   
-  if (!machineId || (!sebanggo && !isClearAction)) {
-    return res.status(400).json({ error: "machineId and sebanggo are required (unless action is 'clear')" });
+  if (!machineId || (!sebanggo && !zuban && !isClearAction && !isLanguageAction)) {
+    return res.status(400).json({ error: "machineId and sebanggo/zuban are required (unless action is 'clear' or 'language_change')" });
   }
   
   // Parse machine IDs: handle both "OZNC09" and "OZNC04,OZNC06"
@@ -485,31 +1299,59 @@ app.post("/api/broadcast-scan", async (req, res) => {
   if (machineIds.length === 0) {
     return res.status(400).json({ error: "Invalid machineId format" });
   }
+
+  // Expand with any related group machine peers (e.g. OZNC04 <-> OZNC06)
+  const allTargetMachineIds = new Set();
+  for (const mid of machineIds) {
+    const peers = await getRelatedMachineIds(mid);
+    peers.forEach(p => allTargetMachineIds.add(p));
+  }
+  const expandedMachineIds = Array.from(allTargetMachineIds);
   
-  console.log(`📡 Broadcasting to machine(s): ${machineIds.join(', ')}`);
+  console.log(`📡 Broadcasting to machine(s) and group peers: ${expandedMachineIds.join(', ')} (clear: ${isClearAction}, langChange: ${isLanguageAction})`);
   
   // For each machine, create and store scan data
-  machineIds.forEach(normalizedMachineId => {
+  expandedMachineIds.forEach(normalizedMachineId => {
+    const incomingLang = additionalData?.language || req.body.language;
+    if (incomingLang) {
+      machineLanguage.set(normalizedMachineId, incomingLang);
+    }
+    const currentMachineLang = incomingLang || machineLanguage.get(normalizedMachineId) || 'ja';
+
     const normalizedSessionKey = machineIds.join(',');
     const scanData = {
-      type: 'scan',
+      type: isClearAction ? 'clear' : (isLanguageAction ? 'language_change' : 'scan'),
+      action: isClearAction ? 'clear' : (isLanguageAction ? 'language_change' : 'scan'),
       machineId: normalizedSessionKey,
       sebanggo,
+      zuban,
       hinban: hinban || '',
+      language: currentMachineLang,
       timestamp: timestamp || new Date().toISOString(),
-      additionalData: additionalData || {}
+      additionalData: {
+        ...(additionalData || (isClearAction ? { action: 'clear' } : {})),
+        language: currentMachineLang
+      }
     };
     
     // Store last scan for persistence (or clear it if action is 'clear')
     if (isClearAction) {
       machineLastScan.delete(normalizedMachineId);
       console.log(`🗑️ Cleared last scan data for ${normalizedMachineId}`);
-    } else if (sebanggo && hinban) {
-      // Only store if we have valid sebanggo and hinban
+    } else if (isLanguageAction) {
+      const existingScan = machineLastScan.get(normalizedMachineId);
+      if (existingScan) {
+        existingScan.language = currentMachineLang;
+        if (!existingScan.additionalData) existingScan.additionalData = {};
+        existingScan.additionalData.language = currentMachineLang;
+      }
+      console.log(`🌐 Language preference updated for ${normalizedMachineId}: ${currentMachineLang}`);
+    } else if (sebanggo || zuban) {
+      // Store whenever valid sebanggo OR zuban exists
       machineLastScan.set(normalizedMachineId, scanData);
-      console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, hinban });
+      console.log(`💾 Stored last scan for ${normalizedMachineId}:`, { sebanggo, zuban, hinban, language: currentMachineLang });
     } else {
-      console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo or hinban`);
+      console.log(`⚠️ Skipping storage for ${normalizedMachineId} - missing sebanggo/zuban`);
     }
     
     // Broadcast to all clients listening to this specific machine
@@ -517,7 +1359,45 @@ app.post("/api/broadcast-scan", async (req, res) => {
   });
   
   // ✅ Insert log to tabletLogDB in parallel with SSE broadcast
-  if (sebanggo && hinban) {
+  if (isClearAction) {
+    try {
+      await client.connect();
+      const database = client.db("submittedDB");
+      const tabletLogDB = database.collection("tabletLogDB");
+      
+      const currentDate = new Date();
+      const dateYYYYMMDD = currentDate.toISOString().split('T')[0]; // yyyy-mm-dd
+      const timeHHMMSS = currentDate.toTimeString().split(' ')[0]; // HH:mm:ss
+      
+      // Extract 工場 and sessionID from additionalData
+      const 工場 = additionalData?.工場 || additionalData?.factory || '';
+      const sessionID = additionalData?.sessionID || '';
+      const Worker_Name = additionalData?.Worker_Name || additionalData?.workerName || additionalData?.worker || '';
+      
+      for (const normalizedMachineId of machineIds) {
+        const logEntry = {
+          sessionID: sessionID,
+          背番号: '',
+          図番: '',
+          品番: '',
+          工場: 工場,
+          設備: normalizedMachineId,
+          設備_原形式: machineId.toUpperCase(),
+          Worker_Name,
+          Action: 'clear',
+          Status: 'Reset',
+          Timestamp: currentDate.toISOString(),
+          Date: dateYYYYMMDD,
+          Time: timeHHMMSS,
+          AdditionalData: { action: 'clear' }
+        };
+        await tabletLogDB.insertOne(logEntry);
+      }
+      console.log(`📝 Tablet clear/reset logs inserted for ${machineIds.length} machine(s) (Action: clear, Status: Reset)`);
+    } catch (error) {
+      console.error('❌ Error inserting tablet clear log:', error);
+    }
+  } else if ((sebanggo || zuban) && hinban) {
     try {
       await client.connect();
       const database = client.db("submittedDB");
@@ -541,6 +1421,7 @@ app.post("/api/broadcast-scan", async (req, res) => {
         const logEntry = {
           sessionID: sessionID,
           背番号: sebanggo,
+          図番: zuban,
           品番: hinban,
           工場: 工場,
           設備: normalizedMachineId,
@@ -858,6 +1739,16 @@ app.post("/api/tablet-log", async (req, res) => {
 
     if (!insertResult.duplicate && logEntry.工場) {
       broadcastToFactory(logEntry.工場, broadcastPayload);
+      // Update + broadcast live machine status (running 背番号 / break / maint / idle)
+      const affected = applyTabletLogToMachineState(logEntry);
+      if (affected.length) {
+        const map = factoryMachineState.get(logEntry.工場);
+        broadcastToFactory(logEntry.工場, {
+          type: 'machine_state',
+          factory: logEntry.工場,
+          machines: affected.map(id => machineStateView(id, map.get(id)))
+        });
+      }
     }
 
     res.json({
@@ -980,6 +1871,30 @@ async function ensureProductPdfIndexes() {
 
 ensureProductPdfIndexes().catch((error) => {
   console.error("❌ Failed to ensure productPDFsDB indexes:", error);
+});
+
+let materialPdfIndexesEnsured = false;
+
+async function ensureMaterialPdfIndexes() {
+  if (materialPdfIndexesEnsured) return;
+
+  await client.connect();
+  const database = client.db(DB_NAME);
+  const materialPDFsDB = database.collection("materialPDFsDB");
+
+  await materialPDFsDB.createIndexes([
+    { key: { pdfType: 1, isActive: 1, uploadedAt: -1 } },
+    { key: { pdfType: 1, "図番Array": 1, isActive: 1 } },
+    { key: { "図番Array": 1, isActive: 1 } },
+    { key: { isActive: 1, deletedAt: -1 } }
+  ]);
+
+  materialPdfIndexesEnsured = true;
+  console.log("✅ materialPDFsDB indexes ensured");
+}
+
+ensureMaterialPdfIndexes().catch((error) => {
+  console.error("❌ Failed to ensure materialPDFsDB indexes:", error);
 });
 
 // Check for existing PDFs before upload
@@ -1166,6 +2081,83 @@ app.post("/api/upload-product-pdf", async (req, res) => {
 });
 
 // Upload converted image for PDF
+app.post("/api/upload-maintenance-image", async (req, res) => {
+  try {
+    const { factory, equipment, date, timestamp, id, base64, sebanggo } = req.body;
+
+    if (!base64 || !factory || !equipment || !date || !timestamp || !id) {
+      return res.status(400).json({ error: "Missing required fields for maintenance image upload" });
+    }
+
+    const bucket = admin.storage().bucket();
+    const buffer = Buffer.from(base64, "base64");
+    const downloadToken = "masterDBToken69";
+
+    const fileName = `${sebanggo || "NO_SEBANGGO"}_${date}_${timestamp}_${id}_maintenanceImage.jpg`;
+    const filePath = `maintenance/${factory}/${equipment}/${fileName}`;
+    const file = bucket.file(filePath);
+
+    await uploadToFirebaseWithRetry(file, buffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: { firebaseStorageDownloadTokens: downloadToken }
+      },
+      validation: false
+    });
+
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+    console.log(`✅ Uploaded maintenance image successfully: ${publicUrl}`);
+    res.json({
+      success: true,
+      url: publicUrl,
+      message: "Maintenance image uploaded successfully"
+    });
+  } catch (error) {
+    console.error("❌ Error uploading maintenance image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
+// Upload material label image
+app.post("/api/upload-material-label-image", async (req, res) => {
+  try {
+    const { factory, equipment, date, timestamp, id, base64, sebanggo } = req.body;
+
+    if (!base64 || !factory || !equipment || !date || !timestamp || !id) {
+      return res.status(400).json({ error: "Missing required fields for material label image upload" });
+    }
+
+    const bucket = admin.storage().bucket();
+    const buffer = Buffer.from(base64, "base64");
+    const downloadToken = "masterDBToken69";
+
+    const fileName = `${sebanggo || "NO_SEBANGGO"}_${date}_${timestamp}_${id}_materialLabelImage.jpg`;
+    const filePath = `materialLabel/${factory}/${equipment}/${fileName}`;
+    const file = bucket.file(filePath);
+
+    await uploadToFirebaseWithRetry(file, buffer, {
+      metadata: {
+        contentType: "image/jpeg",
+        metadata: { firebaseStorageDownloadTokens: downloadToken }
+      },
+      validation: false
+    });
+
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+    console.log(`✅ Uploaded material label image successfully: ${publicUrl}`);
+    res.json({
+      success: true,
+      url: publicUrl,
+      message: "Material label image uploaded successfully"
+    });
+  } catch (error) {
+    console.error("❌ Error uploading material label image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
 app.post("/api/upload-pdf-image", async (req, res) => {
   try {
     const { documentId, imageBase64, pdfType } = req.body;
@@ -1220,6 +2212,34 @@ app.post("/api/upload-pdf-image", async (req, res) => {
   }
 });
 
+// Proxy file/image download to avoid client-side CORS issues and ensure attachment download
+app.get("/api/download-proxy", async (req, res) => {
+  try {
+    const fileUrl = req.query.url;
+    const filename = req.query.filename || "download";
+
+    if (!fileUrl) {
+      return res.status(400).send("Missing url query param");
+    }
+
+    const fetchRes = await fetch(fileUrl);
+    if (!fetchRes.ok) {
+      return res.status(fetchRes.status).send(`Failed to fetch file: ${fetchRes.statusText}`);
+    }
+
+    const contentType = fetchRes.headers.get("content-type") || "application/octet-stream";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+
+    const arrayBuffer = await fetchRes.arrayBuffer();
+    return res.send(Buffer.from(arrayBuffer));
+  } catch (err) {
+    console.error("❌ Download proxy error:", err);
+    return res.status(500).send("Error downloading file");
+  }
+});
+
 // Get PDFs by 背番号
 app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
   try {
@@ -1260,6 +2280,199 @@ app.get("/api/product-pdfs/:sebanggo", async (req, res) => {
 
   } catch (error) {
     console.error("❌ Error fetching product PDFs:", error);
+    res.status(500).json({ error: "Error fetching PDFs", details: error.message });
+  }
+});
+
+// Check for existing Material PDFs before upload
+app.post("/api/check-existing-material-pdfs", async (req, res) => {
+  try {
+    const { pdfType, 図番Array } = req.body;
+    
+    if (!pdfType || !図番Array) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Check which materials already have PDFs of this type
+    const existingPDFs = await materialPDFsDB.find({
+      pdfType,
+      図番Array: { $in: 図番Array },
+      isActive: true
+    }).project({ 図番Array: 1, uploadedAt: 1, uploadedBy: 1, fileName: 1 }).toArray();
+
+    // Build conflict map
+    const conflictMap = {};
+    existingPDFs.forEach(pdf => {
+      pdf.図番Array.forEach(zuban => {
+        if (図番Array.includes(zuban)) {
+          if (!conflictMap[zuban]) conflictMap[zuban] = [];
+          conflictMap[zuban].push({
+            fileName: pdf.fileName,
+            uploadedAt: pdf.uploadedAt,
+            uploadedBy: pdf.uploadedBy
+          });
+        }
+      });
+    });
+
+    res.json({ conflicts: conflictMap });
+  } catch (error) {
+    console.error("❌ Error checking existing material PDFs:", error);
+    res.status(500).json({ error: "Error checking existing PDFs", details: error.message });
+  }
+});
+
+// Upload Material PDF File
+app.post("/api/upload-material-pdf", async (req, res) => {
+  try {
+    const { pdfType, 図番Array, pdfBase64, fileName, uploadedBy, resolutions, excludedMaterialIds = [] } = req.body;
+    
+    if (!pdfType || !図番Array || !pdfBase64 || !fileName) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const validTypes = ["作業条件表", "その他1", "その他2"];
+    if (!validTypes.includes(pdfType)) {
+      return res.status(400).json({ error: "Invalid PDF type" });
+    }
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+    
+    // Convert base64 to buffer
+    const pdfBuffer = Buffer.from(pdfBase64.split(',')[1] || pdfBase64, 'base64');
+    const timestamp = Date.now();
+    const storageFileName = `${pdfType}_${timestamp}_${fileName}`;
+    const pdfFile = admin.storage().bucket().file(`materialPDFs/${pdfType}/${storageFileName}`);
+    
+    await pdfFile.save(pdfBuffer, {
+      metadata: {
+        contentType: 'application/pdf',
+        metadata: { firebaseStorageDownloadTokens: 'masterDBToken69' }
+      },
+      public: true
+    });
+
+    const pdfURL = `https://storage.googleapis.com/${pdfFile.bucket.name}/${encodeURIComponent(pdfFile.name)}?alt=media&token=masterDBToken69`;
+
+    const newDocument = {
+      pdfType,
+      図番Array,
+      fileName,
+      pdfURL,
+      imageURL: null,
+      uploadedBy,
+      uploadedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isActive: true,
+      excludedMaterialIds,
+    };
+
+    const result = await materialPDFsDB.insertOne(newDocument);
+    _invalidateMaterialPDFsCache('upload-material-pdf');
+
+    res.status(200).json({
+      success: true,
+      documentId: result.insertedId,
+      message: "Material PDF uploaded successfully",
+    });
+
+  } catch (error) {
+    console.error("❌ Error uploading material PDF:", error);
+    res.status(500).json({ error: "Error uploading PDF", details: error.message });
+  }
+});
+
+// Upload converted image for Material PDF
+app.post("/api/upload-material-pdf-image", async (req, res) => {
+  try {
+    const { documentId, imageBase64, pdfType } = req.body;
+    
+    if (!documentId || !imageBase64 || !pdfType) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    const imageBuffer = Buffer.from(imageBase64.split(',')[1] || imageBase64, 'base64');
+    const timestamp = Date.now();
+    const imageFileName = `${pdfType}_${documentId}_${timestamp}.jpg`;
+    const imageFile = admin.storage().bucket().file(`materialPDFs/images/${pdfType}/${imageFileName}`);
+    
+    await imageFile.save(imageBuffer, {
+      metadata: {
+        contentType: 'image/jpeg',
+        metadata: { firebaseStorageDownloadTokens: 'masterDBToken69' }
+      },
+      public: true
+    });
+
+    const imageURL = `https://storage.googleapis.com/${imageFile.bucket.name}/${encodeURIComponent(imageFile.name)}?alt=media&token=masterDBToken69`;
+
+    await materialPDFsDB.updateOne(
+      { _id: new ObjectId(documentId) },
+      { $set: { imageURL, updatedAt: new Date().toISOString() } }
+    );
+
+    _invalidateMaterialPDFsCache('upload-material-pdf-image');
+
+    res.status(200).json({
+      success: true,
+      message: "Image uploaded successfully",
+      imageURL
+    });
+
+  } catch (error) {
+    console.error("❌ Error uploading material PDF image:", error);
+    res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
+// Get PDFs by 図番
+app.get("/api/material-pdfs/:zuban", async (req, res) => {
+  try {
+    const { zuban } = req.params;
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Find all active PDFs that include this 図番
+    const pdfs = await materialPDFsDB.find({
+      図番Array: zuban,
+      isActive: true
+    }).project({
+      pdfType: 1,
+      図番Array: 1,
+      fileName: 1,
+      pdfURL: 1,
+      imageURL: 1,
+      uploadedBy: 1,
+      uploadedAt: 1
+    }).toArray();
+
+    // Organize by type
+    const result = {
+      作業条件表: pdfs.find(p => p.pdfType === "作業条件表") || null,
+      "その他1": pdfs.find(p => p.pdfType === "その他1") || null,
+      "その他2": pdfs.find(p => p.pdfType === "その他2") || null,
+    };
+
+    res.json(result);
+
+  } catch (error) {
+    console.error("❌ Error fetching material PDFs:", error);
     res.status(500).json({ error: "Error fetching PDFs", details: error.message });
   }
 });
@@ -1783,6 +2996,546 @@ setInterval(cleanupOldTrash, 24 * 60 * 60 * 1000); // Every 24 hours
 // Run cleanup on server start
 cleanupOldTrash();
 
+
+// ==========================================
+// MATERIAL PDFS 
+// ==========================================
+// Get all PDFs by type
+app.get("/api/material-pdfs-by-type/:pdfType", async (req, res) => {
+  const { pdfType } = req.params;
+  const includeHinban = req.query.includeHinban === '1';
+  const searchQuery = String(req.query.q || '').trim();
+  const processFilter = String(req.query.model || '').trim();
+  const sortField = String(req.query.sortField || 'uploadedAt');
+  const sortDir = req.query.sortDir === 'asc' ? 1 : -1;
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+
+  const _material_pdfCacheKey = `materialpdfs:${pdfType}:${page}:${limit}:${includeHinban}:${searchQuery}:${processFilter}:${sortField}:${sortDir}`;
+  let _material_pdfInflightResolve, _material_pdfInflightReject;
+
+  // Validate pdfType before touching cache
+  const validTypes = ["作業条件表", "その他1", "その他2"];
+  if (!validTypes.includes(pdfType)) {
+    return res.status(400).json({ error: "Invalid PDF type" });
+  }
+
+  // Cache HIT
+  const _material_pdfCached = _materialPDFsCache.get(_material_pdfCacheKey);
+  if (_material_pdfCached && (Date.now() - _material_pdfCached.ts) < _MASTER_DB_TTL) {
+    console.log(`📦 materialPDFs cache HIT: ${_material_pdfCacheKey}`);
+    return res.json(_material_pdfCached.data);
+  }
+
+  // Stampede guard
+  const _material_pdfExisting = _materialPDFsInflight.get(_material_pdfCacheKey);
+  if (_material_pdfExisting) {
+    const _r = await _material_pdfExisting.catch(() => null);
+    if (_r) return res.json(_r);
+  }
+  const _material_pdfInflightPromise = new Promise((resolve, reject) => { _material_pdfInflightResolve = resolve; _material_pdfInflightReject = reject; });
+  _materialPDFsInflight.set(_material_pdfCacheKey, _material_pdfInflightPromise);
+
+  try {
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    const filter = { pdfType, isActive: true };
+    const skip = (page - 1) * limit;
+
+    const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const tokens = searchQuery ? searchQuery.split(/[\s,]+/).filter(Boolean) : [];
+    const regexes = tokens.map((token) => new RegExp(escapeRegex(token), "i"));
+
+    const needsLookup = includeHinban || regexes.length > 0 || Boolean(processFilter);
+    const sortMap = {
+      zuban: "図番Array",
+      hinban: "materialDocs.品番",
+      model: "materialDocs.工程コード",
+      fileName: "fileName",
+      uploader: "uploadedBy",
+      uploadedAt: "uploadedAt",
+      updatedAt: "updatedAt"
+    };
+
+    let sortKey = sortMap[sortField] || "uploadedAt";
+    if (!needsLookup && sortKey.startsWith("materialDocs")) {
+      sortKey = "uploadedAt";
+    }
+
+    const sortStage = { [sortKey]: sortDir };
+    let items = [];
+    let total = 0;
+
+    if (!needsLookup) {
+      const totalCount = await materialPDFsDB.countDocuments(filter);
+      total = totalCount;
+      items = await materialPDFsDB.find(filter)
+        .project({
+          pdfType: 1,
+          図番Array: 1,
+          fileName: 1,
+          pdfURL: 1,
+          imageURL: 1,
+          uploadedBy: 1,
+          uploadedAt: 1,
+          updatedAt: 1
+        })
+        .sort(sortStage)
+        .skip(skip)
+        .limit(limit)
+        .toArray();
+    } else {
+      const pipeline = [{ $match: filter }];
+
+      pipeline.push({
+        $lookup: {
+          from: "materialMasterDB3",
+          localField: "図番Array",
+          foreignField: "図番",
+          pipeline: [{ $project: { 図番: 1, 品番: 1, 工程コード: 1, _id: 1 } }],
+          as: "materialDocs"
+        }
+      });
+
+      // Filter out explicitly excluded materials
+      pipeline.push({
+        $addFields: {
+          materialDocs: {
+            $filter: {
+              input: "$materialDocs",
+              as: "doc",
+              cond: {
+                $not: {
+                  $in: [{ $toString: "$$doc._id" }, { $ifNull: ["$excludedMaterialIds", []] }]
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (processFilter) {
+        pipeline.push({ $match: { "materialDocs.工程コード": processFilter } });
+      }
+
+      if (regexes.length > 0) {
+        const orFilters = [];
+        regexes.forEach((regex) => {
+          orFilters.push({ fileName: regex });
+          orFilters.push({ uploadedBy: regex });
+          orFilters.push({ 図番Array: { $in: [regex] } });
+          orFilters.push({ "materialDocs.品番": regex });
+          orFilters.push({ "materialDocs.工程コード": regex });
+        });
+
+        pipeline.push({ $match: { $or: orFilters } });
+      }
+
+      pipeline.push({
+        $facet: {
+          items: [
+            { $sort: sortStage },
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                pdfType: 1,
+                図番Array: 1,
+                fileName: 1,
+                pdfURL: 1,
+                imageURL: 1,
+                uploadedBy: 1,
+                uploadedAt: 1,
+                updatedAt: 1,
+                hinbanList: {
+                  $map: {
+                    input: "$materialDocs",
+                    as: "doc",
+                    in: { 図番: "$doc.図番", 品番: "$doc.品番" }
+                  }
+                },
+                processList: {
+                  $map: {
+                    input: "$materialDocs",
+                    as: "doc",
+                    in: "$doc.工程コード"
+                  }
+                }
+              }
+            }
+          ],
+          totalCount: [{ $count: "count" }]
+        }
+      });
+
+      const result = await materialPDFsDB.aggregate(pipeline).toArray();
+      items = result[0]?.items || [];
+      total = result[0]?.totalCount?.[0]?.count || 0;
+    }
+
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+
+    const _material_pdfResult = { items, page, limit, total, totalPages };
+    _materialPDFsCache.set(_material_pdfCacheKey, { ts: Date.now(), data: _material_pdfResult });
+    _materialPDFsInflight.delete(_material_pdfCacheKey);
+    if (_material_pdfInflightResolve) _material_pdfInflightResolve(_material_pdfResult);
+
+    res.json(_material_pdfResult);
+
+  } catch (error) {
+    _materialPDFsInflight.delete(_material_pdfCacheKey);
+    if (_material_pdfInflightReject) _material_pdfInflightReject(error);
+    console.error("❌ Error fetching PDFs by type:", error);
+    res.status(500).json({ error: "Error fetching PDFs", details: error.message });
+  }
+});
+
+// Delete PDF (soft delete - moved to trash)
+app.delete("/api/material-pdf/:documentId", async (req, res) => {
+  try {
+    const { documentId } = req.params;
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Soft delete - move to trash
+    await materialPDFsDB.updateOne(
+      { _id: new ObjectId(documentId) },
+      { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+    );
+
+    // Invalidate product-PDFs cache – document soft-deleted
+    _invalidateMaterialPDFsCache('material-pdf soft-delete');
+    console.log(`🗑️ PDF moved to trash: ${documentId}`);
+    res.json({ success: true, message: "PDF moved to trash" });
+
+  } catch (error) {
+    console.error("❌ Error deleting PDF:", error);
+    res.status(500).json({ error: "Error deleting PDF", details: error.message });
+  }
+});
+
+// Batch delete PDFs (soft delete to trash)
+app.post("/api/material-pdf-batch-delete", async (req, res) => {
+  try {
+    const { documentIds } = req.body;
+
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      return res.status(400).json({ error: "documentIds is required" });
+    }
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    const objectIds = documentIds.map(id => new ObjectId(id));
+    const result = await materialPDFsDB.updateMany(
+      { _id: { $in: objectIds } },
+      { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+    );
+
+    // Invalidate product-PDFs cache – batch soft-delete
+    _invalidateMaterialPDFsCache('material-pdf-batch-delete');
+    res.json({ success: true, modifiedCount: result.modifiedCount });
+  } catch (error) {
+    console.error("❌ Error batch deleting PDFs:", error);
+    res.status(500).json({ error: "Error batch deleting PDFs", details: error.message });
+  }
+});
+
+// Get trash items
+app.get("/api/material-pdfs-trash", async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+
+    await ensureMaterialPdfIndexes();
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    const filter = { isActive: false };
+    const total = await materialPDFsDB.countDocuments(filter);
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+    const skip = (page - 1) * limit;
+
+    const items = await materialPDFsDB.find(filter)
+      .project({
+        pdfType: 1,
+        図番Array: 1,
+        fileName: 1,
+        pdfURL: 1,
+        imageURL: 1,
+        uploadedBy: 1,
+        uploadedAt: 1,
+        deletedAt: 1
+      })
+      .sort({ deletedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    res.json({
+      items,
+      page,
+      limit,
+      total,
+      totalPages
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching trash:", error);
+    res.status(500).json({ error: "Error fetching trash", details: error.message });
+  }
+});
+
+// Recover PDF from trash
+app.post("/api/material-pdf-recover/:documentId", async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Restore PDF
+    await materialPDFsDB.updateOne(
+      { _id: new ObjectId(documentId) },
+      { 
+        $set: { isActive: true },
+        $unset: { deletedAt: "" }
+      }
+    );
+
+    // Invalidate product-PDFs cache – document restored to active
+    _invalidateMaterialPDFsCache('material-pdf-recover');
+    console.log(`♻️ PDF recovered from trash: ${documentId}`);
+    res.json({ success: true, message: "PDF recovered successfully" });
+
+  } catch (error) {
+    console.error("❌ Error recovering PDF:", error);
+    res.status(500).json({ error: "Error recovering PDF", details: error.message });
+  }
+});
+
+// Permanently delete PDF (delete from MongoDB and Firebase)
+app.delete("/api/material-pdf-permanent/:documentId", async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    // Get PDF data to find Firebase file paths
+    const pdf = await materialPDFsDB.findOne({ _id: new ObjectId(documentId) });
+    
+    if (!pdf) {
+      return res.status(404).json({ error: "PDF not found" });
+    }
+
+    // Delete from Firebase Storage
+    const bucket = admin.storage().bucket();
+    
+    // Helper function to extract file path from Firebase URL
+    function extractFirebasePath(url) {
+      if (!url || typeof url !== 'string') return null;
+      
+      try {
+        // Remove query string first
+        const urlWithoutQuery = url.split('?')[0];
+        
+        // Handle format: https://storage.googleapis.com/bucket-name/path/to/file
+        if (urlWithoutQuery.includes('storage.googleapis.com/')) {
+          const parts = urlWithoutQuery.split('storage.googleapis.com/');
+          if (parts[1]) {
+            // Split by first slash to separate bucket from path
+            const pathParts = parts[1].split('/');
+            if (pathParts.length > 1) {
+              // Remove bucket name, keep the path
+              pathParts.shift();
+              return decodeURIComponent(pathParts.join('/'));
+            }
+          }
+        }
+        
+        // Handle firebasestorage.googleapis.com format with /o/
+        if (urlWithoutQuery.includes('/o/')) {
+          const parts = urlWithoutQuery.split('/o/');
+          if (parts[1]) {
+            return decodeURIComponent(parts[1]);
+          }
+        }
+        
+        // Handle direct path format: materialPDFs/originals/...
+        if (urlWithoutQuery.startsWith('materialPDFs/')) {
+          return urlWithoutQuery;
+        }
+        
+        return null;
+      } catch (error) {
+        console.error('Error parsing Firebase URL:', error);
+        return null;
+      }
+    }
+    
+    // Delete original PDF
+    if (pdf.pdfURL) {
+      try {
+        const pdfPath = extractFirebasePath(pdf.pdfURL);
+        if (pdfPath) {
+          await bucket.file(pdfPath).delete();
+          console.log(`🔥 Deleted original PDF from Firebase: ${pdfPath}`);
+        } else {
+          console.warn(`⚠️ Could not parse PDF URL: ${pdf.pdfURL}`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Could not delete original PDF: ${error.message}`);
+      }
+    } else {
+      console.log('📝 No PDF URL found, skipping original PDF deletion');
+    }
+    
+    // Delete converted image
+    if (pdf.imageURL) {
+      try {
+        const imagePath = extractFirebasePath(pdf.imageURL);
+        if (imagePath) {
+          await bucket.file(imagePath).delete();
+          console.log(`🔥 Deleted image from Firebase: ${imagePath}`);
+        } else {
+          console.warn(`⚠️ Could not parse image URL: ${pdf.imageURL}`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Could not delete image: ${error.message}`);
+      }
+    }
+
+    // Delete from MongoDB
+    await materialPDFsDB.deleteOne({ _id: new ObjectId(documentId) });
+
+    // Invalidate product-PDFs cache – document fully removed
+    _invalidateMaterialPDFsCache('material-pdf-permanent-delete');
+    console.log(`💀 PDF permanently deleted: ${documentId}`);
+    res.json({ success: true, message: "PDF permanently deleted from all locations" });
+
+  } catch (error) {
+    console.error("❌ Error permanently deleting PDF:", error);
+    res.status(500).json({ error: "Error permanently deleting PDF", details: error.message });
+  }
+});
+
+// Cleanup old trash items (PDFs deleted > 30 days ago)
+async function cleanupOldMaterialTrash() {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const materialPDFsDB = database.collection("materialPDFsDB");
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // Find items deleted more than 30 days ago
+    const oldItems = await materialPDFsDB.find({
+      isActive: false,
+      deletedAt: { $lt: thirtyDaysAgo.toISOString() }
+    }).toArray();
+
+    console.log(`🧹 Found ${oldItems.length} items to permanently delete (>30 days old)`);
+
+    const bucket = admin.storage().bucket();
+    
+    // Helper function to extract file path from Firebase URL
+    function extractFirebasePath(url) {
+      if (!url || typeof url !== 'string') return null;
+      
+      try {
+        // Remove query string first
+        const urlWithoutQuery = url.split('?')[0];
+        
+        // Handle format: https://storage.googleapis.com/bucket-name/path/to/file
+        if (urlWithoutQuery.includes('storage.googleapis.com/')) {
+          const parts = urlWithoutQuery.split('storage.googleapis.com/');
+          if (parts[1]) {
+            // Split by first slash to separate bucket from path
+            const pathParts = parts[1].split('/');
+            if (pathParts.length > 1) {
+              // Remove bucket name, keep the path
+              pathParts.shift();
+              return decodeURIComponent(pathParts.join('/'));
+            }
+          }
+        }
+        
+        // Handle firebasestorage.googleapis.com format with /o/
+        if (urlWithoutQuery.includes('/o/')) {
+          const parts = urlWithoutQuery.split('/o/');
+          if (parts[1]) {
+            return decodeURIComponent(parts[1]);
+          }
+        }
+        
+        // Handle direct path format: materialPDFs/originals/...
+        if (urlWithoutQuery.startsWith('materialPDFs/')) {
+          return urlWithoutQuery;
+        }
+        
+        return null;
+      } catch (error) {
+        console.error('Error parsing Firebase URL:', error);
+        return null;
+      }
+    }
+
+    for (const item of oldItems) {
+      // Delete from Firebase
+      if (item.pdfURL) {
+        try {
+          const pdfPath = extractFirebasePath(item.pdfURL);
+          if (pdfPath) {
+            await bucket.file(pdfPath).delete();
+          }
+        } catch (error) {
+          console.warn(`⚠️ Could not delete PDF: ${error.message}`);
+        }
+      }
+      
+      if (item.imageURL) {
+        try {
+          const imagePath = extractFirebasePath(item.imageURL);
+          if (imagePath) {
+            await bucket.file(imagePath).delete();
+          }
+        } catch (error) {
+          console.warn(`⚠️ Could not delete image: ${error.message}`);
+        }
+      }
+
+      // Delete from MongoDB
+      await materialPDFsDB.deleteOne({ _id: item._id });
+      console.log(`💀 Auto-deleted old PDF: ${item._id}`);
+    }
+
+    if (oldItems.length > 0) {
+      console.log(`✅ Cleanup complete: ${oldItems.length} items permanently deleted`);
+    }
+
+  } catch (error) {
+    console.error('❌ Error during trash cleanup:', error);
+  }
+}
+
+// Run cleanup daily at 3 AM
+setInterval(cleanupOldMaterialTrash, 24 * 60 * 60 * 1000); // Every 24 hours
+// Run cleanup on server start
+cleanupOldMaterialTrash();
+
 // Fetch all master users
 app.get("/masterUsers", async (req, res) => {
   try {
@@ -1978,6 +3731,26 @@ const fdb = admin.firestore();
 
 // Or Firebase Storage:
 const storage = admin.storage();
+
+// Helper to upload files to Firebase Storage with retry logic to handle intermittent "Premature close" network errors
+const uploadToFirebaseWithRetry = async (file, buffer, options = {}, maxRetries = 3) => {
+  // Force resumable: false. Resumable uploads in @google-cloud/storage have a known 
+  // gaxios network bug (ERR_STREAM_PREMATURE_CLOSE) in Node 18+ when fetching tokens.
+  const safeOptions = { ...options, resumable: false };
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await file.save(buffer, safeOptions);
+      return; // Success
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      console.warn(`[Firebase Upload] Attempt ${attempt}/${maxRetries} failed: ${error.message}. Retrying in 1s...`);
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+};
 
 
 
@@ -2272,6 +4045,22 @@ app.post("/searchSebanggo", async (req, res) => {
 //   }
 //});
 
+function normalizeWorkerName(val) {
+  if (!val) return '';
+  if (Array.isArray(val)) return val.filter(Boolean).map(s => String(s).trim()).join(',');
+  if (typeof val === 'string') {
+    val = val.trim();
+    if (val.startsWith('[') && val.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(val);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean).map(s => String(s).trim()).join(',');
+      } catch (_) { }
+    }
+    return val.replace(/^[\["'\s]+|[\]"'\s]+$/g, '').split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean).join(',');
+  }
+  return String(val).trim();
+}
+
 app.post("/submitTopressDBiReporter", async (req, res) => {
   try {
     await client.connect();
@@ -2279,6 +4068,7 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
     const database = client.db("submittedDB");
     const pressDB = database.collection("pressDB");
     const formData = req.body;
+    formData.Worker_Name = normalizeWorkerName(formData.Worker_Name);
 
     // Extract image arrays and remove from formData
     const images = formData.images || [];
@@ -2305,14 +4095,18 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
       const filePath = `CycleCheck/${img.factory}/${fileName}`;
       const file = admin.storage().bucket().file(filePath);
 
-      await file.save(buffer, {
-        metadata: {
-          contentType: "image/jpeg",
+      try {
+        await uploadToFirebaseWithRetry(file, buffer, {
           metadata: {
-            firebaseStorageDownloadTokens: downloadToken
+            contentType: "image/jpeg",
+            metadata: {
+              firebaseStorageDownloadTokens: downloadToken
+            }
           }
-        }
-      });
+        });
+      } catch (uploadError) {
+        console.error(`❌ Error uploading CycleCheck image ${img.label}:`, uploadError);
+      }
 
       const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
       const fieldName = labelToField[img.label] || `${img.label}画像`;
@@ -2324,26 +4118,47 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
       console.log(`📸 Uploading ${materialLabelImages.length} material label images...`);
       
       const materialLabelImageURLs = [];
+      const lotImageMap = {};
+      const lotDefectImageMap = {};
+      const lotAllImagesMap = {};
+      const bucket = admin.storage().bucket();
       
       for (const img of materialLabelImages) {
-        if (!img.base64) continue;
+        if (!img.base64 || !img.id || !img.timestamp) continue;
 
         const buffer = Buffer.from(img.base64, 'base64');
-        const fileName = `${formData.背番号}_${formData.Date}_${formData.Worker_Name}_${formData.工場}_${formData.設備}_materialLabel_${img.timestamp || Date.now()}.jpg`;
+        const fileName = `${formData.背番号}_${formData.Date}_${img.timestamp}_${img.id}_materialLabelImage.jpg`;
         const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
-        const file = admin.storage().bucket().file(filePath);
+        const file = bucket.file(filePath);
 
-        await file.save(buffer, {
-          metadata: {
-            contentType: "image/jpeg",
+        try {
+          await uploadToFirebaseWithRetry(file, buffer, {
             metadata: {
-              firebaseStorageDownloadTokens: downloadToken
+              contentType: "image/jpeg",
+              metadata: {
+                firebaseStorageDownloadTokens: downloadToken
+              }
             }
-          }
-        });
+          });
+        } catch (uploadError) {
+          console.error(`❌ Error uploading material label image ${img.id}:`, uploadError);
+        }
 
         const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
         materialLabelImageURLs.push(publicUrl);
+        if (img.lotNumber) {
+          if (!lotAllImagesMap[img.lotNumber]) lotAllImagesMap[img.lotNumber] = [];
+          lotAllImagesMap[img.lotNumber].push(publicUrl);
+
+          const isDefect = img.description && img.description.includes('疵引き');
+          if (isDefect) {
+            if (!lotDefectImageMap[img.lotNumber]) lotDefectImageMap[img.lotNumber] = [];
+            lotDefectImageMap[img.lotNumber].push(publicUrl);
+          } else {
+            if (!lotImageMap[img.lotNumber]) lotImageMap[img.lotNumber] = [];
+            lotImageMap[img.lotNumber].push(publicUrl);
+          }
+        }
       }
 
       formData.materialLabelImages = materialLabelImageURLs;
@@ -2353,8 +4168,72 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
       if (materialLabelImageURLs.length > 0) {
         formData.材料ラベル画像 = materialLabelImageURLs[0];
       }
+
+      const formatIsoTimestamp = (ts) => {
+        if (!ts) return new Date().toISOString();
+        if (typeof ts === 'string' && ts.includes('T')) return ts;
+        const d = (typeof ts === 'number') ? new Date(ts) : new Date(Number(ts) || ts);
+        return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+      };
+
+      if (Array.isArray(formData.Lot_Details)) {
+        formData.Lot_Details = formData.Lot_Details.map(lot => {
+          const lotLabelImgs = (lot.lotNumber && lotImageMap[lot.lotNumber])
+            || (lot.image ? (Array.isArray(lot.image) ? lot.image : [lot.image]) : []);
+          const finalLabelImgs = lotLabelImgs.length > 0 ? lotLabelImgs : (materialLabelImageURLs.length > 0 ? [materialLabelImageURLs[0]] : []);
+
+          const defectImgs = (lot.lotNumber && lotDefectImageMap[lot.lotNumber])
+            || (lot.defectImage ? (Array.isArray(lot.defectImage) ? lot.defectImage : [lot.defectImage]) : []);
+
+          const seiban = lot.materialSeiban || lot.材料背番号 || formData.materialSeiban || formData.材料背番号 || formData.背番号 || null;
+          const updatedLot = {
+            ...lot,
+            timestamp: formatIsoTimestamp(lot.timestamp)
+          };
+
+          if (finalLabelImgs.length === 1) {
+            updatedLot.image = finalLabelImgs[0];
+          } else if (finalLabelImgs.length > 1) {
+            updatedLot.image = finalLabelImgs;
+          } else {
+            updatedLot.image = null;
+          }
+
+          if (defectImgs.length === 1) {
+            updatedLot.defectImage = defectImgs[0];
+          } else if (defectImgs.length > 1) {
+            updatedLot.defectImage = defectImgs;
+          } else {
+            delete updatedLot.defectImage;
+          }
+
+          delete updatedLot.images;
+          delete updatedLot.defectImages;
+          delete updatedLot.材料背番号;
+
+          if (seiban) {
+            updatedLot.materialSeiban = seiban;
+          }
+          if (lot.scannedQR) {
+            updatedLot.scannedQR = lot.scannedQR;
+          }
+          return updatedLot;
+        });
+      }
       
       console.log(`✅ Uploaded ${materialLabelImageURLs.length} material label images`);
+    } else if (Array.isArray(formData.Lot_Details)) {
+      const formatIsoTimestamp = (ts) => {
+        if (!ts) return new Date().toISOString();
+        if (typeof ts === 'string' && ts.includes('T')) return ts;
+        const d = (typeof ts === 'number') ? new Date(ts) : new Date(Number(ts) || ts);
+        return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+      };
+      formData.Lot_Details = formData.Lot_Details.map(lot => ({
+        ...lot,
+        timestamp: formatIsoTimestamp(lot.timestamp),
+        image: lot.image || null
+      }));
     }
 
     // === PHASE 3: Upload maintenance images and build Maintenance_Data structure ===
@@ -2375,14 +4254,18 @@ app.post("/submitTopressDBiReporter", async (req, res) => {
         const filePath = `maintenance/${formData.工場}/${formData.設備}/${fileName}`;
         const file = admin.storage().bucket().file(filePath);
 
-        await file.save(buffer, {
-          metadata: {
-            contentType: "image/jpeg",
+        try {
+          await uploadToFirebaseWithRetry(file, buffer, {
             metadata: {
-              firebaseStorageDownloadTokens: downloadToken
+              contentType: "image/jpeg",
+              metadata: {
+                firebaseStorageDownloadTokens: downloadToken
+              }
             }
-          }
-        });
+          });
+        } catch (uploadError) {
+          console.error(`❌ Error uploading maintenance image ${img.id}:`, uploadError);
+        }
 
         const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
         imagesByRecordId[img.maintenanceRecordId].push(publicUrl);
@@ -2506,7 +4389,7 @@ app.post('/logPrintAndUpdateMaterialRequest', async (req, res) => {
                     const file = bucket.file(fileName);
                     const downloadToken = "materialLabelToken_" + Date.now() + "_" + Math.random().toString(36).substring(2, 15);
 
-                    await file.save(buffer, {
+                    await uploadToFirebaseWithRetry(file, buffer, {
                         metadata: {
                             contentType: 'image/jpeg',
                             metadata: { firebaseStorageDownloadTokens: downloadToken }
@@ -2601,6 +4484,7 @@ app.post('/submitToDCP', async (req, res) => {
         
         // Extract form data and images
         const formData = req.body;
+        formData.Worker_Name = normalizeWorkerName(formData.Worker_Name);
         const maintenanceImages = formData.maintenanceImages || []; // Array of maintenance images with base64
         const cycleCheckImages = formData.images || []; // Existing cycle check images
         
@@ -2634,7 +4518,7 @@ app.post('/submitToDCP', async (req, res) => {
                 const file = bucket.file(filePath);
                 const downloadToken = "masterDBToken69";
 
-                await file.save(buffer, {
+                await uploadToFirebaseWithRetry(file, buffer, {
                     metadata: {
                         contentType: "image/jpeg",
                         metadata: { firebaseStorageDownloadTokens: downloadToken }
@@ -2669,7 +4553,7 @@ app.post('/submitToDCP', async (req, res) => {
                 const file = bucket.file(filePath);
                 const downloadToken = "masterDBToken69";
 
-                await file.save(buffer, {
+                await uploadToFirebaseWithRetry(file, buffer, {
                     metadata: {
                         contentType: "image/jpeg",
                         metadata: { firebaseStorageDownloadTokens: downloadToken }
@@ -2715,6 +4599,9 @@ app.post('/submitToDCP', async (req, res) => {
         // 2.5. Upload material label images and handle single vs multiple logic
         const materialLabelImages = formData.materialLabelImages || [];
         let materialLabelImageURLs = [];
+        const lotImageMap = {};
+        const lotDefectImageMap = {};
+        const lotAllImagesMap = {};
         
         if (materialLabelImages.length > 0) {
             console.log(`🖼️ Processing ${materialLabelImages.length} material label images...`);
@@ -2726,13 +4613,17 @@ app.post('/submitToDCP', async (req, res) => {
                     const buffer = Buffer.from(imgData.base64, 'base64');
                     console.log(`🔍 Processing material label image ${imgData.id}: buffer size = ${buffer.length} bytes`);
 
-                    // Create unique filename
-                    const fileName = `${formData.背番号}_${formData.Date}_${imgData.timestamp}_${imgData.id}_materialLabelImage.jpg`;
+                    // Create unique filename with lot number (and defect tag if applicable)
+                    const isDefect = !!imgData.isDefect;
+                    const cleanLot = imgData.lotNumber
+                        ? `lot-${String(imgData.lotNumber).trim().replace(/[^a-zA-Z0-9_-]/g, '_')}${isDefect ? '-defect' : ''}`
+                        : (imgData.id ? String(imgData.id).trim().replace(/[^a-zA-Z0-9_-]/g, '_') : `photo-${Date.now()}`);
+                    const fileName = `${formData.背番号}_${formData.Date}_${imgData.timestamp}_${cleanLot}_materialLabelImage.jpg`;
                     const filePath = `materialLabel/${formData.工場}/${formData.設備}/${fileName}`;
                     const file = bucket.file(filePath);
                     const downloadToken = "masterDBToken69";
 
-                    await file.save(buffer, {
+                    await uploadToFirebaseWithRetry(file, buffer, {
                         metadata: {
                             contentType: "image/jpeg",
                             metadata: { firebaseStorageDownloadTokens: downloadToken }
@@ -2742,6 +4633,19 @@ app.post('/submitToDCP', async (req, res) => {
 
                     const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
                     materialLabelImageURLs.push(publicUrl);
+                    if (imgData.lotNumber) {
+                        if (!lotAllImagesMap[imgData.lotNumber]) lotAllImagesMap[imgData.lotNumber] = [];
+                        lotAllImagesMap[imgData.lotNumber].push(publicUrl);
+
+                        const isDefect = imgData.description && imgData.description.includes('疵引き');
+                        if (isDefect) {
+                            if (!lotDefectImageMap[imgData.lotNumber]) lotDefectImageMap[imgData.lotNumber] = [];
+                            lotDefectImageMap[imgData.lotNumber].push(publicUrl);
+                        } else {
+                            if (!lotImageMap[imgData.lotNumber]) lotImageMap[imgData.lotNumber] = [];
+                            lotImageMap[imgData.lotNumber].push(publicUrl);
+                        }
+                    }
                     
                     console.log(`✅ Material label image uploaded: ${publicUrl}`);
                 } catch (uploadError) {
@@ -2781,9 +4685,63 @@ app.post('/submitToDCP', async (req, res) => {
         const pressDBData = {
             ...formData,
             ...uploadedImageURLs, // Add cycle check image URLs
+            Worker_Name: normalizeWorkerName(formData.Worker_Name),
             Maintenance_Data: processedMaintenanceData, // Add maintenance data with photo URLs
             createdAt: new Date().toISOString() // Add server timestamp
         };
+
+        // Associate per-lot image URL in Lot_Details
+        if (Array.isArray(pressDBData.Lot_Details)) {
+            const formatIsoTimestamp = (ts) => {
+                if (!ts) return new Date().toISOString();
+                if (typeof ts === 'string' && ts.includes('T')) return ts;
+                const d = (typeof ts === 'number') ? new Date(ts) : new Date(Number(ts) || ts);
+                return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+            };
+
+            pressDBData.Lot_Details = pressDBData.Lot_Details.map(lot => {
+                const lotLabelImgs = (lot.lotNumber && lotImageMap[lot.lotNumber])
+                    || (lot.image ? (Array.isArray(lot.image) ? lot.image : [lot.image]) : []);
+                const finalLabelImgs = lotLabelImgs.length > 0 ? lotLabelImgs : (materialLabelImageURLs.length > 0 ? [materialLabelImageURLs[0]] : []);
+
+                const defectImgs = (lot.lotNumber && lotDefectImageMap[lot.lotNumber])
+                    || (lot.defectImage ? (Array.isArray(lot.defectImage) ? lot.defectImage : [lot.defectImage]) : []);
+
+                const seiban = lot.materialSeiban || lot.材料背番号 || pressDBData.materialSeiban || pressDBData.材料背番号 || pressDBData.背番号 || null;
+                const updatedLot = {
+                    ...lot,
+                    timestamp: formatIsoTimestamp(lot.timestamp)
+                };
+
+                if (finalLabelImgs.length === 1) {
+                    updatedLot.image = finalLabelImgs[0];
+                } else if (finalLabelImgs.length > 1) {
+                    updatedLot.image = finalLabelImgs;
+                } else {
+                    updatedLot.image = null;
+                }
+
+                if (defectImgs.length === 1) {
+                    updatedLot.defectImage = defectImgs[0];
+                } else if (defectImgs.length > 1) {
+                    updatedLot.defectImage = defectImgs;
+                } else {
+                    delete updatedLot.defectImage;
+                }
+
+                delete updatedLot.images;
+                delete updatedLot.defectImages;
+                delete updatedLot.材料背番号;
+
+                if (seiban) {
+                    updatedLot.materialSeiban = seiban;
+                }
+                if (lot.scannedQR) {
+                    updatedLot.scannedQR = lot.scannedQR;
+                }
+                return updatedLot;
+            });
+        }
 
         console.log(`🔍 pressDBData before cleanup contains these image fields:`, {
             "初物チェック画像": pressDBData["初物チェック画像"],
@@ -2852,7 +4810,7 @@ app.post('/submitToDCP', async (req, res) => {
                 工場: formData.工場,
                 Total: Total_KensaDB,
                 Worker_Name: formData.Inspector_Name || formData.Worker_Name, // Use Inspector_Name if available, fallback to Worker_Name
-                Process_Quantity: formData.Process_Quantity,
+                Process_Quantity: formData.Total, // kensaDB Process_Quantity = production Total (already minus production defects)
                 Remaining_Quantity: formData.Inspection_Good_Total || formData.Total,
                 Date: formData.Inspection_Date || formData.Date, // Use Inspection_Date if available
                 Time_start: formData.Inspection_Time_start || formData.Time_start, // Use Inspection times
@@ -3253,6 +5211,173 @@ app.post("/submitToSRSDBiReporter", async (req, res) => {
   }
 });
 
+
+// ---------------------------------------------------------------------------
+// SRS interactive (SCNA / Girasol): own route so the production "SRS Process iReporter" route above stays untouched.
+// Same save as /submitToSRSDBiReporter, plus box traceability (docs/srs-interactive-label-plan.md):
+//  - Box_IDs index; the SRS result is written back onto each press box in scnaBoxDB (srs = latest, srsRuns = all)
+//  - Srs_Box_IDs: the SRS labels printed in this lane session. Each must exist, be complete/draft, not voided and not yet
+//    linked; they get srsRecordId set. Press boxes may now be used by several records (leftover pieces), so the old
+//    "box already submitted -> 409" check only applies to the old whole-box flow (no Srs_Box_IDs sent).
+//  - Submit_UID (optional): a retry of the same submit returns the saved record instead of a duplicate
+//  - Srs_Unlabelled_NG: [{ boxId, ng, ngTotal }] NG found after the last print; taken from the press box's remaining pieces
+// ---------------------------------------------------------------------------
+let _srsBoxIndexReady = false;
+async function _ensureSrsBoxIndex(SRSDB) {
+  if (_srsBoxIndexReady) return;
+  await SRSDB.createIndex({ Box_IDs: 1 });
+  await SRSDB.createIndex({ Srs_Box_IDs: 1 });
+  await SRSDB.createIndex({ Submit_UID: 1 }, { unique: true, partialFilterExpression: { Submit_UID: { $type: "string" } } });
+  _srsBoxIndexReady = true;
+}
+
+app.post("/submitToSRSDBInteractive", async (req, res) => {
+  try {
+    await client.connect();
+
+    const database = client.db("submittedDB");
+    const SRSDB = database.collection("SRSDB");
+    const formData = req.body;
+    try { await _ensureSrsBoxIndex(SRSDB); } catch (e) { console.error("SRSDB indexes failed:", e.message); }
+
+    // retry of a submit that already went through
+    const submitUid = String(formData.Submit_UID || "").trim();
+    if (submitUid) {
+      const done = await SRSDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+      if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+    }
+
+    const cleanIds = (v) => Array.isArray(v) ? [...new Set(v.map(x => String(x || "").trim()).filter(Boolean))] : [];
+    const srsBoxIds = cleanIds(formData.Box_IDs);
+    const srsLabelIds = cleanIds(formData.Srs_Box_IDs);
+
+    if (srsLabelIds.length) {
+      // labels printed in this session: valid, still open, not linked to another record
+      const labels = await client.db(DB_NAME).collection("srsBoxDB").find({ srsId: { $in: srsLabelIds } }).toArray();
+      const byId = new Map(labels.map(x => [x.srsId, x]));
+      const bad = srsLabelIds.filter(id => {
+        const x = byId.get(id);
+        return !x || (x.status !== "complete" && x.status !== "draft") || x.srsRecordId;
+      });
+      if (bad.length) {
+        return res.status(409).json({
+          error: `SRS label cannot be submitted: ${bad.map(id => `${id} (${byId.get(id) ? (byId.get(id).srsRecordId ? "already submitted" : byId.get(id).status) : "not found"})`).join(", ")}`,
+          srsIds: bad
+        });
+      }
+    } else if (srsBoxIds.length) {
+      // old whole-box flow: a box is processed by SRS once
+      const used = await SRSDB.findOne({ Box_IDs: { $in: srsBoxIds } }, { projection: { Box_IDs: 1 } });
+      if (used) {
+        const dup = srsBoxIds.filter(id => (used.Box_IDs || []).includes(id));
+        return res.status(409).json({ error: `Box already submitted to SRS: ${dup.join(", ")}`, boxIds: dup });
+      }
+    }
+
+    // Handle base64 images
+    const images = formData.images || [];
+    delete formData.images;
+
+    const labelToField = {
+      "初物チェック": "初物チェック画像",
+      // Add more labels if needed
+    };
+
+    for (const img of images) {
+      if (!img.base64 || !img.label) continue;
+
+      const buffer = Buffer.from(img.base64, 'base64');
+      const fileName = `${img.sebanggo}_${img.date}_${img.worker}_${img.factory}_${img.machine}_${img.label}.jpg`;
+      const filePath = `CycleCheck/SRS/${fileName}`;
+      const file = admin.storage().bucket().file(filePath);
+
+      const downloadToken = "masterDBToken69";
+
+      await file.save(buffer, {
+        metadata: {
+          contentType: "image/jpeg",
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken
+          }
+        }
+      });
+
+      const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+      const fieldName = labelToField[img.label] || `${img.label}画像`;
+
+      formData[fieldName] = publicUrl;
+    }
+
+    // Add createdAt timestamp
+    formData.createdAt = new Date().toISOString();
+
+    let result;
+    try {
+      result = await SRSDB.insertOne(formData);
+    } catch (e) {
+      if (e && e.code === 11000 && submitUid) {   // the same submit arrived twice at once
+        const done = await SRSDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+        if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+      }
+      throw e;
+    }
+    _invalidateFinancialsCache('SRSDB insert');
+
+    // The SRS record is saved; what follows is bookkeeping, so a failure is logged and not returned as a submit error.
+    const boxDb = client.db(DB_NAME);
+    if (srsLabelIds.length) {
+      try {
+        await boxDb.collection("srsBoxDB").updateMany(
+          { srsId: { $in: srsLabelIds } },
+          { $set: { srsRecordId: result.insertedId, submittedAt: formData.createdAt } }
+        );
+      } catch (e) { console.error("SRS label link failed (SRSDB record saved):", e.message); }
+    }
+    // NG found after the last print: those pieces are gone from the press box too
+    const lateNg = Array.isArray(formData.Srs_Unlabelled_NG) ? formData.Srs_Unlabelled_NG : [];
+    for (const x of lateNg) {
+      const boxId = String((x && x.boxId) || "").trim();
+      const ng = Number(x && x.ngTotal) || 0;
+      if (!boxId || ng <= 0) continue;
+      try {
+        await boxDb.collection("scnaBoxDB").updateOne({ boxId }, { $push: { srsConsumed: {
+          srsId: null, recordId: result.insertedId, good: 0, ng, pieces: ng, at: formData.createdAt
+        } } });
+      } catch (e) { console.error(`SRS late NG for ${boxId} failed:`, e.message); }
+    }
+    // Write the SRS result back onto each press box so a box lookup shows who ran SRS, on which Girasol, under which work order.
+    if (srsBoxIds.length) {
+      const run = {
+        srsRecordId: result.insertedId,
+        srsIds: srsLabelIds,
+        machine: formData.設備 || "",
+        lane: formData.Lane || formData["R/L"] || "",
+        workers: formData.Worker_Name || "",
+        workOrders: Array.isArray(formData.WorkOrders) ? formData.WorkOrders : [],
+        date: formData.Date || "",
+        timeStart: formData.Time_start || "",
+        timeEnd: formData.Time_end || "",
+        submittedAt: formData.createdAt
+      };
+      try {
+        await boxDb.collection("scnaBoxDB").updateMany(
+          { boxId: { $in: srsBoxIds } },
+          { $set: { srs: run }, $push: { srsRuns: run } }
+        );
+      } catch (e) {
+        console.error("SRS box write-back failed (SRSDB record saved):", e.message);
+      }
+    }
+
+    res.status(201).json({
+      message: "Data and images successfully saved to SRSDB",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error("Error saving data to SRSDB (interactive):", error);
+    res.status(500).json({ error: "Error saving data to SRSDB" });
+  }
+});
 
 // This is for SRS LH
 // Route to fetch all 背番号 with R/L = "LH" from masterDB
@@ -5008,10 +7133,725 @@ app.post("/saveScannedQRData", async (req, res) => {
 // const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 // const client = new MongoClient(uri, { ... }); // Your MongoDB client initialization
 
+app.post('/schema/custom-fields', async (req, res) => {
+  console.log("🟢 Received POST request to /schema/custom-fields");
+  const { dbName = "submittedDB", collectionName } = req.body;
+
+  if (!collectionName) {
+    return res.status(400).json({ error: "collectionName is required" });
+  }
+
+  try {
+    const database = client.db(dbName);
+    const collection = database.collection(collectionName);
+
+    // Fetch the 50 newest documents using the naturally indexed _id
+    const docs = await collection.find({}).sort({ _id: -1 }).limit(50).toArray();
+
+    function flattenObject(obj, prefix = '') {
+      const flattened = {};
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+            Object.assign(flattened, flattenObject(obj[key], prefix + key + '.'));
+          } else {
+            flattened[prefix + key] = obj[key];
+          }
+        }
+      }
+      return flattened;
+    }
+
+    const IGNORED_KEYS = ["_id", "createdAt", "updatedAt", "__v", "id"];
+    const keySet = new Set();
+    
+    docs.forEach(doc => {
+      const flat = flattenObject(doc);
+      Object.keys(flat).forEach(k => {
+        if (IGNORED_KEYS.includes(k) || k.includes("[")) return;
+        keySet.add(k);
+      });
+    });
+
+    const fields = Array.from(keySet).sort();
+    console.log(`✅ Extracted ${fields.length} unique schema fields from ${collectionName}`);
+    res.json({ fields });
+
+  } catch (error) {
+    console.error("❌ Error fetching custom fields schema:", error);
+    res.status(500).json({ error: "Failed to extract database schema", details: error.message });
+  }
+});
+
+// ─── Sensor Aggregation Helpers ───
+function buildSensorFactoryNameExpression() {
+  return {
+    $trim: { input: { $toString: { $ifNull: ["$工場", ""] } } },
+  };
+}
+
+function buildSensorReadingTemperatureExpression(offsets = {}) {
+  const branches = Object.entries(offsets).map(([device, offset]) => ({
+    case: { $eq: ["$device", device] },
+    then: offset
+  }));
+
+  const baseTempExpr = {
+    $convert: {
+      input: {
+        $trim: {
+          input: {
+            $replaceAll: {
+              input: { $toString: { $ifNull: ["$Temperature", ""] } },
+              find: "°C",
+              replacement: "",
+            },
+          },
+        },
+      },
+      to: "double",
+      onError: null,
+      onNull: null,
+    },
+  };
+
+  if (branches.length === 0) return baseTempExpr;
+
+  return {
+    $round: [
+      {
+        $add: [
+          baseTempExpr,
+          { $switch: { branches, default: 0 } }
+        ]
+      },
+      2
+    ]
+  };
+}
+
+function buildSensorReadingHumidityExpression() {
+  return {
+    $convert: {
+      input: {
+        $trim: {
+          input: {
+            $replaceAll: {
+              input: { $toString: { $ifNull: ["$Humidity", ""] } },
+              find: "%",
+              replacement: "",
+            },
+          },
+        },
+      },
+      to: "double",
+      onError: null,
+      onNull: null,
+    },
+  };
+}
+
+function buildSensorReadingWBGTExpression() {
+  const temperature = "$temperatureValue";
+  const humidity = "$humidityValue";
+
+  const wetBulbTemperature = {
+    $subtract: [
+      {
+        $add: [
+          {
+            $multiply: [
+              temperature,
+              {
+                $atan: {
+                  $multiply: [
+                    0.151977,
+                    { $sqrt: { $add: [humidity, 8.313659] } },
+                  ],
+                },
+              },
+            ],
+          },
+          { $atan: { $add: [temperature, humidity] } },
+          {
+            $multiply: [
+              0.00391838,
+              { $pow: [humidity, 1.5] },
+              { $atan: { $multiply: [0.023101, humidity] } },
+            ],
+          },
+        ],
+      },
+      {
+        $add: [
+          { $atan: { $subtract: [humidity, 1.676331] } },
+          4.686035,
+        ],
+      },
+    ],
+  };
+
+  return {
+    $cond: [
+      {
+        $and: [
+          { $ne: [temperature, null] },
+          { $ne: [humidity, null] },
+          { $gte: [temperature, -50] },
+          { $lte: [temperature, 60] },
+          { $gte: [humidity, 0] },
+          { $lte: [humidity, 100] },
+        ],
+      },
+      {
+        $round: [
+          {
+            $add: [
+              { $multiply: [0.7, wetBulbTemperature] },
+              { $multiply: [0.3, temperature] },
+            ],
+          },
+          1,
+        ],
+      },
+      null,
+    ],
+  };
+}
+
+function buildSensorReadingBaseMatch({ factoryName, startDate, endDate, years }) {
+  const match = {};
+  if (factoryName) match["工場"] = factoryName;
+
+  if (years && years.length > 0) {
+    match.Date = { $regex: `^(${years.join('|')})` };
+  } else if (startDate || endDate) {
+    const dateMatch = {};
+    if (startDate) dateMatch.$gte = startDate;
+    if (endDate) dateMatch.$lte = endDate;
+    match.Date = dateMatch;
+  }
+  return match;
+}
+
+function buildSensorReadingDeviceMatch(deviceId = "all") {
+  if (!deviceId || deviceId === "all") return null;
+  return { device: deviceId };
+}
+
+function buildSensorReadingNormalizationStages({ factoryName, startDate, endDate, years, offsets = {} }) {
+  return [
+    { $match: buildSensorReadingBaseMatch({ factoryName, startDate, endDate, years }) },
+    {
+      $addFields: {
+        temperatureValue: buildSensorReadingTemperatureExpression(offsets),
+        humidityValue: buildSensorReadingHumidityExpression(),
+      },
+    },
+    {
+      $addFields: {
+        wbgtValue: buildSensorReadingWBGTExpression(),
+        Temperature: {
+          $cond: [
+            { $eq: ["$temperatureValue", null] },
+            "$Temperature",
+            { $concat: [{ $toString: "$temperatureValue" }, "°C"] }
+          ]
+        }
+      },
+    },
+  ];
+}
+
+function buildSensorReadingSortStage(sortKey) {
+  if (sortKey === "date_asc") return { Date: 1, Time: 1, _id: 1 };
+  if (sortKey === "temp_desc") return { temperatureValue: -1, Date: -1, Time: -1, _id: -1 };
+  if (sortKey === "temp_asc") return { temperatureValue: 1, Date: -1, Time: -1, _id: -1 };
+  return { Date: -1, Time: -1, _id: -1 };
+}
+
+// ─── Dedicated Factory API Routes ───
+
+app.get('/api/factory/production/:factoryName/:date', async (req, res) => {
+  try {
+    const { factoryName, date } = req.params;
+    const PROCESS_COLLECTIONS = ["kensaDB", "pressDB", "slitDB", "SRSDB"];
+    const database = client.db("submittedDB");
+
+    const settled = await Promise.allSettled(
+      PROCESS_COLLECTIONS.map((col) =>
+        database.collection(col)
+          .find({ 工場: factoryName, Date: date })
+          .sort({ Time_start: -1 })
+          .toArray()
+      )
+    );
+
+    const records = settled.flatMap((r, i) =>
+      r.status === "fulfilled"
+        ? r.value.map((row) => ({ ...row, _id: row._id.toString(), _source: PROCESS_COLLECTIONS[i] }))
+        : []
+    );
+
+    let total = 0, totalNG = 0;
+    records.forEach((r) => {
+      total   += Number(r.Total)    || 0;
+      totalNG += Number(r.Total_NG) || 0;
+    });
+    const defectRate = total > 0 ? Math.round((totalNG / total) * 10000) / 100 : 0;
+
+    res.json({ records, total, totalNG, defectRate });
+  } catch (error) {
+    console.error("❌ Error fetching production data:", error);
+    res.status(500).json({ error: "Failed to fetch production data" });
+  }
+});
+
+app.get('/api/factory/sensors/:factoryName/:date', async (req, res) => {
+  try {
+    const { factoryName, date } = req.params;
+    const database = client.db("submittedDB");
+    const readings = await database.collection("tempHumidityDB")
+      .find({ 工場: factoryName, Date: date })
+      .sort({ Time: -1 })
+      .limit(200)
+      .toArray();
+
+    const safeReadings = readings.map(r => ({ ...r, _id: r._id.toString() }));
+    res.json(safeReadings);
+  } catch (error) {
+    console.error("❌ Error fetching sensor readings:", error);
+    res.status(500).json({ error: "Failed to fetch sensor readings" });
+  }
+});
+
+app.post('/api/factory/sensors/overview', async (req, res) => {
+  try {
+    const { date, offsets = {} } = req.body;
+    const database = client.db("submittedDB");
+
+    const aggregation = [
+      {
+        $addFields: {
+          factoryName: buildSensorFactoryNameExpression(),
+        },
+      },
+      {
+        $facet: {
+          allFactories: [
+            { $match: { factoryName: { $ne: "" } } },
+            { $group: { _id: "$factoryName" } },
+            { $sort: { _id: 1 } },
+          ],
+          todayByFactory: [
+            { $match: { Date: date, factoryName: { $ne: "" } } },
+            {
+              $addFields: {
+                temperatureValue: buildSensorReadingTemperatureExpression(offsets),
+                humidityValue: buildSensorReadingHumidityExpression(),
+              },
+            },
+            {
+              $addFields: {
+                wbgtValue: buildSensorReadingWBGTExpression(),
+              },
+            },
+            { $sort: { factoryName: 1, device: 1, Time: -1, _id: -1 } },
+            {
+              $group: {
+                _id: {
+                  device: "$device",
+                  factory: "$factoryName",
+                },
+                latest: { $first: "$$ROOT" },
+              },
+            },
+            {
+              $group: {
+                _id: "$_id.factory",
+                highestTemp: { $max: "$latest.temperatureValue" },
+                averageHumidity: { $avg: "$latest.humidityValue" },
+                sensorCount: { $sum: 1 },
+                wbgt: { $max: "$latest.wbgtValue" },
+                deviceLatest: {
+                  $push: {
+                    date: "$latest.Date",
+                    time: "$latest.Time",
+                  },
+                },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                averageHumidity: { $round: ["$averageHumidity", 1] },
+                factory: "$_id",
+                highestTemp: { $round: ["$highestTemp", 1] },
+                sensorCount: 1,
+                wbgt: { $round: ["$wbgt", 1] },
+                deviceLatest: 1,
+              },
+            },
+            { $sort: { factory: 1 } },
+          ],
+        },
+      },
+    ];
+
+    const result = await database.collection("tempHumidityDB").aggregate(aggregation).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error fetching sensor overview:", error);
+    res.status(500).json({ error: "Failed to fetch sensor overview" });
+  }
+});
+
+app.post('/api/factory/sensors/historical', async (req, res) => {
+  try {
+    const { factoryName, startDate, endDate, years, deviceId = "all", sortKey = "date_desc", skip = 0, limit = 15, offsets = {} } = req.body;
+    const database = client.db("submittedDB");
+    const deviceMatch = buildSensorReadingDeviceMatch(deviceId);
+
+    const aggregation = [
+      ...buildSensorReadingNormalizationStages({ factoryName, startDate, endDate, years, offsets }),
+      ...(deviceMatch ? [{ $match: deviceMatch }] : []),
+      {
+        $facet: {
+          data: [
+            { $sort: buildSensorReadingSortStage(sortKey) },
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                _id: 1,
+                Date: 1,
+                Time: 1,
+                device: 1,
+                Temperature: 1,
+                Humidity: 1,
+                sensorStatus: 1,
+                工場: 1,
+              },
+            },
+          ],
+          totalCount: [
+            { $count: "count" },
+          ],
+        },
+      },
+    ];
+
+    const result = await database.collection("tempHumidityDB").aggregate(aggregation).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error fetching historical sensors:", error);
+    res.status(500).json({ error: "Failed to fetch historical sensors" });
+  }
+});
+
+app.post('/api/factory/sensors/historical/overview', async (req, res) => {
+  console.log("🟢 Received POST request to /api/factory/sensors/historical/overview");
+  try {
+    const { factoryName, startDate, endDate, years, deviceId = "all", offsets = {} } = req.body;
+    const database = client.db("submittedDB");
+    const deviceMatch = buildSensorReadingDeviceMatch(deviceId);
+    const isHourly = Boolean(startDate && endDate && startDate === endDate);
+
+    const aggregation = [
+      ...buildSensorReadingNormalizationStages({ factoryName, startDate, endDate, years, offsets }),
+      {
+        $facet: {
+          deviceOptions: [
+            { $match: { device: { $ne: "" } } },
+            { $group: { _id: "$device" } },
+            { $sort: { _id: 1 } },
+          ],
+          summary: [
+            ...(deviceMatch ? [{ $match: deviceMatch }] : []),
+            {
+              $group: {
+                _id: null,
+                totalReadings: { $sum: 1 },
+                avgTemp: { $avg: "$temperatureValue" },
+                peakTemp: { $max: "$temperatureValue" },
+                minTemp: { $min: "$temperatureValue" },
+                avgHumid: { $avg: "$humidityValue" },
+                heatAlerts: {
+                  $sum: {
+                    $cond: [
+                      { $gt: ["$wbgtValue", 28] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                totalReadings: 1,
+                avgTemp: { $round: ["$avgTemp", 1] },
+                peakTemp: { $round: ["$peakTemp", 1] },
+                minTemp: { $round: ["$minTemp", 1] },
+                avgHumid: { $round: ["$avgHumid", 1] },
+                heatAlerts: 1,
+              },
+            },
+          ],
+          trends: [
+            { $match: { device: { $ne: "" }, ...(deviceMatch || {}) } },
+            {
+              $group: {
+                _id: {
+                  device: "$device",
+                  date: "$Date",
+                  hour: isHourly ? { $substr: ["$Time", 0, 2] } : null,
+                },
+                avgTemperature: { $avg: "$temperatureValue" },
+                avgHumidity: { $avg: "$humidityValue" },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                device: "$_id.device",
+                Date: isHourly 
+                  ? { $concat: ["$_id.date", " ", "$_id.hour", ":00"] }
+                  : "$_id.date",
+                Temperature: { $round: ["$avgTemperature", 1] },
+                Humidity: { $round: ["$avgHumidity", 1] },
+              },
+            },
+            { $sort: { Date: 1, device: 1 } },
+          ],
+          latestDevices: [
+            { $match: { device: { $ne: "" }, ...(deviceMatch || {}) } },
+            { $sort: { device: 1, Date: -1, Time: -1, _id: -1 } },
+            {
+              $group: {
+                _id: "$device",
+                latest: { $first: "$$ROOT" },
+                readingCount: { $sum: 1 },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                deviceId: "$_id",
+                readingCount: 1,
+                latest: {
+                  Date: "$latest.Date",
+                  Time: "$latest.Time",
+                  Temperature: "$latest.Temperature",
+                  Humidity: "$latest.Humidity",
+                  sensorStatus: "$latest.sensorStatus",
+                  factory: "$latest.工場",
+                },
+              },
+            },
+            { $sort: { "latest.Date": -1, "latest.Time": -1, deviceId: 1 } },
+          ],
+        },
+      },
+    ];
+
+    const result = await database.collection("tempHumidityDB").aggregate(aggregation).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error fetching historical sensors overview:", error);
+    res.status(500).json({ error: "Failed to fetch historical sensors overview" });
+  }
+});
+
+app.post('/api/factory/sensors/historical/export', async (req, res) => {
+  try {
+    const { factoryName, startDate, endDate, deviceId = "all", sortKey = "date_desc", offsets = {} } = req.body;
+    const database = client.db("submittedDB");
+    const deviceMatch = buildSensorReadingDeviceMatch(deviceId);
+
+    const aggregation = [
+      ...buildSensorReadingNormalizationStages({ factoryName, startDate, endDate, offsets }),
+      ...(deviceMatch ? [{ $match: deviceMatch }] : []),
+      { $sort: buildSensorReadingSortStage(sortKey) },
+      {
+        $project: {
+          _id: 1,
+          Date: 1,
+          Time: 1,
+          device: 1,
+          Temperature: 1,
+          Humidity: 1,
+          sensorStatus: 1,
+          工場: 1,
+        },
+      },
+    ];
+
+    const result = await database.collection("tempHumidityDB").aggregate(aggregation).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Error fetching historical sensors export:", error);
+    res.status(500).json({ error: "Failed to fetch historical sensors export" });
+  }
+});
+
+// ─── DEDICATED ROUTE FOR FACTORY OVERVIEW DATA ───
+app.post('/api/factory/production-period', async (req, res) => {
+  console.log("🟢 Received POST request to /api/factory/production-period");
+  const { queries } = req.body;
+  if (!Array.isArray(queries) || queries.length !== 4) {
+    return res.status(400).json({ error: "Expected exactly 4 queries." });
+  }
+
+  try {
+    const database = client.db("submittedDB");
+    const collections = ["kensaDB", "pressDB", "SRSDB", "slitDB"];
+    
+    // Explicitly define the projection to optimize the payload!
+    const projection = {
+      "工場": 1, "Date": 1, "Time_start": 1, "Time_end": 1, "品番": 1, "背番号": 1, "設備": 1, "Worker_Name": 1,
+      "Total": 1, "Total_NG": 1, "SRS_Total_NG": 1, "Process_Quantity": 1, "Cycle_Time": 1,
+      "Total_Work_Hours": 1, "Total_Break_Hours": 1, "Total_Trouble_Hours": 1,
+      "Total_Trouble_Minutes": 1, "Total_Break_Minutes": 1,
+      "疵引不良": 1, "加工不良": 1, "その他": 1, "Spare": 1,
+      "StopCall.count": 1, "StopCall.totalWaitMinutes": 1,
+      "createdAt": 1, "Comment": 1, "ショット数": 1,
+      "材料ロット": 1, "材料背番号": 1,
+      "Total_Meters": 1, "Total_Pieces": 1,
+      "非不良廃棄": 1, "非不良廃棄_詳細": 1, "疵引処理数": 1,
+      "Break_Time_Data": 1, "Maintenance_Data": 1,
+      "初物チェック画像": 1, "終物チェック画像": 1, "材料ラベル画像": 1,
+      "materialLabelImages": 1, "materialLabelImageCount": 1,
+      "uniqueID": 1
+    };
+
+    const results = await Promise.all(collections.map((col, index) => {
+      // Create objects from the BSON ObjectId if they were converted on frontend to string, though frontend queries shouldn't have ObjectIds in this context.
+      return database.collection(col).find(queries[index]).project(projection).toArray();
+    }));
+
+    // Ensure _id is serialized cleanly
+    const serializeRecords = (records) => records.map(r => ({ ...r, _id: r._id?.toString() }));
+
+    res.json({
+      Kensa: serializeRecords(results[0]),
+      Press: serializeRecords(results[1]),
+      SRS: serializeRecords(results[2]),
+      Slit: serializeRecords(results[3])
+    });
+  } catch (error) {
+    console.error("❌ Error fetching production period:", error);
+    res.status(500).json({ error: "Failed to fetch production period" });
+  }
+});
+
+app.get('/api/setsubi-history', async (req, res) => {
+  try {
+    const { factory, equipmentId, status, search, dateFrom, dateTo, page = '1', limit = '50', sortColumn, sortDir = 'desc' } = req.query;
+    const pageNum = parseInt(page, 10) || 1;
+    const limitNum = parseInt(limit, 10) || 50;
+    const skip = (pageNum - 1) * limitNum;
+    const sortOrder = sortDir === 'asc' ? 1 : -1;
+
+    let query = { _deleted: { $ne: true } };
+
+    if (factory) query["工場"] = factory;
+    if (equipmentId) query.equipmentId = equipmentId;
+    if (status) query.status = status;
+    if (dateFrom || dateTo) {
+      query.date = {};
+      if (dateFrom) query.date.$gte = dateFrom;
+      if (dateTo) query.date.$lte = dateTo;
+    }
+
+    if (search) {
+      const regex = new RegExp(search, 'i');
+      query.$or = [
+        { title: regex }, { title_en: regex }, { title_ja: regex },
+        { details: regex }, { details_en: regex }, { details_ja: regex },
+        { equipmentName: regex }, { "工場": regex }, { "名前": regex },
+        { "attempts.title": regex }, { "attempts.title_en": regex }, { "attempts.title_ja": regex },
+        { "attempts.fixDescription": regex }, { "attempts.fixDescription_en": regex }, { "attempts.fixDescription_ja": regex },
+        { "attempts.result": regex }, { "attempts.result_en": regex }, { "attempts.result_ja": regex },
+        { "attempts.fixedBy": regex }
+      ];
+    }
+
+    const database = client.db("submittedDB");
+    const collection = database.collection("setsubiHistory");
+
+    const totalCount = await collection.countDocuments(query);
+
+    const sortMap = {
+      machine: "equipmentName",
+      equipmentName: "equipmentName",
+      factory: "工場",
+      "工場": "工場",
+      date: "date",
+      issueTitle: "title",
+      title: "title",
+      status: "status",
+      reportedBy: "名前",
+      "名前": "名前",
+      submittedBy: "名前"
+    };
+
+    let items;
+    if (sortColumn === "attempts") {
+      items = await collection.aggregate([
+        { $match: query },
+        {
+          $addFields: {
+            attemptsCount: {
+              $cond: {
+                if: { $isArray: "$attempts" },
+                then: { $size: "$attempts" },
+                else: 0
+              }
+            }
+          }
+        },
+        { $sort: { attemptsCount: sortOrder, date: -1, createdAt: -1 } },
+        { $skip: skip },
+        { $limit: limitNum },
+        { $project: { attemptsCount: 0 } }
+      ], { collation: { locale: "ja", numericOrdering: true } }).toArray();
+    } else {
+      const sortField = sortMap[sortColumn] || "date";
+      const sortObj = { [sortField]: sortOrder };
+      if (sortField !== "date") {
+        sortObj.date = -1;
+      }
+      if (sortField !== "createdAt") {
+        sortObj.createdAt = -1;
+      }
+
+      items = await collection.find(query)
+        .collation({ locale: "ja", numericOrdering: true })
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limitNum)
+        .toArray();
+    }
+
+    res.json({
+      items,
+      totalCount,
+      page: pageNum,
+      totalPages: Math.ceil(totalCount / limitNum),
+      limit: limitNum
+    });
+  } catch (error) {
+    console.error("❌ Error fetching setsubi history:", error);
+    res.status(500).json({ error: "Failed to fetch equipment history" });
+  }
+});
+
 app.post('/queries', async (req, res) => {
   console.log("🟢 Received POST request to /queries");
   // Destructure query from req.body to modify it if needed
-  let { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username } = req.body;
+  let { dbName, collectionName, query, aggregation, insertData, update, delete: deleteFlag, username, sort, limit, projection, skip, options } = req.body;
 
   try {
     // Log the initial request for debugging
@@ -5142,7 +7982,18 @@ app.post('/queries', async (req, res) => {
     
     // Default to find if no other operation specified
     console.log("🔵 Running Find Query with query:", query);
-    const results = await collection.find(query).toArray();
+    let cursor = collection.find(query || {});
+    const effProj = projection || options?.projection;
+    const effSort = sort || options?.sort;
+    const effLimit = limit || options?.limit;
+    const effSkip = skip || options?.skip;
+
+    if (effProj) cursor = cursor.project(effProj);
+    if (effSort) cursor = cursor.sort(effSort);
+    if (effSkip) cursor = cursor.skip(Number(effSkip));
+    if (effLimit) cursor = cursor.limit(Number(effLimit));
+
+    const results = await cursor.toArray();
     console.log(`✅ Find Query Results Count: ${results.length}`);
     // console.log("✅ Query Results (Find):", JSON.stringify(results, null, 2)); // Can be verbose
     res.json(results);
@@ -6240,6 +9091,7 @@ app.post('/api/iot-device-names/save', async (req, res) => {
   const hasName = Object.prototype.hasOwnProperty.call(req.body || {}, 'name');
   const hasImageURLs = Object.prototype.hasOwnProperty.call(req.body || {}, 'imageURLs');
   const hasUsername = Object.prototype.hasOwnProperty.call(req.body || {}, 'username');
+  const hasOffset = Object.prototype.hasOwnProperty.call(req.body || {}, 'offset');
 
   if (!normalizedDeviceId || !normalizedFactoryName) {
     return res.status(400).json({
@@ -6277,6 +9129,13 @@ app.post('/api/iot-device-names/save', async (req, res) => {
 
     if (hasUsername) {
       updateDoc.$set.username = normalizeIotDeviceNameValue(req.body.username);
+    }
+
+    if (hasOffset) {
+      const parsedOffset = Number(req.body.offset);
+      updateDoc.$set.offset = Number.isNaN(parsedOffset) ? 0 : parsedOffset;
+    } else {
+      updateDoc.$setOnInsert.offset = 0;
     }
 
     if (hasImageURLs) {
@@ -7146,6 +10005,119 @@ const _FINANCIALS_SORTERS = {
 };
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Mongo $function body that turns a 製造ロット string into an ISO date (mirrors normalizeLotDate)
+const _NORMALIZE_LOT_DATE_BODY = `
+    function(lot) {
+      if (!lot) return null;
+      var s = String(lot).trim();
+      var yr, mo, dy;
+      // 1. Already ISO yyyy-mm-dd
+      if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) {
+        yr = parseInt(s.slice(0,4), 10);
+        mo = parseInt(s.slice(5,7), 10);
+        dy = parseInt(s.slice(8,10), 10);
+      // 2. Single-dash: yymmdd-xx, yyyymm-dd, yymm-dd
+      } else if (/^\\d+-\\d+$/.test(s)) {
+        var parts = s.split('-');
+        var left = parts[0], right = parts[1];
+        if (left.length === 6) {
+          var py = parseInt(left.slice(0,4), 10);
+          var pm = parseInt(left.slice(4,6), 10);
+          var pd = parseInt(right.slice(0,2), 10);
+          if (py >= 2020 && py <= 2099 && pm >= 1 && pm <= 12 && pd >= 1 && pd <= 31) {
+            yr = py; mo = pm; dy = pd;
+          } else {
+            yr = 2000 + parseInt(left.slice(0,2), 10);
+            mo = parseInt(left.slice(2,4), 10);
+            dy = parseInt(left.slice(4,6), 10);
+          }
+        } else if (left.length === 4) {
+          yr = 2000 + parseInt(left.slice(0,2), 10);
+          mo = parseInt(left.slice(2,4), 10);
+          dy = parseInt(right.slice(0,2), 10);
+        } else { return null; }
+      // 3. Strip non-digits
+      } else {
+        var digits = s.replace(/\\D/g, '');
+        if (digits.length >= 8) {
+          var py2 = parseInt(digits.slice(0,4), 10);
+          var pm2 = parseInt(digits.slice(4,6), 10);
+          var pd2 = parseInt(digits.slice(6,8), 10);
+          if (py2 >= 2020 && py2 <= 2099 && pm2 >= 1 && pm2 <= 12 && pd2 >= 1 && pd2 <= 31) {
+            yr = py2; mo = pm2; dy = pd2;
+          } else {
+            yr = 2000 + parseInt(digits.slice(0,2), 10);
+            mo = parseInt(digits.slice(2,4), 10);
+            dy = parseInt(digits.slice(4,6), 10);
+          }
+        } else if (digits.length >= 6) {
+          yr = 2000 + parseInt(digits.slice(0,2), 10);
+          mo = parseInt(digits.slice(2,4), 10);
+          dy = parseInt(digits.slice(4,6), 10);
+        } else { return null; }
+      }
+      if (!yr || mo < 1 || mo > 12 || dy < 1 || dy > 31) return null;
+      var dt = new Date(Date.UTC(yr, mo - 1, dy));
+      if (dt.getUTCFullYear() !== yr || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== dy) return null;
+      return yr + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy;
+    }
+  `;
+
+// Sum of recoveries[].quantity in one recoveryDB document
+const _recoveryDocQty = (doc) => Array.isArray(doc?.recoveries)
+  ? doc.recoveries.reduce((s, r) => s + (r.quantity || 0), 0)
+  : 0;
+
+/**
+ * Allocate recoveryDB documents to financial rows and stamp `row.recoveredNg`.
+ * Rows are keyed by 品番+背番号+工場, but recoveries are mostly known by 背番号, so a
+ * naive per-ban stamp would subtract the same recovered qty from every row of that ban.
+ * Each recovery doc is instead assigned to exactly ONE row: candidates are the rows of its
+ * 背番号, narrowed by 品番 then 工場 when the doc carries them (and a match exists), and the
+ * remaining tie goes to the row with the highest `created`.
+ * Returns Map(row -> [recovery docs]) so callers can list the contributing documents.
+ */
+function _allocateRecoveriesToRows(rows, recoveryDocs) {
+  const rowsByBan = new Map();
+  rows.forEach(r => {
+    r.recoveredNg = 0;
+    if (!rowsByBan.has(r.ban)) rowsByBan.set(r.ban, []);
+    rowsByBan.get(r.ban).push(r);
+  });
+  const docsByRow = new Map();
+  recoveryDocs.forEach(doc => {
+    let candidates = rowsByBan.get(doc.背番号);
+    if (!candidates || !candidates.length) return;
+    const byHinban = doc.品番 ? candidates.filter(r => r.hinban === doc.品番) : [];
+    if (byHinban.length) candidates = byHinban;
+    const byFactory = doc.factory ? candidates.filter(r => r.factory === doc.factory) : [];
+    if (byFactory.length) candidates = byFactory;
+    const target = candidates.reduce((best, r) => (r.created > best.created ? r : best), candidates[0]);
+    target.recoveredNg += _recoveryDocQty(doc);
+    if (!docsByRow.has(target)) docsByRow.set(target, []);
+    docsByRow.get(target).push(doc);
+  });
+  return docsByRow;
+}
+
+// recoveryDB filter shared by /api/financials and the breakdown endpoints
+function _buildRecoveryQuery({ fromDate, toDate, factory, ban }) {
+  const query = {};
+  if (factory) query.factory = factory;
+  if (ban) query.背番号 = ban;
+  if (fromDate || toDate) {
+    const lotRange = {};
+    const createdRange = {};
+    if (fromDate) { lotRange.$gte = fromDate; createdRange.$gte = `${fromDate}T00:00:00.000Z`; }
+    if (toDate)   { lotRange.$lte = toDate;   createdRange.$lte = `${toDate}T23:59:59.999Z`; }
+    query.$or = [
+      { lotDate: lotRange },
+      { lotDate: { $exists: false }, createdAt: createdRange }
+    ];
+  }
+  return query;
+}
+
 /**
  * Financials API
  * POST /api/financials
@@ -7236,62 +10208,7 @@ app.post('/api/financials', async (req, res) => {
     return `${yr}-${String(mo).padStart(2, '0')}-${String(dy).padStart(2, '0')}`;
   };
 
-  const normalizeLotDateBody = `
-    function(lot) {
-      if (!lot) return null;
-      var s = String(lot).trim();
-      var yr, mo, dy;
-      // 1. Already ISO yyyy-mm-dd
-      if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) {
-        yr = parseInt(s.slice(0,4), 10);
-        mo = parseInt(s.slice(5,7), 10);
-        dy = parseInt(s.slice(8,10), 10);
-      // 2. Single-dash: yymmdd-xx, yyyymm-dd, yymm-dd
-      } else if (/^\\d+-\\d+$/.test(s)) {
-        var parts = s.split('-');
-        var left = parts[0], right = parts[1];
-        if (left.length === 6) {
-          var py = parseInt(left.slice(0,4), 10);
-          var pm = parseInt(left.slice(4,6), 10);
-          var pd = parseInt(right.slice(0,2), 10);
-          if (py >= 2020 && py <= 2099 && pm >= 1 && pm <= 12 && pd >= 1 && pd <= 31) {
-            yr = py; mo = pm; dy = pd;
-          } else {
-            yr = 2000 + parseInt(left.slice(0,2), 10);
-            mo = parseInt(left.slice(2,4), 10);
-            dy = parseInt(left.slice(4,6), 10);
-          }
-        } else if (left.length === 4) {
-          yr = 2000 + parseInt(left.slice(0,2), 10);
-          mo = parseInt(left.slice(2,4), 10);
-          dy = parseInt(right.slice(0,2), 10);
-        } else { return null; }
-      // 3. Strip non-digits
-      } else {
-        var digits = s.replace(/\\D/g, '');
-        if (digits.length >= 8) {
-          var py2 = parseInt(digits.slice(0,4), 10);
-          var pm2 = parseInt(digits.slice(4,6), 10);
-          var pd2 = parseInt(digits.slice(6,8), 10);
-          if (py2 >= 2020 && py2 <= 2099 && pm2 >= 1 && pm2 <= 12 && pd2 >= 1 && pd2 <= 31) {
-            yr = py2; mo = pm2; dy = pd2;
-          } else {
-            yr = 2000 + parseInt(digits.slice(0,2), 10);
-            mo = parseInt(digits.slice(2,4), 10);
-            dy = parseInt(digits.slice(4,6), 10);
-          }
-        } else if (digits.length >= 6) {
-          yr = 2000 + parseInt(digits.slice(0,2), 10);
-          mo = parseInt(digits.slice(2,4), 10);
-          dy = parseInt(digits.slice(4,6), 10);
-        } else { return null; }
-      }
-      if (!yr || mo < 1 || mo > 12 || dy < 1 || dy > 31) return null;
-      var dt = new Date(Date.UTC(yr, mo - 1, dy));
-      if (dt.getUTCFullYear() !== yr || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== dy) return null;
-      return yr + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy;
-    }
-  `;
+  const normalizeLotDateBody = _NORMALIZE_LOT_DATE_BODY;
 
   // Hoisted so the catch block can access them for stampede cleanup
   let _cacheKey, _inflightResolve, _inflightReject;
@@ -8027,31 +10944,11 @@ app.post('/api/financials', async (req, res) => {
     try {
       const recoveryDb = client.db('submittedDB');
       const recoveryCollection = recoveryDb.collection('recoveryDB');
-      const recoveryQuery = {};
-      if (trimmedFactory) recoveryQuery.factory = trimmedFactory;
-      const recoveryDateConditions = [];
-      if (fromDate || toDate) {
-        const lotRange = {};
-        const createdRange = {};
-        if (fromDate) { lotRange.$gte = fromDate; createdRange.$gte = `${fromDate}T00:00:00.000Z`; }
-        if (toDate)   { lotRange.$lte = toDate;   createdRange.$lte = `${toDate}T23:59:59.999Z`; }
-        recoveryDateConditions.push({ lotDate: lotRange });
-        recoveryDateConditions.push({ lotDate: { $exists: false }, createdAt: createdRange });
-        recoveryQuery.$or = recoveryDateConditions;
-      }
+      const recoveryQuery = _buildRecoveryQuery({ fromDate, toDate, factory: trimmedFactory });
       const allRecoveries = await recoveryCollection.find(recoveryQuery).toArray();
-      // Build a map: ban -> total recovered quantity
-      const recoveryByBan = new Map();
-      allRecoveries.forEach(item => {
-        const ban = item.背番号;
-        if (!ban) return;
-        const qty = Array.isArray(item.recoveries)
-          ? item.recoveries.reduce((s, r) => s + (r.quantity || 0), 0)
-          : 0;
-        recoveryByBan.set(ban, (recoveryByBan.get(ban) || 0) + qty);
-      });
-      // Stamp recoveredNg on ALL rows (not just current page) so the cache is self-contained
-      rows.forEach(row => { row.recoveredNg = recoveryByBan.get(row.ban) || 0; });
+      // Stamp recoveredNg on ALL rows (not just current page) so the cache is self-contained.
+      // Each recovery doc lands on exactly one row (see _allocateRecoveriesToRows).
+      _allocateRecoveriesToRows(rows, allRecoveries);
 
       // Rebuild factoryTotalsMap with recovery-adjusted finalGood and scrapLoss
       factoryTotalsMap.clear();
@@ -8098,13 +10995,12 @@ app.post('/api/financials', async (req, res) => {
         .slice(0, 5);
 
       // Apply recovery adjustment to ALL rows (pre-pagination)
-      if (recoveryByBan.size > 0) {
+      if (allRecoveries.length > 0) {
         let adjTotalLoss = 0;
         let adjFinalGood = 0;
         let adjScrapLoss = 0;
         rows.forEach(row => {
-          const recoveredNg = recoveryByBan.get(row.ban) || 0;
-          const ngAfterRecovery = Math.max((row.totalNg || 0) - recoveredNg, 0);
+          const ngAfterRecovery = Math.max((row.totalNg || 0) - (row.recoveredNg || 0), 0);
           adjTotalLoss  += ngAfterRecovery;
           adjFinalGood  += (row.created || 0) - ngAfterRecovery;
           adjScrapLoss  += ngAfterRecovery * (row.pricePerPc || 0);
@@ -8225,6 +11121,323 @@ app.post('/api/financials', async (req, res) => {
     });
   }
 });
+
+// ── Financials breakdown (drill-down for one 背番号) ─────────────────────────
+// Source collections: process -> { collection, ng field }. press is filtered on its
+// own `Date`; the other three derive the date from 製造ロット via $function.
+const _FIN_BREAKDOWN_SOURCES = {
+  press: { collection: 'pressDB', ngField: 'Total_NG',     lotDated: false },
+  slit:  { collection: 'slitDB',  ngField: 'Total_NG',     lotDated: true  },
+  srs:   { collection: 'SRSDB',   ngField: 'SRS_Total_NG', lotDated: true  },
+  kensa: { collection: 'kensaDB', ngField: 'Total_NG',     lotDated: true  }
+};
+
+// Fixed per-process defect columns (top-level fields on the submitted docs; names mirror
+// the 不良管理 screen). kensaDB is model-specific and resolved from defectDefinitions instead.
+const _FIN_FIXED_DEFECTS = {
+  press: [{ key: '疵引不良', label: '疵引不良', label_en: 'Scratch Defect' },
+          { key: '加工不良', label: '加工不良', label_en: 'Processing Defect' },
+          { key: 'その他',   label: 'その他',   label_en: 'Other' }],
+  srs:   ['くっつき・めくれ', 'シワ', '転写位置ズレ', '転写不良', '文字欠け', 'その他'].map(k => ({ key: k, label: k, label_en: '' }))
+};
+_FIN_FIXED_DEFECTS.slit = _FIN_FIXED_DEFECTS.press;
+
+// Defect columns for one source; kensa labels come from the 背番号's model in defectDefinitions
+async function _finBreakdownDefectColumns(source, ban) {
+  if (_FIN_FIXED_DEFECTS[source]) return { columns: _FIN_FIXED_DEFECTS[source], model: '' };
+  const masterDb = client.db('Sasaki_Coating_MasterDB');
+  const master = await masterDb.collection('masterDB').findOne({ 背番号: ban }, { projection: { モデル: 1 } });
+  const model = master?.モデル || '';
+  const def = model ? await masterDb.collection('defectDefinitions').findOne({ モデル: model }) : null;
+  const columns = Array.from({ length: 12 }, (_, i) => {
+    const key = `counter-${i + 1}`;
+    return { key, label: def?.counters?.[key]?.trim() || `カウンター${i + 1}`, label_en: def?.counters_en?.[key]?.trim() || '' };
+  });
+  return { columns, model };
+}
+
+// Base pipeline stages selecting one 背番号's documents inside the date range
+function _finBreakdownBasePipeline(source, { fromDate, toDate, ban, factory }) {
+  const cfg = _FIN_BREAKDOWN_SOURCES[source];
+  const match = { 背番号: ban };
+  if (factory) match['工場'] = factory;
+  if (!cfg.lotDated) {
+    match.Date = { $gte: fromDate, $lte: toDate };
+    return [{ $match: match }, { $addFields: { normalizedLotDate: '$Date' } }];
+  }
+  match.製造ロット = { $exists: true, $ne: '' };
+  return [
+    { $match: match },
+    { $addFields: { normalizedLotDate: { $function: { body: _NORMALIZE_LOT_DATE_BODY, args: ['$製造ロット'], lang: 'js' } } } },
+    { $match: { normalizedLotDate: { $gte: fromDate, $lte: toDate } } }
+  ];
+}
+
+/**
+ * POST /api/financials/breakdown
+ * Body: { fromDate, toDate, ban, factory? }
+ * Rebuilds the financial rows of ONE 背番号 with the same rules as /api/financials and returns
+ * every number needed to explain its Scrap Loss. Raw source documents are NOT included here;
+ * they are served page by page by /api/financials/breakdown/records.
+ */
+app.post('/api/financials/breakdown', async (req, res) => {
+  const { fromDate, toDate } = req.body || {};
+  const ban = String(req.body?.ban || '').trim();
+  const factory = String(req.body?.factory || '').trim();
+  if (!fromDate || !toDate || !ban) {
+    return res.status(400).json({ success: false, error: 'fromDate, toDate and ban are required' });
+  }
+  try {
+    const submittedDb = client.db('submittedDB');
+    const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
+    const params = { fromDate, toDate, ban, factory };
+
+    // Defect columns per process (kensa labels depend on the 背番号's model)
+    const defectColumns = {};
+    await Promise.all(Object.keys(_FIN_BREAKDOWN_SOURCES).map(async src => {
+      defectColumns[src] = (await _finBreakdownDefectColumns(src, ban)).columns;
+    }));
+
+    // One tiny aggregation per process: totals (and per-defect sums d0..dn) grouped by 品番 + 工場
+    const sumStage = (source, extra = {}) => {
+      const defectSums = {};
+      defectColumns[source].forEach((c, i) => {
+        defectSums[`d${i}`] = { $sum: { $ifNull: [`$${source === 'kensa' ? 'Counters.' : ''}${c.key}`, 0] } };
+      });
+      return {
+        $group: {
+          _id: { hinban: '$品番', factory: '$工場' },
+          ng: { $sum: { $ifNull: [`$${_FIN_BREAKDOWN_SOURCES[source].ngField}`, 0] } },
+          ...defectSums,
+          ...extra
+        }
+      };
+    };
+    const runAgg = (source, extra) => submittedDb.collection(_FIN_BREAKDOWN_SOURCES[source].collection)
+      .aggregate([..._finBreakdownBasePipeline(source, params), sumStage(source, extra)], { allowDiskUse: true }).toArray();
+    const [pressAgg, slitAgg, srsAgg, kensaAgg] = await Promise.all([
+      runAgg('press', { created: { $sum: { $ifNull: ['$Process_Quantity', 0] } } }),
+      runAgg('slit'), runAgg('srs'), runAgg('kensa')
+    ]);
+
+    const byKey = new Map();
+    const entry = (id) => {
+      const hinban = id.hinban;
+      const fac = id.factory || 'Unknown';
+      const key = `${hinban}__${fac}`;
+      if (!byKey.has(key)) byKey.set(key, { hinban, ban, factory: fac, created: 0, pressNg: 0, slitNg: 0, srsNg: 0, kensaNg: 0,
+        defects: { press: {}, slit: {}, srs: {}, kensa: {} } });
+      return byKey.get(key);
+    };
+    const addDefects = (e, source, r) => {
+      defectColumns[source].forEach((c, i) => { e.defects[source][c.key] = (e.defects[source][c.key] || 0) + (r[`d${i}`] || 0); });
+    };
+    pressAgg.forEach(r => { const e = entry(r._id); e.created += r.created || 0; e.pressNg += r.ng || 0; addDefects(e, 'press', r); });
+    slitAgg.forEach(r  => { const e = entry(r._id); e.slitNg  += r.ng || 0; addDefects(e, 'slit', r); });
+    srsAgg.forEach(r   => { const e = entry(r._id); e.srsNg   += r.ng || 0; addDefects(e, 'srs', r); });
+    kensaAgg.forEach(r => { const e = entry(r._id); e.kensaNg += r.ng || 0; addDefects(e, 'kensa', r); });
+
+    const hinbans = Array.from(new Set(Array.from(byKey.values()).map(e => e.hinban).filter(Boolean)));
+    const masterDocs = await masterCollection.find(
+      { 品番: { $in: hinbans } },
+      { projection: { 品番: 1, モデル: 1, 背番号: 1, pricePerPc: 1 } }
+    ).toArray();
+    const masterMap = new Map(masterDocs.map(d => [d.品番, d]));
+
+    // Same rules as /api/financials: rows without a price are skipped, rows with created=0
+    // fold their NG into the highest-created row of the same 背番号.
+    const skippedNoPrice = [];
+    const priced = [];
+    byKey.forEach(e => {
+      const master = masterMap.get(e.hinban);
+      const pricePerPc = parseFloat(master?.pricePerPc) || 0;
+      if (pricePerPc <= 0) {
+        skippedNoPrice.push({ hinban: e.hinban, factory: e.factory, created: e.created,
+          totalNg: e.pressNg + e.slitNg + e.srsNg + e.kensaNg });
+        return;
+      }
+      priced.push({ ...e, model: master?.モデル || '', pricePerPc, mergedZeroCreatedNg: 0 });
+    });
+    const rows = priced.filter(r => r.created > 0);
+    priced.filter(r => r.created === 0).forEach(z => {
+      const target = rows.reduce((best, r) => (!best || r.created > best.created ? r : best), null);
+      if (!target) return;
+      target.pressNg += z.pressNg; target.slitNg += z.slitNg; target.srsNg += z.srsNg; target.kensaNg += z.kensaNg;
+      target.mergedZeroCreatedNg += z.pressNg + z.slitNg + z.srsNg + z.kensaNg;
+      Object.keys(z.defects).forEach(src => Object.keys(z.defects[src]).forEach(k => {
+        target.defects[src][k] = (target.defects[src][k] || 0) + z.defects[src][k];
+      }));
+    });
+
+    const recoveryDocs = await submittedDb.collection('recoveryDB')
+      .find(_buildRecoveryQuery({ fromDate, toDate, factory, ban })).toArray();
+    const docsByRow = _allocateRecoveriesToRows(rows, recoveryDocs);
+
+    const totals = { created: 0, totalNg: 0, recoveredNg: 0, ngAfterRecovery: 0, finalGood: 0, cost: 0, scrapLoss: 0, value: 0,
+                     pressNg: 0, slitNg: 0, srsNg: 0, kensaNg: 0 };
+    const outRows = rows.map(r => {
+      const totalNg = r.pressNg + r.slitNg + r.srsNg + r.kensaNg;
+      const ngAfterRecovery = Math.max(totalNg - r.recoveredNg, 0);
+      const finalGood = r.created - ngAfterRecovery;
+      const cost = r.created * r.pricePerPc;
+      const scrapLoss = ngAfterRecovery * r.pricePerPc;
+      ['created', 'pressNg', 'slitNg', 'srsNg', 'kensaNg'].forEach(k => { totals[k] += r[k]; });
+      Object.assign(totals, {
+        totalNg: totals.totalNg + totalNg, recoveredNg: totals.recoveredNg + r.recoveredNg,
+        ngAfterRecovery: totals.ngAfterRecovery + ngAfterRecovery, finalGood: totals.finalGood + finalGood,
+        cost: totals.cost + cost, scrapLoss: totals.scrapLoss + scrapLoss, value: totals.value + (cost - scrapLoss)
+      });
+      return {
+        hinban: r.hinban, factory: r.factory, model: r.model,
+        created: r.created, pressNg: r.pressNg, slitNg: r.slitNg, srsNg: r.srsNg, kensaNg: r.kensaNg,
+        mergedZeroCreatedNg: r.mergedZeroCreatedNg,
+        // Per-process defect quantities; `unclassified` = process NG not explained by the defect fields
+        defectsByProcess: ['press', 'slit', 'srs', 'kensa'].map(src => {
+          const processNg = r[`${src}Ng`];
+          const items = defectColumns[src]
+            .map(c => ({ key: c.key, label: c.label, label_en: c.label_en, qty: r.defects[src][c.key] || 0 }))
+            .filter(d => d.qty > 0).sort((a, b) => b.qty - a.qty);
+          return { process: src, ng: processNg, items, unclassified: Math.max(processNg - items.reduce((s, d) => s + d.qty, 0), 0) };
+        }),
+        totalNg, recoveredNg: r.recoveredNg, ngAfterRecovery, finalGood,
+        recoveryDocCount: (docsByRow.get(r) || []).length,
+        pricePerPc: r.pricePerPc,
+        cost: Number(cost.toFixed(2)), scrapLoss: Number(scrapLoss.toFixed(2)), value: Number((cost - scrapLoss).toFixed(2)),
+        yieldPercent: r.created > 0 ? Number(((finalGood / r.created) * 100).toFixed(2)) : 0
+      };
+    }).sort((a, b) => b.scrapLoss - a.scrapLoss);
+
+    totals.cost = Number(totals.cost.toFixed(2));
+    totals.scrapLoss = Number(totals.scrapLoss.toFixed(2));
+    totals.value = Number(totals.value.toFixed(2));
+    totals.yieldPercent = totals.created > 0 ? Number(((totals.finalGood / totals.created) * 100).toFixed(2)) : 0;
+
+    res.json({
+      success: true, ban, factory, fromDate, toDate,
+      model: outRows[0]?.model || '',
+      rows: outRows, totals, skippedNoPrice,
+      unallocatedRecoveryDocs: recoveryDocs.length - Array.from(docsByRow.values()).reduce((s, d) => s + d.length, 0)
+    });
+  } catch (error) {
+    console.error('❌ Error building financials breakdown:', error);
+    res.status(500).json({ success: false, error: 'Failed to build breakdown', message: error.message });
+  }
+});
+
+/**
+ * POST /api/financials/breakdown/records
+ * Body: { fromDate, toDate, ban, factory?, source: press|slit|srs|kensa|recovery, page?, limit? }
+ * One server-side page of the raw documents behind a breakdown (newest first). Only `limit`
+ * (max 50) documents are read per call; a parallel count query supplies the page total.
+ */
+app.post('/api/financials/breakdown/records', async (req, res) => {
+  const { fromDate, toDate } = req.body || {};
+  const ban = String(req.body?.ban || '').trim();
+  const factory = String(req.body?.factory || '').trim();
+  const source = String(req.body?.source || '');
+  if (!fromDate || !toDate || !ban) {
+    return res.status(400).json({ success: false, error: 'fromDate, toDate and ban are required' });
+  }
+  if (source !== 'recovery' && !_FIN_BREAKDOWN_SOURCES[source]) {
+    return res.status(400).json({ success: false, error: 'source must be press, slit, srs, kensa or recovery' });
+  }
+  const limit = Math.min(Math.max(parseInt(req.body?.limit, 10) || 20, 1), 50);
+  const requestedPage = Math.max(parseInt(req.body?.page, 10) || 1, 1);
+  const sortField = String(req.body?.sortField || 'date');
+  const sortDir = req.body?.sortDir === 'asc' ? 1 : -1;
+  try {
+    const submittedDb = client.db('submittedDB');
+    let total, records;
+
+    if (source === 'recovery') {
+      const col = submittedDb.collection('recoveryDB');
+      const query = _buildRecoveryQuery({ fromDate, toDate, factory, ban });
+      total = await col.countDocuments(query);
+      const page = Math.min(requestedPage, Math.max(Math.ceil(total / limit), 1));
+      // quantity is the sum of recoveries[].quantity, so it is computed before sorting
+      const recoverySortKeys = { date: 'lotDate', lot: '製造ロット', hinban: '品番', factory: 'factory', quantity: '_qty' };
+      const recoverySort = recoverySortKeys[sortField]
+        ? { [recoverySortKeys[sortField]]: sortDir, createdAt: -1, _id: -1 }
+        : { lotDate: -1, createdAt: -1, _id: -1 };
+      const docs = await col.aggregate([
+        { $match: query },
+        { $addFields: { _qty: { $sum: '$recoveries.quantity' } } },
+        { $sort: recoverySort },
+        { $skip: (page - 1) * limit },
+        { $limit: limit }
+      ], { allowDiskUse: true }).toArray();
+      records = docs.map(d => ({
+        _id: String(d._id), lotDate: d.lotDate || null, lot: d.製造ロット || '', hinban: d.品番 || '',
+        factory: d.factory || '', quantity: d._qty || 0,
+        recoveries: (d.recoveries || []).map(r => ({ defectType: r.defectType, quantity: r.quantity || 0 })),
+        userId: d.userId || '', createdAt: d.createdAt || null
+      }));
+      return res.json({ success: true, source, records, total, page, limit, totalPages: Math.ceil(total / limit) });
+    }
+
+    const cfg = _FIN_BREAKDOWN_SOURCES[source];
+    const col = submittedDb.collection(cfg.collection);
+    const base = _finBreakdownBasePipeline(source, { fromDate, toDate, ban, factory });
+    const countRes = await col.aggregate([...base, { $count: 'n' }], { allowDiskUse: true }).toArray();
+    total = countRes[0]?.n || 0;
+    const page = Math.min(requestedPage, Math.max(Math.ceil(total / limit), 1));
+    const { columns: defectColumns, model } = await _finBreakdownDefectColumns(source, ban);
+    // Whitelisted sort keys -> document field (defect columns are addressed as "defect:<key>")
+    const sortKeys = { date: 'normalizedLotDate', lot: '製造ロット', hinban: '品番', factory: '工場',
+                       machine: '設備', worker: 'Worker_Name', ng: cfg.ngField };
+    if (source === 'press') sortKeys.quantity = 'Process_Quantity';
+    if (source === 'kensa') sortKeys.quantity = 'Total';
+    defectColumns.forEach(c => { sortKeys[`defect:${c.key}`] = source === 'kensa' ? `Counters.${c.key}` : c.key; });
+    const sortSpec = sortKeys[sortField]
+      ? { [sortKeys[sortField]]: sortDir, normalizedLotDate: -1, _id: -1 }
+      : { normalizedLotDate: -1, _id: -1 };
+    const project = { normalizedLotDate: 1, 製造ロット: 1, 品番: 1, 工場: 1, Date: 1, 設備: 1, Worker_Name: 1,
+                      Process_Quantity: 1, Total: 1, Total_NG: 1, SRS_Total_NG: 1 };
+    defectColumns.forEach(c => { project[source === 'kensa' ? `Counters.${c.key}` : c.key] = 1; });
+    const docs = await col.aggregate([
+      ...base,
+      { $sort: sortSpec },
+      { $skip: (page - 1) * limit },
+      { $limit: limit },
+      { $project: project }
+    ], { allowDiskUse: true }).toArray();
+    records = docs.map(d => ({
+      defects: Object.fromEntries(defectColumns.map(c =>
+        [c.key, Number(source === 'kensa' ? d.Counters?.[c.key] : d[c.key]) || 0])),
+      _id: String(d._id), date: d.normalizedLotDate || d.Date || null, lot: d.製造ロット || '',
+      hinban: d.品番 || '', factory: d.工場 || '', machine: d.設備 || '', worker: d.Worker_Name || '',
+      quantity: source === 'press' ? (d.Process_Quantity || 0) : (source === 'kensa' ? (d.Total || 0) : null),
+      ng: d[cfg.ngField] || 0
+    }));
+    res.json({ success: true, source, records, defectColumns, model, total, page, limit, totalPages: Math.ceil(total / limit) });
+  } catch (error) {
+    console.error('❌ Error loading financials breakdown records:', error);
+    res.status(500).json({ success: false, error: 'Failed to load records', message: error.message });
+  }
+});
+
+/**
+ * POST /api/financials/breakdown/record
+ * Body: { source: press|slit|srs|kensa, id }
+ * The full submitted document behind one breakdown row (for the 生産記録詳細 modal).
+ */
+app.post('/api/financials/breakdown/record', async (req, res) => {
+  const source = String(req.body?.source || '');
+  const id = String(req.body?.id || '');
+  if (!_FIN_BREAKDOWN_SOURCES[source] || !ObjectId.isValid(id)) {
+    return res.status(400).json({ success: false, error: 'valid source and id are required' });
+  }
+  try {
+    const doc = await client.db('submittedDB').collection(_FIN_BREAKDOWN_SOURCES[source].collection)
+      .findOne({ _id: new ObjectId(id) });
+    if (!doc) return res.status(404).json({ success: false, error: 'Record not found' });
+    res.json({ success: true, record: doc });
+  } catch (error) {
+    console.error('❌ Error loading financials breakdown record:', error);
+    res.status(500).json({ success: false, error: 'Failed to load record', message: error.message });
+  }
+});
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Financials CSV Export — all rows, no pagination
@@ -8374,6 +11587,10 @@ app.post('/api/analytics-data', async (req, res) => {
     factoryAccess = [],
     factoryFilter, // CRITICAL: Factory filter parameter
     bans,          // Optional: array of 背番号 to restrict results to
+    partNumbers,   // Optional: array of 品番 to restrict results to
+    hinbans,       // Optional: alias for partNumbers
+    models,        // Optional: array of モデル to restrict results to
+    advancedFilters, // Optional: array of MongoDB filter clauses
     collectionName = 'kensaDB',
     dbName = "submittedDB"
   } = req.body;
@@ -8414,6 +11631,96 @@ app.post('/api/analytics-data', async (req, res) => {
     if (Array.isArray(bans) && bans.length > 0) {
       baseQuery['背番号'] = { $in: bans };
       console.log(`🔖 Applied 背番号 filter: ${bans.length} products`);
+    }
+
+    // Apply 品番 (part number) filter
+    const resolvedPartNumbers = partNumbers || hinbans;
+    if (Array.isArray(resolvedPartNumbers) && resolvedPartNumbers.length > 0) {
+      baseQuery['品番'] = { $in: resolvedPartNumbers };
+      console.log(`🔖 Applied 品番 filter: ${resolvedPartNumbers.length} part numbers`);
+    }
+
+    // Apply モデル (model) filter - resolved via masterDB (submittedDB records don't store モデル directly)
+    if (Array.isArray(models) && models.length > 0) {
+      try {
+        const masterDb = client.db('Sasaki_Coating_MasterDB');
+        const masterDocs = await masterDb.collection('masterDB').find(
+          { モデル: { $in: models } },
+          { projection: { 背番号: 1, 品番: 1, _id: 0 } }
+        ).toArray();
+        const modelBans = [...new Set(masterDocs.map(d => d.背番号).filter(Boolean))];
+        const modelHinbans = [...new Set(masterDocs.map(d => d.品番).filter(Boolean))];
+        console.log(`🔖 Resolved ${models.length} models to ${modelBans.length} 背番号 and ${modelHinbans.length} 品番`);
+        if (modelBans.length > 0) {
+          if (baseQuery['背番号'] && baseQuery['背番号'].$in) {
+            baseQuery['背番号'].$in = baseQuery['背番号'].$in.filter(b => modelBans.includes(b));
+          } else {
+            baseQuery['背番号'] = { $in: modelBans };
+          }
+        } else if (modelHinbans.length > 0) {
+          if (baseQuery['品番'] && baseQuery['品番'].$in) {
+            baseQuery['品番'].$in = baseQuery['品番'].$in.filter(p => modelHinbans.includes(p));
+          } else {
+            baseQuery['品番'] = { $in: modelHinbans };
+          }
+        } else {
+          baseQuery['背番号'] = { $in: ['__NO_MATCH__'] };
+        }
+      } catch (err) {
+        console.error('Failed to resolve models in masterDB:', err);
+      }
+    }
+
+    // Apply advanced filter clauses if provided
+    if (Array.isArray(advancedFilters) && advancedFilters.length > 0) {
+      if (!baseQuery.$and) {
+        baseQuery = { $and: [baseQuery] };
+      }
+      for (const clause of advancedFilters) {
+        if (!clause || typeof clause !== 'object' || Object.keys(clause).length === 0) continue;
+
+        let normalizedClause = { ...clause };
+
+        // 1. Resolve モデル if queried (submittedDB records don't store モデル directly)
+        if ('モデル' in normalizedClause) {
+          try {
+            const masterDb = client.db('Sasaki_Coating_MasterDB');
+            const modelCond = normalizedClause['モデル'];
+            const resolvedModelCond = Array.isArray(modelCond) ? { $in: modelCond } : modelCond;
+            const masterDocs = await masterDb.collection('masterDB').find(
+              { モデル: resolvedModelCond },
+              { projection: { 背番号: 1, 品番: 1, _id: 0 } }
+            ).toArray();
+            const modelBans = [...new Set(masterDocs.map(d => d.背番号).filter(Boolean))];
+            const modelHinbans = [...new Set(masterDocs.map(d => d.品番).filter(Boolean))];
+            if (modelBans.length > 0) {
+              normalizedClause = { 背番号: { $in: modelBans } };
+            } else if (modelHinbans.length > 0) {
+              normalizedClause = { 品番: { $in: modelHinbans } };
+            } else {
+              normalizedClause = { 背番号: '__NO_MATCH__' };
+            }
+          } catch (err) {
+            console.error('Failed to resolve モデル in advanced filter clause:', err);
+          }
+        } else {
+          // 2. Normalize array values for scalar fields: { field: [val] } -> unwrap or { $in: val }
+          for (const key of Object.keys(normalizedClause)) {
+            if (key.startsWith('$')) continue;
+            const val = normalizedClause[key];
+            if (Array.isArray(val)) {
+              if (val.length === 1) {
+                normalizedClause[key] = val[0];
+              } else if (val.length > 1) {
+                normalizedClause[key] = { $in: val };
+              }
+            }
+          }
+        }
+
+        baseQuery.$and.push(normalizedClause);
+      }
+      console.log(`🔍 Applied ${advancedFilters.length} advanced filter clauses. Query:`, JSON.stringify(baseQuery));
     }
 
     // Build climate data query (for temperature/humidity)
@@ -9938,7 +13245,7 @@ app.post('/api/production-goals/lookup', async (req, res) => {
 // ==================== UPDATE PRODUCTION PLAN ====================
 app.post('/api/production-plans/update', async (req, res) => {
     try {
-        const { planId, factory, date, products, breaks, updatedBy } = req.body;
+        const { planId, factory, date, products, breaks, updatedBy, startTime, unavailableEquipment } = req.body;
         
         if (!planId) {
             return res.status(400).json({ 
@@ -9959,6 +13266,8 @@ app.post('/api/production-plans/update', async (req, res) => {
         if (products) updateData.products = products;
         if (breaks) updateData.breaks = breaks;
         if (updatedBy) updateData.updatedBy = updatedBy;
+        if (startTime !== undefined) updateData.startTime = startTime;
+        if (unavailableEquipment !== undefined) updateData.unavailableEquipment = unavailableEquipment;
         
         const result = await collection.updateOne(
             { _id: new ObjectId(planId) },
@@ -10016,7 +13325,7 @@ app.get('/api/production-plans', async (req, res) => {
 // ==================== CREATE PRODUCTION PLAN ====================
 app.post('/api/production-plans', async (req, res) => {
     try {
-        const { factory, date, products, breaks, createdBy } = req.body;
+        const { factory, date, products, breaks, createdBy, startTime, unavailableEquipment } = req.body;
         
         if (!factory || !date) {
             return res.status(400).json({ 
@@ -10037,6 +13346,8 @@ app.post('/api/production-plans', async (req, res) => {
             createdAt: new Date(),
             updatedAt: new Date()
         };
+        if (startTime) plan.startTime = startTime;
+        if (unavailableEquipment) plan.unavailableEquipment = unavailableEquipment;
         
         const result = await collection.insertOne(plan);
         
@@ -10396,6 +13707,13 @@ function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
 
   const rawValue = row?.[field];
 
+  if (operator === "exists") {
+    return rawValue != null && rawValue !== "";
+  }
+  if (operator === "not_exists") {
+    return rawValue == null || rawValue === "";
+  }
+
   if (type === "number") {
     const rowValue = getFactoryStatusNumericValue(rawValue);
     const filterValue = getFactoryStatusNumericValue(filter?.value);
@@ -10404,6 +13722,7 @@ function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
 
     if (rowValue == null) return false;
     if (operator === "equals") return rowValue === filterValue;
+    if (operator === "not_equals") return rowValue !== filterValue;
     if (operator === "greater") return filterValue != null && rowValue > filterValue;
     if (operator === "less") return filterValue != null && rowValue < filterValue;
     if (operator === "range") return fromValue != null && toValue != null && rowValue >= fromValue && rowValue <= toValue;
@@ -10425,6 +13744,7 @@ function matchesFactoryStatusSingleFilter(row = {}, filter = {}) {
 
   const filterText = normalizeFactoryStatusTextLower(filter?.value);
   if (operator === "equals") return rowText === filterText;
+  if (operator === "not_equals") return rowText !== filterText;
   if (operator === "contains") return rowText.includes(filterText);
   return true;
 }
@@ -10739,6 +14059,842 @@ async function collectFactoryStatusMatchingSessionIdsByOperator(collection, matc
     .map((item) => normalizeFactoryStatusText(item?._id))
     .filter(Boolean);
 }
+
+app.get('/api/factory-status/machines/:factoryName', async (req, res) => {
+  try {
+    const { factoryName } = req.params;
+    const db = client.db(DB_NAME);
+    const machines = await db.collection(CHECK_FORM_EQUIPMENT_COLLECTION)
+      .find({ 
+        工場: factoryName, 
+        _archived: { $ne: true } 
+      })
+      .sort({ name: 1 })
+      .toArray();
+      
+    res.json({ success: true, machines });
+  } catch (error) {
+    console.error(`Error fetching machines for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// ============================================
+// DIGITAL TWIN — live per-machine state for the freyaAdmin2 3D dashboard
+// Sources: cycleCountDB (live cycles), tabletLogDB (worker/背番号/alerts),
+//          masterDB (pcPerCycle), setsubiDB (heads/table length/pairs), productionGoalsDB
+// ============================================
+const DIGITAL_TWIN_IDLE_MS = 10 * 60 * 1000;       // no cycle for 10 min => idle
+const DIGITAL_TWIN_WORKING_FRESH_MS = 30 * 1000;   // listeners that send `working` heartbeat every ~10s; older than this => not trusted
+const DIGITAL_TWIN_OFF_MS = 60 * 60 * 1000;        // no activity for 60 min => off
+const DIGITAL_TWIN_RESET_HOUR_JST = 2;             // ioT listener resets cycles at 02:00
+const DIGITAL_TWIN_JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DIGITAL_TWIN_STATUS_PRIORITY = ['stopCall', 'cncCancel', 'maintenance', 'break', 'running', 'idle', 'off'];
+
+function getDigitalTwinProductionDay(nowMs = Date.now()) {
+  const jstNow = new Date(nowMs + DIGITAL_TWIN_JST_OFFSET_MS); // UTC fields == JST wall clock
+  const todayCutoff = Date.UTC(
+    jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate(), DIGITAL_TWIN_RESET_HOUR_JST
+  ) - DIGITAL_TWIN_JST_OFFSET_MS;
+  const cutoffMs = nowMs < todayCutoff ? todayCutoff - 24 * 60 * 60 * 1000 : todayCutoff;
+  return {
+    cutoffMs,
+    productionDate: new Date(cutoffMs + DIGITAL_TWIN_JST_OFFSET_MS).toISOString().slice(0, 10),
+    calendarDate: jstNow.toISOString().slice(0, 10),
+  };
+}
+
+// cycleCountDB timestamps are naive local time (JST by default; see DIGITAL_TWIN_FACTORY_TIMEZONES) (Python datetime.now().isoformat())
+// Factories whose machine PCs write naive LOCAL timestamps outside Japan (IANA zone; DST handled).
+// SCNA: the factory is in Indianapolis (Eastern) but the machine PCs' clocks run on US Pacific time
+// (verified 2026-11-05: naive '04:58' arrived at 12:58Z). Match the PCs, not the factory location.
+// If the PC clocks/timezones are ever corrected, change this to 'America/Indiana/Indianapolis'.
+const DIGITAL_TWIN_FACTORY_TIMEZONES = { SCNA: 'America/Los_Angeles' };
+
+// Epoch ms of a naive wall-clock string interpreted in an IANA timezone.
+function naiveToEpochInZone(str, timeZone) {
+  const asUtc = Date.parse(`${str}Z`);
+  if (!Number.isFinite(asUtc)) return null;
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const offsetAt = (t) => {
+      const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+      return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(t / 1000) * 1000;
+    };
+    let guess = asUtc - offsetAt(asUtc);
+    guess = asUtc - offsetAt(guess); // second pass settles DST boundaries
+    return guess;
+  } catch (e) {
+    return null;
+  }
+}
+
+function parseDigitalTwinTimestamp(value, timeZone = null) {
+  if (!value) return null;
+  if (value instanceof Date) return value.getTime();
+  const str = String(value).trim();
+  const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(str);
+  if (!hasZone && timeZone) {
+    const zoned = naiveToEpochInZone(str, timeZone);
+    if (zoned !== null) return zoned;
+  }
+  const ms = Date.parse(hasZone ? str : `${str}+09:00`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function splitDigitalTwinEquipment(value) {
+  return String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+// sessionID format: `${背番号|setup}_${設備}_${工場}_${date}_${n}`
+function getDigitalTwinSessionEquipment(sessionID) {
+  const parts = String(sessionID || '').split('_');
+  return parts.length >= 5 ? parts[1] : '';
+}
+
+function toDigitalTwinNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function timeToDigitalTwinMinutes(t) {
+  if (!t || typeof t !== 'string') return null;
+  const m = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
+function minutesToDigitalTwinTime(mins) {
+  if (mins === null || mins === undefined) return '';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function buildDigitalTwinTimelineSegments({
+  runs = [],
+  activeRun = null,
+  currentStatus = 'off',
+  dayStartMin = 480,
+  dayEndMin = 1140,
+}) {
+  const segments = [];
+  const addSegment = (type, sMin, eMin, meta = {}) => {
+    if (eMin <= sMin) return;
+    const last = segments[segments.length - 1];
+    if (
+      last &&
+      last.type === type &&
+      last.sebanggo === (meta.sebanggo || '') &&
+      last.label === (meta.label || '')
+    ) {
+      last.endMin = eMin;
+      last.end = minutesToDigitalTwinTime(eMin);
+      last.durationMin = last.endMin - last.startMin;
+      return;
+    }
+    segments.push({
+      type,
+      startMin: sMin,
+      endMin: eMin,
+      start: minutesToDigitalTwinTime(sMin),
+      end: minutesToDigitalTwinTime(eMin),
+      durationMin: eMin - sMin,
+      sebanggo: meta.sebanggo || '',
+      hinban: meta.hinban || '',
+      worker: meta.worker || '',
+      pieces: meta.pieces || 0,
+      shots: meta.shots || 0,
+      label: meta.label || '',
+    });
+  };
+
+  let minShiftStart = dayStartMin;
+  let maxShiftEnd = dayEndMin;
+  runs.forEach((r) => {
+    if (r.startMin !== null && r.startMin < minShiftStart) minShiftStart = Math.floor(r.startMin / 30) * 30;
+    if (r.endMin !== null && r.endMin > maxShiftEnd) maxShiftEnd = Math.ceil(r.endMin / 30) * 30;
+  });
+  if (activeRun && activeRun.startMin !== null && activeRun.startMin < minShiftStart) {
+    minShiftStart = Math.floor(activeRun.startMin / 30) * 30;
+  }
+  if (activeRun && activeRun.endMin !== null && activeRun.endMin > maxShiftEnd) {
+    maxShiftEnd = Math.ceil(activeRun.endMin / 30) * 30;
+  }
+
+  let cursor = minShiftStart;
+
+  for (const r of runs) {
+    if (r.startMin === null || r.endMin === null) continue;
+    if (r.startMin > cursor) {
+      const gap = r.startMin - cursor;
+      addSegment(gap <= 15 ? 'setup' : 'idle', cursor, r.startMin, {
+        label: gap <= 15 ? '段取・切替' : 'アイドル',
+      });
+      cursor = r.startMin;
+    }
+
+    const subEvents = [];
+    (r.breaks || []).forEach((b) => {
+      if (b.startMin >= r.startMin && b.endMin <= r.endMin && b.endMin > b.startMin) {
+        subEvents.push({ type: 'break', startMin: b.startMin, endMin: b.endMin, label: '休憩' });
+      }
+    });
+    (r.stopCalls || []).forEach((s) => {
+      const sMin = timeToDigitalTwinMinutes(s.start || s.time);
+      const eMin = timeToDigitalTwinMinutes(s.end || s.resolvedAt);
+      if (sMin !== null && eMin !== null && sMin >= r.startMin && eMin <= r.endMin && eMin > sMin) {
+        subEvents.push({ type: 'stopCall', startMin: sMin, endMin: eMin, label: '呼出・停止' });
+      }
+    });
+    (r.maintenances || []).forEach((m) => {
+      const sMin = timeToDigitalTwinMinutes(m.start);
+      const eMin = timeToDigitalTwinMinutes(m.end);
+      if (sMin !== null && eMin !== null && sMin >= r.startMin && eMin <= r.endMin && eMin > sMin) {
+        subEvents.push({ type: 'maintenance', startMin: sMin, endMin: eMin, label: 'メンテナンス' });
+      }
+    });
+    subEvents.sort((a, b) => a.startMin - b.startMin);
+
+    let runCursor = r.startMin;
+    for (const sub of subEvents) {
+      if (sub.startMin > runCursor) {
+        addSegment('running', runCursor, sub.startMin, {
+          sebanggo: r.sebanggo,
+          hinban: r.hinban,
+          worker: r.worker,
+          label: r.sebanggo || '稼働',
+        });
+      }
+      addSegment(sub.type, Math.max(runCursor, sub.startMin), sub.endMin, {
+        label: sub.label,
+      });
+      runCursor = Math.max(runCursor, sub.endMin);
+    }
+    if (runCursor < r.endMin) {
+      addSegment('running', runCursor, r.endMin, {
+        sebanggo: r.sebanggo,
+        hinban: r.hinban,
+        worker: r.worker,
+        label: r.sebanggo || '稼働',
+      });
+    }
+    cursor = Math.max(cursor, r.endMin);
+  }
+
+  if (activeRun && activeRun.startMin !== null && activeRun.endMin !== null && activeRun.endMin > cursor) {
+    if (activeRun.startMin > cursor) {
+      const gap = activeRun.startMin - cursor;
+      addSegment(gap <= 15 ? 'setup' : 'idle', cursor, activeRun.startMin, {
+        label: gap <= 15 ? '段取・切替' : 'アイドル',
+      });
+      cursor = activeRun.startMin;
+    }
+    const actType = currentStatus === 'break' ? 'break'
+      : currentStatus === 'stopCall' ? 'stopCall'
+      : currentStatus === 'maintenance' ? 'maintenance'
+      : currentStatus === 'idle' ? 'idle'
+      : 'running';
+    addSegment(actType, cursor, activeRun.endMin, {
+      sebanggo: activeRun.sebanggo,
+      hinban: activeRun.hinban,
+      worker: activeRun.worker,
+      label: activeRun.sebanggo || (actType === 'running' ? '稼働中' : actType),
+    });
+    cursor = activeRun.endMin;
+  }
+
+  if (cursor < maxShiftEnd) {
+    addSegment(currentStatus === 'off' ? 'off' : 'idle', cursor, maxShiftEnd, {
+      label: currentStatus === 'off' ? '停止' : '待機',
+    });
+  }
+
+  const summary = {
+    runningMin: 0,
+    idleMin: 0,
+    setupMin: 0,
+    breakMin: 0,
+    stopCallMin: 0,
+    maintenanceMin: 0,
+    offMin: 0,
+    totalShiftMin: maxShiftEnd - minShiftStart,
+    shiftStart: minutesToDigitalTwinTime(minShiftStart),
+    shiftEnd: minutesToDigitalTwinTime(maxShiftEnd),
+    uptimePercent: 0,
+  };
+  segments.forEach((s) => {
+    if (s.type === 'running') summary.runningMin += s.durationMin;
+    else if (s.type === 'idle') summary.idleMin += s.durationMin;
+    else if (s.type === 'setup') summary.setupMin += s.durationMin;
+    else if (s.type === 'break') summary.breakMin += s.durationMin;
+    else if (s.type === 'stopCall') summary.stopCallMin += s.durationMin;
+    else if (s.type === 'maintenance') summary.maintenanceMin += s.durationMin;
+    else if (s.type === 'off') summary.offMin += s.durationMin;
+  });
+  const operatingMin = summary.runningMin + summary.idleMin + summary.setupMin + summary.stopCallMin + summary.maintenanceMin;
+  summary.uptimePercent = operatingMin > 0 ? Math.round((summary.runningMin / operatingMin) * 100) : 0;
+
+  return { segments, summary };
+}
+
+// Factories that can be shown on the dashboard: any factory with recent press records or a cycle sensor.
+app.get('/api/digital-twin-factories', async (req, res) => {
+  try {
+    const since = new Date(Date.now() + DIGITAL_TWIN_JST_OFFSET_MS - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const masterDb = client.db(DB_NAME);
+    const submittedDb = client.db('submittedDB');
+    const distinctField = (collection, field, match) => collection
+      .aggregate([{ $match: match }, { $group: { _id: `$${field}` } }])
+      .toArray()
+      .then((rows) => rows.map((r) => r._id));
+    const [pressFactories, sensorFactories] = await Promise.all([
+      distinctField(submittedDb.collection('pressDB'), '工場', { Date: { $gte: since } }),
+      distinctField(masterDb.collection('cycleCountDB'), 'factory', {}),
+    ]);
+    const sensorSet = new Set(sensorFactories.map((f) => String(f || '').trim()));
+    const names = [...new Set([...pressFactories, ...sensorFactories].map((f) => String(f || '').trim()))]
+      .filter((f) => f && !f.endsWith('工場') || ['第一工場', '第二工場'].includes(f));
+    const factories = names
+      .map((factory) => ({ factory, hasCycleSensors: sensorSet.has(factory) }))
+      .sort((a, b) => Number(b.hasCycleSensors) - Number(a.hasCycleSensors) || a.factory.localeCompare(b.factory, 'ja'));
+    res.json({ success: true, factories });
+  } catch (error) {
+    console.error('Error listing digital twin factories:', error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+app.get('/api/digital-twin/:factoryName', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    const nowMs = Date.now();
+    const { cutoffMs, productionDate, calendarDate } = getDigitalTwinProductionDay(nowMs);
+    const recentSince = new Date(cutoffMs + DIGITAL_TWIN_JST_OFFSET_MS - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const masterDb = client.db(DB_NAME);
+    const submittedDb = client.db('submittedDB');
+
+    const [cycleDocs, setsubiDocs, logDocs, pressDocs, goalRows, recentEquipment] = await Promise.all([
+      masterDb.collection('cycleCountDB').find({ factory }).toArray(),
+      masterDb.collection(CHECK_FORM_EQUIPMENT_COLLECTION)
+        .find({ 工場: factory, _archived: { $ne: true } })
+        .project({ name: 1, noOfHead: 1, tableLength: 1 })
+        .toArray(),
+      submittedDb.collection('tabletLogDB')
+        .find({ 工場: factory, Date: { $in: [...new Set([productionDate, calendarDate])] } })
+        .project({ 設備: 1, sessionID: 1, 背番号: 1, 品番: 1, Worker_Name: 1, Action: 1, Status: 1, Timestamp: 1 })
+        .toArray(),
+      submittedDb.collection('pressDB')
+        .find({ 工場: factory, Date: { $in: [...new Set([productionDate, calendarDate])] } })
+        .sort({ Time_start: 1 })
+        .toArray(),
+      submittedDb.collection('productionGoalsDB').aggregate([
+        { $match: { factory, date: productionDate } },
+        { $group: { _id: null, target: { $sum: { $convert: { input: '$targetQuantity', to: 'double', onError: 0, onNull: 0 } } } } },
+      ]).toArray(),
+      // Machines used in the last 30 days (for factories without a fixed floor map)
+      submittedDb.collection('pressDB')
+        .aggregate([{ $match: { 工場: factory, Date: { $gte: recentSince } } }, { $group: { _id: '$設備' } }])
+        .toArray()
+        .then((rows) => rows.map((r) => r._id).filter(Boolean)),
+    ]);
+    const recentlyUsedIds = new Set(recentEquipment.flatMap((e) => splitDigitalTwinEquipment(e)));
+
+    // ── Machines + pairs from setsubiDB ──
+    const machines = new Map();
+    const ensureMachine = (id) => {
+      if (!machines.has(id)) {
+        machines.set(id, {
+          id, noOfHead: 1, tableLength: null, hasCycleSensor: false,
+          cycleRaw: null, lastCycleMs: null,
+          stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null,
+          lastLogMs: null, lastLogStatus: null, sessionEquipment: '',
+          worker: '', sebanggo: '', hinban: '', sebanggoAt: 0, lotStartMs: 0,
+          // Tablet session: 'Start time set' opens it, 'End time set' marks wrap-up, Submit/Reset closes it
+          sessionStartMs: null, endTimeSet: false,
+        });
+      }
+      return machines.get(id);
+    };
+    const pairOf = new Map();
+    setsubiDocs.forEach((doc) => {
+      const names = splitDigitalTwinEquipment(doc.name);
+      if (names.length === 2) {
+        pairOf.set(names[0], names[1]);
+        pairOf.set(names[1], names[0]);
+        return;
+      }
+      if (names.length !== 1) return;
+      const m = ensureMachine(names[0]);
+      m.noOfHead = toDigitalTwinNumber(doc.noOfHead) || 1;
+      m.tableLength = toDigitalTwinNumber(doc.tableLength);
+    });
+
+    // ── Live cycles (latest doc per machine) ──
+    cycleDocs.forEach((doc) => {
+      const id = String(doc.machine || '').trim();
+      if (!id) return;
+      const m = ensureMachine(id);
+      const ts = parseDigitalTwinTimestamp(doc.timestamp, DIGITAL_TWIN_FACTORY_TIMEZONES[factory] || null);
+      if (m.lastCycleMs !== null && ts !== null && ts < m.lastCycleMs) return;
+      m.hasCycleSensor = true;
+      m.cycleRaw = Number(doc.cycle) || 0;
+      m.lastCycleMs = ts;
+      // New listeners also report whether the CNC is actively working (near-real-time run/stop).
+      m.workingFlag = typeof doc.working === 'boolean' ? doc.working : null;
+    });
+
+    // ── Tablet log replay (oldest → newest) for alerts, worker, 背番号 ──
+    const logs = logDocs
+      .map((log) => ({ ...log, ms: parseDigitalTwinTimestamp(log.Timestamp) }))
+      .filter((log) => log.ms !== null && log.ms >= cutoffMs && log.ms <= nowMs + 60000)
+      .sort((a, b) => a.ms - b.ms);
+
+    logs.forEach((log) => {
+      const action = String(log.Action || '');
+      const sessionEquip = getDigitalTwinSessionEquipment(log.sessionID);
+      const isSetup = String(log.sessionID || '').startsWith('setup_');
+      splitDigitalTwinEquipment(log.設備).forEach((id) => {
+        const m = ensureMachine(id);
+        m.lastLogMs = log.ms;
+        m.lastLogStatus = log.Status || null;
+        if (sessionEquip) m.sessionEquipment = sessionEquip;
+        if (log.Worker_Name) m.worker = log.Worker_Name;
+        if (log.背番号 && !isSetup && log.ms >= m.sebanggoAt) {
+          // First log of a new schedule (different 背番号, or the previous one was submitted/reset)
+          if (m.sebanggo !== log.背番号) m.lotStartMs = log.ms;
+          m.sebanggo = log.背番号;
+          m.hinban = log.品番 || '';
+          m.sebanggoAt = log.ms;
+        }
+
+        if (action.startsWith('Stop call activated')) m.stopCallAt = log.ms;
+        else if (/^Stop call (unlocked|resolved|canceled)/.test(action)) {
+          // The leader unlock (gatekeeper) also releases a CNC cancel lock.
+          m.stopCallAt = null;
+          m.cncCancelAt = null;
+        }
+        else if (action.startsWith('CNC Cancel Button Detected')) m.cncCancelAt = log.ms;
+        else if (action.startsWith('CNC Cancel Unlocked')) m.cncCancelAt = null;
+        else if (action === 'Maintenance started') m.maintenanceAt = log.ms;
+        else if (action === 'Maintenance ended') m.maintenanceAt = null;
+        else if (action === 'Break started') m.breakAt = log.ms;
+        else if (action === 'Break ended') m.breakAt = null;
+        else if (action === 'Start time set') {
+          m.sessionStartMs = log.ms;
+          m.endTimeSet = false;
+        } else if (action === 'End time set') {
+          if (m.sessionStartMs) m.endTimeSet = true;
+        } else if (action === 'Submit button pressed' || action === 'Reset button pressed') {
+          m.breakAt = null;
+          m.maintenanceAt = null;
+          m.sessionStartMs = null;
+          m.endTimeSet = false;
+          // A finished job (Reset, or completed Submit) means nothing is running any more:
+          // drop the 背番号 so the 3D badge does not keep showing the last job after it was submitted.
+          if (action === 'Reset button pressed' || (action === 'Submit button pressed' && log.Status === 'Completed')) {
+            m.sebanggo = '';
+            m.hinban = '';
+            m.sebanggoAt = log.ms;
+          }
+        }
+        if (log.Status === 'Completed' || log.Status === 'Reset') {
+          m.sessionStartMs = null;
+          m.endTimeSet = false;
+        }
+      });
+    });
+
+    // ── Group completed pressDB runs by machine ──
+    const pressByMachine = new Map();
+    pressDocs.forEach((doc) => {
+      splitDigitalTwinEquipment(doc.設備).forEach((id) => {
+        if (!pressByMachine.has(id)) pressByMachine.set(id, []);
+        pressByMachine.get(id).push(doc);
+      });
+    });
+
+    // ── pcPerCycle from masterDB for active + completed 背番号 ──
+    const sebanggoList = [
+      ...new Set([
+        ...[...machines.values()].map((m) => m.sebanggo),
+        ...pressDocs.map((d) => d.背番号),
+      ].filter(Boolean)),
+    ];
+    const products = sebanggoList.length
+      ? await masterDb.collection('masterDB')
+        .find({ 背番号: { $in: sebanggoList } })
+        .project({ 背番号: 1, 工場: 1, pcPerCycle: 1, machineConfig: 1 })
+        .toArray()
+      : [];
+    const productBySebanggo = new Map();
+    products.forEach((p) => {
+      const existing = productBySebanggo.get(p.背番号);
+      if (!existing || (p.工場 === factory && existing.工場 !== factory)) productBySebanggo.set(p.背番号, p);
+    });
+    const resolvePcPerCycle = (product, machineId) => {
+      if (!product) return null;
+      const config = product.machineConfig && typeof product.machineConfig === 'object' ? product.machineConfig : null;
+      return toDigitalTwinNumber(config?.[machineId]?.pcPerCycle) ?? toDigitalTwinNumber(product.pcPerCycle);
+    };
+
+    // ── SCNA: per-schedule cycle baseline ──
+    // The listener's cycle count only resets at 02:00, so on a schedule change the monitor kept showing the
+    // previous schedule's pieces. Remember the machine's cycle count when a new schedule starts and show the
+    // difference. Baseline missing (first time seen) => 0, i.e. unchanged until the next schedule change.
+    const lotBaseline = new Map();
+    if (factory.toUpperCase() === 'SCNA') {
+      const baseCol = masterDb.collection('digitalTwinLotBaseline');
+      try {
+        const baseDocs = await baseCol.find({ factory }).toArray();
+        const baseById = new Map(baseDocs.map((d) => [d.machine, d]));
+        const ops = [];
+        machines.forEach((m) => {
+          if (!m.hasCycleSensor || m.cycleRaw === null || !m.sebanggo || !m.lotStartMs) return;
+          if (m.lastCycleMs === null || m.lastCycleMs < cutoffMs) return;
+          const key = `${m.sebanggo}|${m.lotStartMs}`;
+          const doc = baseById.get(m.id);
+          let baseline = 0;
+          if (doc && doc.key === key) {
+            baseline = Number(doc.baseline) || 0;
+            if (m.cycleRaw < baseline) baseline = 0; // listener reset its count (02:00)
+            else { lotBaseline.set(m.id, baseline); return; }
+          } else if (doc) {
+            baseline = m.cycleRaw; // new schedule seen: start counting from now
+          }
+          lotBaseline.set(m.id, baseline);
+          ops.push({ updateOne: {
+            filter: { factory, machine: m.id },
+            update: { $set: { key, baseline, updatedAt: new Date() } },
+            upsert: true,
+          } });
+        });
+        if (ops.length) await baseCol.bulkWrite(ops, { ordered: false });
+      } catch (err) {
+        console.error('Digital twin lot baseline error:', err);
+      }
+    }
+
+    // ── Per-machine status, accurate piece counts, and timeline ──
+    const results = new Map();
+    machines.forEach((m) => {
+      const cycleIsToday = m.lastCycleMs !== null && m.lastCycleMs >= cutoffMs;
+      const todayCycles = cycleIsToday ? m.cycleRaw : 0;
+      const isScna = factory.toUpperCase() === 'SCNA';
+      const lotCycles = isScna ? Math.max(0, todayCycles - (lotBaseline.get(m.id) || 0)) : todayCycles;
+      const lastActivityMs = Math.max(cycleIsToday ? m.lastCycleMs : 0, m.lastLogMs || 0) || null;
+
+      let status = 'off';
+      if (m.stopCallAt) status = 'stopCall';
+      else if (m.cncCancelAt) status = 'cncCancel';
+      else if (m.maintenanceAt) status = 'maintenance';
+      else if (m.breakAt) status = 'break';
+      // New listeners: `working` heartbeat (<30s old) => running; working=false or stale => falls through to idle/off.
+      else if (m.workingFlag !== null && m.workingFlag !== undefined) {
+        if (m.workingFlag === true && cycleIsToday && nowMs - m.lastCycleMs < DIGITAL_TWIN_WORKING_FRESH_MS) status = 'running';
+        else if (lastActivityMs && nowMs - lastActivityMs < DIGITAL_TWIN_OFF_MS) status = 'idle';
+      }
+      // Legacy listeners (no `working` flag): a cycle in the last 10 min => running
+      else if (cycleIsToday && nowMs - m.lastCycleMs < DIGITAL_TWIN_IDLE_MS) status = 'running';
+      // No cycle sensor: tablet logs go quiet during a run, so an open session (start set, end not yet set) = running
+      else if (!m.hasCycleSensor && m.sessionStartMs && !m.endTimeSet) status = 'running';
+      else if (lastActivityMs && nowMs - lastActivityMs < DIGITAL_TWIN_OFF_MS) status = 'idle';
+      else if (!m.hasCycleSensor && m.sessionStartMs) status = 'idle'; // wrap-up left open
+
+      // Parse completed runs for this machine
+      const mPressDocs = pressByMachine.get(m.id) || [];
+      const completedRuns = mPressDocs.map((d) => {
+        const startMin = timeToDigitalTwinMinutes(d.Time_start);
+        const endMin = timeToDigitalTwinMinutes(d.Time_end);
+        const shots = Number(d.ショット数) || 0;
+        const pieces = Number(d.Total_Pieces || d.Process_Quantity) || 0;
+        const breaks = Object.values(d.Break_Time_Data || {})
+          .filter((b) => b && b.start && b.end)
+          .map((b) => ({
+            start: b.start,
+            end: b.end,
+            startMin: timeToDigitalTwinMinutes(b.start),
+            endMin: timeToDigitalTwinMinutes(b.end),
+          }))
+          .filter((b) => b.startMin !== null && b.endMin !== null && b.endMin > b.startMin);
+
+        return {
+          sebanggo: d.背番号 || '',
+          hinban: d.品番 || '',
+          start: d.Time_start || '',
+          end: d.Time_end || '',
+          startMin,
+          endMin,
+          shots,
+          pieces,
+          worker: d.Worker_Name || '',
+          breaks,
+          stopCalls: Array.isArray(d.StopCall?.records) ? d.StopCall.records : [],
+          maintenances: Array.isArray(d.Maintenance_Data?.records) ? d.Maintenance_Data.records : [],
+        };
+      }).sort((a, b) => (a.startMin || 0) - (b.startMin || 0));
+
+      const totalCompletedPieces = completedRuns.reduce((sum, r) => sum + r.pieces, 0);
+      const totalCompletedShots = completedRuns.reduce((sum, r) => sum + r.shots, 0);
+
+      // Active / in-progress run calculation
+      const activeCycles = (cycleIsToday && m.hasCycleSensor)
+        ? (isScna ? (m.sebanggo ? lotCycles : 0) : Math.max(0, todayCycles - totalCompletedShots))
+        : 0;
+      const activePcPerCycle = resolvePcPerCycle(productBySebanggo.get(m.sebanggo), m.id);
+      const activePieces = activeCycles > 0 && activePcPerCycle ? activeCycles * activePcPerCycle : 0;
+
+      let pieces = null;
+      if (isScna) {
+        // Per-schedule only: the current schedule's cycles x pcPerCycle (nothing once it is submitted/reset)
+        pieces = activePieces > 0 ? activePieces : null;
+      } else if (totalCompletedPieces > 0 || activePieces > 0) {
+        pieces = totalCompletedPieces + activePieces;
+      } else if (todayCycles > 0 && activePcPerCycle) {
+        pieces = todayCycles * activePcPerCycle;
+      }
+
+      // Display cycles: sensor count if available, otherwise total shots from press records
+      const displayCycles = isScna ? activeCycles : (m.hasCycleSensor ? todayCycles : totalCompletedShots);
+
+      // Active run object (if currently in progress)
+      let activeRun = null;
+      if ((m.lastLogStatus === 'in-progress' || m.sessionStartMs) && status !== 'off') {
+        let activeStartMin = 480;
+        if (m.sessionStartMs) {
+          const d = new Date(m.sessionStartMs + DIGITAL_TWIN_JST_OFFSET_MS);
+          activeStartMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+        } else if (completedRuns.length > 0 && completedRuns[completedRuns.length - 1].endMin) {
+          activeStartMin = completedRuns[completedRuns.length - 1].endMin;
+        } else if (m.sebanggoAt) {
+          const d = new Date(m.sebanggoAt + DIGITAL_TWIN_JST_OFFSET_MS);
+          activeStartMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+        }
+        const jstNow = new Date(nowMs + DIGITAL_TWIN_JST_OFFSET_MS);
+        const nowMin = jstNow.getUTCHours() * 60 + jstNow.getUTCMinutes();
+        const activeEndMin = Math.max(activeStartMin, nowMin);
+
+        activeRun = {
+          sebanggo: m.sebanggo || '',
+          hinban: m.hinban || '',
+          worker: m.worker || '',
+          start: minutesToDigitalTwinTime(activeStartMin),
+          end: minutesToDigitalTwinTime(activeEndMin),
+          startMin: activeStartMin,
+          endMin: activeEndMin,
+          shots: activeCycles,
+          pieces: activePieces,
+          status,
+        };
+      }
+
+      // Build timeline segments and summary
+      const { segments: timeline, summary: timelineSummary } = buildDigitalTwinTimelineSegments({
+        runs: completedRuns,
+        activeRun,
+        currentStatus: status,
+        dayStartMin: 480,
+        dayEndMin: 1140,
+      });
+
+      // Clean runs for frontend response
+      const cleanRuns = completedRuns.map(({ sebanggo, hinban, start, end, shots, pieces: rPieces, worker }) => ({
+        sebanggo,
+        hinban,
+        start,
+        end,
+        shots,
+        pieces: rPieces,
+        worker,
+        durationMin: (timeToDigitalTwinMinutes(end) || 0) - (timeToDigitalTwinMinutes(start) || 0),
+      }));
+
+      // Worker and product fallback from latest run if idle/off
+      const fallbackWorker = m.worker || (cleanRuns.length > 0 ? cleanRuns[cleanRuns.length - 1].worker : '');
+      const fallbackSebanggo = m.sebanggo || (cleanRuns.length > 0 ? cleanRuns[cleanRuns.length - 1].sebanggo : '');
+      const fallbackHinban = m.hinban || (cleanRuns.length > 0 ? cleanRuns[cleanRuns.length - 1].hinban : '');
+
+      results.set(m.id, {
+        id: m.id,
+        noOfHead: m.noOfHead,
+        tableLength: m.tableLength,
+        hasCycleSensor: m.hasCycleSensor,
+        statusSource: m.hasCycleSensor ? 'sensor' : 'tablet',
+        recentlyUsed: m.hasCycleSensor || recentlyUsedIds.has(m.id) || m.lastLogMs !== null || mPressDocs.length > 0,
+        sessionStartedAt: m.sessionStartMs ? new Date(m.sessionStartMs).toISOString() : null,
+        status,
+        cycle: m.cycleRaw,
+        todayCycles: displayCycles,
+        lastCycleAt: m.lastCycleMs ? new Date(m.lastCycleMs).toISOString() : null,
+        secondsSinceCycle: cycleIsToday ? Math.max(0, Math.round((nowMs - m.lastCycleMs) / 1000)) : null,
+        lastActivityAt: lastActivityMs ? new Date(lastActivityMs).toISOString() : null,
+        worker: fallbackWorker,
+        sebanggo: fallbackSebanggo,
+        hinban: fallbackHinban,
+        pcPerCycle: activePcPerCycle,
+        pieces,
+        alertSince: m.stopCallAt || m.cncCancelAt || m.maintenanceAt || m.breakAt
+          ? new Date(m.stopCallAt || m.cncCancelAt || m.maintenanceAt || m.breakAt).toISOString()
+          : null,
+        completedRuns: cleanRuns,
+        activeRun,
+        timeline,
+        timelineSummary,
+        pair: null,
+        _sessionEquipment: m.sessionEquipment,
+      });
+    });
+
+    // ── Pairs: fixed partners; merged status + shared count when running together ──
+    results.forEach((r) => {
+      const partnerId = pairOf.get(r.id);
+      if (!partnerId) return;
+      const partner = results.get(partnerId);
+      const together = splitDigitalTwinEquipment(r._sessionEquipment).length === 2
+        || (partner && splitDigitalTwinEquipment(partner._sessionEquipment).length === 2
+          && splitDigitalTwinEquipment(partner._sessionEquipment).includes(r.id))
+        || (r.completedRuns.length > 0 && partner && partner.completedRuns.length > 0
+          && r.completedRuns[0].start === partner.completedRuns[0]?.start
+          && r.completedRuns[0].sebanggo === partner.completedRuns[0]?.sebanggo);
+
+      r.pair = { partner: partnerId, together: Boolean(together) };
+    });
+
+    results.forEach((r) => {
+      if (!r.pair?.together) return;
+      const partner = results.get(r.pair.partner);
+      if (!partner) return;
+      const statuses = [r.status, partner.status];
+      r.pair.status = DIGITAL_TWIN_STATUS_PRIORITY.find((s) => statuses.includes(s)) || r.status;
+      r.pair.sharedCycles = r.hasCycleSensor && partner.hasCycleSensor
+        ? (r.todayCycles || 0) + (partner.todayCycles || 0)
+        : Math.max(r.todayCycles || 0, partner.todayCycles || 0);
+      r.pair.sharedPieces = Math.max(r.pieces ?? 0, partner.pieces ?? 0);
+      r.pair.worker = r.worker || partner.worker;
+      r.pair.sebanggo = r.sebanggo || partner.sebanggo;
+      r.pair.completedRuns = r.completedRuns.length >= partner.completedRuns.length ? r.completedRuns : partner.completedRuns;
+    });
+
+    const machineList = [...results.values()]
+      .map(({ _sessionEquipment, ...rest }) => rest)
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    res.json({
+      success: true,
+      factory,
+      generatedAt: new Date(nowMs).toISOString(),
+      productionDate,
+      idleThresholdMinutes: DIGITAL_TWIN_IDLE_MS / 60000,
+      hasCycleSensors: machineList.some((m) => m.hasCycleSensor),
+      goal: goalRows[0]?.target || 0,
+      machines: machineList,
+    });
+  } catch (error) {
+    console.error(`Error building digital twin for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// ── DIGITAL TWIN ANNOTATIONS (Permanent 3D sensor & camera spatial coordinates) ──
+app.get('/api/digital-twin/:factoryName/annotations', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    try { await client.connect(); } catch (_) {}
+    const masterDb = client.db(DB_NAME);
+    const doc = await masterDb.collection('twinAnnotations').findOne({ factory });
+
+    if (!doc) {
+      return res.json({
+        success: true,
+        factory,
+        sensors: null,
+        cameras: null,
+        updatedAt: null,
+      });
+    }
+
+    res.json({
+      success: true,
+      factory,
+      sensors: Array.isArray(doc.sensors) ? doc.sensors : [],
+      cameras: Array.isArray(doc.cameras) ? doc.cameras : [],
+      updatedAt: doc.updatedAt || null,
+      updatedBy: doc.updatedBy || null,
+    });
+  } catch (error) {
+    console.error(`Error fetching annotations for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/digital-twin/:factoryName/annotations', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    const { sensors, cameras, updatedBy } = req.body || {};
+    try { await client.connect(); } catch (_) {}
+    const masterDb = client.db(DB_NAME);
+    const now = new Date();
+
+    const updateDoc = {
+      $set: {
+        factory,
+        sensors: Array.isArray(sensors) ? sensors : [],
+        cameras: Array.isArray(cameras) ? cameras : [],
+        updatedAt: now,
+        updatedBy: String(updatedBy || 'admin').trim(),
+      },
+      $setOnInsert: {
+        createdAt: now,
+      },
+    };
+
+    await masterDb.collection('twinAnnotations').updateOne(
+      { factory },
+      updateDoc,
+      { upsert: true }
+    );
+
+    res.json({
+      success: true,
+      factory,
+      updatedAt: now,
+      message: 'Annotations saved permanently to MongoDB',
+    });
+  } catch (error) {
+    console.error(`Error saving annotations for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/digital-twin/:factoryName/annotations', async (req, res) => {
+  try {
+    const factory = String(req.params.factoryName || '').trim();
+    if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
+
+    try { await client.connect(); } catch (_) {}
+    const masterDb = client.db(DB_NAME);
+    await masterDb.collection('twinAnnotations').deleteOne({ factory });
+
+    res.json({
+      success: true,
+      factory,
+      message: 'Annotations reset to default',
+    });
+  } catch (error) {
+    console.error(`Error resetting annotations for ${req.params.factoryName}:`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 app.post('/api/factory-status/snapshot', async (req, res) => {
   try {
@@ -11775,7 +15931,7 @@ app.post("/resetUserPassword", async (req, res) => {
 
 
 // Verify leader by username and role for QR authentication
-app.post("/verifyLeader", async (req, res) => {
+const verifyLeaderHandler = async (req, res) => {
   const { username } = req.body;
 
   if (!username) {
@@ -11818,7 +15974,9 @@ app.post("/verifyLeader", async (req, res) => {
     console.error("Error verifying leader:", err);
     res.status(500).json({ error: "Internal server error during leader verification." });
   }
-});
+};
+app.post("/verifyLeader", verifyLeaderHandler);
+app.post("/verify-leader", verifyLeaderHandler);
 
 
 // Create new worker
@@ -12341,27 +16499,12 @@ app.post("/uploadMasterImage", async (req, res) => {
     }
 
     const 品番 = oldRecord["品番"] || oldRecord["材料品番"] || "unknownPart"; // Support both 品番 and 材料品番
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const fileName = `${品番}.jpg`;
-    const filePath = `masterImage/${fileName}`;
-    const file = admin.storage().bucket().file(filePath);
-
-    const buffer = Buffer.from(base64, "base64");
-
-    // Use a random token or constant token (example below)
-    const downloadToken = "masterDBToken69";
-
-    await file.save(uploadBuffer, {
-      metadata: {
-        contentType: "image/jpeg",
-        metadata: {
-          firebaseStorageDownloadTokens: downloadToken
-        }
-      }
+    const fileNameBase = `${collectionName}_${recordId}_${品番}_${label || "main"}`.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePathPrefix = `masterImage/${fileNameBase}`;
+    const { imageURL: firebaseUrl } = await saveBase64AssetToFirebase({
+      base64,
+      filePathPrefix,
     });
-
-    // ✅ Firebase-style URL (supports preview/download with token)
-    const firebaseUrl = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
 
     // Update document in the specified collection
     await collection.updateOne({ _id: objectId }, { $set: { imageURL: firebaseUrl } });
@@ -12456,6 +16599,28 @@ async function saveBase64AssetToFirebase({
   };
 }
 
+// Translation proxy via MyMemory API
+app.post("/api/translate", async (req, res) => {
+  const { text, langpair = "en|ja" } = req.body;
+  if (!text) return res.status(400).json({ error: "Text is required" });
+  try {
+    const email = process.env.MYMEMORY_EMAIL || "";
+    const emailParam = email ? `&de=${encodeURIComponent(email)}` : "";
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langpair}${emailParam}`;
+    // using dynamic import for node-fetch if global fetch is not available
+    const fetchFn = typeof fetch === "undefined" ? (...args) => import("node-fetch").then(({default: f}) => f(...args)) : fetch;
+    const response = await fetchFn(url);
+    const data = await response.json();
+    if (data.responseStatus === 200) {
+      return res.json({ translatedText: data.responseData.translatedText });
+    }
+    return res.status(500).json({ error: "Translation failed", details: data });
+  } catch (error) {
+    console.error("Translation API error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Upload an image attached to an equipment event (事案) to Firebase Storage.
 // Does NOT update MongoDB — the returned URL is stored by the caller when saving the event record.
 app.post("/api/upload-equipment-event-image", async (req, res) => {
@@ -12467,9 +16632,10 @@ app.post("/api/upload-equipment-event-image", async (req, res) => {
 
   try {
     const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
     const factory  = (factoryName  || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
     const machine  = (equipmentName || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
-    const filePathPrefix = `equipmentEvents/${factory}/${machine}/${timestamp}`;
+    const filePathPrefix = `equipmentEvents/${factory}/${machine}/${timestamp}_${randomSuffix}`;
     const { filePath, imageURL } = await saveBase64AssetToFirebase({ base64, filePathPrefix });
 
     console.log(`📎 Equipment event file uploaded by ${username || "unknown"}: ${filePath}`);
@@ -12477,6 +16643,75 @@ app.post("/api/upload-equipment-event-image", async (req, res) => {
   } catch (error) {
     console.error("Error uploading equipment event image:", error);
     res.status(500).json({ error: "Error uploading image", details: error.message });
+  }
+});
+
+// Upload raw file (video/pdf/etc) attached to an equipment event to Firebase Storage via multipart/form-data
+app.post("/api/upload-equipment-event-file", upload.single('file'), async (req, res) => {
+  const { factoryName, equipmentName, username } = req.body;
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+  try {
+    const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const factory  = (factoryName  || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
+    const machine  = (equipmentName || "unknown").replace(/[^a-zA-Z0-9　-鿿]/g, "_");
+    
+    // Extract extension from original name
+    const ext = path.extname(req.file.originalname) || '';
+    const filePathPrefix = `equipmentEvents/${factory}/${machine}/${timestamp}_${randomSuffix}${ext}`;
+    
+    const bucket = admin.storage().bucket();
+    const fileOptions = {
+      destination: filePathPrefix,
+      metadata: {
+        contentType: req.file.mimetype,
+        metadata: {
+          firebaseStorageDownloadTokens: FIREBASE_DOWNLOAD_TOKEN,
+        },
+      }
+    };
+
+    await bucket.upload(req.file.path, fileOptions);
+    const uploadedFile = bucket.file(filePathPrefix);
+    const imageURL = buildFirebaseDownloadUrl(uploadedFile, FIREBASE_DOWNLOAD_TOKEN);
+    
+    // Cleanup local file
+    fs.unlink(req.file.path, () => {});
+
+    console.log(`📎 Equipment event raw file uploaded by ${username || "unknown"}: ${filePathPrefix}`);
+    res.json({ imageURL });
+  } catch (error) {
+    console.error("Error uploading equipment event raw file:", error);
+    // Cleanup local file
+    if (req.file && req.file.path) fs.unlink(req.file.path, () => {});
+    res.status(500).json({ error: "Error uploading file", details: error.message });
+  }
+});
+
+// Delete an image attached to an equipment event from Firebase Storage.
+app.post("/api/delete-equipment-event-image", async (req, res) => {
+  const { imageURL } = req.body;
+  if (!imageURL) {
+    return res.status(400).json({ error: "imageURL is required" });
+  }
+
+  try {
+    const url = new URL(imageURL);
+    const pathSegments = url.pathname.split('/o/');
+    if (pathSegments.length > 1) {
+      const filePath = decodeURIComponent(pathSegments[1]);
+      await admin.storage().bucket().file(filePath).delete();
+      console.log(`🗑️ Deleted equipment event file from Firebase: ${filePath}`);
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting equipment event image:", error);
+    if (error.code === 404) {
+      res.json({ success: true, message: "File already deleted" });
+    } else {
+      res.status(500).json({ error: "Error deleting image", details: error.message });
+    }
   }
 });
 
@@ -12854,6 +17089,8 @@ const _masterFiltersCache   = new Map();
 const _masterFiltersInflight = new Map();
 const _productPDFsCache     = new Map();
 const _productPDFsInflight  = new Map();
+const _materialPDFsCache    = new Map();
+const _materialPDFsInflight = new Map();
 const _MASTER_DB_TTL = 24 * 60 * 60 * 1000; // 1 day
 
 // Invalidate full-data cache (per collection, or all when no arg).
@@ -12895,6 +17132,15 @@ function _invalidateProductPDFsCache(reason = '') {
   _productPDFsCache.clear();
   _productPDFsInflight.clear();
   if (n > 0) console.log(`🗑️  productPDFs cache invalidated${reason ? ' — ' + reason : ''}: ${n} entries`);
+}
+
+// Invalidate material-PDF list cache.
+// Called on every material PDF upload, image update, or delete.
+function _invalidateMaterialPDFsCache(reason = '') {
+  const n = _materialPDFsCache.size;
+  _materialPDFsCache.clear();
+  _materialPDFsInflight.clear();
+  if (n > 0) console.log(`🗑️  materialPDFs cache invalidated${reason ? ' — ' + reason : ''}: ${n} entries`);
 }
 // =========================================================
 
@@ -13032,7 +17278,11 @@ app.post('/api/masterdb/paginate', async (req, res) => {
     };
     for (const [key, field] of Object.entries(filterFieldMap)) {
       const val = simpleFilters[key];
-      if (val && val !== 'all') conditions.push({ [field]: val });
+      if (Array.isArray(val)) {
+        if (val.length) conditions.push({ [field]: { $in: val } });
+      } else if (val && val !== 'all') {
+        conditions.push({ [field]: val });
+      }
     }
 
     // Advanced filter object
@@ -17918,7 +22168,11 @@ app.post("/api/noda-requests", async (req, res) => {
             });
           }
 
-          // Handle inventory transactions when changing from completed to pending/in-progress
+          const userName = req.body.userName || 'Freya Admin';
+          let inventoryReversed = false;
+          let inventoryCompleted = false;
+
+          // Handle inventory transactions when changing from completed to pending/in-progress/paused
           if (currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'paused' || newStatus === 'in-progress')) {
             console.log(`🔄 Reversing inventory transaction for line item ${data.lineNumber}: ${currentStatus} → ${newStatus}`);
             
@@ -17927,19 +22181,7 @@ app.post("/api/noda-requests", async (req, res) => {
               { $match: { 背番号: currentLineItem.背番号 } },
               {
                 $addFields: {
-                  timeStampDate: {
-                    $cond: {
-                      if: { $type: "$timeStamp" },
-                      then: {
-                        $cond: {
-                          if: { $eq: [{ $type: "$timeStamp" }, "string"] },
-                          then: { $dateFromString: { dateString: "$timeStamp" } },
-                          else: "$timeStamp"
-                        }
-                      },
-                      else: new Date()
-                    }
-                  }
+                  timeStampDate: buildInventoryTimeStampDateExpression()
                 }
               },
               { $sort: { timeStampDate: -1 } },
@@ -17948,27 +22190,22 @@ app.post("/api/noda-requests", async (req, res) => {
 
             if (inventoryResults.length > 0) {
               const currentInventory = inventoryResults[0];
-              const quantity = currentLineItem.quantity;
+              const quantity = Number(currentLineItem.quantity) || 0;
 
-              // Calculate reversed inventory quantities
-              // When reversing a picking operation (completed → pending/in-progress), we need to:
-              // 1. Restore the physical quantity (items go back to stock)
-              // 2. Restore the reserved quantity (items become reserved again for this request)
-              // 3. Keep available quantity unchanged (items are reserved, not available for others)
-              
-              // From the original flow:
-              // - When reserved: physical unchanged, reserved increased, available decreased
-              // - When picked: physical decreased, reserved decreased, available unchanged
-              // - When reversing pick: physical increased, reserved increased, available unchanged
-              
-              const newPhysicalQuantity = (currentInventory.physicalQuantity || 0) + quantity;
-              const newReservedQuantity = (currentInventory.reservedQuantity || 0) + quantity;
-              const newAvailableQuantity = currentInventory.availableQuantity || 0; // Available stays the same
+              const currentPhysical = Number(currentInventory.physicalQuantity || currentInventory.runningQuantity || 0);
+              const currentReserved = Number(currentInventory.reservedQuantity || 0);
+              const currentAvailable = Number(currentInventory.availableQuantity || currentInventory.runningQuantity || 0);
+
+              const newPhysicalQuantity = currentPhysical + quantity;
+              const newReservedQuantity = currentReserved + quantity;
+              const newAvailableQuantity = currentAvailable; // Available stays the same
 
               // Create reverse inventory transaction
+              const reverseTraceId = `freyaAdmin-reverse-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
               const reverseTransaction = {
                 背番号: currentLineItem.背番号,
                 品番: currentLineItem.品番,
+                工場: currentInventory.工場 || currentLineItem.工場 || bulkRequest.factory || '1',
                 timeStamp: new Date(),
                 Date: new Date().toISOString().split('T')[0],
                 
@@ -17979,20 +22216,96 @@ app.post("/api/noda-requests", async (req, res) => {
                 
                 // Legacy field for compatibility
                 runningQuantity: newAvailableQuantity,
-                lastQuantity: currentInventory.physicalQuantity || 0,
+                lastQuantity: currentPhysical,
                 
                 action: `Admin Status Reversal (+${quantity} physical, +${quantity} reserved)`,
                 source: `Freya Admin - Status Change (${currentStatus} → ${newStatus})`,
                 requestId: requestId,
                 bulkRequestNumber: bulkRequest.requestNumber,
                 lineNumber: data.lineNumber,
-                note: `Reversed picking transaction for request ${bulkRequest.requestNumber} line ${data.lineNumber}. Status changed from ${currentStatus} to ${newStatus}. Physical: ${currentInventory.physicalQuantity || 0} → ${newPhysicalQuantity}, Reserved: ${currentInventory.reservedQuantity || 0} → ${newReservedQuantity}`
+                note: `Reversed picking transaction for request ${bulkRequest.requestNumber} line ${data.lineNumber}. Status changed from ${currentStatus} to ${newStatus}. Physical: ${currentPhysical} → ${newPhysicalQuantity}, Reserved: ${currentReserved} → ${newReservedQuantity}`,
+                
+                _insertSource: `nodaServer-createInventoryTransaction-${reverseTraceId}`,
+                _insertedAt: new Date().toISOString(),
+                _insertedBy: 'nodaServer.js:createInventoryTransaction'
               };
 
               await inventoryCollection.insertOne(reverseTransaction);
+              inventoryReversed = true;
               console.log(`✅ Inventory transaction reversed for ${currentLineItem.背番号}: +${quantity} units`);
             } else {
               console.warn(`⚠️ No inventory record found for ${currentLineItem.背番号}`);
+            }
+          }
+
+          // Handle inventory transactions when changing from pending/paused to completed
+          if (currentStatus !== 'completed' && newStatus === 'completed') {
+            console.log(`📦 [DEBUG] Recording picking completion inventory transaction for line item ${data.lineNumber}: ${currentStatus} → ${newStatus}, 背番号: '${currentLineItem.背番号}'`);
+            
+            // Get current inventory state
+            const inventoryResults = await inventoryCollection.aggregate([
+              { $match: { 背番号: currentLineItem.背番号 } },
+              {
+                $addFields: {
+                  timeStampDate: buildInventoryTimeStampDateExpression()
+                }
+              },
+              { $sort: { timeStampDate: -1 } },
+              { $limit: 1 }
+            ]).toArray();
+
+            console.log(`📦 [DEBUG] inventoryResults found: ${inventoryResults.length}`);
+
+            if (inventoryResults.length > 0) {
+              const currentInventory = inventoryResults[0];
+              const quantity = Number(currentLineItem.quantity) || 0;
+
+              const currentPhysical = Number(currentInventory.physicalQuantity || currentInventory.runningQuantity || 0);
+              const currentReserved = Number(currentInventory.reservedQuantity || 0);
+              const currentAvailable = Number(currentInventory.availableQuantity || currentInventory.runningQuantity || 0);
+
+              const newPhysicalQuantity = Math.max(0, currentPhysical - quantity);
+              const newReservedQuantity = Math.max(0, currentReserved - quantity);
+              const newAvailableQuantity = newPhysicalQuantity - newReservedQuantity;
+
+              console.log(`📦 [DEBUG] Quantities - Current: phys=${currentPhysical}, res=${currentReserved} | New: phys=${newPhysicalQuantity}, res=${newReservedQuantity}`);
+
+              // Create picking completion inventory transaction
+              const completionTraceId = `freyaAdmin-picking-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+              const completionTransaction = {
+                背番号: currentLineItem.背番号,
+                品番: currentLineItem.品番,
+                工場: currentInventory.工場 || currentLineItem.工場 || bulkRequest.factory || '1',
+                timeStamp: new Date(),
+                Date: new Date().toISOString().split('T')[0],
+                
+                // Two-stage inventory fields
+                physicalQuantity: newPhysicalQuantity,
+                reservedQuantity: newReservedQuantity,
+                availableQuantity: newAvailableQuantity,
+                
+                // Legacy field for compatibility
+                runningQuantity: newPhysicalQuantity,
+                lastQuantity: currentPhysical,
+                
+                action: `Picking Completed (-${quantity})`,
+                source: `Freya Admin - Status Change (${currentStatus} → ${newStatus})`,
+                requestId: requestId,
+                bulkRequestNumber: bulkRequest.requestNumber,
+                lineNumber: data.lineNumber,
+                note: `Admin completed picking transaction for request ${bulkRequest.requestNumber} line ${data.lineNumber} by ${userName || 'admin'}. Status changed from ${currentStatus} to ${newStatus}. Physical: ${currentPhysical} → ${newPhysicalQuantity}, Reserved: ${currentReserved} → ${newReservedQuantity}`,
+                
+                _insertSource: `nodaServer-createInventoryTransaction-${completionTraceId}`,
+                _insertedAt: new Date().toISOString(),
+                _insertedBy: 'nodaServer.js:createInventoryTransaction',
+                _providedAction: `Picking Completed (-${quantity})`
+              };
+
+              const insertRes = await inventoryCollection.insertOne(completionTransaction);
+              inventoryCompleted = true;
+              console.log(`✅ [DEBUG] Inventory picking transaction inserted! ID: ${insertRes.insertedId}, acknowledged: ${insertRes.acknowledged}`);
+            } else {
+              console.warn(`⚠️ [DEBUG] No inventory record found for ${currentLineItem.背番号}`);
             }
           }
 
@@ -18002,6 +22315,12 @@ app.post("/api/noda-requests", async (req, res) => {
             "lineItems.$.updatedAt": new Date(),
             updatedAt: new Date()
           };
+
+          // Set completion fields if moving to completed status
+          if (currentStatus !== 'completed' && newStatus === 'completed') {
+            updateFields["lineItems.$.completedAt"] = new Date();
+            updateFields["lineItems.$.completedBy"] = userName;
+          }
 
           // Clear completion fields if moving away from completed status
           if (currentStatus === 'completed' && newStatus !== 'completed') {
@@ -18095,12 +22414,186 @@ app.post("/api/noda-requests", async (req, res) => {
             previousStatus: currentStatus,
             newStatus: data.status,
             bulkStatus: newBulkStatus,
-            inventoryReversed: currentStatus === 'completed' && (newStatus === 'pending' || newStatus === 'paused' || newStatus === 'in-progress')
+            inventoryReversed: inventoryReversed,
+            inventoryCompleted: inventoryCompleted
           });
 
         } catch (error) {
           console.error("Error in updateLineItemStatus:", error);
           res.status(500).json({ error: "Failed to update line item status", details: error.message });
+        }
+        break;
+
+      case 'batchUpdateLineItemStatus':
+        try {
+          if (!requestId || !data || !data.status) {
+            return res.status(400).json({ error: "Request ID and target status are required" });
+          }
+
+          const targetStatus = data.status;
+          const bulkRequest = await requestsCollection.findOne(withActiveRequestFilter({ _id: new ObjectId(requestId) }));
+          if (!bulkRequest) {
+            return res.status(404).json({ error: "Bulk request not found" });
+          }
+
+          if (bulkRequest.requestType !== 'bulk') {
+            return res.status(400).json({ error: "This operation is only for bulk requests" });
+          }
+
+          const userName = req.body.userName || 'Freya Admin';
+          const lineItems = bulkRequest.lineItems || [];
+
+          // Determine which line items to update
+          let targetLineNumbers = [];
+          if (data.lineNumbers === 'all' || !Array.isArray(data.lineNumbers)) {
+            targetLineNumbers = lineItems
+              .filter(item => item.status !== targetStatus && item.status !== 'in-progress')
+              .map(item => item.lineNumber);
+          } else {
+            targetLineNumbers = data.lineNumbers.map(Number);
+          }
+
+          // Filter line items that are eligible to update
+          const eligibleItems = lineItems.filter(item => {
+            if (!targetLineNumbers.includes(item.lineNumber)) return false;
+            if (item.status === targetStatus) return false;
+            if (item.status === 'in-progress' && targetStatus === 'completed') return false;
+            return true;
+          });
+
+          if (eligibleItems.length === 0) {
+            return res.json({
+              success: true,
+              message: "No eligible line items to update",
+              updatedCount: 0,
+              updatedLineNumbers: []
+            });
+          }
+
+          const updatedLineNumbers = [];
+          const now = new Date();
+
+          for (const item of eligibleItems) {
+            const currentStatus = item.status;
+            const quantity = Number(item.quantity) || 0;
+
+            // Handle completing from non-completed
+            if (currentStatus !== 'completed' && targetStatus === 'completed') {
+              // Get current inventory state
+              const inventoryResults = await inventoryCollection.aggregate([
+                { $match: { 背番号: item.背番号 } },
+                {
+                  $addFields: {
+                    timeStampDate: buildInventoryTimeStampDateExpression()
+                  }
+                },
+                { $sort: { timeStampDate: -1 } },
+                { $limit: 1 }
+              ]).toArray();
+
+              if (inventoryResults.length > 0) {
+                const currentInventory = inventoryResults[0];
+                const currentPhysical = Number(currentInventory.physicalQuantity || currentInventory.runningQuantity || 0);
+                const currentReserved = Number(currentInventory.reservedQuantity || 0);
+                const currentAvailable = Number(currentInventory.availableQuantity || currentInventory.runningQuantity || 0);
+
+                const newPhysicalQuantity = Math.max(0, currentPhysical - quantity);
+                const newReservedQuantity = Math.max(0, currentReserved - quantity);
+                const newAvailableQuantity = newPhysicalQuantity - newReservedQuantity;
+
+                const completionTraceId = `freyaAdmin-batch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+                const completionTransaction = {
+                  背番号: item.背番号,
+                  品番: item.品番,
+                  工場: currentInventory.工場 || item.工場 || bulkRequest.factory || '1',
+                  timeStamp: new Date(),
+                  Date: new Date().toISOString().split('T')[0],
+                  
+                  // Two-stage inventory fields
+                  physicalQuantity: newPhysicalQuantity,
+                  reservedQuantity: newReservedQuantity,
+                  availableQuantity: newAvailableQuantity,
+                  
+                  // Legacy field for compatibility
+                  runningQuantity: newPhysicalQuantity,
+                  lastQuantity: currentPhysical,
+                  
+                  action: `Picking Completed (-${quantity})`,
+                  source: `Freya Admin - Batch Status Change (${currentStatus} → ${targetStatus})`,
+                  requestId: requestId,
+                  bulkRequestNumber: bulkRequest.requestNumber,
+                  lineNumber: item.lineNumber,
+                  note: `Admin batch completed picking transaction for request ${bulkRequest.requestNumber} line ${item.lineNumber} by ${userName}. Status changed from ${currentStatus} to ${targetStatus}. Physical: ${currentPhysical} → ${newPhysicalQuantity}, Reserved: ${currentReserved} → ${newReservedQuantity}`,
+                  
+                  _insertSource: `nodaServer-createInventoryTransaction-${completionTraceId}`,
+                  _insertedAt: new Date().toISOString(),
+                  _insertedBy: 'nodaServer.js:createInventoryTransaction',
+                  _providedAction: `Picking Completed (-${quantity})`
+                };
+
+                await inventoryCollection.insertOne(completionTransaction);
+              }
+            }
+
+            // Update item in lineItems array
+            item.status = targetStatus;
+            item.updatedAt = now;
+            if (targetStatus === 'completed') {
+              item.completedAt = now;
+              item.completedBy = userName;
+            } else if (currentStatus === 'completed') {
+              item.completedAt = null;
+              item.completedBy = null;
+            }
+            updatedLineNumbers.push(item.lineNumber);
+          }
+
+          // Check bulk request status
+          const allCompleted = lineItems.every(item => item.status === 'completed');
+          const anyInProgress = lineItems.some(item => item.status === 'in-progress');
+          const anyPaused = lineItems.some(item => item.status === 'paused');
+          const anyCompleted = lineItems.some(item => item.status === 'completed');
+
+          let newBulkStatus = bulkRequest.status;
+          let bulkUpdateFields = { 
+            lineItems: lineItems,
+            updatedAt: now 
+          };
+
+          if (allCompleted) {
+            newBulkStatus = 'completed';
+            bulkUpdateFields.status = 'completed';
+            bulkUpdateFields.completedAt = now;
+          } else if (anyInProgress) {
+            newBulkStatus = 'in-progress';
+            bulkUpdateFields.status = 'in-progress';
+          } else if (anyPaused) {
+            newBulkStatus = 'paused';
+            bulkUpdateFields.status = 'paused';
+          } else if (anyCompleted) {
+            newBulkStatus = 'in-progress';
+            bulkUpdateFields.status = 'in-progress';
+          } else {
+            newBulkStatus = 'pending';
+            bulkUpdateFields.status = 'pending';
+          }
+
+          await requestsCollection.updateOne(
+            withActiveRequestFilter({ _id: new ObjectId(requestId) }),
+            { $set: bulkUpdateFields }
+          );
+
+          res.json({
+            success: true,
+            message: `Successfully updated ${updatedLineNumbers.length} line items to ${targetStatus}`,
+            updatedCount: updatedLineNumbers.length,
+            updatedLineNumbers: updatedLineNumbers,
+            bulkStatus: newBulkStatus
+          });
+
+        } catch (error) {
+          console.error("Error in batchUpdateLineItemStatus:", error);
+          res.status(500).json({ error: "Failed to batch update line item statuses", details: error.message });
         }
         break;
 
@@ -21087,6 +25580,13 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
 
       if (!field || !operator) return true;
 
+      if (operator === 'exists') {
+        return rawValue != null && rawValue !== '';
+      }
+      if (operator === 'not_exists') {
+        return rawValue == null || rawValue === '';
+      }
+
       if (type === 'number') {
         const itemValue = Number(rawValue) || 0;
         const nextValue = Number(filter?.value);
@@ -21094,6 +25594,7 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
         const nextTo = Number(filter?.valueTo);
 
         if (operator === 'equals') return itemValue === nextValue;
+        if (operator === 'not_equals') return itemValue !== nextValue;
         if (operator === 'greater') return itemValue > nextValue;
         if (operator === 'less') return itemValue < nextValue;
         if (operator === 'range') return itemValue >= nextFrom && itemValue <= nextTo;
@@ -21105,6 +25606,7 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
         if (!itemDate) return false;
 
         if (operator === 'equals') return itemDate === filter?.value;
+        if (operator === 'not_equals') return itemDate !== filter?.value;
         if (operator === 'greater') return itemDate > filter?.value;
         if (operator === 'less') return itemDate < filter?.value;
         if (operator === 'range') {
@@ -21128,6 +25630,7 @@ function matchesInventoryAdvancedFilters(item = {}, filters = []) {
 
       const compareValue = String(filter?.value || '').trim().toLowerCase();
       if (operator === 'equals') return itemValue === compareValue;
+      if (operator === 'not_equals') return itemValue !== compareValue;
       if (operator === 'contains') return itemValue.includes(compareValue);
       return true;
     });
@@ -21980,7 +26483,9 @@ app.get('/api/freya-tablet-data', async (req, res) => {
                 { "背番号": searchRegex },
                 { "Worker_Name": searchRegex },
                 { "材料ロット": searchRegex },
-                { "Comment": searchRegex }
+                { "Comment": searchRegex },
+                { "Run_ID": searchRegex },
+                { "Box_IDs": searchRegex }
             ];
             
             // If we already have an $or condition for dates, we need to use $and
@@ -22606,11 +27111,16 @@ app.get('/api/equipment/list', async (req, res) => {
  */
 app.post('/api/equipment/data', async (req, res) => {
     try {
-        const { startDate, endDate, equipment } = req.body;
+        const { startDate, endDate, equipment, hinban, seiban, hinbans, parts } = req.body;
         
         console.log('📊 Fetching equipment data (optimized)...');
         console.log(`   Date range: ${startDate} to ${endDate}`);
         console.log(`   Equipment count: ${equipment?.length || 'all'}`);
+        if (Array.isArray(parts) && parts.length > 0) {
+            console.log(`   Parts count: ${parts.length}`);
+        } else if (hinban) {
+            console.log(`   Part: ${hinban} / ${seiban || 'all'}`);
+        }
         
         const db = client.db('submittedDB');
         const collection = db.collection('pressDB');
@@ -22628,23 +27138,35 @@ app.post('/api/equipment/data', async (req, res) => {
             matchQuery.設備 = { $in: equipment };
         }
         
-        // Fetch data with only needed fields (projection)
-        const results = await collection.find(matchQuery, {
-            projection: {
-                設備: 1,
-                工場: 1,
-                Date: 1,
-                品番: 1,
-                背番号: 1,
-                ショット数: 1,
-                Process_Quantity: 1,
-                Total_NG: 1,
-                Time_start: 1,
-                Time_end: 1,
-                作業者: 1,
-                STATUS: 1
+        if (Array.isArray(parts) && parts.length > 0) {
+            const orList = parts.map(p => {
+                const c = {};
+                if (p.hinban) c.品番 = p.hinban;
+                if (p.seiban) c.背番号 = p.seiban;
+                return c;
+            }).filter(c => Object.keys(c).length > 0);
+            if (orList.length > 0) {
+                matchQuery.$or = orList;
             }
-        }).toArray();
+        } else if (Array.isArray(hinbans) && hinbans.length > 0) {
+            matchQuery.品番 = { $in: hinbans };
+        } else if (Array.isArray(hinban) && hinban.length > 0) {
+            matchQuery.品番 = { $in: hinban };
+        } else {
+            if (hinban) matchQuery.品番 = hinban;
+            if (seiban) matchQuery.背番号 = seiban;
+        }
+        
+        // Fetch data with all fields for full record details
+        const results = await collection.find(matchQuery)
+            .sort({ Date: -1, Time_start: -1 })
+            .toArray();
+        
+        // Normalize Worker_Name and 作業者 so both are populated
+        results.forEach(r => {
+            if (!r.Worker_Name && r['作業者']) r.Worker_Name = r['作業者'];
+            if (!r['作業者'] && r.Worker_Name) r['作業者'] = r.Worker_Name;
+        });
         
         console.log(`✅ Found ${results.length} records`);
         
@@ -22659,6 +27181,168 @@ app.post('/api/equipment/data', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to fetch equipment data: ' + error.message
+        });
+    }
+});
+
+/**
+ * POST /api/equipment/part-comparison
+ * Dedicated endpoint for cross-machine part benchmarking (品番 / 背番号)
+ * Returns both aggregated machine comparison statistics and full record details.
+ */
+app.post('/api/equipment/part-comparison', async (req, res) => {
+    try {
+        const { hinban, seiban, hinbans, parts, startDate, endDate } = req.body;
+        
+        console.log('🔍 Cross-machine part comparison requested:');
+        if (Array.isArray(parts) && parts.length > 0) {
+            console.log(`   Parts count: ${parts.length} (${parts.map(p => p.hinban).join(', ')})`);
+        } else if (Array.isArray(hinbans) && hinbans.length > 0) {
+            console.log(`   Hinbans count: ${hinbans.length} (${hinbans.join(', ')})`);
+        } else {
+            console.log(`   Part: ${hinban || 'any'} / ${seiban || 'any'}`);
+        }
+        console.log(`   Date Range: ${startDate || 'all'} ~ ${endDate || 'all'}`);
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('pressDB');
+        
+        const matchQuery = {};
+        
+        if (Array.isArray(parts) && parts.length > 0) {
+            const orList = parts.map(p => {
+                const c = {};
+                if (p.hinban) c.品番 = p.hinban;
+                if (p.seiban) c.背番号 = p.seiban;
+                return c;
+            }).filter(c => Object.keys(c).length > 0);
+            if (orList.length > 0) {
+                matchQuery.$or = orList;
+            }
+        } else if (Array.isArray(hinbans) && hinbans.length > 0) {
+            matchQuery.品番 = { $in: hinbans };
+        } else if (Array.isArray(hinban) && hinban.length > 0) {
+            matchQuery.品番 = { $in: hinban };
+        } else {
+            if (hinban) matchQuery.品番 = hinban;
+            if (seiban) matchQuery.背番号 = seiban;
+        }
+        
+        if (startDate || endDate) {
+            matchQuery.Date = {};
+            if (startDate) matchQuery.Date.$gte = startDate;
+            if (endDate) matchQuery.Date.$lte = endDate;
+        }
+        
+        const records = await collection.find(matchQuery)
+            .sort({ Date: -1, Time_start: -1 })
+            .toArray();
+            
+        // Normalize Worker_Name and 作業者
+        records.forEach(r => {
+            if (!r.Worker_Name && r['作業者']) r.Worker_Name = r['作業者'];
+            if (!r['作業者'] && r.Worker_Name) r['作業者'] = r.Worker_Name;
+        });
+        
+        // Aggregate statistics per machine
+        const machinesMap = {};
+        let grandTotalShots = 0;
+        let grandTotalDefects = 0;
+        
+        records.forEach(r => {
+            const mach = r.設備 || r.machine || 'Unknown';
+            if (!machinesMap[mach]) {
+                machinesMap[mach] = {
+                    machine: mach,
+                    totalShots: 0,
+                    goodShots: 0,
+                    totalDefects: 0,
+                    totalMinutes: 0,
+                    recordCount: 0,
+                    firstSeen: r.Date,
+                    lastSeen: r.Date,
+                    records: []
+                };
+            }
+            
+            const shots = Number(r['ショット数'] || r.shots || r.Process_Quantity || r.Total_Count || r.totalCount || r.total_count || r.良品数 || 0);
+            const defects = Number(r.Total_NG || r.SRS_Total_NG || r['不良数'] || r.Bad_Count || r.badCount || r.Defect_Count || 0);
+            
+            machinesMap[mach].totalShots += shots;
+            machinesMap[mach].totalDefects += defects;
+            machinesMap[mach].goodShots += Math.max(0, shots - defects);
+            machinesMap[mach].recordCount += 1;
+            machinesMap[mach].records.push(r);
+            
+            // Track date span
+            if (r.Date && (!machinesMap[mach].firstSeen || r.Date < machinesMap[mach].firstSeen)) {
+                machinesMap[mach].firstSeen = r.Date;
+            }
+            if (r.Date && (!machinesMap[mach].lastSeen || r.Date > machinesMap[mach].lastSeen)) {
+                machinesMap[mach].lastSeen = r.Date;
+            }
+            
+            // Duration calculation if time fields exist
+            if (r.Time_start && r.Time_end) {
+                const [sh, sm] = r.Time_start.split(':').map(Number);
+                const [eh, em] = r.Time_end.split(':').map(Number);
+                if (!isNaN(sh) && !isNaN(sm) && !isNaN(eh) && !isNaN(em)) {
+                    let mins = (eh * 60 + em) - (sh * 60 + sm);
+                    if (mins < 0) mins += 1440; // overnight
+                    if (mins > 0 && mins < 1440) machinesMap[mach].totalMinutes += mins;
+                }
+            }
+            
+            grandTotalShots += shots;
+            grandTotalDefects += defects;
+        });
+        
+        const machineList = Object.values(machinesMap).map(m => {
+            const defectRate = m.totalShots > 0 ? (m.totalDefects / m.totalShots) * 100 : 0;
+            const operatingHours = +(m.totalMinutes / 60).toFixed(1);
+            const share = grandTotalShots > 0 ? (m.totalShots / grandTotalShots) * 100 : 0;
+            const shotsPerHour = operatingHours > 0 ? Math.round(m.totalShots / operatingHours) : 0;
+            
+            return {
+                machine: m.machine,
+                totalShots: m.totalShots,
+                goodShots: m.goodShots,
+                totalDefects: m.totalDefects,
+                defectRate: +defectRate.toFixed(2),
+                operatingHours,
+                shotsPerHour,
+                share: +share.toFixed(1),
+                recordCount: m.recordCount,
+                firstSeen: m.firstSeen,
+                lastSeen: m.lastSeen,
+                records: m.records
+            };
+        }).sort((a, b) => b.totalShots - a.totalShots);
+        
+        const overallDefectRate = grandTotalShots > 0 ? (grandTotalDefects / grandTotalShots) * 100 : 0;
+        
+        console.log(`✅ Part comparison found ${records.length} records across ${machineList.length} machines`);
+        
+        res.json({
+            success: true,
+            hinban,
+            seiban,
+            overall: {
+                totalShots: grandTotalShots,
+                totalDefects: grandTotalDefects,
+                defectRate: +overallDefectRate.toFixed(2),
+                machineCount: machineList.length,
+                recordCount: records.length
+            },
+            machines: machineList,
+            records
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in /api/equipment/part-comparison:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to process part cross-machine comparison: ' + error.message
         });
     }
 });
@@ -23104,6 +27788,1774 @@ app.get('/api/factory-overview/env', async (req, res) => {
 });
 
 // ==================== END FACTORY OVERVIEW ENDPOINTS ====================
+
+// ==================== SCNA NC PROGRAMS (PLT -> JSON points) ====================
+// Admin uploads a .plt for a masterDB item (工場: SCNA only); the browser converts it to points.
+// The miniPC listener fetches the points by program id and sends them to the CNC directly.
+
+function _validateScnaNcPoints(points) {
+  if (!Array.isArray(points) || points.length === 0) return "points must be a non-empty array";
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (!p || ![0, 1].includes(Number(p.flag)) || !Number.isInteger(Number(p.layer))
+      || !Number.isFinite(Number(p.x)) || !Number.isFinite(Number(p.y))) {
+      return `invalid point at position ${i}`;
+    }
+  }
+  return null;
+}
+
+app.post("/api/scna-nc-programs", async (req, res) => {
+  try {
+    const { sebanggo, displayName, fileName, pltBase64, pceBase64, points, uploadedBy } = req.body;
+    // The browser sends either the exported .plt (pltBase64) or the Xiao .pce (pceBase64)
+    const sourceType = pceBase64 ? "pce" : "plt";
+    const sourceBase64 = pceBase64 || pltBase64;
+    if (!sebanggo || !displayName || !String(displayName).trim() || !fileName || !sourceBase64) {
+      return res.status(400).json({ error: "sebanggo, displayName, fileName and pltBase64 (or pceBase64) are required" });
+    }
+    const pointsError = _validateScnaNcPoints(points);
+    if (pointsError) return res.status(400).json({ error: pointsError });
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+
+    // Strictly SCNA items only
+    const item = await database.collection("masterDB").findOne({ 背番号: sebanggo, 工場: "SCNA" });
+    if (!item) {
+      return res.status(400).json({ error: `背番号 ${sebanggo} is not an SCNA (工場: SCNA) item` });
+    }
+
+    const programs = database.collection("scnaNCProgramsDB");
+    const name = String(displayName).trim();
+    const dup = await programs.findOne({ 背番号: sebanggo, displayName: name, isActive: true });
+    if (dup) {
+      return res.status(409).json({ error: `A program named "${name}" already exists for ${sebanggo}` });
+    }
+
+    const docId = new ObjectId();
+    const buffer = Buffer.from(String(sourceBase64).split(',')[1] || sourceBase64, 'base64');
+    const storagePath = `scnaNC/${sebanggo}/${docId}_${Date.now()}.${sourceType}`;
+    const file = admin.storage().bucket().file(storagePath);
+    await file.save(buffer, {
+      metadata: {
+        contentType: 'application/octet-stream',
+        metadata: { firebaseStorageDownloadTokens: 'masterDBToken69' }
+      },
+      public: true
+    });
+    const sourceURL = `https://storage.googleapis.com/${file.bucket.name}/${encodeURIComponent(file.name)}?alt=media&token=masterDBToken69`;
+
+    const nowIso = new Date().toISOString();
+    const cleanPoints = points.map((p, i) => ({
+      index: i,
+      flag: Number(p.flag),
+      layer: Number(p.layer),
+      x: Number(p.x),
+      y: Number(p.y),
+      value: p.value === undefined ? 1.0 : Number(p.value)
+    }));
+
+    await programs.insertOne({
+      _id: docId,
+      背番号: sebanggo,
+      品番: item.品番 || "",
+      工場: "SCNA",
+      displayName: name,
+      fileName,
+      sourceType,
+      // pltURL is kept for PLT uploads as before; a PCE upload stores its original under pceURL
+      ...(sourceType === "pce" ? { pceURL: sourceURL } : { pltURL: sourceURL }),
+      points: cleanPoints,
+      pointCount: cleanPoints.length,
+      uploadedBy: uploadedBy || 'admin',
+      uploadedAt: nowIso,
+      updatedAt: nowIso,
+      isActive: true
+    });
+
+    res.status(201).json({ success: true, documentId: docId, pointCount: cleanPoints.length, sourceType, sourceURL });
+  } catch (error) {
+    console.error("❌ Error uploading SCNA NC program:", error);
+    res.status(500).json({ error: "Failed to upload NC program", details: error.message });
+  }
+});
+
+// List programs for one 背番号 (no points payload — used by admin and the tablet picker)
+app.get("/api/scna-nc-programs/by-sebanggo/:sebanggo", async (req, res) => {
+  try {
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const list = await programs.find({ 背番号: req.params.sebanggo, isActive: true })
+      .project({ points: 0 })
+      .sort({ displayName: 1 })
+      .toArray();
+    res.json(list);
+  } catch (error) {
+    console.error("❌ Error listing SCNA NC programs:", error);
+    res.status(500).json({ error: "Failed to list NC programs", details: error.message });
+  }
+});
+
+// Which SCNA 背番号 already have programs (for the admin table badge)
+app.get("/api/scna-nc-programs/counts", async (req, res) => {
+  try {
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const rows = await programs.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: "$背番号", count: { $sum: 1 } } }
+    ]).toArray();
+    res.json(Object.fromEntries(rows.map(r => [r._id, r.count])));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to count NC programs", details: error.message });
+  }
+});
+
+// Points for the miniPC listener
+app.get("/api/scna-nc-programs/:id/points", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const doc = await programs.findOne(
+      { _id: new ObjectId(req.params.id), isActive: true },
+      { projection: { displayName: 1, 背番号: 1, points: 1 } }
+    );
+    if (!doc) return res.status(404).json({ error: "Program not found" });
+    res.json({ id: doc._id, 背番号: doc.背番号, displayName: doc.displayName, points: doc.points });
+  } catch (error) {
+    console.error("❌ Error fetching SCNA NC program points:", error);
+    res.status(500).json({ error: "Failed to fetch NC program", details: error.message });
+  }
+});
+
+app.patch("/api/scna-nc-programs/:id", async (req, res) => {
+  try {
+    const name = String(req.body?.displayName || "").trim();
+    if (!name) return res.status(400).json({ error: "displayName is required" });
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const current = await programs.findOne({ _id: new ObjectId(req.params.id), isActive: true }, { projection: { 背番号: 1 } });
+    if (!current) return res.status(404).json({ error: "Program not found" });
+    const dup = await programs.findOne({ 背番号: current.背番号, displayName: name, isActive: true, _id: { $ne: current._id } });
+    if (dup) return res.status(409).json({ error: `A program named "${name}" already exists for ${current.背番号}` });
+    await programs.updateOne({ _id: current._id }, { $set: { displayName: name, updatedAt: new Date().toISOString() } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to rename NC program", details: error.message });
+  }
+});
+
+// Soft delete (keeps the PLT and points for audit/recovery)
+app.delete("/api/scna-nc-programs/:id", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const programs = client.db(DB_NAME).collection("scnaNCProgramsDB");
+    const result = await programs.updateOne(
+      { _id: new ObjectId(req.params.id), isActive: true },
+      { $set: { isActive: false, deletedAt: new Date().toISOString() } }
+    );
+    if (!result.matchedCount) return res.status(404).json({ error: "Program not found" });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete NC program", details: error.message });
+  }
+});
+
+// ==================== END SCNA NC PROGRAMS ====================
+
+// ==================== SCNA LABEL LAYOUTS ====================
+// Layouts drawn in freyaAdmin2 (SCNA > Label Designer). The miniPC print server
+// (print_DBprinter.py) reads them straight from the `labelLayouts` collection via /queries:
+//   { layoutId, name, customers: [..], isDefault, layout: { widthMm, heightMm, elements: [..] } }
+const LABEL_ELEMENT_TYPES = ["text", "barcode128", "qr", "line", "rect"];
+
+function _validateLabelLayout(layout) {
+  if (!layout || typeof layout !== "object") return "layout is required";
+  const w = Number(layout.widthMm), h = Number(layout.heightMm);
+  if (!(w > 0 && w <= 500) || !(h > 0 && h <= 500)) return "widthMm / heightMm must be between 0 and 500";
+  if (!Array.isArray(layout.elements)) return "layout.elements must be an array";
+  if (layout.elements.length > 200) return "too many elements (max 200)";
+  for (let i = 0; i < layout.elements.length; i++) {
+    const el = layout.elements[i];
+    if (!el || !LABEL_ELEMENT_TYPES.includes(el.type)) return `invalid element type at position ${i}`;
+    // Optional element ID: the key the tablet uses to set a value at print time (see print_DBprinter.py overrides).
+    // Not unique on purpose: every element with the same ID receives the same value.
+    if (el.name !== undefined && el.name !== "") {
+      if (typeof el.name !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(el.name)) return `element ${i}: ID may only use letters, numbers, _ and - (max 64)`;
+    }
+    for (const k of ["x", "y", "w", "h"]) {
+      if (!Number.isFinite(Number(el[k]))) return `element ${i}: ${k} must be a number`;
+    }
+  }
+  return null;
+}
+
+// Hash of the drawn layout. The Firebase thumbnail records the hash it was rendered from, so the admin page
+// only trusts the stored image while it still matches the layout (otherwise it draws a preview on the spot).
+function _layoutHash(layout) {
+  return require("crypto").createHash("sha1").update(JSON.stringify(layout || {})).digest("hex").slice(0, 16);
+}
+
+function _cleanCustomers(customers) {
+  if (!Array.isArray(customers)) return [];
+  return [...new Set(customers.map(c => String(c || "").trim()).filter(Boolean))];
+}
+
+// SCNA processes. Each label layout lists the processes it can be printed from (labelLayouts.processes) and each
+// item binds layouts per process (masterDB.labelLayoutByProcess.<process>). Layouts from before processes existed
+// were all press layouts; _ensureLabelProcesses backfills that.
+const SCNA_LABEL_PROCESSES = ["PSA", "press", "SRS", "kensa"];
+
+function _cleanProcesses(processes) {
+  if (!Array.isArray(processes)) return [];
+  return SCNA_LABEL_PROCESSES.filter(p => processes.includes(p));
+}
+
+// Process asked for by a caller; a missing value means press so tablets that do not send it yet keep working.
+function _requestedProcess(value) {
+  const p = String(value || "press").trim();
+  return SCNA_LABEL_PROCESSES.includes(p) ? p : null;
+}
+
+// Backfill, idempotent: layouts without processes become press layouts, and the old masterDB.labelLayoutIds
+// (and the older single labelLayoutId) folds into labelLayoutByProcess.press.
+async function _ensureLabelProcesses(database) {
+  await database.collection("labelLayouts").updateMany(
+    { processes: { $exists: false } },
+    { $set: { processes: ["press"] } }
+  );
+  await database.collection("masterDB").updateMany(
+    { 工場: "SCNA", $or: [{ labelLayoutIds: { $exists: true } }, { labelLayoutId: { $exists: true } }] },
+    [
+      { $set: { "labelLayoutByProcess.press": { $setUnion: [
+        { $ifNull: ["$labelLayoutByProcess.press", []] },
+        { $ifNull: ["$labelLayoutIds", []] },
+        { $cond: [{ $in: [{ $ifNull: ["$labelLayoutId", ""] }, ["", null]] }, [], ["$labelLayoutId"]] },
+      ] } } },
+      { $unset: ["labelLayoutIds", "labelLayoutId"] },
+    ]
+  );
+}
+
+// A customer maps to one layout per process, and only one layout can be the default for a process.
+async function _applyLabelLayoutExclusivity(col, layoutId, customers, isDefault, processes) {
+  if (customers.length) {
+    await col.updateMany(
+      { layoutId: { $ne: layoutId }, processes: { $in: processes } },
+      { $pull: { customers: { $in: customers } } }
+    );
+  }
+  if (isDefault) {
+    await col.updateMany({ layoutId: { $ne: layoutId }, processes: { $in: processes } }, { $set: { isDefault: false } });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SCNA box traceability (docs/scna-box-traceability-plan.md): one record per printed box in scnaBoxDB.
+// The server issues the box ID (<work order>-B<seq>, serial from an atomic counter). boxUid is made by the tablet
+// up front, so a retry or reload of the same box never creates a second one.
+// ---------------------------------------------------------------------------
+let _scnaBoxIndexesReady = false;
+async function _ensureScnaBoxIndexes() {
+  if (_scnaBoxIndexesReady) return;
+  const col = client.db(DB_NAME).collection("scnaBoxDB");
+  await col.createIndex({ boxUid: 1 }, { unique: true });
+  await col.createIndex({ boxId: 1 }, { unique: true });
+  await col.createIndex({ runId: 1 });
+  _scnaBoxIndexesReady = true;
+}
+
+// Counter key: the work order number; without one, <背番号>-<YYYYMMDD> (JST). Letters, numbers, . _ - only.
+function _scnaBoxKey(workOrderNumber, sebanggo) {
+  let key = String(workOrderNumber || "").trim();
+  if (!key) {
+    const ymd = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+    key = `${String(sebanggo || "").trim()}-${ymd}`;
+  }
+  return key.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+}
+
+const _SCNA_BOX_FIELDS = [
+  "runId", "workOrderNumber", "背番号", "品番", "machines", "Tablet_Home", "worker", "startedAt", "finishedAt",
+  "printedAt", "printedBy", "copies", "layoutId", "qtyLabel", "qtyMeasured", "lots", "snapshot", "approximate", "notes",
+  "capped", "producedSinceLastBox", "carriedOverPieces", "fillMethod"
+];
+
+app.post("/api/scna-boxes", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const boxUid = String(body.boxUid || "").trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(boxUid)) return res.status(400).json({ error: "boxUid is required (8-64 letters, numbers, _ or -)" });
+    if (!String(body.背番号 || "").trim() && !String(body.workOrderNumber || "").trim()) {
+      return res.status(400).json({ error: "背番号 or workOrderNumber is required" });
+    }
+    if (body.lots !== undefined && !Array.isArray(body.lots)) return res.status(400).json({ error: "lots must be an array" });
+
+    await client.connect();
+    await _ensureScnaBoxIndexes();
+    const db = client.db(DB_NAME);
+    const col = db.collection("scnaBoxDB");
+
+    const existing = await col.findOne({ boxUid });
+    if (existing) return res.json({ ...existing, existing: true });
+
+    const key = _scnaBoxKey(body.workOrderNumber, body.背番号);
+    const counter = await db.collection("scnaBoxCounters").findOneAndUpdate(
+      { _id: key }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" }
+    );
+    const seq = (counter && (counter.value ? counter.value.seq : counter.seq)) || 1;
+
+    const doc = { boxId: `${key}-B${String(seq).padStart(3, "0")}`, boxUid, seq, factory: "SCNA" };
+    for (const f of _SCNA_BOX_FIELDS) if (body[f] !== undefined) doc[f] = body[f];
+    doc.lots = Array.isArray(doc.lots) ? doc.lots : [];
+    doc.approximate = !!doc.approximate;
+    doc.pressId = null;
+    doc.createdAt = new Date().toISOString();
+
+    try {
+      await col.insertOne(doc);
+    } catch (e) {
+      if (e && e.code === 11000) {   // same boxUid arrived twice at once: return the first
+        const again = await col.findOne({ boxUid });
+        if (again) return res.json({ ...again, existing: true });
+      }
+      throw e;
+    }
+    res.status(201).json(doc);
+  } catch (error) {
+    console.error("❌ Error saving SCNA box:", error);
+    res.status(500).json({ error: "Failed to save box", details: error.message });
+  }
+});
+
+app.get("/api/scna-boxes/:boxId", async (req, res) => {
+  try {
+    await client.connect();
+    const doc = await client.db(DB_NAME).collection("scnaBoxDB").findOne({ boxId: req.params.boxId });
+    if (!doc) return res.status(404).json({ error: "Box not found" });
+    res.json(doc);
+  } catch (error) {
+    console.error("❌ Error reading SCNA box:", error);
+    res.status(500).json({ error: "Failed to read box", details: error.message });
+  }
+});
+
+app.get("/api/scna-boxes", async (req, res) => {
+  try {
+    const runId = String(req.query.runId || "").trim();
+    const lotNumber = String(req.query.lotNumber || "").trim();
+    if (!runId && !lotNumber) return res.status(400).json({ error: "runId or lotNumber is required" });
+    await client.connect();
+    // lotNumber: every box that contains this material lot (exact match, spare lines included)
+    const filter = runId ? { runId } : { "lots.lotNumber": lotNumber };
+    const list = await client.db(DB_NAME).collection("scnaBoxDB").find(filter).sort(runId ? { seq: 1 } : { printedAt: -1 }).limit(500).toArray();
+    res.json(list);
+  } catch (error) {
+    console.error("❌ Error listing SCNA boxes:", error);
+    res.status(500).json({ error: "Failed to list boxes", details: error.message });
+  }
+});
+
+// ==== SRS BOXES START ====================================================
+// SRS WIP labels (Girasol). One printed label = one SRS box, ID `<WO>-S<seq>`. See docs/srs-interactive-label-plan.md.
+//   srsBoxDB     the label registry: status complete | draft | superseded | voided, the lines (which press box / legacy
+//                lot gave how many good + NG pieces), parent link for drafts that were finished later
+//   scnaBoxDB    press boxes get `srsConsumed: [{ srsId, good, ng, pieces, at, void? }]`; remaining = base - consumed
+// All routes are new; the DCP box routes and the legacy SRS routes are not touched.
+const _SRS_NG_FIELDS = ["くっつき・めくれ", "シワ", "転写位置ズレ", "転写不良", "文字欠け", "その他"];
+
+class _SrsError extends Error {
+  constructor(status, message, extra) { super(message); this.status = status; this.extra = extra || {}; }
+}
+function _srsSend(res, error, label) {
+  if (error instanceof _SrsError) return res.status(error.status).json({ error: error.message, ...error.extra });
+  console.error(`❌ ${label}:`, error);
+  return res.status(500).json({ error: `${label} failed`, details: error.message });
+}
+
+let _srsBoxDbIndexesReady = false;
+async function _ensureSrsBoxDbIndexes() {
+  if (_srsBoxDbIndexesReady) return;
+  const db = client.db(DB_NAME);
+  const col = db.collection("srsBoxDB");
+  await col.createIndex({ srsId: 1 }, { unique: true });
+  await col.createIndex({ boxUid: 1 }, { unique: true });
+  await col.createIndex({ parentSrsId: 1 });
+  await col.createIndex({ "lines.boxId": 1 });
+  await col.createIndex({ srsRecordId: 1 });
+  await db.collection("scnaBoxDB").createIndex({ "srsConsumed.srsId": 1 });
+  _srsBoxDbIndexesReady = true;
+}
+
+// Pieces of a press box: the measured quantity, else the label quantity (plan S5). Voided SRS boxes give their pieces back.
+function _pressBoxBase(doc) {
+  const m = Number(doc && doc.qtyMeasured);
+  if (m > 0) return m;
+  const l = Number(doc && doc.qtyLabel);
+  return l > 0 ? l : 0;
+}
+function _pressBoxConsumed(doc) {
+  return ((doc && doc.srsConsumed) || [])
+    .filter(e => e && e.void !== true)
+    .reduce((a, e) => a + (Number(e.pieces) || 0), 0);
+}
+function _pressBoxRemaining(doc) { return Math.max(0, _pressBoxBase(doc) - _pressBoxConsumed(doc)); }
+
+function _srsInt(v, what) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) throw new _SrsError(400, `${what} must be a whole number >= 0`);
+  return n;
+}
+function _srsNgObject(ng) {
+  const out = {};
+  _SRS_NG_FIELDS.forEach(f => { out[f] = _srsInt((ng && ng[f]) || 0, `ng.${f}`); });
+  return out;
+}
+function _normSku(v) { return String(v || "").trim().toUpperCase(); }
+
+function _cleanSrsLines(lines) {
+  if (!Array.isArray(lines) || !lines.length) throw new _SrsError(400, "lines is required (at least one input)");
+  const seen = new Set();
+  return lines.map((l, i) => {
+    l = l || {};
+    const boxId = String(l.boxId || "").trim().toUpperCase() || null;
+    if (boxId) {
+      if (seen.has(boxId)) throw new _SrsError(400, `lines[${i}]: press box ${boxId} appears twice`);
+      seen.add(boxId);
+    }
+    const ng = _srsNgObject(l.ng);
+    const ngTotal = _SRS_NG_FIELDS.reduce((a, f) => a + ng[f], 0);
+    const good = _srsInt(l.good || 0, `lines[${i}].good`);
+    const lotNumbers = (Array.isArray(l.lotNumbers) ? l.lotNumbers : (l.lotNumber ? [l.lotNumber] : []))
+      .map(x => String(x || "").trim()).filter(Boolean);
+    if (!boxId && !lotNumbers.length) throw new _SrsError(400, `lines[${i}]: a legacy input needs a lot number`);
+    return {
+      boxId, legacy: !boxId, 品番: String(l.品番 || "").trim(), lotNumbers,
+      machines: Array.isArray(l.machines) ? l.machines.map(x => String(x)).filter(Boolean) : [],
+      carried: !!l.carried, good, ng, ngTotal
+    };
+  });
+}
+
+// Read-only: can `need` pieces be taken from this press box? Throws the same 409s as _consumePressBox. Used before the
+// SRS ID is issued so a refused request does not burn a number.
+async function _checkPressBox(db, boxId, sku, need) {
+  const doc = await db.collection("scnaBoxDB").findOne({ boxId });
+  if (!doc) throw new _SrsError(409, `Press box not found: ${boxId}`, { boxId });
+  if (sku && doc.品番 && _normSku(doc.品番) !== _normSku(sku)) {
+    throw new _SrsError(409, `Press box ${boxId} is product ${doc.品番}, not ${sku}`, { boxId });
+  }
+  const base = _pressBoxBase(doc);
+  if (!base) throw new _SrsError(409, `Press box ${boxId} has no quantity`, { boxId });
+  const remaining = base - _pressBoxConsumed(doc);
+  if (need > remaining) {
+    throw new _SrsError(409, `Press box ${boxId} has only ${Math.max(0, remaining)} pieces left (needs ${need})`, { boxId, remaining: Math.max(0, remaining), need });
+  }
+  return { doc, remaining };
+}
+
+// Take `good + ng` pieces from a press box for srsId. Optimistic concurrency on the length of srsConsumed so two
+// tablets cannot both take the last pieces; returns the pieces left.
+async function _consumePressBox(db, boxId, sku, srsId, good, ngTotal) {
+  const need = good + ngTotal;
+  const col = db.collection("scnaBoxDB");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const doc = await col.findOne({ boxId });
+    if (!doc) throw new _SrsError(409, `Press box not found: ${boxId}`, { boxId });
+    if (sku && doc.品番 && _normSku(doc.品番) !== _normSku(sku)) {
+      throw new _SrsError(409, `Press box ${boxId} is product ${doc.品番}, not ${sku}`, { boxId });
+    }
+    const base = _pressBoxBase(doc);
+    if (!base) throw new _SrsError(409, `Press box ${boxId} has no quantity`, { boxId });
+    const remaining = base - _pressBoxConsumed(doc);
+    if (need > remaining) {
+      throw new _SrsError(409, `Press box ${boxId} has only ${Math.max(0, remaining)} pieces left (needs ${need})`, { boxId, remaining: Math.max(0, remaining), need });
+    }
+    const len = (doc.srsConsumed || []).length;
+    const filter = len === 0
+      ? { boxId, $or: [{ srsConsumed: { $exists: false } }, { srsConsumed: { $size: 0 } }] }
+      : { boxId, srsConsumed: { $size: len } };
+    const r = await col.updateOne(filter, { $push: { srsConsumed: { srsId, good, ng: ngTotal, pieces: need, at: new Date().toISOString() } } });
+    if (r.modifiedCount === 1) return remaining - need;
+  }
+  throw new _SrsError(409, `Press box ${boxId} is busy, try again`, { boxId });
+}
+async function _releasePressBoxes(db, boxIds, srsId) {
+  for (const boxId of boxIds) {
+    try { await db.collection("scnaBoxDB").updateOne({ boxId }, { $pull: { srsConsumed: { srsId } } }); }
+    catch (e) { console.error(`SRS rollback failed for ${boxId}:`, e.message); }
+  }
+}
+
+// POST /api/srs-boxes - issue an SRS ID and register the label. Idempotent on boxUid (a retry returns the first box).
+app.post("/api/srs-boxes", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const boxUid = String(b.boxUid || "").trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(boxUid)) throw new _SrsError(400, "boxUid is required (8-64 letters, numbers, _ or -)");
+    const status = String(b.status || "");
+    if (status !== "complete" && status !== "draft") throw new _SrsError(400, "status must be 'complete' or 'draft'");
+    const workOrder = String(b.workOrder || "").trim();
+    const sebanggo = String(b.背番号 || "").trim();
+    const hinban = String(b.品番 || "").trim();
+    if (!sebanggo || !hinban) throw new _SrsError(400, "背番号 and 品番 are required");
+    const lane = String(b.lane || "").trim().toUpperCase();
+    if (lane !== "LH" && lane !== "RH") throw new _SrsError(400, "lane must be LH or RH");
+    const machine = String(b.machine || "").trim();
+    if (!machine) throw new _SrsError(400, "machine is required");
+    const lines = _cleanSrsLines(b.lines).map(l => ({ ...l, 品番: l.品番 || hinban }));
+    const qtyLabel = _srsInt(b.qtyLabel, "qtyLabel");
+    if (qtyLabel <= 0) throw new _SrsError(400, "qtyLabel must be greater than 0");
+    const qtyMeasured = lines.reduce((a, l) => a + l.good, 0);
+    if (qtyMeasured <= 0) throw new _SrsError(400, "the lines contain no good pieces");
+    // a draft label shows exactly what was entered; a complete label shows 収容数 even if the measured total differs (flagged)
+    if (status === "draft" && qtyLabel !== qtyMeasured) throw new _SrsError(400, `draft qtyLabel (${qtyLabel}) must equal the sum of the lines (${qtyMeasured})`);
+    const parentSrsId = String(b.parentSrsId || "").trim() || null;
+    if (parentSrsId && !lines.some(l => l.carried)) throw new _SrsError(400, "a resumed box must carry the draft's lines (carried: true)");
+    if (!parentSrsId && lines.some(l => l.carried)) throw new _SrsError(400, "carried lines need parentSrsId");
+
+    await client.connect();
+    await _ensureSrsBoxDbIndexes();
+    const db = client.db(DB_NAME);
+    const col = db.collection("srsBoxDB");
+
+    const existing = await col.findOne({ boxUid });
+    if (existing) return res.json({ ...existing, existing: true });
+
+    // refuse before a number is issued (the checks are repeated atomically when the pieces are taken)
+    if (parentSrsId) {
+      const parent = await col.findOne({ srsId: parentSrsId });
+      if (!parent) throw new _SrsError(409, `Draft not found: ${parentSrsId}`);
+      if (_normSku(parent.品番) !== _normSku(hinban)) throw new _SrsError(409, `Draft ${parentSrsId} is product ${parent.品番}, not ${hinban}`);
+      if (parent.status !== "draft") throw new _SrsError(409, `Draft ${parentSrsId} is not an open draft (status ${parent.status})`, { parentSrsId, status: parent.status });
+    }
+    for (const l of lines) {
+      if (l.carried || !l.boxId || l.good + l.ngTotal === 0) continue;
+      await _checkPressBox(db, l.boxId, l.品番, l.good + l.ngTotal);
+    }
+
+    const key = _scnaBoxKey(workOrder, sebanggo);
+    const counter = await db.collection("scnaBoxCounters").findOneAndUpdate(
+      { _id: `${key}-S` }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" }
+    );
+    const seq = (counter && (counter.value ? counter.value.seq : counter.seq)) || 1;
+    const srsId = `${key}-S${String(seq).padStart(3, "0")}`;
+
+    // claim the draft first (atomic), so two tablets cannot both finish it
+    if (parentSrsId) {
+      const parent = await col.findOne({ srsId: parentSrsId });
+      if (!parent) throw new _SrsError(409, `Draft not found: ${parentSrsId}`);
+      if (_normSku(parent.品番) !== _normSku(hinban)) throw new _SrsError(409, `Draft ${parentSrsId} is product ${parent.品番}, not ${hinban}`);
+      const claim = await col.updateOne(
+        { srsId: parentSrsId, status: "draft" },
+        { $set: { status: "superseded", replacedBy: srsId, supersededAt: new Date().toISOString() } }
+      );
+      if (claim.modifiedCount !== 1) throw new _SrsError(409, `Draft ${parentSrsId} is not an open draft (status ${parent.status})`, { parentSrsId, status: parent.status });
+    }
+
+    const consumed = [];
+    try {
+      for (const l of lines) {
+        if (l.carried || !l.boxId || l.good + l.ngTotal === 0) continue;
+        await _consumePressBox(db, l.boxId, l.品番, srsId, l.good, l.ngTotal);
+        consumed.push(l.boxId);
+      }
+      const doc = {
+        srsId, boxUid, seq, factory: "SCNA", status,
+        workOrder, 背番号: sebanggo, 品番: hinban, machine, lane,
+        workers: String(b.workers || "").trim(),
+        qtyLabel, qtyMeasured, mismatch: qtyLabel !== qtyMeasured,
+        lines, parentSrsId, replacedBy: null,
+        printedAt: b.printedAt || new Date().toISOString(),
+        printedBy: b.printedBy || null, copies: Number(b.copies) || 1, layoutId: b.layoutId || null,
+        srsRecordId: null, void: null, createdAt: new Date().toISOString()
+      };
+      try {
+        await col.insertOne(doc);
+      } catch (e) {
+        if (e && e.code === 11000) {   // same boxUid arrived twice at once: give back and return the first
+          await _releasePressBoxes(db, consumed, srsId);
+          if (parentSrsId) await col.updateOne({ srsId: parentSrsId, replacedBy: srsId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } });
+          const again = await col.findOne({ boxUid });
+          if (again) return res.json({ ...again, existing: true });
+        }
+        throw e;
+      }
+      return res.status(201).json(doc);
+    } catch (e) {
+      await _releasePressBoxes(db, consumed, srsId);
+      if (parentSrsId) {
+        try { await col.updateOne({ srsId: parentSrsId, replacedBy: srsId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } }); }
+        catch (e2) { console.error("SRS draft revert failed:", e2.message); }
+      }
+      throw e;
+    }
+  } catch (error) {
+    _srsSend(res, error, "Saving SRS box");
+  }
+});
+
+// GET /api/srs-boxes/:srsId[?chain=1] - the label; chain=1 adds the drafts it replaced, the press boxes and the SRSDB records.
+app.get("/api/srs-boxes/:srsId", async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const box = await db.collection("srsBoxDB").findOne({ srsId: String(req.params.srsId || "").trim().toUpperCase() });
+    if (!box) return res.status(404).json({ error: "SRS box not found" });
+    if (!req.query.chain) return res.json(box);
+
+    const parents = [];
+    let cur = box;
+    for (let i = 0; i < 10 && cur.parentSrsId; i++) {
+      cur = await db.collection("srsBoxDB").findOne({ srsId: cur.parentSrsId });
+      if (!cur) break;
+      parents.push(cur);
+    }
+    const all = [box, ...parents];
+    const boxIds = [...new Set(all.flatMap(x => (x.lines || []).map(l => l.boxId).filter(Boolean)))];
+    const pressBoxes = boxIds.length ? await db.collection("scnaBoxDB").find({ boxId: { $in: boxIds } }).toArray() : [];
+    const srsIds = all.map(x => x.srsId);
+    const srsRecords = await client.db("submittedDB").collection("SRSDB").find({ Srs_Box_IDs: { $in: srsIds } }).toArray();
+    res.json({ box, parents, pressBoxes, srsRecords });
+  } catch (error) {
+    _srsSend(res, error, "Reading SRS box");
+  }
+});
+
+// GET /api/srs-press-boxes/:boxId - a press box with its remaining pieces (what the SRS tablet scans).
+app.get("/api/srs-press-boxes/:boxId", async (req, res) => {
+  try {
+    await client.connect();
+    const doc = await client.db(DB_NAME).collection("scnaBoxDB").findOne({ boxId: String(req.params.boxId || "").trim().toUpperCase() });
+    if (!doc) return res.status(404).json({ error: "Box not found" });
+    res.json({ ...doc, base: _pressBoxBase(doc), consumed: _pressBoxConsumed(doc), remaining: _pressBoxRemaining(doc) });
+  } catch (error) {
+    _srsSend(res, error, "Reading press box");
+  }
+});
+
+// POST /api/srs-boxes/:srsId/void - lane reset after printing (leader approved on the tablet). Gives the pieces back; a
+// draft that this box replaced becomes an open draft again. A box already linked to an SRSDB record cannot be voided.
+app.post("/api/srs-boxes/:srsId/void", async (req, res) => {
+  try {
+    const leader = (req.body && req.body.leader) || {};
+    const leaderUser = String(leader.username || "").trim();
+    if (!leaderUser) throw new _SrsError(400, "leader.username is required");
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const col = db.collection("srsBoxDB");
+    const srsId = String(req.params.srsId || "").trim().toUpperCase();
+    const box = await col.findOne({ srsId });
+    if (!box) throw new _SrsError(404, "SRS box not found");
+    if (box.srsRecordId) throw new _SrsError(409, "This SRS box is already part of a submitted SRS record");
+    if (box.status !== "complete" && box.status !== "draft") throw new _SrsError(409, `SRS box is ${box.status}`);
+    const r = await col.updateOne({ srsId, status: box.status, srsRecordId: null }, { $set: {
+      status: "voided",
+      void: { at: new Date().toISOString(), reason: String(req.body.reason || "reset"), previousStatus: box.status, leader: { username: leaderUser, name: String(leader.name || "") } }
+    } });
+    if (r.modifiedCount !== 1) throw new _SrsError(409, "SRS box changed, try again");
+    await db.collection("scnaBoxDB").updateMany(
+      { "srsConsumed.srsId": srsId },
+      { $set: { "srsConsumed.$[e].void": true } },
+      { arrayFilters: [{ "e.srsId": srsId }] }
+    );
+    if (box.parentSrsId) {
+      await col.updateOne({ srsId: box.parentSrsId, status: "superseded", replacedBy: srsId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } });
+    }
+    res.json({ ok: true, srsId, status: "voided" });
+  } catch (error) {
+    _srsSend(res, error, "Voiding SRS box");
+  }
+});
+// ==== SRS BOXES END ======================================================
+
+// ==== KENSA BOXES START ==================================================
+// Kensa (inspection) labels for "Kensa interactive SCNA". One printed label = one Kensa box, ID `<背番号>-<yyyymmdd>-K<seq>`.
+// See docs/kensa-interactive-plan.md (API contract section). All routes are new; nothing existing is modified.
+//   kensaBoxDB   the label registry: status complete | draft | superseded | voided, lines (which DCP box / SRS box / legacy lot
+//                gave how many good + NG pieces), parentKensaId for drafts finished later
+//   scnaBoxDB    DCP boxes get `kensaConsumed: [{ kensaId, good, ng, pieces, at, void? }]`. The same entry is mirrored into
+//                `srsConsumed` with `viaKensa: true` so the (unchanged) SRS routes see the pieces as taken and their optimistic
+//                concurrency also guards the shared pool. Remaining = base - srsConsumed(no viaKensa) - kensaConsumed.
+//   srsBoxDB     SRS boxes get `kensaConsumed` only.
+const _KENSA_COUNTERS = Array.from({ length: 12 }, (_, i) => `counter-${i + 1}`);
+
+class _KensaError extends Error {
+  constructor(status, message, extra) { super(message); this.status = status; this.extra = extra || {}; }
+}
+function _kensaSend(res, error, label) {
+  if (error instanceof _KensaError) return res.status(error.status).json({ error: error.message, ...error.extra });
+  console.error(`❌ ${label}:`, error);
+  return res.status(500).json({ error: `${label} failed`, details: error.message });
+}
+
+let _kensaBoxDbIndexesReady = false;
+async function _ensureKensaBoxDbIndexes() {
+  if (_kensaBoxDbIndexesReady) return;
+  const db = client.db(DB_NAME);
+  const col = db.collection("kensaBoxDB");
+  await col.createIndex({ kensaId: 1 }, { unique: true });
+  await col.createIndex({ boxUid: 1 }, { unique: true });
+  await col.createIndex({ parentKensaId: 1 });
+  await col.createIndex({ "lines.boxId": 1 });
+  await col.createIndex({ "lines.srsId": 1 });
+  await col.createIndex({ kensaRecordId: 1 });
+  await db.collection("scnaBoxDB").createIndex({ "kensaConsumed.kensaId": 1 });
+  await db.collection("srsBoxDB").createIndex({ "kensaConsumed.kensaId": 1 });
+  _kensaBoxDbIndexesReady = true;
+}
+
+function _kensaInt(v, what) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) throw new _KensaError(400, `${what} must be a whole number >= 0`);
+  return n;
+}
+// Kind of an input ID: DCP press box `...-B###`, SRS label `...-S###`, Kensa label `...-K###`.
+function _kensaIdKind(id) {
+  const s = String(id || "").trim().toUpperCase();
+  if (/-B\d+$/.test(s)) return "dcp";
+  if (/-S\d+$/.test(s)) return "srs";
+  if (/-K\d+$/.test(s)) return "kensa";
+  return null;
+}
+function _kensaPieces(e) { return (Number(e && e.pieces) || ((Number(e && e.good) || 0) + (Number(e && e.ng) || 0))); }
+// pieces already taken from an input (voided entries give them back)
+function _kensaTaken(kind, doc) {
+  let n = ((doc && doc.kensaConsumed) || []).filter(e => e && e.void !== true).reduce((a, e) => a + _kensaPieces(e), 0);
+  if (kind === "dcp") {
+    n += ((doc && doc.srsConsumed) || []).filter(e => e && e.void !== true && !e.viaKensa).reduce((a, e) => a + (Number(e.pieces) || 0), 0);
+  }
+  return n;
+}
+function _kensaBase(doc) { return _pressBoxBase(doc); }   // measured quantity, else label quantity (same rule for DCP and SRS boxes)
+function _kensaUsable(kind, doc) {
+  return kind === "srs" ? (doc.status === "complete" || doc.status === "draft") : true;
+}
+
+function _cleanKensaLines(lines) {
+  if (!Array.isArray(lines) || !lines.length) throw new _KensaError(400, "lines is required (at least one input)");
+  const seenNew = new Set(), seenCarried = new Set();
+  return lines.map((l, i) => {
+    l = l || {};
+    const boxId = String(l.boxId || "").trim().toUpperCase() || null;
+    const srsId = String(l.srsId || "").trim().toUpperCase() || null;
+    if (boxId && srsId) throw new _KensaError(400, `lines[${i}]: a line is either a DCP box or an SRS box, not both`);
+    if (boxId && _kensaIdKind(boxId) !== "dcp") throw new _KensaError(400, `lines[${i}]: ${boxId} is not a DCP box ID (...-B###)`);
+    if (srsId && _kensaIdKind(srsId) !== "srs") throw new _KensaError(400, `lines[${i}]: ${srsId} is not an SRS ID (...-S###)`);
+    const carried = !!l.carried;
+    const inputId = boxId || srsId;
+    if (inputId) {
+      const seen = carried ? seenCarried : seenNew;
+      if (seen.has(inputId)) throw new _KensaError(400, `lines[${i}]: input ${inputId} appears twice`);
+      seen.add(inputId);
+    }
+    const ng = {};
+    _KENSA_COUNTERS.forEach(c => { ng[c] = _kensaInt((l.ng && l.ng[c]) || 0, `lines[${i}].ng.${c}`); });
+    const ngTotal = _KENSA_COUNTERS.reduce((a, c) => a + ng[c], 0);
+    const good = _kensaInt(l.good || 0, `lines[${i}].good`);
+    const lotNumber = String(l.lotNumber || (Array.isArray(l.lotNumbers) ? l.lotNumbers.filter(Boolean).join(",") : "") || "").trim();
+    if (!inputId && !lotNumber) throw new _KensaError(400, `lines[${i}]: a legacy input needs a lot number`);
+    return { boxId, srsId, legacy: !inputId, 品番: String(l.品番 || "").trim(), lotNumber, carried, good, ng, ngTotal, ...(l.spare ? { spare: true } : {}) };   // spare: pieces added from another lot to top the box up
+  });
+}
+
+function _kensaCol(kind) { return kind === "srs" ? "srsBoxDB" : "scnaBoxDB"; }
+function _kensaField(kind) { return kind === "srs" ? "srsId" : "boxId"; }
+
+// Read-only: can `need` pieces be taken from this input? Throws the 409s that _kensaConsume throws. Used before the ID is
+// issued so a refused request does not burn a number.
+async function _kensaCheckInput(db, kind, id, sku, need) {
+  const doc = await db.collection(_kensaCol(kind)).findOne({ [_kensaField(kind)]: id });
+  const what = kind === "srs" ? "SRS box" : "Press box";
+  if (!doc) throw new _KensaError(409, `${what} not found: ${id}`, { id });
+  if (!_kensaUsable(kind, doc)) throw new _KensaError(409, `${what} ${id} is ${doc.status} and cannot be used`, { id, status: doc.status });
+  if (sku && doc.品番 && _normSku(doc.品番) !== _normSku(sku)) throw new _KensaError(409, `${what} ${id} is product ${doc.品番}, not ${sku}`, { id });
+  const base = _kensaBase(doc);
+  if (!base) throw new _KensaError(409, `${what} ${id} has no quantity`, { id });
+  const remaining = base - _kensaTaken(kind, doc);
+  if (need > remaining) throw new _KensaError(409, `${what} ${id} has only ${Math.max(0, remaining)} pieces left (needs ${need})`, { id, remaining: Math.max(0, remaining), need });
+  return { doc, remaining };
+}
+
+// Take good + ng pieces from an input for kensaId. Optimistic concurrency on the array lengths (kensaConsumed, and srsConsumed
+// for a DCP box, which the SRS routes also guard) so two tablets cannot both take the last pieces.
+async function _kensaConsume(db, kind, id, sku, kensaId, good, ngTotal) {
+  const need = good + ngTotal;
+  const col = db.collection(_kensaCol(kind));
+  const field = _kensaField(kind);
+  const sized = (name, len) => len === 0
+    ? { $or: [{ [name]: { $exists: false } }, { [name]: { $size: 0 } }] }
+    : { [name]: { $size: len } };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { doc, remaining } = await _kensaCheckInput(db, kind, id, sku, need);
+    const at = new Date().toISOString();
+    const entry = { kensaId, good, ng: ngTotal, pieces: need, at };
+    const filter = { [field]: id, $and: [sized("kensaConsumed", (doc.kensaConsumed || []).length)] };
+    const push = { kensaConsumed: entry };
+    if (kind === "dcp") {
+      filter.$and.push(sized("srsConsumed", (doc.srsConsumed || []).length));
+      push.srsConsumed = { srsId: null, kensaId, viaKensa: true, good, ng: ngTotal, pieces: need, at };
+    }
+    const r = await col.updateOne(filter, { $push: push });
+    if (r.modifiedCount === 1) return remaining - need;
+  }
+  throw new _KensaError(409, `Input ${id} is busy, try again`, { id });
+}
+async function _kensaRelease(db, taken, kensaId) {
+  for (const t of taken) {
+    try {
+      const upd = { $pull: { kensaConsumed: { kensaId } } };
+      if (t.kind === "dcp") upd.$pull.srsConsumed = { kensaId, viaKensa: true };
+      await db.collection(_kensaCol(t.kind)).updateOne({ [_kensaField(t.kind)]: t.id }, upd);
+    } catch (e) { console.error(`Kensa rollback failed for ${t.id}:`, e.message); }
+  }
+}
+async function _kensaReopenParent(col, parentKensaId, kensaId) {
+  if (!parentKensaId) return;
+  try { await col.updateOne({ kensaId: parentKensaId, replacedBy: kensaId }, { $set: { status: "draft", replacedBy: null }, $unset: { supersededAt: "" } }); }
+  catch (e) { console.error("Kensa draft revert failed:", e.message); }
+}
+
+// POST /api/kensa-boxes - issue a Kensa ID and register the label. Idempotent on boxUid.
+app.post("/api/kensa-boxes", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const boxUid = String(b.boxUid || "").trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(boxUid)) throw new _KensaError(400, "boxUid is required (8-64 letters, numbers, _ or -)");
+    const status = String(b.status || "");
+    if (status !== "complete" && status !== "draft") throw new _KensaError(400, "status must be 'complete' or 'draft'");
+    const sebanggo = String(b.背番号 || "").trim();
+    const hinban = String(b.品番 || "").trim();
+    if (!sebanggo || !hinban) throw new _KensaError(400, "背番号 and 品番 are required");
+    const machine = String(b.machine || "").trim();
+    if (!machine) throw new _KensaError(400, "machine is required");
+    const lines = _cleanKensaLines(b.lines).map(l => ({ ...l, 品番: l.品番 || hinban }));
+    const qtyLabel = _kensaInt(b.qtyLabel, "qtyLabel");
+    if (qtyLabel <= 0) throw new _KensaError(400, "qtyLabel must be greater than 0");
+    const qtyMeasured = lines.reduce((a, l) => a + l.good, 0);
+    if (qtyMeasured <= 0) throw new _KensaError(400, "the lines contain no good pieces");
+    if (status === "draft" && qtyLabel !== qtyMeasured) throw new _KensaError(400, `draft qtyLabel (${qtyLabel}) must equal the sum of the lines (${qtyMeasured})`);
+    const parentKensaId = String(b.parentKensaId || "").trim().toUpperCase() || null;
+    if (parentKensaId && !lines.some(l => l.carried)) throw new _KensaError(400, "a resumed box must carry the draft's lines (carried: true)");
+    if (!parentKensaId && lines.some(l => l.carried)) throw new _KensaError(400, "carried lines need parentKensaId");
+
+    await client.connect();
+    await _ensureKensaBoxDbIndexes();
+    const db = client.db(DB_NAME);
+    const col = db.collection("kensaBoxDB");
+
+    const existing = await col.findOne({ boxUid });
+    if (existing) return res.json({ ...existing, existing: true });
+
+    // refuse before a number is issued (the checks are repeated atomically when the pieces are taken)
+    if (parentKensaId) {
+      const parent = await col.findOne({ kensaId: parentKensaId });
+      if (!parent) throw new _KensaError(409, `Draft not found: ${parentKensaId}`);
+      if (_normSku(parent.品番) !== _normSku(hinban)) throw new _KensaError(409, `Draft ${parentKensaId} is product ${parent.品番}, not ${hinban}`);
+      if (parent.status !== "draft") throw new _KensaError(409, `Draft ${parentKensaId} is not an open draft (status ${parent.status})`, { parentKensaId, status: parent.status });
+    }
+    for (const l of lines) {
+      if (l.carried || l.legacy || l.good + l.ngTotal === 0) continue;
+      await _kensaCheckInput(db, l.boxId ? "dcp" : "srs", l.boxId || l.srsId, l.品番, l.good + l.ngTotal);
+    }
+
+    const key = _scnaBoxKey(null, sebanggo);
+    const counter = await db.collection("scnaBoxCounters").findOneAndUpdate(
+      { _id: `${key}-K` }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" }
+    );
+    const seq = (counter && (counter.value ? counter.value.seq : counter.seq)) || 1;
+    const kensaId = `${key}-K${String(seq).padStart(3, "0")}`;
+
+    if (parentKensaId) {   // claim the draft first (atomic), so two tablets cannot both finish it
+      const claim = await col.updateOne(
+        { kensaId: parentKensaId, status: "draft" },
+        { $set: { status: "superseded", replacedBy: kensaId, supersededAt: new Date().toISOString() } }
+      );
+      if (claim.modifiedCount !== 1) throw new _KensaError(409, `Draft ${parentKensaId} is not an open draft`, { parentKensaId });
+    }
+
+    const taken = [];
+    try {
+      for (const l of lines) {
+        if (l.carried || l.legacy || l.good + l.ngTotal === 0) continue;
+        const kind = l.boxId ? "dcp" : "srs";
+        const id = l.boxId || l.srsId;
+        await _kensaConsume(db, kind, id, l.品番, kensaId, l.good, l.ngTotal);
+        taken.push({ kind, id });
+      }
+      const doc = {
+        kensaId, boxUid, seq, factory: "SCNA", status,
+        背番号: sebanggo, 品番: hinban, machine,
+        workers: String(b.workers || "").trim(),
+        qtyLabel, qtyMeasured, mismatch: qtyLabel !== qtyMeasured,
+        lines, parentKensaId, replacedBy: null,
+        printedAt: b.printedAt || new Date().toISOString(),
+        printedBy: b.printedBy || null, copies: Number(b.copies) || 1, layoutId: b.layoutId || null,
+        kensaRecordId: null, void: null, createdAt: new Date().toISOString()
+      };
+      try {
+        await col.insertOne(doc);
+      } catch (e) {
+        if (e && e.code === 11000) {   // same boxUid arrived twice at once: give back and return the first
+          await _kensaRelease(db, taken, kensaId);
+          await _kensaReopenParent(col, parentKensaId, kensaId);
+          const again = await col.findOne({ boxUid });
+          if (again) return res.json({ ...again, existing: true });
+        }
+        throw e;
+      }
+      return res.status(201).json(doc);
+    } catch (e) {
+      await _kensaRelease(db, taken, kensaId);
+      await _kensaReopenParent(col, parentKensaId, kensaId);
+      throw e;
+    }
+  } catch (error) {
+    _kensaSend(res, error, "Saving Kensa box");
+  }
+});
+
+// GET /api/kensa-boxes/:kensaId[?chain=1] - the label; chain=1 adds the drafts it replaced, the input boxes and the kensaDB records.
+app.get("/api/kensa-boxes/:kensaId", async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const col = db.collection("kensaBoxDB");
+    const box = await col.findOne({ kensaId: String(req.params.kensaId || "").trim().toUpperCase() });
+    if (!box) return res.status(404).json({ error: "Kensa box not found" });
+    if (!req.query.chain) return res.json(box);
+
+    const parents = [];
+    let cur = box;
+    for (let i = 0; i < 10 && cur.parentKensaId; i++) {
+      cur = await col.findOne({ kensaId: cur.parentKensaId });
+      if (!cur) break;
+      parents.push(cur);
+    }
+    const all = [box, ...parents];
+    const boxIds = [...new Set(all.flatMap(x => (x.lines || []).map(l => l.boxId).filter(Boolean)))];
+    const srsIds = [...new Set(all.flatMap(x => (x.lines || []).map(l => l.srsId).filter(Boolean)))];
+    const pressBoxes = boxIds.length ? await db.collection("scnaBoxDB").find({ boxId: { $in: boxIds } }).toArray() : [];
+    const srsBoxes = srsIds.length ? await db.collection("srsBoxDB").find({ srsId: { $in: srsIds } }).toArray() : [];
+    const kensaRecords = await client.db("submittedDB").collection("kensaDB").find({ Kensa_Box_IDs: { $in: all.map(x => x.kensaId) } }).toArray();
+    res.json({ box, parents, pressBoxes, srsBoxes, kensaRecords });
+  } catch (error) {
+    _kensaSend(res, error, "Reading Kensa box");
+  }
+});
+
+// GET /api/kensa-inputs/:id - what the Kensa tablet scans: a DCP box (...-B###) or an SRS label (...-S###) with its remaining pieces.
+app.get("/api/kensa-inputs/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim().toUpperCase();
+    const kind = _kensaIdKind(id);
+    if (kind === "kensa") return res.status(400).json({ error: "A Kensa label cannot be used as an input", kind: "kensa", id });
+    if (!kind) return res.status(404).json({ error: "Unknown ID format (expected ...-B### or ...-S###)", id });
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const doc = await db.collection(_kensaCol(kind)).findOne({ [_kensaField(kind)]: id });
+    if (!doc) return res.status(404).json({ error: kind === "srs" ? "SRS box not found" : "Box not found", kind, id });
+    const usable = _kensaUsable(kind, doc);
+    const base = _kensaBase(doc);
+    const consumed = _kensaTaken(kind, doc);
+    let lotNumbers = [];
+    if (kind === "dcp") {
+      lotNumbers = (doc.lots || []).map(x => String((x && x.lotNumber) || "").trim()).filter(Boolean);
+    } else {
+      (doc.lines || []).forEach(l => {
+        const ls = Array.isArray(l.lotNumbers) ? l.lotNumbers : (l.lotNumber ? [l.lotNumber] : []);
+        ls.forEach(x => { x = String(x || "").trim(); if (x) lotNumbers.push(x); });
+      });
+      if (!lotNumbers.length) {   // lines that came from DCP boxes: take the box lots
+        const ids = (doc.lines || []).map(l => l.boxId).filter(Boolean);
+        if (ids.length) {
+          const boxes = await db.collection("scnaBoxDB").find({ boxId: { $in: ids } }).toArray();
+          boxes.forEach(x => (x.lots || []).forEach(l => { const v = String((l && l.lotNumber) || "").trim(); if (v) lotNumbers.push(v); }));
+        }
+      }
+    }
+    lotNumbers = [...new Set(lotNumbers)];
+    // lots with how many pieces each contributed (null = not known): shown on the Kensa tablet's info sidebar
+    const lotMap = new Map();
+    const addLot = (lot, pcs) => {
+      lot = String(lot || "").trim(); if (!lot) return;
+      const n = Number(pcs);
+      const cur = lotMap.get(lot);
+      if (Number.isFinite(n) && n >= 0 && pcs !== null && pcs !== undefined && pcs !== "") lotMap.set(lot, (cur || 0) + n);
+      else if (cur === undefined) lotMap.set(lot, null);
+    };
+    if (kind === "dcp") {
+      (doc.lots || []).forEach(x => addLot(x && x.lotNumber, x && x.pieces));
+    } else {
+      (doc.lines || []).forEach(l => {
+        const ls = (Array.isArray(l.lotNumbers) ? l.lotNumbers : (l.lotNumber ? String(l.lotNumber).split(",") : [])).map(x => String(x || "").trim()).filter(Boolean);
+        if (ls.length === 1) addLot(ls[0], l.good);
+        else ls.forEach(x => addLot(x, null));
+      });
+    }
+    lotNumbers.forEach(x => addLot(x, null));
+    const lots = [...lotMap.entries()].map(([lotNumber, pieces]) => ({ lotNumber, pieces }));
+    res.json({
+      kind, id, 品番: doc.品番 || "", 背番号: doc.背番号 || "", lotNumbers, lots,
+      status: kind === "srs" ? doc.status : (doc.status || "complete"), usable,
+      base, consumed, remaining: usable ? Math.max(0, base - consumed) : 0
+    });
+  } catch (error) {
+    _kensaSend(res, error, "Reading Kensa input");
+  }
+});
+
+// GET /api/scna-trace?code=<any QR text or ID> - which processes are already done for a box, whatever QR is scanned:
+// a press box (...-B###), an SRS label (...-S###), a Kensa label (...-K###) or a legacy "品番,収容数,lot" QR (matched by lot).
+// Printing does not matter: a label counts once its ID is registered (also when it was registered without printing).
+app.get("/api/scna-trace", async (req, res) => {
+  try {
+    const code = String(req.query.code || "").trim();
+    if (!code) return res.status(400).json({ error: "code is required" });
+    const parts = code.split(/[,\s]+/).map(p => p.trim()).filter(Boolean);
+    let id = "", kind = null;
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const k = _kensaIdKind(parts[i]);
+      if (k) { id = parts[i].toUpperCase(); kind = k; parts.splice(i, 1); break; }
+    }
+    const lot = !id && parts.length >= 3 ? parts.slice(2).join("") : "";
+    if (!id && !lot) return res.status(404).json({ error: "Unknown QR format" });
+
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const live = { $in: ["complete", "draft", "superseded"] };
+    const pressIds = new Set(), srsIds = new Set(), kensaIds = new Set();
+    let hinban = parts[0] || "";
+
+    if (kind === "dcp") pressIds.add(id);
+    else if (kind === "srs") srsIds.add(id);
+    else if (kind === "kensa") kensaIds.add(id);
+    else {
+      const lotQ = { $or: [{ "lines.lotNumbers": lot }, { "lines.lotNumber": lot }], status: live };
+      (await db.collection("scnaBoxDB").find({ "lots.lotNumber": lot }).project({ boxId: 1 }).limit(200).toArray()).forEach(x => pressIds.add(x.boxId));
+      (await db.collection("srsBoxDB").find(lotQ).project({ srsId: 1 }).limit(200).toArray()).forEach(x => srsIds.add(x.srsId));
+      (await db.collection("kensaBoxDB").find(lotQ).project({ kensaId: 1 }).limit(200).toArray()).forEach(x => kensaIds.add(x.kensaId));
+    }
+
+    // walk the chain in both directions: kensa -> srs/press (lines), srs -> press (lines), press -> srs -> kensa (consumers)
+    for (let round = 0; round < 3; round++) {
+      if (kensaIds.size) {
+        for (const d of await db.collection("kensaBoxDB").find({ kensaId: { $in: [...kensaIds] } }).toArray()) {
+          hinban = hinban || d.品番 || "";
+          (d.lines || []).forEach(l => { if (l.srsId) srsIds.add(l.srsId); if (l.boxId) pressIds.add(l.boxId); });
+        }
+      }
+      if (srsIds.size) {
+        for (const d of await db.collection("srsBoxDB").find({ srsId: { $in: [...srsIds] } }).toArray()) {
+          hinban = hinban || d.品番 || "";
+          (d.lines || []).forEach(l => { if (l.boxId) pressIds.add(l.boxId); });
+        }
+        (await db.collection("kensaBoxDB").find({ "lines.srsId": { $in: [...srsIds] }, status: live }).project({ kensaId: 1 }).toArray()).forEach(x => kensaIds.add(x.kensaId));
+      }
+      if (pressIds.size) {
+        (await db.collection("srsBoxDB").find({ "lines.boxId": { $in: [...pressIds] }, status: live }).project({ srsId: 1 }).toArray()).forEach(x => srsIds.add(x.srsId));
+        (await db.collection("kensaBoxDB").find({ "lines.boxId": { $in: [...pressIds] }, status: live }).project({ kensaId: 1 }).toArray()).forEach(x => kensaIds.add(x.kensaId));
+      }
+    }
+
+    // a voided label does not count; a draft is "started" (partial), only complete/superseded-by-complete is done
+    const srsDocs = srsIds.size ? await db.collection("srsBoxDB").find({ srsId: { $in: [...srsIds] } }).project({ srsId: 1, status: 1 }).toArray() : [];
+    const kensaDocs = kensaIds.size ? await db.collection("kensaBoxDB").find({ kensaId: { $in: [...kensaIds] } }).project({ kensaId: 1, status: 1 }).toArray() : [];
+    const summarize = (docs, field) => {
+      const ok = docs.filter(d => d.status && d.status !== "voided");
+      return {
+        done: ok.some(d => d.status === "complete" || d.status === "superseded"),
+        started: ok.length > 0,
+        ids: ok.map(d => d[field])
+      };
+    };
+    res.json({
+      code, kind: kind || "legacy", id, lot, 品番: hinban,
+      processes: {
+        press: { done: pressIds.size > 0, started: pressIds.size > 0, ids: [...pressIds] },
+        srs: summarize(srsDocs, "srsId"),
+        kensa: summarize(kensaDocs, "kensaId")
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error tracing SCNA code:", error);
+    res.status(500).json({ error: "Trace failed", details: error.message });
+  }
+});
+
+// GET /api/scna-info?code=<any QR text or ID> - everything known about a box and every process it went through, for
+// infoScanner.html: masterDB, then Cutting (press boxes + the press submissions), SRS (SRS labels + SRS records), Kensa (Kensa
+// labels + kensaDB records). Same chain walk as /api/scna-trace, but it returns the documents themselves.
+app.get("/api/scna-info", async (req, res) => {
+  try {
+    const code = String(req.query.code || "").trim();
+    if (!code) return res.status(400).json({ error: "code is required" });
+    const parts = code.split(/[,\s]+/).map(p => p.trim()).filter(Boolean);
+    let id = "", kind = null;
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const k = _kensaIdKind(parts[i]);
+      if (k) { id = parts[i].toUpperCase(); kind = k; parts.splice(i, 1); break; }
+    }
+    const lot = !id && parts.length >= 3 ? parts.slice(2).join("") : "";
+    if (!id && !lot) return res.status(404).json({ error: "Unknown QR format (expected a box / SRS / Kensa ID or a 品番,収容数,lot QR)" });
+
+    await client.connect();
+    const db = client.db(DB_NAME), sub = client.db("submittedDB");
+    const live = { $in: ["complete", "draft", "superseded"] };
+    const pressIds = new Set(), srsIds = new Set(), kensaIds = new Set();
+    let hinban = parts[0] || "", sebanggo = "";
+
+    if (kind === "dcp") pressIds.add(id);
+    else if (kind === "srs") srsIds.add(id);
+    else if (kind === "kensa") kensaIds.add(id);
+    else {
+      const lotQ = { $or: [{ "lines.lotNumbers": lot }, { "lines.lotNumber": lot }], status: live };
+      (await db.collection("scnaBoxDB").find({ "lots.lotNumber": lot }).project({ boxId: 1 }).limit(200).toArray()).forEach(x => pressIds.add(x.boxId));
+      (await db.collection("srsBoxDB").find(lotQ).project({ srsId: 1 }).limit(200).toArray()).forEach(x => srsIds.add(x.srsId));
+      (await db.collection("kensaBoxDB").find(lotQ).project({ kensaId: 1 }).limit(200).toArray()).forEach(x => kensaIds.add(x.kensaId));
+    }
+    for (let round = 0; round < 3; round++) {
+      if (kensaIds.size) {
+        for (const d of await db.collection("kensaBoxDB").find({ kensaId: { $in: [...kensaIds] } }).toArray()) {
+          hinban = hinban || d.品番 || ""; sebanggo = sebanggo || d.背番号 || "";
+          (d.lines || []).forEach(l => { if (l.srsId) srsIds.add(l.srsId); if (l.boxId) pressIds.add(l.boxId); });
+        }
+      }
+      if (srsIds.size) {
+        for (const d of await db.collection("srsBoxDB").find({ srsId: { $in: [...srsIds] } }).toArray()) {
+          hinban = hinban || d.品番 || ""; sebanggo = sebanggo || d.背番号 || "";
+          (d.lines || []).forEach(l => { if (l.boxId) pressIds.add(l.boxId); });
+        }
+        (await db.collection("kensaBoxDB").find({ "lines.srsId": { $in: [...srsIds] }, status: live }).project({ kensaId: 1 }).toArray()).forEach(x => kensaIds.add(x.kensaId));
+      }
+      if (pressIds.size) {
+        (await db.collection("srsBoxDB").find({ "lines.boxId": { $in: [...pressIds] }, status: live }).project({ srsId: 1 }).toArray()).forEach(x => srsIds.add(x.srsId));
+        (await db.collection("kensaBoxDB").find({ "lines.boxId": { $in: [...pressIds] }, status: live }).project({ kensaId: 1 }).toArray()).forEach(x => kensaIds.add(x.kensaId));
+      }
+    }
+
+    const pressIdList = [...pressIds], srsIdList = [...srsIds], kensaIdList = [...kensaIds];
+    const pressBoxes = pressIdList.length ? await db.collection("scnaBoxDB").find({ boxId: { $in: pressIdList } }).sort({ boxId: 1 }).toArray() : [];
+    const srsBoxes = srsIdList.length ? await db.collection("srsBoxDB").find({ srsId: { $in: srsIdList } }).sort({ srsId: 1 }).toArray() : [];
+    const kensaBoxes = kensaIdList.length ? await db.collection("kensaBoxDB").find({ kensaId: { $in: kensaIdList } }).sort({ kensaId: 1 }).toArray() : [];
+    pressBoxes.concat(srsBoxes, kensaBoxes).forEach(d => { hinban = hinban || d.品番 || ""; sebanggo = sebanggo || d.背番号 || ""; });
+
+    const pressRecords = pressIdList.length ? await sub.collection("pressDB").find({ Box_IDs: { $in: pressIdList } }).sort({ createdAt: 1 }).toArray() : [];
+    const srsRecords = srsIdList.length ? await sub.collection("SRSDB").find({ Srs_Box_IDs: { $in: srsIdList } }).sort({ createdAt: 1 }).toArray() : [];
+    const kensaRecords = (kensaIdList.length || pressIdList.length || srsIdList.length)
+      ? await sub.collection("kensaDB").find({ $or: [{ Kensa_Box_IDs: { $in: kensaIdList } }, { Box_IDs: { $in: pressIdList.concat(srsIdList) } }] }).sort({ createdAt: 1 }).toArray() : [];
+
+    let masterDB = null;
+    const mq = sebanggo ? { 工場: "SCNA", 背番号: sebanggo } : (hinban ? { 工場: "SCNA", 品番: hinban } : null);
+    if (mq) masterDB = await client.db("Sasaki_Coating_MasterDB").collection("masterDB").findOne(mq);
+
+    res.json({
+      code, kind: kind || "legacy", id, lot, 品番: hinban, 背番号: sebanggo || (masterDB && masterDB.背番号) || "",
+      masterDB,
+      processes: [
+        { key: "cutting", title: "Cutting", boxes: pressBoxes, records: pressRecords },
+        { key: "srs", title: "SRS", boxes: srsBoxes, records: srsRecords },
+        { key: "kensa", title: "Kensa", boxes: kensaBoxes, records: kensaRecords }
+      ]
+    });
+  } catch (error) {
+    console.error("❌ Error reading SCNA info:", error);
+    res.status(500).json({ error: "Info failed", details: error.message });
+  }
+});
+
+// POST /api/kensa-boxes/:kensaId/void - reset after printing (leader approved on the tablet). Gives the pieces back; a draft that
+// this box replaced becomes an open draft again. A box already linked to a kensaDB record cannot be voided.
+app.post("/api/kensa-boxes/:kensaId/void", async (req, res) => {
+  try {
+    const leader = (req.body && req.body.leader) || {};
+    const leaderUser = String(leader.username || "").trim();
+    if (!leaderUser) throw new _KensaError(400, "leader.username is required");
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const col = db.collection("kensaBoxDB");
+    const kensaId = String(req.params.kensaId || "").trim().toUpperCase();
+    const box = await col.findOne({ kensaId });
+    if (!box) throw new _KensaError(404, "Kensa box not found");
+    if (box.kensaRecordId) throw new _KensaError(409, "This Kensa box is already part of a submitted kensa record");
+    if (box.status !== "complete" && box.status !== "draft") throw new _KensaError(409, `Kensa box is ${box.status}`);
+    const r = await col.updateOne({ kensaId, status: box.status, kensaRecordId: null }, { $set: {
+      status: "voided",
+      void: { at: new Date().toISOString(), reason: String((req.body && req.body.reason) || "reset"), previousStatus: box.status, leader: { username: leaderUser, name: String(leader.name || "") } }
+    } });
+    if (r.modifiedCount !== 1) throw new _KensaError(409, "Kensa box changed, try again");
+    for (const cname of ["scnaBoxDB", "srsBoxDB"]) {
+      await db.collection(cname).updateMany(
+        { "kensaConsumed.kensaId": kensaId },
+        { $set: { "kensaConsumed.$[e].void": true } },
+        { arrayFilters: [{ "e.kensaId": kensaId }] }
+      );
+    }
+    await db.collection("scnaBoxDB").updateMany(
+      { "srsConsumed.kensaId": kensaId },
+      { $set: { "srsConsumed.$[e].void": true } },
+      { arrayFilters: [{ "e.kensaId": kensaId }] }
+    );
+    if (box.parentKensaId) await _kensaReopenParent(col, box.parentKensaId, kensaId);
+    res.json({ ok: true, kensaId, status: "voided" });
+  } catch (error) {
+    _kensaSend(res, error, "Voiding Kensa box");
+  }
+});
+
+let _kensaDbIndexReady = false;
+async function _ensureKensaDbIndex(kensaDB) {
+  if (_kensaDbIndexReady) return;
+  await kensaDB.createIndex({ Submit_UID: 1 }, { unique: true, partialFilterExpression: { Submit_UID: { $type: "string" } } });
+  await kensaDB.createIndex({ Kensa_Box_IDs: 1 });
+  await kensaDB.createIndex({ Box_IDs: 1 });
+  _kensaDbIndexReady = true;
+}
+
+// POST /submitToKensaDBInteractive - the inspection record (legacy kensaDB fields + Kensa/box links). Photos use the same payload as the
+// DCP interactive submit: images:[{ base64, label:'初物チェック'|'終物チェック', sebanggo, date, worker, factory, machine }].
+app.post("/submitToKensaDBInteractive", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db("submittedDB");
+    const kensaDB = database.collection("kensaDB");
+    const formData = req.body || {};
+    try { await _ensureKensaDbIndex(kensaDB); } catch (e) { console.error("kensaDB indexes failed:", e.message); }
+
+    const submitUid = String(formData.Submit_UID || "").trim();
+    if (submitUid) {
+      const done = await kensaDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+      if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+    }
+
+    const requiredFields = ["品番", "背番号", "Total", "工場", "Worker_Name", "Process_Quantity", "Remaining_Quantity",
+      "Date", "Time_start", "Time_end", "設備", "Counters", "Total_NG", "製造ロット", "Cycle_Time"];
+    const missing = requiredFields.filter(f => formData[f] === undefined || formData[f] === null);
+    if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(", ")}` });
+
+    const cleanIds = (v) => Array.isArray(v) ? [...new Set(v.map(x => String(x || "").trim().toUpperCase()).filter(Boolean))] : [];
+    const kensaIds = cleanIds(formData.Kensa_Box_IDs);
+    const boxIds = cleanIds(formData.Box_IDs);
+    formData.Kensa_Box_IDs = kensaIds;
+    formData.Box_IDs = boxIds;
+
+    const boxDb = client.db(DB_NAME);
+    if (kensaIds.length) {   // labels printed in this session: valid, still open, not linked to another record
+      const labels = await boxDb.collection("kensaBoxDB").find({ kensaId: { $in: kensaIds } }).toArray();
+      const byId = new Map(labels.map(x => [x.kensaId, x]));
+      const bad = kensaIds.filter(id => {
+        const x = byId.get(id);
+        return !x || (x.status !== "complete" && x.status !== "draft") || x.kensaRecordId;
+      });
+      if (bad.length) {
+        return res.status(409).json({
+          error: `Kensa label cannot be submitted: ${bad.map(id => `${id} (${byId.get(id) ? (byId.get(id).kensaRecordId ? "already submitted" : byId.get(id).status) : "not found"})`).join(", ")}`,
+          kensaIds: bad
+        });
+      }
+    }
+
+    // photos: 初物 is required, 終物 is optional
+    const images = (Array.isArray(formData.images) ? formData.images : []).concat(Array.isArray(formData.photos) ? formData.photos : []);
+    delete formData.images;
+    delete formData.photos;
+    if (!images.some(i => i && i.label === "初物チェック" && i.base64)) {
+      return res.status(400).json({ error: "初物チェック (first-piece) photo is required" });
+    }
+    const labelToField = { "初物チェック": "初物チェック画像", "終物チェック": "終物チェック画像" };
+    const safe = (v) => String(v === undefined || v === null || v === "" ? "x" : v).replace(/[\\/]+/g, "_");
+    const bucket = admin.storage().bucket();
+    for (const img of images) {
+      if (!img || !img.base64 || !labelToField[img.label]) continue;
+      try {
+        const buffer = Buffer.from(img.base64, "base64");
+        const factory = safe(img.factory || formData.工場);
+        const fileName = `${safe(img.sebanggo || formData.背番号)}_${safe(img.date || formData.Date)}_${safe(img.worker || formData.Worker_Name)}_${factory}_${safe(img.machine || formData.設備)}_${img.label}.jpg`;
+        const file = bucket.file(`CycleCheck/${factory}/${fileName}`);
+        const downloadToken = "masterDBToken69";
+        await uploadToFirebaseWithRetry(file, buffer, {
+          metadata: { contentType: "image/jpeg", metadata: { firebaseStorageDownloadTokens: downloadToken } }
+        });
+        formData[labelToField[img.label]] = `https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`;
+      } catch (uploadError) {
+        console.error(`❌ Kensa interactive: photo upload failed (${img.label}):`, uploadError.message);
+      }
+    }
+    if (!formData["初物チェック画像"]) {
+      return res.status(502).json({ error: "初物チェック photo upload failed, please retry" });
+    }
+
+    // optional defect photos taken during the inspection (max 25): a failed one is logged and skipped, it never blocks the submit
+    const defectUrls = [];
+    const defectImgs = images.filter(i => i && i.label === "不良画像" && i.base64).slice(0, 25);
+    for (let di = 0; di < defectImgs.length; di++) {
+      const img = defectImgs[di];
+      try {
+        const buffer = Buffer.from(img.base64, "base64");
+        const factory = safe(img.factory || formData.工場);
+        const fileName = `${safe(img.sebanggo || formData.背番号)}_${safe(img.date || formData.Date)}_${safe(img.worker || formData.Worker_Name)}_${factory}_${safe(img.machine || formData.設備)}_不良画像_${di + 1}_${safe(img.id || Date.now())}.jpg`;
+        const file = bucket.file(`CycleCheck/${factory}/${fileName}`);
+        const downloadToken = "masterDBToken69";
+        await uploadToFirebaseWithRetry(file, buffer, {
+          metadata: { contentType: "image/jpeg", metadata: { firebaseStorageDownloadTokens: downloadToken } }
+        });
+        defectUrls.push(`https://firebasestorage.googleapis.com/v0/b/${file.bucket.name}/o/${encodeURIComponent(file.name)}?alt=media&token=${downloadToken}`);
+      } catch (uploadError) {
+        console.error(`❌ Kensa interactive: defect photo ${di + 1} upload failed:`, uploadError.message);
+      }
+    }
+    formData.defectImages = defectUrls;                 // array of Firebase Storage links, in the order taken
+    formData.defectImagesCount = defectUrls.length;
+
+    formData.createdAt = new Date().toISOString();
+    let result;
+    try {
+      result = await kensaDB.insertOne(formData);
+    } catch (e) {
+      if (e && e.code === 11000 && submitUid) {   // the same submit arrived twice at once
+        const done = await kensaDB.findOne({ Submit_UID: submitUid }, { projection: { _id: 1 } });
+        if (done) return res.status(200).json({ message: "Already saved", insertedId: done._id, existing: true });
+      }
+      throw e;
+    }
+    _invalidateFinancialsCache("kensaDB insert");
+    _invalidateFactoryOverviewCache("kensaDB insert");
+
+    // The record is saved; what follows is bookkeeping, so a failure is logged and not returned as a submit error.
+    if (kensaIds.length) {
+      try {
+        await boxDb.collection("kensaBoxDB").updateMany(
+          { kensaId: { $in: kensaIds } },
+          { $set: { kensaRecordId: result.insertedId, submittedAt: formData.createdAt } }
+        );
+      } catch (e) { console.error("Kensa label link failed (kensaDB record saved):", e.message); }
+    }
+    // NG found after the last print: those pieces are gone from the input too
+    const lateNg = Array.isArray(formData.Kensa_Unlabelled_NG) ? formData.Kensa_Unlabelled_NG : [];
+    for (const x of lateNg) {
+      const id = String((x && (x.boxId || x.srsId || x.id)) || "").trim().toUpperCase();
+      const ng = Number(x && x.ngTotal) || 0;
+      const kind = _kensaIdKind(id);
+      if (!id || ng <= 0 || (kind !== "dcp" && kind !== "srs")) continue;
+      try {
+        const push = { kensaConsumed: { kensaId: null, recordId: result.insertedId, good: 0, ng, pieces: ng, at: formData.createdAt } };
+        if (kind === "dcp") push.srsConsumed = { srsId: null, kensaId: null, viaKensa: true, recordId: result.insertedId, good: 0, ng, pieces: ng, at: formData.createdAt };
+        await boxDb.collection(_kensaCol(kind)).updateOne({ [_kensaField(kind)]: id }, { $push: push });
+      } catch (e) { console.error(`Kensa late NG for ${id} failed:`, e.message); }
+    }
+    // Write the result back onto each input so a box lookup shows who inspected it, where and when.
+    if (boxIds.length) {
+      const run = {
+        kensaRecordId: result.insertedId, kensaIds,
+        machine: formData.設備 || "", workers: formData.Worker_Name || "",
+        date: formData.Date || "", timeStart: formData.Time_start || "", timeEnd: formData.Time_end || "",
+        submittedAt: formData.createdAt
+      };
+      for (const kind of ["dcp", "srs"]) {
+        const ids = boxIds.filter(id => _kensaIdKind(id) === kind);
+        if (!ids.length) continue;
+        try {
+          await boxDb.collection(_kensaCol(kind)).updateMany(
+            { [_kensaField(kind)]: { $in: ids } },
+            { $set: { kensa: run }, $push: { kensaRuns: run } }
+          );
+        } catch (e) { console.error("Kensa box write-back failed (kensaDB record saved):", e.message); }
+      }
+    }
+
+    res.status(201).json({ message: "Data and images successfully saved to kensaDB", insertedId: result.insertedId });
+  } catch (error) {
+    console.error("Error saving data to kensaDB (interactive):", error);
+    res.status(500).json({ error: "Error saving data to kensaDB" });
+  }
+});
+// ==== KENSA BOXES END ====================================================
+
+
+app.get("/api/scna-label-layouts", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const process = req.query.process ? _requestedProcess(req.query.process) : null;
+    if (req.query.process && !process) return res.status(400).json({ error: "unknown process" });
+    const list = await database.collection("labelLayouts")
+      .find(process ? { processes: process } : {}).sort({ name: 1 }).toArray();
+    res.json(list);
+  } catch (error) {
+    console.error("❌ Error listing label layouts:", error);
+    res.status(500).json({ error: "Failed to list label layouts", details: error.message });
+  }
+});
+
+app.post("/api/scna-label-layouts", async (req, res) => {
+  try {
+    const { name, customers, isDefault, layout, username } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: "name is required" });
+    const processes = _cleanProcesses(req.body?.processes);
+    if (!processes.length) return res.status(400).json({ error: "at least one process is required" });
+    const err = _validateLabelLayout(layout);
+    if (err) return res.status(400).json({ error: err });
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const col = database.collection("labelLayouts");
+    const trimmed = String(name).trim();
+    if (await col.findOne({ name: trimmed, processes: { $in: processes } })) {
+      return res.status(409).json({ error: `A layout named "${trimmed}" already exists in this process` });
+    }
+    const layoutId = `lbl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const cleanCustomers = _cleanCustomers(customers);
+    const now = new Date().toISOString();
+    await _applyLabelLayoutExclusivity(col, layoutId, cleanCustomers, !!isDefault, processes);
+    await col.insertOne({
+      layoutId, name: trimmed, processes, customers: cleanCustomers, isDefault: !!isDefault, layout, layoutHash: _layoutHash(layout),
+      createdBy: username || null, createdAt: now, updatedAt: now,
+    });
+    res.json({ success: true, layoutId });
+  } catch (error) {
+    console.error("❌ Error creating label layout:", error);
+    res.status(500).json({ error: "Failed to create label layout", details: error.message });
+  }
+});
+
+app.put("/api/scna-label-layouts/:layoutId", async (req, res) => {
+  try {
+    const { name, customers, isDefault, layout, username } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: "name is required" });
+    const err = _validateLabelLayout(layout);
+    if (err) return res.status(400).json({ error: err });
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const col = database.collection("labelLayouts");
+    const layoutId = req.params.layoutId;
+    const trimmed = String(name).trim();
+    const existing = await col.findOne({ layoutId });
+    if (!existing) return res.status(404).json({ error: "Layout not found" });
+    // processes is optional on save; omitted keeps what the layout has.
+    const processes = Array.isArray(req.body?.processes) ? _cleanProcesses(req.body.processes) : (existing.processes || ["press"]);
+    if (!processes.length) return res.status(400).json({ error: "at least one process is required" });
+    if (await col.findOne({ name: trimmed, layoutId: { $ne: layoutId }, processes: { $in: processes } })) {
+      return res.status(409).json({ error: `A layout named "${trimmed}" already exists in this process` });
+    }
+    // Items are bound via masterDB.labelLayoutId now; `customers` is only touched when a caller still sends it,
+    // so saving a layout never wipes customer bindings that have not been migrated yet.
+    const cleanCustomers = _cleanCustomers(customers);
+    await _applyLabelLayoutExclusivity(col, layoutId, cleanCustomers, !!isDefault, processes);
+    // A process taken off the layout also drops its item bindings, so the tablet never offers a layout the
+    // process no longer lists.
+    const removedProcesses = (existing.processes || ["press"]).filter(p => !processes.includes(p));
+    for (const p of removedProcesses) {
+      await database.collection("masterDB").updateMany(
+        { 工場: "SCNA", [`labelLayoutByProcess.${p}`]: layoutId },
+        { $pull: { [`labelLayoutByProcess.${p}`]: layoutId } }
+      );
+    }
+    const $set = {
+      name: trimmed, processes, isDefault: !!isDefault, layout, layoutHash: _layoutHash(layout),
+      updatedBy: username || null, updatedAt: new Date().toISOString(),
+    };
+    if (Array.isArray(customers)) $set.customers = cleanCustomers;
+    await col.updateOne({ layoutId }, { $set });
+    res.json({ success: true, layoutId });
+  } catch (error) {
+    console.error("❌ Error updating label layout:", error);
+    res.status(500).json({ error: "Failed to update label layout", details: error.message });
+  }
+});
+
+// Preview image rendered by the admin page when a layout is saved (kept in Firebase Storage so the explorer
+// never has to draw every layout on the fly).
+app.put("/api/scna-label-layouts/:layoutId/thumbnail", async (req, res) => {
+  try {
+    const imageBase64 = String(req.body?.imageBase64 || "");
+    const m = /^data:image\/png;base64,(.+)$/.exec(imageBase64);
+    if (!m) return res.status(400).json({ error: "imageBase64 must be a PNG data URL" });
+    const buffer = Buffer.from(m[1], "base64");
+    if (!buffer.length || buffer.length > 4 * 1024 * 1024) return res.status(400).json({ error: "thumbnail is empty or too large (max 4MB)" });
+
+    await client.connect();
+    const col = client.db(DB_NAME).collection("labelLayouts");
+    const layoutId = req.params.layoutId;
+    const doc = await col.findOne({ layoutId });
+    if (!doc) return res.status(404).json({ error: "Layout not found" });
+    const hash = doc.layoutHash || _layoutHash(doc.layout);
+
+    const file = admin.storage().bucket().file(`labelLayoutThumbnails/${layoutId}.png`);
+    await file.save(buffer, {
+      metadata: { contentType: "image/png", cacheControl: "public, max-age=31536000", metadata: { firebaseStorageDownloadTokens: "labelLayoutThumbToken" } },
+      public: true,
+    });
+    const thumbnailUrl = `https://storage.googleapis.com/${file.bucket.name}/${encodeURIComponent(file.name)}?alt=media&token=labelLayoutThumbToken&v=${hash}`;
+    await col.updateOne({ layoutId }, { $set: { layoutHash: hash, thumbnailUrl, thumbnailHash: hash, thumbnailAt: new Date().toISOString() } });
+    res.json({ success: true, thumbnailUrl });
+  } catch (error) {
+    console.error("❌ Error saving label layout thumbnail:", error);
+    res.status(500).json({ error: "Failed to save thumbnail", details: error.message });
+  }
+});
+
+// Copy a layout into other processes as an independent layout (own layoutId, own drawing). Body:
+// { processes: [...], name?, copyBindings?, fromProcess?, username }. With copyBindings the items bound to the
+// source in fromProcess (default: the source's first process) are bound to the copy in every target process.
+app.post("/api/scna-label-layouts/:layoutId/duplicate", async (req, res) => {
+  try {
+    const processes = _cleanProcesses(req.body?.processes);
+    if (!processes.length) return res.status(400).json({ error: "at least one target process is required" });
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const col = database.collection("labelLayouts");
+    const src = await col.findOne({ layoutId: req.params.layoutId });
+    if (!src) return res.status(404).json({ error: "Layout not found" });
+
+    let name = String(req.body?.name || "").trim() || `${src.name} (${processes.join(", ")})`;
+    const base = name;
+    for (let n = 2; await col.findOne({ name, processes: { $in: processes } }); n++) name = `${base} ${n}`;
+
+    const layoutId = `lbl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const now = new Date().toISOString();
+    await col.insertOne({
+      layoutId, name, processes, customers: [], isDefault: false, layout: src.layout, layoutHash: _layoutHash(src.layout),
+      copiedFrom: src.layoutId, createdBy: req.body?.username || null, createdAt: now, updatedAt: now,
+    });
+
+    let bound = 0;
+    if (req.body?.copyBindings) {
+      const fromProcess = _requestedProcess(req.body?.fromProcess || (src.processes || ["press"])[0]);
+      if (fromProcess) {
+        const itemsCol = database.collection("masterDB");
+        const filter = { 工場: "SCNA", [`labelLayoutByProcess.${fromProcess}`]: src.layoutId };
+        const $addToSet = Object.fromEntries(processes.map(p => [`labelLayoutByProcess.${p}`, layoutId]));
+        bound = (await itemsCol.updateMany(filter, { $addToSet })).modifiedCount;
+      }
+    }
+    res.json({ success: true, layoutId, name, bound });
+  } catch (error) {
+    console.error("❌ Error duplicating label layout:", error);
+    res.status(500).json({ error: "Failed to duplicate label layout", details: error.message });
+  }
+});
+
+app.delete("/api/scna-label-layouts/:layoutId", async (req, res) => {
+  try {
+    await client.connect();
+    const result = await client.db(DB_NAME).collection("labelLayouts")
+      .deleteOne({ layoutId: req.params.layoutId });
+    if (!result.deletedCount) return res.status(404).json({ error: "Layout not found" });
+    admin.storage().bucket().file(`labelLayoutThumbnails/${req.params.layoutId}.png`).delete().catch(() => {});
+    await _ensureLabelProcesses(client.db(DB_NAME));
+    for (const p of SCNA_LABEL_PROCESSES) {
+      await client.db(DB_NAME).collection("masterDB").updateMany(
+        { 工場: "SCNA", [`labelLayoutByProcess.${p}`]: req.params.layoutId },
+        { $pull: { [`labelLayoutByProcess.${p}`]: req.params.layoutId } }
+      );
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete label layout", details: error.message });
+  }
+});
+
+
+// Item binding: masterDB.labelLayoutByProcess = { PSA: [ids], press: [ids], SRS: [ids], kensa: [ids] } (SCNA items
+// only). An item can have several layouts per process and the tablet operator picks one when printing. The old
+// labelLayoutIds / labelLayoutId fields are folded into `press` by _ensureLabelProcesses. The print server resolves,
+// in order: the layoutId the tablet asked for, the item's layouts for the process, the old customer rule, then the
+// process default layout.
+function _itemLayoutIds(item, process) {
+  const ids = item.labelLayoutByProcess && item.labelLayoutByProcess[process];
+  return Array.isArray(ids) ? ids.slice() : [];
+}
+
+// Lightweight list for the label explorer / assign modal, so paging and search work client-side.
+app.get("/api/scna-label-layouts/items", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const rows = await database.collection("masterDB").find(
+      { 工場: "SCNA" },
+      { projection: { _id: 0, 背番号: 1, 品番: 1, 品名: 1, "顧客/納入先": 1, labelLayoutByProcess: 1 } }
+    ).sort({ 背番号: 1 }).toArray();
+    res.json(rows.map(({ labelLayoutByProcess, ...rest }) => ({
+      ...rest,
+      layoutIdsByProcess: Object.fromEntries(SCNA_LABEL_PROCESSES.map(p => [p, _itemLayoutIds({ labelLayoutByProcess }, p)])),
+    })));
+  } catch (error) {
+    console.error("❌ Error listing label layout items:", error);
+    res.status(500).json({ error: "Failed to list items", details: error.message });
+  }
+});
+
+// Layouts the tablet can offer for one item. Same order the print server uses, so the list never disagrees
+// with what would print: assigned layouts, else the old customer rule, else the default layout.
+app.get("/api/scna-label-layouts/for-item", async (req, res) => {
+  try {
+    const sebanggo = String(req.query.sebanggo || "").trim();
+    if (!sebanggo) return res.status(400).json({ error: "sebanggo is required" });
+    const process = _requestedProcess(req.query.process);
+    if (!process) return res.status(400).json({ error: "unknown process" });
+    await client.connect();
+    const database = client.db(DB_NAME);
+    await _ensureLabelProcesses(database);
+    const item = await database.collection("masterDB").findOne({ 工場: "SCNA", 背番号: sebanggo });
+    if (!item) return res.status(404).json({ error: "Item not found" });
+    const layoutsCol = database.collection("labelLayouts");
+    const pick = (d) => ({ layoutId: d.layoutId, name: d.name });
+    const sortByName = (a, b) => String(a.name).localeCompare(String(b.name), "ja");
+
+    const ids = _itemLayoutIds(item, process);
+    if (ids.length) {
+      const docs = await layoutsCol.find({ layoutId: { $in: ids }, processes: process }).toArray();
+      if (docs.length) return res.json({ source: "assigned", layouts: docs.map(pick).sort(sortByName) });
+    }
+    const customer = String(item["顧客/納入先"] || "").trim();
+    if (customer) {
+      const docs = await layoutsCol.find({ customers: customer, processes: process }).toArray();
+      if (docs.length) return res.json({ source: "customer", layouts: docs.map(pick).sort(sortByName) });
+    }
+    const def = await layoutsCol.findOne({ isDefault: true, processes: process });
+    if (def) return res.json({ source: "default", layouts: [pick(def)] });
+    res.json({ source: "none", layouts: [] });
+  } catch (error) {
+    console.error("❌ Error resolving item label layouts:", error);
+    res.status(500).json({ error: "Failed to resolve layouts", details: error.message });
+  }
+});
+
+app.put("/api/scna-label-layouts/:layoutId/assign", async (req, res) => {
+  try {
+    const clean = (a) => (Array.isArray(a) ? [...new Set(a.map(v => String(v || "").trim()).filter(Boolean))] : []);
+    const add = clean(req.body?.add);
+    const remove = clean(req.body?.remove);
+    const process = _requestedProcess(req.body?.process);
+    if (!process) return res.status(400).json({ error: "unknown process" });
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const layoutId = req.params.layoutId;
+    await _ensureLabelProcesses(database);
+    const layoutDoc = await database.collection("labelLayouts").findOne({ layoutId });
+    if (!layoutDoc) return res.status(404).json({ error: "Layout not found" });
+    if (add.length && !(layoutDoc.processes || []).includes(process)) {
+      return res.status(400).json({ error: `This layout is not enabled for ${process}` });
+    }
+    const items = database.collection("masterDB");
+    const path = `labelLayoutByProcess.${process}`;
+    let assigned = 0, removed = 0;
+    if (add.length) {
+      const r = await items.updateMany({ 工場: "SCNA", 背番号: { $in: add } }, { $addToSet: { [path]: layoutId } });
+      assigned = r.modifiedCount;
+    }
+    if (remove.length) {
+      const r = await items.updateMany({ 工場: "SCNA", 背番号: { $in: remove } }, { $pull: { [path]: layoutId } });
+      removed = r.modifiedCount;
+    }
+    res.json({ success: true, assigned, removed });
+  } catch (error) {
+    console.error("❌ Error assigning label layout items:", error);
+    res.status(500).json({ error: "Failed to assign items", details: error.message });
+  }
+});
+
+// One-time migration of the old customer binding: items whose 顧客/納入先 is listed on a layout get that layout
+// added to labelLayoutIds (items that already have a layout are left alone). The customer list moves to
+// `legacyCustomers` as a record, so layouts no longer carry a live customer rule. { dryRun: true } only counts.
+app.post("/api/scna-label-layouts/migrate-customers", async (req, res) => {
+  try {
+    const dryRun = !!req.body?.dryRun;
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const layoutsCol = database.collection("labelLayouts");
+    const items = database.collection("masterDB");
+    await _ensureLabelProcesses(database);
+    const withCustomers = await layoutsCol.find({ "customers.0": { $exists: true } }).toArray();
+    const report = [];
+    for (const l of withCustomers) {
+      const filter = {
+        工場: "SCNA",
+        "顧客/納入先": { $in: l.customers },
+        $or: [{ "labelLayoutByProcess.press": { $exists: false } }, { "labelLayoutByProcess.press": { $size: 0 } }],
+      };
+      let matched;
+      if (dryRun) {
+        matched = await items.countDocuments(filter);
+      } else {
+        matched = (await items.updateMany(filter, { $addToSet: { "labelLayoutByProcess.press": l.layoutId } })).modifiedCount;
+        await layoutsCol.updateOne({ layoutId: l.layoutId }, {
+          $set: { legacyCustomers: l.customers, customers: [], migratedAt: new Date().toISOString() },
+        });
+      }
+      report.push({ layoutId: l.layoutId, name: l.name, customers: l.customers, items: matched });
+    }
+    res.json({ success: true, dryRun, layouts: report });
+  } catch (error) {
+    console.error("❌ Error migrating label layout customers:", error);
+    res.status(500).json({ error: "Failed to migrate customers", details: error.message });
+  }
+});
+
+// Field display names for the label designer. The script and layouts use the real masterDB
+// field names; this collection only holds the English/Japanese names the editor shows.
+//   labelFieldNames: { field, labelEn, labelJa, updatedAt }
+// GET returns every field found on SCNA masterDB items (so new columns appear automatically)
+// together with whatever names have been saved for them.
+app.get("/api/scna-label-fields", async (req, res) => {
+  try {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const factory = String(req.query.factory || "SCNA").trim() || "SCNA";
+    const rows = await database.collection("masterDB").aggregate([
+      { $match: { 工場: factory } },
+      { $project: { kv: { $objectToArray: "$$ROOT" } } },
+      { $unwind: "$kv" },
+      { $group: { _id: "$kv.k" } },
+    ]).toArray();
+    const fields = rows.map(r => r._id).filter(k => k !== "_id").sort();
+    const names = await database.collection("labelFieldNames").find({}).toArray();
+    res.json({ fields, names });
+  } catch (error) {
+    console.error("❌ Error listing label fields:", error);
+    res.status(500).json({ error: "Failed to list label fields", details: error.message });
+  }
+});
+
+app.put("/api/scna-label-fields", async (req, res) => {
+  try {
+    const { names, username } = req.body || {};
+    if (!Array.isArray(names) || names.length > 500) {
+      return res.status(400).json({ error: "names must be an array (max 500)" });
+    }
+    const now = new Date().toISOString();
+    const ops = [];
+    for (const n of names) {
+      const field = String(n?.field || "").trim();
+      if (!field || field === "_id") continue;
+      const labelEn = String(n?.labelEn || "").trim();
+      const labelJa = String(n?.labelJa || "").trim();
+      ops.push(labelEn || labelJa
+        ? { updateOne: { filter: { field }, update: { $set: { field, labelEn, labelJa, updatedAt: now, updatedBy: username || null } }, upsert: true } }
+        : { deleteOne: { filter: { field } } });
+    }
+    if (ops.length) {
+      await client.connect();
+      await client.db(DB_NAME).collection("labelFieldNames").bulkWrite(ops);
+    }
+    res.json({ success: true, saved: ops.length });
+  } catch (error) {
+    console.error("❌ Error saving label field names:", error);
+    res.status(500).json({ error: "Failed to save label field names", details: error.message });
+  }
+});
+
+// ==================== END SCNA LABEL LAYOUTS ====================
 
 // Get unique machine names for filter dropdown
 app.get('/api/scna/machines', async (req, res) => {
@@ -32206,7 +38658,13 @@ function normalizeCheckFormMachineName(value = '') {
 function checkFormMachineNamesMatch(left = '', right = '') {
   const normalizedLeft = normalizeCheckFormMachineName(left);
   const normalizedRight = normalizeCheckFormMachineName(right);
-  return Boolean(normalizedLeft) && Boolean(normalizedRight) && normalizedLeft === normalizedRight;
+  if (!normalizedLeft || !normalizedRight) return false;
+  if (normalizedLeft === normalizedRight) return true;
+
+  const leftTokens = normalizedLeft.split(',').map(m => m.trim()).filter(Boolean);
+  const rightTokens = normalizedRight.split(',').map(m => m.trim()).filter(Boolean);
+
+  return leftTokens.some(lt => rightTokens.includes(lt));
 }
 
 function sanitizeCheckFormFileSegment(value = '', fallback = 'item') {
@@ -32277,14 +38735,21 @@ function buildCheckFormFieldImageFolderKey(field = {}) {
 
 function sanitizeCheckFormField(field = {}) {
   const imageURL = normalizeCheckFormText(field.imageURL);
+  const type = normalizeCheckFormText(field.type).toLowerCase();
+  const labelFallback = type === 'name' ? '作業者名' : '項目';
+  const label = normalizeCheckFormText(field.label || field.label_ja || field.label_en) || labelFallback;
 
   return {
-    id: normalizeCheckFormText(field.id),
-    label: normalizeCheckFormText(field.label),
+    id: normalizeCheckFormText(field.id || field.fieldId),
+    label,
+    label_ja: normalizeCheckFormText(field.label_ja || field.label) || label,
+    label_en: normalizeCheckFormText(field.label_en || field.label) || (type === 'name' ? 'Worker Name' : label),
     description: normalizeCheckFormText(field.description),
+    description_ja: normalizeCheckFormText(field.description_ja || field.description),
+    description_en: normalizeCheckFormText(field.description_en || field.description),
     imageURL,
     imageFolderKey: buildCheckFormFieldImageFolderKey({ ...field, imageURL }),
-    type: normalizeCheckFormText(field.type).toLowerCase(),
+    type,
     required: !!field.required,
     locked: !!field.locked,
     photoRequired: !!field.photoRequired,
@@ -32292,14 +38757,15 @@ function sanitizeCheckFormField(field = {}) {
     min: normalizeCheckFormMaybeNumber(field.min),
     max: normalizeCheckFormMaybeNumber(field.max),
     unit: normalizeCheckFormText(field.unit),
+    timing: normalizeCheckFormText(field.timing || 'pre').toLowerCase() === 'post' ? 'post' : 'pre',
   };
 }
 
 function sanitizeCheckFormEquipment(equipment = {}) {
   return {
     _id: toCheckFormIdString(equipment._id),
-    name: normalizeCheckFormText(equipment.name),
-    工場: normalizeCheckFormText(equipment['工場']),
+    name: normalizeCheckFormText(equipment.name || equipment['設備名'] || equipment.equipmentName),
+    工場: normalizeCheckFormText(equipment['工場'] || equipment.factory),
     imageURL: normalizeCheckFormText(equipment.imageURL),
   };
 }
@@ -32313,9 +38779,14 @@ function sanitizeCheckFormTemplate(template = {}, equipmentMap = new Map()) {
   return {
     _id: toCheckFormIdString(template._id),
     name: normalizeCheckFormText(template.name),
+    name_ja: normalizeCheckFormText(template.name_ja || template.name),
+    name_en: normalizeCheckFormText(template.name_en || template.name),
     description: normalizeCheckFormText(template.description),
+    description_ja: normalizeCheckFormText(template.description_ja || template.description),
+    description_en: normalizeCheckFormText(template.description_en || template.description),
     工場: normalizeCheckFormText(template['工場']),
     schedule: normalizeCheckFormSchedule(template.schedule),
+    timing: normalizeCheckFormText(template.timing || 'pre').toLowerCase() === 'post' ? 'post' : 'pre',
     startDate: normalizeCheckFormText(template.startDate),
     status: normalizeCheckFormText(template.status || 'active'),
     equipmentIds,
@@ -32359,17 +38830,15 @@ function isCheckFormAnswered(fieldType = '', value = null) {
 }
 
 function doesCheckFormAnswerRequireTicket(field = {}, value = null) {
-  const fieldType = normalizeCheckFormText(field.type).toLowerCase();
-
-  if (fieldType === 'checkbox') {
-    return normalizeCheckFormText(value).toUpperCase() === 'NG';
+  const strVal = String(value || '').trim().toUpperCase();
+  if (strVal === 'NG') {
+    return true;
   }
 
-  if (fieldType === 'number' || fieldType === 'select') {
-    const numericValue = normalizeCheckFormMaybeNumber(value);
-    if (numericValue === null) return false;
-    if (field.min !== null && numericValue < field.min) return true;
-    if (field.max !== null && numericValue > field.max) return true;
+  const numericValue = normalizeCheckFormMaybeNumber(value);
+  if (numericValue !== null) {
+    if (field.min !== null && field.min !== undefined && numericValue < field.min) return true;
+    if (field.max !== null && field.max !== undefined && numericValue > field.max) return true;
   }
 
   return false;
@@ -32377,9 +38846,14 @@ function doesCheckFormAnswerRequireTicket(field = {}, value = null) {
 
 function buildCheckFormAnswerStatus(field = {}, value = null, ticketRequired = false) {
   const fieldType = normalizeCheckFormText(field.type).toLowerCase();
+  const valStr = normalizeCheckFormText(value).toUpperCase();
 
-  if (fieldType === 'checkbox') {
-    return normalizeCheckFormText(value).toUpperCase() === 'NG' ? 'ng' : 'ok';
+  if (valStr === 'NG') {
+    return 'ng';
+  }
+
+  if (fieldType === 'checkbox' || fieldType === 'toggle') {
+    return valStr === 'NG' ? 'ng' : 'ok';
   }
 
   if ((fieldType === 'number' || fieldType === 'select') && ticketRequired) {
@@ -32432,6 +38906,184 @@ app.get('/checkList2.html', (req, res) => {
 
 app.get('/checkList2.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'checkList2.js'));
+});
+
+function getScheduleHeaderInfo(schedule, templateName = '') {
+  const norm = String(schedule || '').toLowerCase();
+  const tNorm = String(templateName || '').toLowerCase();
+  if (norm.includes('daily') || norm.includes('日') || tNorm.includes('日')) {
+    return { en: ' - DAILY', ja: ' - 日次' };
+  }
+  if (norm.includes('weekly') || norm.includes('週') || tNorm.includes('週')) {
+    return { en: ' - WEEKLY', ja: ' - 週次' };
+  }
+  if (norm.includes('monthly') || norm.includes('月') || tNorm.includes('月')) {
+    return { en: ' - MONTHLY', ja: ' - 月次' };
+  }
+  return { en: '', ja: '' };
+}
+
+async function getBilingualText(text) {
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return { ja: '', en: '', combined: '' };
+  }
+  const cleanText = text.trim();
+  const lang = detectTextLang(cleanText);
+  const targetLang = lang === 'ja' ? 'en' : 'ja';
+  
+  let translatedText = cleanText;
+  try {
+    const db = client.db(DB_NAME);
+    const coll = db.collection('translationCacheDB');
+    const cached = await coll.findOne({ text: cleanText, targetLang });
+    if (cached && cached.translated) {
+      translatedText = cached.translated;
+    } else {
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanText)}&langpair=${lang}|${targetLang}`;
+      const apiRes = await fetch(url);
+      const data = await apiRes.json();
+      if (data?.responseData?.translatedText) {
+        translatedText = data.responseData.translatedText;
+      }
+      await coll.insertOne({ text: cleanText, targetLang, translated: translatedText, createdAt: new Date() }).catch(() => {});
+    }
+  } catch (err) {
+    console.error(`[getBilingualText] Error translating "${cleanText}":`, err.message);
+  }
+
+  let ja = lang === 'ja' ? cleanText : translatedText;
+  let en = lang === 'en' ? cleanText : translatedText;
+
+  if (!ja) ja = en;
+  if (!en) en = ja;
+
+  const combined = (ja && en && ja !== en) ? `${ja} / ${en}` : cleanText;
+  return { ja, en, combined };
+}
+
+app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
+  const { factory, machine, status, reason, userInput, expectedInput, isOptional, schedule, itemLabel, fieldLabel } = req.body || {};
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
+  
+  const now = new Date();
+  const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  const schedInfo = getScheduleHeaderInfo(schedule);
+  const titleHeader = isOptional
+    ? '📝 【OPTIONAL TICKET / 任意報告】'
+    : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
+  const statusLabel = isOptional ? 'OPTIONAL TICKET (任意報告)' : (status || 'NG');
+  const labelText = itemLabel || fieldLabel || '';
+  const bilingualReason = await getBilingualText(reason);
+
+  let messageBody = `${titleHeader}\n工場: ${factory}\n設備: ${machine}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+  if (labelText) messageBody += `\n点検項目: ${labelText}`;
+  if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+  if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+  messageBody += `\n理由: ${bilingualReason.combined}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message_id: result.message_id });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/check-forms/cancel-ng-ticket', async (req, res) => {
+  const { messageIds } = req.body || {};
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    return res.json({ success: true, cancelled: [] });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const results = [];
+
+  for (const messageId of messageIds) {
+    if (!messageId) continue;
+    try {
+      const deleteUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+      const delResponse = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { 'X-ChatWorkToken': apiKey }
+      });
+
+      if (delResponse.ok) {
+        results.push({ messageId, success: true });
+      } else {
+        results.push({ messageId, success: false });
+      }
+    } catch (e) {
+      results.push({ messageId, success: false, error: e.message });
+    }
+  }
+
+  res.json({ success: true, results });
+});
+
+app.post('/api/check-forms/update-ng-ticket', async (req, res) => {
+  const { messageId, factory, machine, status, reason, userInput, expectedInput, isOptional, schedule, itemLabel, fieldLabel } = req.body || {};
+  if (!messageId) {
+    return res.status(400).json({ error: 'messageId is required' });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+
+  try {
+    const now = new Date();
+    const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const schedInfo = getScheduleHeaderInfo(schedule);
+    const titleHeader = isOptional
+      ? '📝 【OPTIONAL TICKET / 任意報告】'
+      : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
+    const statusLabel = isOptional ? 'OPTIONAL TICKET (任意報告)' : (status || 'NG');
+    const labelText = itemLabel || fieldLabel || '';
+    const bilingualReason = await getBilingualText(reason);
+
+    let messageBody = `${titleHeader}\n工場: ${factory}\n設備: ${machine}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+    if (labelText) messageBody += `\n点検項目: ${labelText}`;
+    if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+    if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+    messageBody += `\n理由: ${bilingualReason.combined}`;
+    messageBody += `\n(編集済み / Updated)`;
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message_id: result.message_id });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get('/api/check-forms/reference-images', async (req, res) => {
@@ -32745,6 +39397,1186 @@ app.post('/api/check-forms/translate', async (req, res) => {
   }
 });
 
+app.get('/api/check-forms/tickets/open', async (req, res) => {
+  try {
+    const { factory, machine } = req.query;
+    if (!factory || !machine) {
+      return res.status(400).json({ error: 'factory and machine are required' });
+    }
+    const submittedDb = client.db('submittedDB');
+    const ngReportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const tickets = await ngReportsCollection.find({
+      factory,
+      加工設備: machine,
+      status: 'open'
+    }).sort({ createdAt: -1 }).toArray();
+    
+    return res.json({ tickets });
+  } catch (error) {
+    console.error('Failed to fetch open tickets:', error);
+    return res.status(500).json({ error: 'Failed to fetch open tickets' });
+  }
+});
+
+app.get('/api/check-forms/maintenance-workers', async (req, res) => {
+  try {
+    const masterDb = client.db('Sasaki_Coating_MasterDB');
+    const usersCollection = masterDb.collection('users');
+    const users = await usersCollection.find({}).toArray();
+    
+    // The user has firstName and lastName. Format as "FirstName LastName"
+    const workers = users.map(u => {
+      const first = u.firstName || '';
+      const last = u.lastName || '';
+      const fullName = `${first} ${last}`.trim();
+      return {
+        fullName: fullName || u.username || 'Unknown',
+        username: u.username || 'unknown'
+      };
+    });
+    
+    return res.json({ workers });
+  } catch (error) {
+    console.error('Failed to fetch maintenance workers:', error);
+    return res.status(500).json({ error: 'Failed to fetch maintenance workers' });
+  }
+});
+
+app.post('/api/check-forms/bypass', async (req, res) => {
+  const { factory, machine, workerName, leaderName, leaderUsername, reason, timing, templates } = req.body || {};
+
+  if (!factory || !machine) {
+    return res.status(400).json({ error: 'factory and machine are required' });
+  }
+
+  try {
+    await client.connect();
+    const db = client.db('submittedDB');
+    const bypassCollection = db.collection('checklistBypassDB');
+
+    const doc = {
+      factory: String(factory).trim(),
+      machine: String(machine).trim(),
+      workerName: String(workerName || '').trim(),
+      leaderName: String(leaderName || '').trim(),
+      leaderUsername: String(leaderUsername || '').trim(),
+      reason: String(reason || '').trim(),
+      timing: String(timing || 'pre').trim(),
+      templates: Array.isArray(templates) ? templates : [],
+      bypassedAt: new Date().toISOString(),
+      createdAt: new Date(),
+    };
+
+    const result = await bypassCollection.insertOne(doc);
+    return res.json({ success: true, bypassId: result.insertedId.toHexString() });
+  } catch (error) {
+    console.error('Error logging checklist bypass:', error);
+    return res.status(500).json({ error: 'Failed to record checklist bypass' });
+  }
+});
+
+app.post('/api/check-forms/tickets/resolve', async (req, res) => {
+  try {
+    const { ticketId, workerName, workerUsername, fixReason, fixImageBase64s } = req.body;
+    if (!ticketId || !workerName || !fixReason) {
+      return res.status(400).json({ error: 'ticketId, workerName, and fixReason are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const ngReportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    
+    const ticket = await ngReportsCollection.findOne({ _id: new ObjectId(ticketId) });
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    
+    let imageURLs = [];
+    if (fixImageBase64s && Array.isArray(fixImageBase64s)) {
+      for (let i = 0; i < fixImageBase64s.length; i++) {
+        const uploadResult = await saveBase64AssetToFirebase({
+          base64: fixImageBase64s[i],
+          filePathPrefix: `maintenanceForm/${ticket.factory}/tickets/fixes/fix_${ticketId}_${Date.now()}_${i}`
+        });
+        if (uploadResult && uploadResult.imageURL) {
+          imageURLs.push(uploadResult.imageURL);
+        }
+      }
+    }
+    
+    const now = new Date();
+    const bilingualFix = await getBilingualText(fixReason);
+    
+    await ngReportsCollection.updateOne(
+      { _id: new ObjectId(ticketId) },
+      {
+        $set: {
+          status: 'closed',
+          closedAt: now.toISOString(),
+          closedBy: workerName,
+          closedByUsername: workerUsername,
+          fixReason: fixReason,
+          fixReason_ja: bilingualFix.ja,
+          fixReason_en: bilingualFix.en,
+          fixReason_bilingual: bilingualFix.combined
+        },
+        $push: {
+          statusHistory: {
+            action: 'Ticket Closed',
+            fromStatus: 'open',
+            toStatus: 'closed',
+            timestamp: now.toISOString(),
+            user: workerName,
+            username: workerUsername,
+            fixReason: fixReason,
+            fixReason_ja: bilingualFix.ja,
+            fixReason_en: bilingualFix.en,
+            fixReason_bilingual: bilingualFix.combined,
+            imageURLs: imageURLs
+          }
+        }
+      }
+    );
+    
+    // Update Chatwork message if exists
+    const updatedTicket = await ngReportsCollection.findOne({ _id: new ObjectId(ticketId) });
+    if (updatedTicket && updatedTicket.chatworkMessageId) {
+      await updateNgTicketChatworkMessage(updatedTicket).catch(e => {
+        console.error('Failed to trigger Chatwork message update from resolve:', e);
+      });
+    }
+    
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to resolve ticket:', error);
+    return res.status(500).json({ error: 'Failed to resolve ticket' });
+  }
+});
+
+app.post('/api/check-forms/notify-ng-ticket', async (req, res) => {
+  const { factory, machine, status, reason, userInput, expectedInput } = req.body;
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
+  
+  const now = new Date();
+  const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  let messageBody = `工場: ${factory}\n設備: ${machine}\nステータス: ${status}\n日時: ${timestamp}`;
+  if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+  if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+  messageBody += `\n理由: ${reason}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      res.status(200).json({ message_id: result.message_id });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/check-forms/cancel-ng-ticket', async (req, res) => {
+  const { messageIds } = req.body || {};
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    return res.json({ success: true, cancelled: [] });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const results = [];
+
+  for (const messageId of messageIds) {
+    if (!messageId) continue;
+    try {
+      const deleteUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+      const delResponse = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { 'X-ChatWorkToken': apiKey }
+      });
+
+      if (delResponse.ok) {
+        results.push({ messageId, status: 'deleted' });
+      } else {
+        // Fallback: Edit message to indicate [Cancelled / Reset]
+        const editUrl = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+        const now = new Date();
+        const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+        const cancelText = `[info][title]❌ 【点検リセット / Cancelled】[/title]点検がリセットされたため、このNGチケットは取り消されました。\n日時: ${timestamp}[/info]`;
+        
+        await fetch(editUrl, {
+          method: 'PUT',
+          headers: {
+            'X-ChatWorkToken': apiKey,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: new URLSearchParams({ body: cancelText })
+        });
+        results.push({ messageId, status: 'cancelled_edit' });
+      }
+    } catch (err) {
+      console.error(`Failed to cancel Chatwork message ${messageId}:`, err);
+    }
+  }
+
+  res.json({ success: true, results });
+});
+
+app.post('/api/check-forms/update-ng-ticket', async (req, res) => {
+  const { messageId, factory, machine, status, reason, userInput, expectedInput } = req.body || {};
+  if (!messageId) {
+    return res.status(400).json({ error: 'messageId is required' });
+  }
+
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${messageId}`;
+
+  try {
+    const now = new Date();
+    const timestamp = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    let messageBody = `工場: ${factory}\n設備: ${machine}\nステータス: ${status}\n日時: ${timestamp}`;
+    if (expectedInput) messageBody += `\n期待値: ${expectedInput}`;
+    if (userInput !== undefined && userInput !== '') messageBody += `\n入力値: ${userInput}`;
+    messageBody += `\n理由: ${reason}`;
+    messageBody += `\n(編集済み / Updated)`;
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body: messageBody })
+    });
+
+    if (response.ok) {
+      res.status(200).json({ success: true, messageId });
+    } else {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: errorText });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/check-forms/today-status', async (req, res) => {
+  const factory = normalizeCheckFormText(req.query.factory);
+  const machine = normalizeCheckFormText(req.query.machine);
+
+  if (!factory || !machine) {
+    return res.status(400).json({ error: 'factory and machine are required' });
+  }
+
+  try {
+    await client.connect();
+    const submittedDb = client.db('submittedDB');
+    const recordsCollection = submittedDb.collection(CHECK_FORM_RECORDS_COLLECTION);
+    const jstDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
+
+    let relatedMachineIds = [];
+    try {
+      if (typeof getRelatedMachineIds === 'function') {
+        relatedMachineIds = await getRelatedMachineIds(machine);
+      }
+    } catch (_) {}
+
+    const machineTokens = Array.from(new Set([
+      ...machine.split(',').map(m => m.trim()).filter(Boolean),
+      ...relatedMachineIds
+    ]));
+    const machinePattern = machineTokens.map(m => escapeCheckFormRegex(m)).join('|');
+    const machineRegex = new RegExp(`(^|,)\\s*(${machinePattern})\\s*(,|$)`, 'i');
+
+    const machineMatchFilter = {
+      $or: [
+        { 加工設備: { $in: machineTokens } },
+        { machine: { $in: machineTokens } },
+        { selectedMachine: { $in: machineTokens } },
+        { 加工設備: machineRegex },
+        { machine: machineRegex },
+        { selectedMachine: machineRegex }
+      ]
+    };
+
+    const docs = await recordsCollection.find({
+      factory,
+      ...machineMatchFilter,
+      createdAt: { $gte: startOfDay }
+    }).sort({ createdAt: -1 }).toArray();
+
+    if (!docs || docs.length === 0) {
+      return res.status(200).json({
+        hasSubmittedToday: false,
+        isPreComplete: false,
+        isPostComplete: false,
+        recordIds: {}
+      });
+    }
+
+    const recordIds = {};
+    let isPreComplete = false;
+    let isPostComplete = false;
+
+    docs.forEach(doc => {
+      const recId = doc._id.toString();
+      if (doc.templateId) {
+        recordIds[doc.templateId] = recId;
+      }
+      if (doc.templateName) {
+        recordIds[doc.templateName] = recId;
+      }
+      if (doc.isPreComplete !== false) isPreComplete = true;
+      if (doc.isPostComplete === true) isPostComplete = true;
+    });
+
+    const reportsCollection = submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const openTickets = await reportsCollection.find({
+      factory,
+      ...machineMatchFilter,
+      createdAt: { $gte: startOfDay },
+      status: { $regex: /^open$/i }
+    }).toArray();
+
+    const openDefectTickets = openTickets.filter(t => {
+      const ans = String(t.answerValue || '').trim().toUpperCase();
+      const num = Number(t.answerValue);
+      const isOutOfBounds = !isNaN(num) && (
+        (t.min !== null && t.min !== undefined && num < t.min) ||
+        (t.max !== null && t.max !== undefined && num > t.max)
+      );
+
+      if (ans === 'NG' || isOutOfBounds || t.ticketType === 'defect' || t.required === true) {
+        return true;
+      }
+      return false;
+    });
+
+    const hasOpenTickets = openDefectTickets.length > 0;
+
+    return res.status(200).json({
+      hasSubmittedToday: true,
+      isPreComplete,
+      isPostComplete,
+      hasOpenTickets,
+      openTicketCount: openDefectTickets.length,
+      openDefectTicketCount: openDefectTickets.length,
+      openOptionalTicketCount: openTickets.length - openDefectTickets.length,
+      recordIds,
+      lastSubmittedAt: docs[0].createdAt
+    });
+  } catch (error) {
+    console.error('Error fetching today checklist status:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/check-forms/today-overview', async (req, res) => {
+  const filterFactory = normalizeCheckFormText(req.query.factory);
+  const targetDateStr = normalizeCheckFormText(req.query.date);
+
+  try {
+    await client.connect();
+    const masterDb = client.db(DB_NAME);
+    const submittedDb = client.db('submittedDB');
+
+    // Determine target day in JST
+    const jstDateStr = targetDateStr || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
+    const endOfDay = new Date(`${jstDateStr}T23:59:59.999+09:00`);
+
+    // 1. Fetch active templates
+    const templateQuery = { status: { $ne: 'inactive' } };
+    if (filterFactory) {
+      templateQuery.工場 = filterFactory;
+    }
+    const templates = await masterDb.collection('checkFormTemplatesDB').find(templateQuery).toArray();
+
+    // 2. Collect equipment IDs & names
+    const equipmentIdStrings = [];
+    const equipmentObjIds = [];
+    const templateEquipmentMap = new Map();
+
+    templates.forEach((template) => {
+      const templateId = template._id.toString();
+      const rawEqIds = Array.isArray(template.equipmentIds)
+        ? template.equipmentIds
+        : (template.equipmentId ? [template.equipmentId] : (Array.isArray(template.machines) ? template.machines : []));
+      templateEquipmentMap.set(templateId, rawEqIds);
+
+      rawEqIds.forEach((id) => {
+        const strId = String(id?._id || id?.id || id).trim();
+        if (strId && !equipmentIdStrings.includes(strId)) {
+          equipmentIdStrings.push(strId);
+          if (ObjectId.isValid(strId)) {
+            equipmentObjIds.push(new ObjectId(strId));
+          }
+        }
+      });
+    });
+
+    // 3. Fetch equipment info
+    const equipmentDocs = await masterDb.collection('setsubiDB').find({}).toArray();
+
+    const equipmentMap = new Map();
+    equipmentDocs.forEach((eq) => {
+      const idStr = eq._id.toString();
+      const name = normalizeCheckFormText(eq['設備名'] || eq.name || eq.equipmentName || idStr);
+      const factory = normalizeCheckFormText(eq['工場'] || eq.factory || '—');
+      equipmentMap.set(idStr, { id: idStr, name, factory });
+      if (eq.id) equipmentMap.set(String(eq.id), { id: idStr, name, factory });
+      if (name) equipmentMap.set(name.toLowerCase(), { id: idStr, name, factory });
+    });
+
+    // Build unique machine list from active templates
+    const machinesMap = new Map();
+    templates.forEach((template) => {
+      const formId = template._id.toString();
+      const formName = normalizeCheckFormText(template.name || template.name_ja || template.name_en || '点検フォーム');
+      const formSchedule = normalizeCheckFormSchedule(template.schedule || 'daily');
+      const formTiming = normalizeCheckFormText(template.timing || 'pre');
+      const checkCount = Array.isArray(template.fields) ? template.fields.length : 0;
+      const templateFactory = normalizeCheckFormText(template.工場 || '—');
+
+      const rawEqIds = templateEquipmentMap.get(formId) || [];
+      rawEqIds.forEach((eqId) => {
+        const idStr = String(eqId).trim();
+        const eqInfo = equipmentMap.get(idStr) || { id: idStr, name: idStr, factory: templateFactory };
+        
+        if (filterFactory && eqInfo.factory && eqInfo.factory !== '—' && eqInfo.factory !== filterFactory) {
+          return;
+        }
+
+        const machineKey = `${eqInfo.factory}:${eqInfo.name}`;
+        if (!machinesMap.has(machineKey)) {
+          machinesMap.set(machineKey, {
+            id: idStr,
+            name: eqInfo.name,
+            factory: eqInfo.factory,
+            assignedTemplates: [],
+            todaySubmissions: [],
+          });
+        }
+
+        const machineObj = machinesMap.get(machineKey);
+        if (!machineObj.assignedTemplates.some((t) => t.formId === formId)) {
+          machineObj.assignedTemplates.push({
+            formId,
+            formName,
+            schedule: formSchedule,
+            timing: formTiming,
+            checkCount,
+          });
+        }
+      });
+    });
+
+    // 4. Query records submitted for this day
+    const formIds = templates.map((t) => t._id.toString());
+    const formObjIds = templates.map((t) => t._id);
+
+    const recordQuery = {
+      $or: [
+        { formId: { $in: [...formIds, ...formObjIds] } },
+        { templateId: { $in: [...formIds, ...formObjIds] } },
+      ],
+      $and: [
+        {
+          $or: [
+            { completedAt: { $gte: startOfDay.toISOString(), $lte: endOfDay.toISOString() } },
+            { createdAt: { $gte: startOfDay, $lte: endOfDay } },
+            { submittedAt: { $gte: startOfDay.toISOString(), $lte: endOfDay.toISOString() } },
+          ]
+        }
+      ]
+    };
+
+    const records = await submittedDb.collection(CHECK_FORM_RECORDS_COLLECTION)
+      .find(recordQuery)
+      .sort({ completedAt: -1, createdAt: -1 })
+      .toArray();
+
+    // 5. Query NG reports for this day or open
+    const ngReports = await submittedDb.collection(CHECK_FORM_NG_REPORTS_COLLECTION)
+      .find({
+        $or: [
+          { createdAt: { $gte: startOfDay, $lte: endOfDay } },
+          { submittedAt: { $gte: startOfDay.toISOString(), $lte: endOfDay.toISOString() } },
+          { status: 'open' }
+        ]
+      })
+      .toArray();
+
+    const ngReportsByRecordId = new Map();
+    ngReports.forEach((report) => {
+      const recId = report.checkFormRecordId || report.recordId;
+      if (recId) {
+        const key = String(recId).trim();
+        if (!ngReportsByRecordId.has(key)) ngReportsByRecordId.set(key, []);
+        ngReportsByRecordId.get(key).push(report);
+      }
+    });
+
+    // 6. Map records to machines
+    records.forEach((record) => {
+      const machineName = normalizeCheckFormText(record['加工設備'] || record.machine || record.machineName || record.selectedMachine);
+      const recId = record._id.toString();
+      const linkedNg = ngReportsByRecordId.get(recId) || [];
+
+      // Check if record has NG
+      const hasNG = Boolean(record.hasNG || linkedNg.length > 0 || (Array.isArray(record.answers) && record.answers.some((a) => a.hasNG)));
+
+      // Extract NG reasons
+      let ngReason = '';
+      if (hasNG) {
+        if (linkedNg.length > 0) {
+          ngReason = linkedNg.map((r) => r.reason || r.defectDetails || r.fieldLabel).filter(Boolean).join('; ');
+        } else if (Array.isArray(record.answers)) {
+          const ngAnswers = record.answers.filter((a) => a.hasNG && a.reason);
+          ngReason = ngAnswers.map((a) => a.reason).join('; ');
+        }
+        if (!ngReason) ngReason = record.ngReason || 'NG判定項目あり';
+      }
+
+      // Find matching machine
+      for (const [key, machineObj] of machinesMap.entries()) {
+        if (checkFormMachineNamesMatch(machineObj.name, machineName)) {
+          machineObj.todaySubmissions.push({
+            recordId: recId,
+            formId: record.formId || record.templateId || '',
+            formName: record.formName || record.templateName || '',
+            completedBy: record.completedBy || record.inspector || '作業者',
+            completedAt: record.completedAt || record.createdAt || record.submittedAt,
+            hasNG,
+            ngReason,
+            answersCount: Array.isArray(record.answers) ? record.answers.length : 0,
+            answers: record.answers || [],
+            linkedNgTickets: linkedNg,
+          });
+        }
+      }
+    });
+
+    // 7. Aggregate machine status and KPIs
+    let completedCount = 0;
+    let defectCount = 0;
+    let pendingCount = 0;
+
+    const machineList = Array.from(machinesMap.values()).map((m) => {
+      const hasSubmissions = m.todaySubmissions.length > 0;
+      const hasNG = m.todaySubmissions.some((s) => s.hasNG);
+
+      let status = 'pending';
+      if (hasNG) {
+        status = 'defect';
+        defectCount += 1;
+      } else if (hasSubmissions) {
+        status = 'completed';
+        completedCount += 1;
+      } else {
+        status = 'pending';
+        pendingCount += 1;
+      }
+
+      // Sort submissions (NG first, then latest)
+      const sortedSubmissions = [...m.todaySubmissions].sort((a, b) => {
+        if (a.hasNG && !b.hasNG) return -1;
+        if (!a.hasNG && b.hasNG) return 1;
+        return new Date(b.completedAt || 0) - new Date(a.completedAt || 0);
+      });
+
+      const primary = sortedSubmissions[0] || null;
+
+      return {
+        id: m.id,
+        name: m.name,
+        factory: m.factory,
+        status,
+        hasNG,
+        submissionCount: m.todaySubmissions.length,
+        primarySubmission: primary,
+        submissions: sortedSubmissions,
+        assignedTemplates: m.assignedTemplates,
+      };
+    });
+
+    // Sort machine list: Defect (NG) first, then Pending, then Completed
+    const statusPriority = { defect: 0, pending: 1, completed: 2 };
+    machineList.sort((a, b) => {
+      const pDiff = statusPriority[a.status] - statusPriority[b.status];
+      if (pDiff !== 0) return pDiff;
+      if (a.factory !== b.factory) return a.factory.localeCompare(b.factory, 'ja');
+      return a.name.localeCompare(b.name, 'ja');
+    });
+
+    return res.json({
+      date: jstDateStr,
+      formattedDate: startOfDay.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }),
+      summary: {
+        totalMachines: machineList.length,
+        completedCount,
+        defectCount,
+        pendingCount,
+      },
+      machines: machineList,
+    });
+  } catch (error) {
+    console.error('Error loading today check form overview:', error);
+    return res.status(500).json({ error: 'Failed to load today overview', details: error.message });
+  }
+});
+
+// ─── DEDICATED FREYA ADMIN NG TICKETS ENDPOINTS ──────────────────────────────────────
+let _checkFormTemplatesCache = null;
+let _checkFormTemplatesCacheTime = 0;
+
+async function getCheckFormTemplatesMap() {
+  const now = Date.now();
+  if (_checkFormTemplatesCache && (now - _checkFormTemplatesCacheTime < 60000)) {
+    return _checkFormTemplatesCache;
+  }
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const templates = await db.collection(CHECK_FORM_TEMPLATES_COLLECTION).find({}).toArray();
+    console.log(`📋 [NG Tickets] Loaded ${templates.length} check form templates for bilingual resolution.`);
+    const map = new Map();
+    templates.forEach(t => {
+      const tid = t._id.toString();
+      const fieldsMap = new Map();
+      const fieldsByLabelMap = new Map();
+      if (Array.isArray(t.fields)) {
+        t.fields.forEach(f => {
+          const fieldObj = {
+            id: f.id ? String(f.id) : '',
+            label_ja: f.label_ja || f.label || '',
+            label_en: f.label_en || f.label || '',
+            description_ja: f.description_ja || f.description || '',
+            description_en: f.description_en || f.description || ''
+          };
+          if (f.id) {
+            fieldsMap.set(String(f.id), fieldObj);
+          }
+          if (f.label) {
+            fieldsByLabelMap.set(String(f.label).trim(), fieldObj);
+          }
+          if (f.label_ja) {
+            fieldsByLabelMap.set(String(f.label_ja).trim(), fieldObj);
+          }
+        });
+      }
+      map.set(tid, {
+        name_ja: t.name_ja || t.name || '',
+        name_en: t.name_en || t.name || '',
+        fields: fieldsMap,
+        fieldsByLabel: fieldsByLabelMap
+      });
+    });
+    _checkFormTemplatesCache = map;
+    _checkFormTemplatesCacheTime = now;
+    return map;
+  } catch (err) {
+    console.error('Error loading checkFormTemplatesMap:', err);
+    return new Map();
+  }
+}
+
+function normalizeNgTicketDoc(doc, templateMap) {
+  if (!doc) return null;
+  const workerStr = Array.isArray(doc.workerName) 
+    ? doc.workerName.join(', ') 
+    : (doc.workerName || doc.completedBy || '');
+  const machineStr = doc.加工設備 || doc.machine || doc.selectedMachine || doc.machineName || doc.machineId || '';
+  const formStr = doc.templateName || doc.formName || doc.checkFormName || '';
+  const imgUrls = Array.isArray(doc.imageURLs) ? doc.imageURLs.filter(Boolean) : [];
+  const createdAtIso = doc.createdAt ? (doc.createdAt instanceof Date ? doc.createdAt.toISOString() : String(doc.createdAt)) : new Date().toISOString();
+  
+  const templateIdStr = doc.templateId ? doc.templateId.toString() : '';
+  const tmpl = templateMap ? templateMap.get(templateIdStr) : null;
+  let fieldInfo = (tmpl && doc.fieldId) ? tmpl.fields.get(String(doc.fieldId)) : null;
+  if (!fieldInfo && tmpl && doc.fieldLabel) {
+    fieldInfo = tmpl.fieldsByLabel.get(String(doc.fieldLabel).trim());
+  }
+
+  const formName_ja = tmpl?.name_ja || doc.formName_ja || formStr;
+  const formName_en = tmpl?.name_en || doc.formName_en || formStr;
+  const fieldLabel_ja = fieldInfo?.label_ja || doc.fieldLabel_ja || doc.fieldLabel || '';
+  const fieldLabel_en = fieldInfo?.label_en || doc.fieldLabel_en || doc.fieldLabel || '';
+  const rawTiming = fieldInfo?.timing || doc.timing || 'pre';
+  const isPost = String(rawTiming).toLowerCase().includes('post') || String(rawTiming).includes('後');
+  const timing_ja = isPost ? '作業後点検' : '作業前点検';
+  const timing_en = isPost ? 'Post-Production Check' : 'Pre-Production Check';
+
+  const rawTicketType = String(doc.ticketType || doc.type || doc.ticket_type || '').trim().toLowerCase();
+  const isOpt = rawTicketType === 'optional'
+    || doc.isOptional === true
+    || doc.optional === true
+    || doc.required === false
+    || String(doc.answerValue || '').trim().toUpperCase() === 'OK'
+    || String(doc.answerValue || '').trim() === '合格'
+    || String(doc.answerValue || '').trim() === '正常'
+    || String(doc.answerValue || '').trim() === 'なし';
+  const ticketType = isOpt ? 'optional' : 'defect';
+
+  return {
+    _id: doc._id.toString(),
+    ticketId: doc._id.toString(),
+    ticketNo: doc.ticketNo ?? null,
+    ticketType,
+    isOptional: isOpt,
+    isDefect: !isOpt,
+    required: doc.required ?? !isOpt,
+    source: doc.source || 'checkForm',
+    factory: doc.factory || '',
+    machineName: machineStr,
+    加工設備: machineStr,
+    equipmentId: doc.equipmentId || null,
+    templateId: templateIdStr,
+    formName: formStr,
+    templateName: formStr,
+    formName_ja,
+    formName_en,
+    timing: rawTiming,
+    timing_ja,
+    timing_en,
+    recordId: doc.checkFormRecordId ? doc.checkFormRecordId.toString() : (doc.recordId || null),
+    checkFormRecordId: doc.checkFormRecordId ? doc.checkFormRecordId.toString() : null,
+    completedBy: workerStr,
+    workerName: workerStr,
+    fieldId: doc.fieldId || '',
+    fieldLabel: doc.fieldLabel || '',
+    fieldLabel_ja,
+    fieldLabel_en,
+    fieldType: doc.fieldType || '',
+    answerValue: doc.answerValue || '',
+    min: doc.min ?? null,
+    max: doc.max ?? null,
+    unit: doc.unit || '',
+    reason: doc.reason || '',
+    reason_ja: doc.reason_ja || doc.reason || '',
+    reason_en: doc.reason_en || doc.reason || '',
+    reason_bilingual: doc.reason_bilingual || (doc.reason_ja && doc.reason_en && doc.reason_ja !== doc.reason_en ? `${doc.reason_ja} / ${doc.reason_en}` : (doc.reason || '')),
+    imageURLs: imgUrls,
+    imageCount: imgUrls.length,
+    hasImages: imgUrls.length > 0,
+    chatworkMessageId: doc.chatworkMessageId || null,
+    status: String(doc.status || 'open').trim().toLowerCase(),
+    createdAt: createdAtIso,
+    closedAt: doc.closedAt ? (doc.closedAt instanceof Date ? doc.closedAt.toISOString() : String(doc.closedAt)) : null,
+    closedBy: doc.closedBy || null,
+    closedByUsername: doc.closedByUsername || null,
+    fixReason: doc.fixReason || null,
+    fixReason_ja: doc.fixReason_ja || doc.fixReason || null,
+    fixReason_en: doc.fixReason_en || doc.fixReason || null,
+    fixReason_bilingual: doc.fixReason_bilingual || (doc.fixReason_ja && doc.fixReason_en && doc.fixReason_ja !== doc.fixReason_en ? `${doc.fixReason_ja} / ${doc.fixReason || ''}` : null),
+    fixImageURLs: Array.isArray(doc.fixImageURLs) ? doc.fixImageURLs.filter(Boolean) : [],
+    statusHistory: Array.isArray(doc.statusHistory) ? doc.statusHistory : []
+  };
+}
+
+app.post('/api/check-forms/ng-tickets/page', async (req, res) => {
+  try {
+    const { filters = {}, page = 1, limit = 10, sort = {} } = req.body || {};
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.max(1, Number(limit) || 10);
+    const skip = (safePage - 1) * safeLimit;
+
+    await client.connect();
+    const db = client.db('submittedDB');
+    const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const templateMap = await getCheckFormTemplatesMap();
+
+    const queryFilter = {};
+
+    if (filters.factory && filters.factory !== 'all') {
+      queryFilter.factory = filters.factory;
+    }
+
+    if (filters.status && filters.status !== 'all') {
+      queryFilter.status = { $regex: new RegExp(`^${filters.status}$`, 'i') };
+    }
+
+    if (filters.startDate || filters.endDate) {
+      queryFilter.createdAt = {};
+      if (filters.startDate) {
+        queryFilter.createdAt.$gte = new Date(filters.startDate);
+      }
+      if (filters.endDate) {
+        const endD = new Date(filters.endDate);
+        endD.setHours(23, 59, 59, 999);
+        queryFilter.createdAt.$lte = endD;
+      }
+    }
+
+    if (filters.keyword && String(filters.keyword).trim()) {
+      const kw = String(filters.keyword).trim();
+      const regex = { $regex: kw, $options: 'i' };
+      queryFilter.$or = [
+        { factory: regex },
+        { 加工設備: regex },
+        { machineName: regex },
+        { templateName: regex },
+        { formName: regex },
+        { fieldLabel: regex },
+        { reason: regex },
+        { fixReason: regex },
+        { workerName: regex },
+        { completedBy: regex }
+      ];
+    }
+
+    const totalItems = await collection.countDocuments(queryFilter);
+    const dir = Number(sort.direction) === 1 ? 1 : -1;
+    let docs;
+
+    if (sort.column === 'type') {
+      const typeExpr = {
+        $cond: [
+          {
+            $or: [
+              { $eq: [{ $toLower: { $ifNull: ['$ticketType', ''] } }, 'optional'] },
+              { $eq: [{ $toLower: { $ifNull: ['$type', ''] } }, 'optional'] },
+              { $eq: ['$isOptional', true] },
+              { $eq: ['$optional', true] },
+              { $eq: ['$required', false] },
+              { $eq: [{ $toUpper: { $ifNull: ['$answerValue', ''] } }, 'OK'] },
+              { $eq: [{ $ifNull: ['$answerValue', ''] }, '合格'] },
+              { $eq: [{ $ifNull: ['$answerValue', ''] }, '正常'] },
+              { $eq: [{ $ifNull: ['$answerValue', ''] }, 'なし'] }
+            ]
+          },
+          'optional',
+          'defect'
+        ]
+      };
+
+      const pipeline = [
+        { $match: queryFilter },
+        { $addFields: { computedType: typeExpr } },
+        { $sort: { computedType: dir, createdAt: -1, _id: -1 } },
+        { $skip: skip },
+        { $limit: safeLimit }
+      ];
+      docs = await collection.aggregate(pipeline).toArray();
+    } else {
+      let sortObj = { createdAt: -1, _id: -1 };
+      if (sort.column === 'createdAt') sortObj = { createdAt: dir, _id: -1 };
+      else if (sort.column === 'ticketNo') sortObj = { ticketNo: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'factory') sortObj = { factory: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'location') sortObj = { factory: dir, 加工設備: dir, machineName: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'status') sortObj = { status: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'fieldLabel') sortObj = { fieldLabel: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'formName') sortObj = { templateName: dir, formName: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'answerValue') sortObj = { answerValue: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'completedBy') sortObj = { completedBy: dir, workerName: dir, createdAt: -1, _id: -1 };
+      else if (sort.column === 'imageCount') sortObj = { imageCount: dir, createdAt: -1, _id: -1 };
+
+      docs = await collection.find(queryFilter).sort(sortObj).skip(skip).limit(safeLimit).toArray();
+    }
+    const normalizedDocs = docs.map(d => normalizeNgTicketDoc(d, templateMap));
+
+    const allDocs = await collection.find(queryFilter, { projection: { imageURLs: 1, checkFormRecordId: 1, 加工設備: 1, machineName: 1, workerName: 1, completedBy: 1 } }).toArray();
+    let imageTickets = 0;
+    const recordIdsSet = new Set();
+    const machineKeysSet = new Set();
+    const operatorNamesSet = new Set();
+
+    allDocs.forEach(d => {
+      if (Array.isArray(d.imageURLs) && d.imageURLs.filter(Boolean).length > 0) imageTickets++;
+      if (d.checkFormRecordId) recordIdsSet.add(d.checkFormRecordId.toString());
+      const m = d.加工設備 || d.machineName || d.machine || '';
+      if (m) machineKeysSet.add(m);
+      const w = Array.isArray(d.workerName) ? d.workerName.join(', ') : (d.workerName || d.completedBy || '');
+      if (w) operatorNamesSet.add(w);
+    });
+
+    const totalPages = totalItems > 0 ? Math.ceil(totalItems / safeLimit) : 0;
+
+    res.json({
+      data: normalizedDocs,
+      summary: {
+        totalTickets: totalItems,
+        imageTickets,
+        recordCount: recordIdsSet.size,
+        machineCount: machineKeysSet.size,
+        operatorCount: operatorNamesSet.size
+      },
+      pagination: {
+        currentPage: totalPages > 0 ? Math.min(safePage, totalPages) : 1,
+        totalPages,
+        totalItems,
+        itemsPerPage: safeLimit
+      }
+    });
+  } catch (err) {
+    console.error('❌ Error in /api/check-forms/ng-tickets/page:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/check-forms/ng-tickets/filter-options', async (req, res) => {
+  try {
+    await client.connect();
+    const db = client.db('submittedDB');
+    const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const templateMap = await getCheckFormTemplatesMap();
+
+    const docs = await collection.find({}, { projection: { factory: 1, 加工設備: 1, machineName: 1, templateName: 1, formName: 1, templateId: 1, fieldId: 1, workerName: 1, completedBy: 1, status: 1, fieldLabel: 1, fieldType: 1 } }).toArray();
+
+    const factoriesSet = new Set();
+    const machineNamesSet = new Set();
+    const formNamesSet = new Set();
+    const completedBySet = new Set();
+    const statusesSet = new Set(['open', 'closed']);
+    const fieldLabelsSet = new Set();
+    const fieldTypesSet = new Set();
+
+    docs.forEach(rawDoc => {
+      const d = normalizeNgTicketDoc(rawDoc, templateMap);
+      if (d.factory) factoriesSet.add(d.factory);
+      if (d.machineName) machineNamesSet.add(d.machineName);
+      if (d.formName_en) formNamesSet.add(d.formName_en);
+      if (d.formName_ja) formNamesSet.add(d.formName_ja);
+      if (d.completedBy) completedBySet.add(d.completedBy);
+      if (d.status) statusesSet.add(String(d.status).toLowerCase());
+      if (d.fieldLabel_en) fieldLabelsSet.add(d.fieldLabel_en);
+      if (d.fieldLabel_ja) fieldLabelsSet.add(d.fieldLabel_ja);
+      if (d.fieldType) fieldTypesSet.add(d.fieldType);
+    });
+
+    res.json({
+      factories: Array.from(factoriesSet).sort(),
+      machineNames: Array.from(machineNamesSet).sort(),
+      formNames: Array.from(formNamesSet).sort(),
+      completedBy: Array.from(completedBySet).sort(),
+      statuses: Array.from(statusesSet).sort(),
+      fieldLabels: Array.from(fieldLabelsSet).sort(),
+      fieldTypes: Array.from(fieldTypesSet).sort()
+    });
+  } catch (err) {
+    console.error('❌ Error in /api/check-forms/ng-tickets/filter-options:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/check-forms/ng-tickets/export', async (req, res) => {
+  try {
+    const { filters = {}, sort = {} } = req.body || {};
+
+    await client.connect();
+    const db = client.db('submittedDB');
+    const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+    const templateMap = await getCheckFormTemplatesMap();
+
+    const queryFilter = {};
+    if (filters.factory && filters.factory !== 'all') queryFilter.factory = filters.factory;
+    if (filters.status && filters.status !== 'all') queryFilter.status = { $regex: new RegExp(`^${filters.status}$`, 'i') };
+    if (filters.startDate || filters.endDate) {
+      queryFilter.createdAt = {};
+      if (filters.startDate) queryFilter.createdAt.$gte = new Date(filters.startDate);
+      if (filters.endDate) {
+        const endD = new Date(filters.endDate);
+        endD.setHours(23, 59, 59, 999);
+        queryFilter.createdAt.$lte = endD;
+      }
+    }
+    if (filters.keyword && String(filters.keyword).trim()) {
+      const kw = String(filters.keyword).trim();
+      const regex = { $regex: kw, $options: 'i' };
+      queryFilter.$or = [
+        { factory: regex }, { 加工設備: regex }, { machineName: regex },
+        { templateName: regex }, { formName: regex }, { fieldLabel: regex },
+        { reason: regex }, { fixReason: regex }, { workerName: regex }, { completedBy: regex }
+      ];
+    }
+
+    let sortObj = { createdAt: -1, _id: -1 };
+    if (sort.column) {
+      const dir = Number(sort.direction) === 1 ? 1 : -1;
+      if (sort.column === 'createdAt') sortObj = { createdAt: dir, _id: -1 };
+      else if (sort.column === 'factory') sortObj = { factory: dir, _id: -1 };
+      else if (sort.column === 'status') sortObj = { status: dir, _id: -1 };
+    }
+
+    const docs = await collection.find(queryFilter).sort(sortObj).toArray();
+    res.json(docs.map(d => normalizeNgTicketDoc(d, templateMap)));
+  } catch (err) {
+    console.error('❌ Error in /api/check-forms/ng-tickets/export:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+async function updateNgTicketChatworkMessage(report) {
+  if (!report || !report.chatworkMessageId) return;
+  const roomId = '440654635';
+  const apiKey = process.env.CHATWORK_API_KEY;
+  if (!apiKey) return;
+
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${report.chatworkMessageId}`;
+
+  const createdAtDate = report.createdAt ? new Date(report.createdAt) : new Date();
+  const timestamp = createdAtDate.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  
+  const formatter = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const parts = formatter.formatToParts(createdAtDate);
+  const year = parts.find(p => p.type === 'year').value;
+  const month = parts.find(p => p.type === 'month').value;
+  const day = parts.find(p => p.type === 'day').value;
+  const dateStr = `${year}-${month}-${day}`;
+  
+  const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
+  const isClosed = report.status === 'closed';
+  const schedInfo = getScheduleHeaderInfo(report.schedule, report.templateName);
+
+  let titleHeader = isClosed
+    ? `✅✅✅ 【DEFECT TICKET${schedInfo.en} (対応済) / 不適合報告${schedInfo.ja} (解決)】 ✅✅✅`
+    : `⚠️ 【DEFECT TICKET${schedInfo.en} / 不適合報告${schedInfo.ja}】`;
+
+  let statusLabel = isClosed ? '済 (Closed)' : 'NG';
+  const labelText = report.fieldLabel_ja || report.fieldLabel || report.fieldLabel_en || '';
+
+  let body = `${titleHeader}\nチケット番号: #${report.ticketNo || ''}\n工場: ${report.factory || ''}\n設備: ${report['加工設備'] || report.machine || ''}\nステータス: ${statusLabel}\n日時: ${timestamp}`;
+
+  if (labelText) {
+    body += `\n点検項目: ${labelText}`;
+  }
+
+  if (report.fieldType === 'number' && typeof report.min === 'number' && typeof report.max === 'number') {
+    body += `\n期待値: ${report.min} - ${report.max} ${report.unit || ''}`;
+  }
+
+  if (report.answerValue !== undefined && report.answerValue !== null && report.answerValue !== '') {
+    let ans = report.answerValue;
+    if (Array.isArray(ans)) ans = ans.join(', ');
+    body += `\n入力値: ${ans}`;
+  }
+
+  let reasonStr = report.reason || '';
+  if (report.reason_ja && report.reason_en && report.reason_ja !== report.reason_en) {
+    reasonStr = `${report.reason_ja} / ${report.reason_en}`;
+  } else if (report.reason_bilingual) {
+    reasonStr = report.reason_bilingual;
+  } else if (report.reason) {
+    const bReason = await getBilingualText(report.reason);
+    reasonStr = bReason.combined;
+  }
+
+  body += `\n理由: ${reasonStr}`;
+  if (Array.isArray(report.imageURLs) && report.imageURLs.length > 0) {
+    body += `\n画像: ${report.imageURLs[0]}`;
+  }
+  body += `\n管理リンク: ${adminLink}`;
+
+  if (isClosed) {
+    const closedAtDate = report.closedAt ? new Date(report.closedAt) : new Date();
+    const closedAtStr = closedAtDate.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const closedBy = report.closedBy || report.closedByUsername || '管理者';
+
+    let fixReasonStr = report.fixReason || '点検・修正完了';
+    if (report.fixReason_ja && report.fixReason_en && report.fixReason_ja !== report.fixReason_en) {
+      fixReasonStr = `${report.fixReason_ja} / ${report.fixReason_en}`;
+    } else if (report.fixReason_bilingual) {
+      fixReasonStr = report.fixReason_bilingual;
+    } else if (report.fixReason) {
+      const bFix = await getBilingualText(report.fixReason);
+      fixReasonStr = bFix.combined;
+    }
+
+    const fixImages = Array.isArray(report.fixImageURLs) ? report.fixImageURLs : (Array.isArray(report.fixImagesData) ? report.fixImagesData : []);
+
+    body += `\n\n[info][title]✅ 解決済み (Closed)[/title]対応者: ${closedBy}\n対応日時: ${closedAtStr}\n対応内容: ${fixReasonStr}`;
+    if (fixImages.length > 0) {
+      body += `\n修正画像: ${fixImages.join('\n')}`;
+    }
+    body += `[/info]`;
+  } else if (Array.isArray(report.statusHistory) && report.statusHistory.some(h => h.action === 'Ticket Reopened')) {
+    const latestReopen = [...report.statusHistory].reverse().find(h => h.action === 'Ticket Reopened');
+    const reopenUser = latestReopen?.user || latestReopen?.username || '管理者';
+    const reopenTime = latestReopen?.timestamp ? new Date(latestReopen.timestamp).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
+    body += `\n\n[info][title]⚠️ 再オープン (Reopened)[/title]再オープン者: ${reopenUser}${reopenTime ? `\n日時: ${reopenTime}` : ''}[/info]`;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'X-ChatWorkToken': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ body })
+    });
+    if (!res.ok) {
+      const errTxt = await res.text();
+      console.error(`⚠️ Failed to update Chatwork message ${report.chatworkMessageId}: ${res.status} ${errTxt}`);
+    } else {
+      console.log(`✅ Successfully updated Chatwork message ${report.chatworkMessageId} for ticket #${report.ticketNo} (status: ${report.status})`);
+    }
+  } catch (err) {
+    console.error(`❌ Error updating Chatwork message ${report.chatworkMessageId}:`, err);
+  }
+}
+
+app.post('/api/check-forms/ng-tickets/update-status', async (req, res) => {
+  try {
+    const { ticketId, update, username, role } = req.body || {};
+    if (!ticketId || !update) {
+      return res.status(400).json({ error: 'ticketId and update object are required' });
+    }
+
+    await client.connect();
+    const db = client.db('submittedDB');
+    const collection = db.collection(CHECK_FORM_NG_REPORTS_COLLECTION);
+
+    if (update && update.$set) {
+      if (update.$set.fixReason) {
+        const bilingualFix = await getBilingualText(update.$set.fixReason);
+        update.$set.fixReason_ja = bilingualFix.ja;
+        update.$set.fixReason_en = bilingualFix.en;
+        update.$set.fixReason_bilingual = bilingualFix.combined;
+      }
+      if (update.$set.reason) {
+        const bilingualReason = await getBilingualText(update.$set.reason);
+        update.$set.reason_ja = bilingualReason.ja;
+        update.$set.reason_en = bilingualReason.en;
+        update.$set.reason_bilingual = bilingualReason.combined;
+      }
+    }
+
+    const filter = { _id: new ObjectId(ticketId) };
+    const result = await collection.updateOne(filter, update);
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    // Trigger Chatwork update if chatworkMessageId exists
+    const updatedTicket = await collection.findOne(filter);
+    if (updatedTicket && updatedTicket.chatworkMessageId) {
+      updateNgTicketChatworkMessage(updatedTicket).catch(e => {
+        console.error('Failed to trigger Chatwork message update:', e);
+      });
+    }
+
+    res.json({ success: true, matchedCount: result.matchedCount, modifiedCount: result.modifiedCount });
+  } catch (err) {
+    console.error('❌ Error in /api/check-forms/ng-tickets/update-status:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/check-forms/submit', async (req, res) => {
   const payload = req.body || {};
   const factory = normalizeCheckFormText(payload.factory);
@@ -32760,7 +40592,32 @@ app.post('/api/check-forms/submit', async (req, res) => {
     return res.status(400).json({ error: 'machine is required' });
   }
 
+  console.log('📋 [/api/check-forms/submit] Received payload:', JSON.stringify({
+    factory: payload.factory,
+    machine: payload.machine,
+    workerName: payload.workerName,
+    templateCount: submittedTemplates.length,
+    templates: submittedTemplates.map(t => ({
+      templateId: t.templateId || t._id,
+      templateName: t.templateName || t.name,
+      workerName: t.workerName,
+      answersCount: Array.isArray(t.answers) ? t.answers.length : 0,
+      answers: Array.isArray(t.answers) ? t.answers.map(a => ({ fieldId: a.fieldId || a.id, type: a.type, value: a.value })) : []
+    }))
+  }, null, 2));
+
+  if (!factory) {
+    console.error('❌ [/api/check-forms/submit] Error: factory is required');
+    return res.status(400).json({ error: 'factory is required' });
+  }
+
+  if (!machine) {
+    console.error('❌ [/api/check-forms/submit] Error: machine is required');
+    return res.status(400).json({ error: 'machine is required' });
+  }
+
   if (submittedTemplates.length === 0) {
+    console.error('❌ [/api/check-forms/submit] Error: at least one template submission is required');
     return res.status(400).json({ error: 'at least one template submission is required' });
   }
 
@@ -32773,48 +40630,132 @@ app.post('/api/check-forms/submit', async (req, res) => {
     const now = new Date();
     const nowIso = now.toISOString();
     const recordDocs = [];
+    const updateOps = [];
+    const recordIdMap = {};
     const ngReportDocs = [];
 
     for (let templateIndex = 0; templateIndex < submittedTemplates.length; templateIndex += 1) {
       const templatePayload = submittedTemplates[templateIndex] || {};
       const answersPayload = Array.isArray(templatePayload.answers) ? templatePayload.answers : [];
-      const templateId = normalizeCheckFormText(templatePayload.templateId);
-      const templateName = normalizeCheckFormText(templatePayload.templateName);
+      const templateId = normalizeCheckFormText(templatePayload.templateId || templatePayload._id);
+      const templateName = normalizeCheckFormText(templatePayload.templateName || templatePayload.name);
       const description = normalizeCheckFormText(templatePayload.description);
       const schedule = normalizeCheckFormSchedule(templatePayload.schedule);
       const startDate = normalizeCheckFormText(templatePayload.startDate);
       const fallbackEquipmentIds = normalizeCheckFormStringArray(templatePayload.equipmentIds);
       const fallbackEquipmentNames = normalizeCheckFormStringArray(templatePayload.equipmentNames);
-      const equipmentId = normalizeCheckFormText(
-        templatePayload.equipmentId || templatePayload.selectedMachineId || fallbackEquipmentIds[0]
+      let equipmentId = normalizeCheckFormText(
+        templatePayload.equipmentId || templatePayload.selectedMachineId
+      );
+      const selectedMachine = normalizeCheckFormText(
+        templatePayload.selectedMachine || machine || fallbackEquipmentNames[0]
       );
       const processingEquipment = normalizeCheckFormText(
-        templatePayload['加工設備'] || templatePayload.selectedMachine || machine || fallbackEquipmentNames[0]
+        templatePayload['加工設備'] || selectedMachine
       );
-      const selectedMachine = normalizeCheckFormText(templatePayload.selectedMachine || machine);
-      const workerName = normalizeCheckFormText(templatePayload.workerName);
+
+      if (processingEquipment) {
+        try {
+          const setsubiCollection = db.collection('setsubiDB');
+          const equipDoc = await setsubiCollection.findOne({
+            $or: [
+              { name: processingEquipment },
+              { 設備名: processingEquipment },
+              { name_ja: processingEquipment }
+            ]
+          });
+          if (equipDoc && equipDoc._id) {
+            equipmentId = equipDoc._id.toString();
+          }
+        } catch (_) {}
+      }
+
+      if (!equipmentId && fallbackEquipmentIds.length > 0) {
+        equipmentId = fallbackEquipmentIds[0];
+      }
+      let rawWorkerName = templatePayload.workerName || payload.workerName || templatePayload.Worker_Name || payload.Worker_Name;
+      if (!rawWorkerName && Array.isArray(answersPayload)) {
+        const nameAns = answersPayload.find(a => a && (a.type === 'name' || (a.fieldId && a.fieldId.includes('名前'))) && a.value);
+        if (nameAns) rawWorkerName = nameAns.value;
+      }
+      let workerNameArray = [];
+      if (Array.isArray(rawWorkerName)) {
+        workerNameArray = rawWorkerName.map(w => normalizeCheckFormText(w)).filter(Boolean);
+      } else if (typeof rawWorkerName === 'string') {
+        const trimmed = rawWorkerName.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          try { workerNameArray = JSON.parse(trimmed); } catch (e) { workerNameArray = [trimmed]; }
+        } else if (trimmed) {
+          workerNameArray = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+        }
+      }
+      const workerName = workerNameArray.length > 0 ? (workerNameArray.length === 1 ? workerNameArray[0] : workerNameArray) : '';
 
       if (!templateId || !templateName) {
+        console.error(`❌ [/api/check-forms/submit] Error: templateId and templateName are required for template index ${templateIndex}`);
         return res.status(400).json({ error: `templateId and templateName are required for template index ${templateIndex}` });
       }
 
-      if (!workerName) {
+      if (!workerName || workerNameArray.length === 0) {
+        console.error(`❌ [/api/check-forms/submit] Error: workerName is required for template ${templateName}`);
         return res.status(400).json({ error: `workerName is required for template ${templateName}` });
       }
 
       if (!selectedMachine) {
+        console.error(`❌ [/api/check-forms/submit] Error: selectedMachine is required for template ${templateName}`);
         return res.status(400).json({ error: `selectedMachine is required for template ${templateName}` });
       }
 
       if (!processingEquipment) {
+        console.error(`❌ [/api/check-forms/submit] Error: 加工設備 is required for template ${templateName}`);
         return res.status(400).json({ error: `加工設備 is required for template ${templateName}` });
       }
 
       if (answersPayload.length === 0) {
+        console.error(`❌ [/api/check-forms/submit] Error: answers are required for template ${templateName}`);
         return res.status(400).json({ error: `answers are required for template ${templateName}` });
       }
 
-      const recordId = new ObjectId();
+      let existingObjId = null;
+      if (templatePayload.recordId && ObjectId.isValid(templatePayload.recordId)) {
+        existingObjId = new ObjectId(templatePayload.recordId);
+      } else {
+        const jstDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+        const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
+
+        let relatedEquipments = [];
+        try {
+          if (typeof getRelatedMachineIds === 'function') {
+            relatedEquipments = await getRelatedMachineIds(processingEquipment);
+          }
+        } catch (_) {}
+        const equipTokens = Array.from(new Set([
+          ...processingEquipment.split(',').map(m => m.trim()).filter(Boolean),
+          ...relatedEquipments
+        ]));
+        const equipPattern = equipTokens.map(m => escapeCheckFormRegex(m)).join('|');
+        const equipRegex = new RegExp(`(^|,)\\s*(${equipPattern})\\s*(,|$)`, 'i');
+
+        const existingDoc = await recordsCollection.findOne({
+          factory,
+          $or: [
+            { machine: { $in: equipTokens } },
+            { 加工設備: { $in: equipTokens } },
+            { selectedMachine: { $in: equipTokens } },
+            { machine: equipRegex },
+            { 加工設備: equipRegex },
+            { selectedMachine: equipRegex }
+          ],
+          templateId,
+          createdAt: { $gte: startOfDay }
+        });
+        if (existingDoc) {
+          existingObjId = existingDoc._id;
+        }
+      }
+
+      const recordId = existingObjId || new ObjectId();
+      recordIdMap[templateId] = recordId.toHexString();
       const normalizedAnswers = [];
       const recordTicketSummaries = [];
 
@@ -32833,8 +40774,9 @@ app.post('/api/check-forms/submit', async (req, res) => {
           return res.status(400).json({ error: `field ${field.label} is missing an answer in template ${templateName}` });
         }
 
+        const ticketRequired = doesCheckFormAnswerRequireTicket(field, normalizedValue);
         const fieldPhotoData = normalizeCheckFormText(answerPayload.fieldPhotoData);
-        if (field.photoRequired && !fieldPhotoData) {
+        if (field.photoRequired && !ticketRequired && !fieldPhotoData) {
           return res.status(400).json({ error: `field ${field.label} requires a photo in template ${templateName}` });
         }
 
@@ -32854,17 +40796,18 @@ app.post('/api/check-forms/submit', async (req, res) => {
           ? answerPayload.ticket
           : null;
         const ticketReason = normalizeCheckFormText(ticketPayload?.reason);
+        const chatworkMessageId = normalizeCheckFormText(ticketPayload?.chatworkMessageId);
         const ticketImagesData = Array.isArray(ticketPayload?.imagesData)
           ? ticketPayload.imagesData.filter(Boolean).slice(0, 5)
           : [];
-        const ticketRequired = doesCheckFormAnswerRequireTicket(field, normalizedValue);
-        const shouldCreateTicket = ticketRequired || !!ticketPayload?.saved;
+        const shouldCreateTicket = ticketRequired || (!!ticketPayload?.saved && !!ticketReason);
         let ticketSummary = null;
 
-        if (shouldCreateTicket) {
-          if (!ticketReason) {
-            return res.status(400).json({ error: `ticket reason is required for field ${field.label} in template ${templateName}` });
-          }
+        if (ticketRequired && !ticketReason) {
+          return res.status(400).json({ error: `ticket reason is required for field ${field.label} in template ${templateName}` });
+        }
+
+        if (shouldCreateTicket && ticketReason) {
 
           const ticketImageURLs = [];
           for (let imageIndex = 0; imageIndex < ticketImagesData.length; imageIndex += 1) {
@@ -32888,6 +40831,7 @@ app.post('/api/check-forms/submit', async (req, res) => {
             equipmentId: equipmentId || null,
             templateId,
             templateName,
+            schedule: templatePayload.schedule || 'daily',
             checkFormRecordId: recordId,
             workerName,
             fieldId: field.id,
@@ -32897,8 +40841,11 @@ app.post('/api/check-forms/submit', async (req, res) => {
             min: field.min,
             max: field.max,
             unit: field.unit,
+            ticketType: (ticketRequired || ticketPayload?.ticketType === 'defect' || String(normalizedValue || '').toUpperCase() === 'NG') ? 'defect' : 'optional',
+            required: (ticketRequired || ticketPayload?.ticketType === 'defect' || String(normalizedValue || '').toUpperCase() === 'NG'),
             reason: ticketReason,
             imageURLs: ticketImageURLs,
+            chatworkMessageId,
             status: 'open',
             createdAt: now,
             ...(approvedBy ? { approvedBy } : {}),
@@ -32907,9 +40854,11 @@ app.post('/api/check-forms/submit', async (req, res) => {
           ngReportDocs.push(reportDoc);
           ticketSummary = {
             ticketKey,
-            required: ticketRequired,
+            ticketType: reportDoc.ticketType,
+            required: reportDoc.required,
             reason: ticketReason,
             imageURLs: ticketImageURLs,
+            chatworkMessageId,
           };
           recordTicketSummaries.push({
             fieldId: field.id,
@@ -32941,32 +40890,71 @@ app.post('/api/check-forms/submit', async (req, res) => {
         });
       }
 
-      recordDocs.push({
-        _id: recordId,
-        source: 'checkForm',
-        templateId,
-        templateName,
-        description,
-        schedule,
-        startDate,
-        factory,
-        加工設備: processingEquipment,
-        equipmentId: equipmentId || null,
-        workerName,
-        answers: normalizedAnswers,
-        tickets: recordTicketSummaries,
-        submittedAtClient: normalizeCheckFormText(payload.submittedAtClient),
-        createdAt: now,
-        updatedAt: now,
-      });
+      if (existingObjId) {
+        updateOps.push({
+          filter: { _id: existingObjId },
+          update: {
+            $push: {
+              answers: { $each: normalizedAnswers },
+              tickets: { $each: recordTicketSummaries }
+            },
+            $set: {
+              isPostComplete: true,
+              updatedAt: now
+            }
+          }
+        });
+      } else {
+        recordDocs.push({
+          _id: recordId,
+          source: 'checkForm',
+          templateId,
+          templateName,
+          description,
+          schedule,
+          startDate,
+          factory,
+          加工設備: processingEquipment,
+          equipmentId: equipmentId || null,
+          workerName: Array.isArray(workerName) ? workerName.join(', ') : workerName,
+          Worker_Name: workerNameArray,
+          answers: normalizedAnswers,
+          tickets: recordTicketSummaries,
+          isPreComplete: true,
+          isPostComplete: false,
+          submittedAtClient: normalizeCheckFormText(payload.submittedAtClient),
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     }
 
     const session = client.startSession();
 
     try {
       await session.withTransaction(async () => {
+        if (ngReportDocs.length > 0) {
+          const countersCollection = submittedDb.collection('counters');
+          const counterResult = await countersCollection.findOneAndUpdate(
+            { _id: 'ticketNo' },
+            { $inc: { seq: ngReportDocs.length } },
+            { returnDocument: 'after', upsert: true, session }
+          );
+          const doc = counterResult.value || counterResult;
+          const endSeq = doc.seq;
+          const startSeq = endSeq - ngReportDocs.length + 1;
+          
+          for (let i = 0; i < ngReportDocs.length; i++) {
+            ngReportDocs[i].ticketNo = startSeq + i;
+          }
+        }
+
         if (recordDocs.length > 0) {
           await recordsCollection.insertMany(recordDocs, { session });
+        }
+
+        for (const op of updateOps) {
+          await recordsCollection.updateOne(op.filter, op.update, { session });
         }
 
         if (ngReportDocs.length > 0) {
@@ -32977,11 +40965,57 @@ app.post('/api/check-forms/submit', async (req, res) => {
       await session.endSession();
     }
 
+    // Send Chatwork Edit messages if needed
+    for (const report of ngReportDocs) {
+      if (report.chatworkMessageId && report.imageURLs && report.imageURLs.length > 0) {
+        try {
+          const roomId = '440654635';
+          const apiKey = process.env.CHATWORK_API_KEY;
+          const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages/${report.chatworkMessageId}`;
+          const timestamp = report.createdAt.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+          
+          const formatter = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
+          const parts = formatter.formatToParts(new Date(report.createdAt));
+          const year = parts.find(p => p.type === 'year').value;
+          const month = parts.find(p => p.type === 'month').value;
+          const day = parts.find(p => p.type === 'day').value;
+          const dateStr = `${year}-${month}-${day}`;
+          
+          const adminLink = `https://karlsome.github.io/freyaAdmin2/maintenance/submissions/tickets?startDate=${dateStr}&endDate=${dateStr}`;
+          
+          const titleHeader = '⚠️ 【DEFECT TICKET / 不適合報告】';
+          let editedBody = `${titleHeader}\nチケット番号: #${report.ticketNo}\n工場: ${report.factory}\n設備: ${report.加工設備}\nステータス: NG\n日時: ${timestamp}`;
+          if (report.fieldType === 'number' && typeof report.min === 'number' && typeof report.max === 'number') {
+            editedBody += `\n期待値: ${report.min} - ${report.max} ${report.unit || ''}`;
+          }
+          if (report.answerValue !== undefined && report.answerValue !== null && report.answerValue !== '') {
+            let ans = report.answerValue;
+            if (Array.isArray(ans)) ans = ans.join(', ');
+            editedBody += `\n入力値: ${ans}`;
+          }
+          editedBody += `\n理由: ${report.reason}\n画像: ${report.imageURLs[0]}\n管理リンク: ${adminLink}`;
+          
+          await fetch(url, {
+            method: 'PUT',
+            headers: {
+              'X-ChatWorkToken': apiKey,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({ body: editedBody })
+          });
+        } catch (err) {
+          console.error('Failed to edit chatwork message', err);
+        }
+      }
+    }
+
     return res.status(201).json({
       success: true,
       insertedRecordCount: recordDocs.length,
+      updatedRecordCount: updateOps.length,
       insertedTicketCount: ngReportDocs.length,
-      recordIds: recordDocs.map((record) => record._id.toHexString()),
+      hasOpenTickets: ngReportDocs.some(r => r.ticketType === 'defect' || r.required === true || String(r.answerValue || '').trim().toUpperCase() === 'NG'),
+      recordIds: recordIdMap,
     });
   } catch (error) {
     console.error('Error submitting check forms:', error);
@@ -33023,6 +41057,3739 @@ app.get('/api/check-forms/verify-qr', async (req, res) => {
 
 console.log('📋 Check form tablet routes loaded');
 
+// ── Camera HLS proxy (MediaMTX) ───────────────────────────────────────────────
+// MediaMTX serves HLS with correct continuous timestamps. This proxy enforces
+const requireCamAuth = (req, res, next) => {
+  const user = process.env.CAM_USER;
+  const pass = process.env.CAM_PASS;
+  if (!user || !pass) return next();
+  const match = (req.headers.authorization || '').match(/^Basic\s+(.+)$/i);
+  if (!match) return res.status(401).set('WWW-Authenticate', 'Basic realm="camera"').json({ error: 'Authentication required' });
+  const decoded = Buffer.from(match[1], 'base64').toString();
+  const colonIdx = decoded.indexOf(':');
+  if (decoded.slice(0, colonIdx) !== user || decoded.slice(colonIdx + 1) !== pass) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+  next();
+};
+
+function camHeaders() {
+  const user = process.env.CAM_USER;
+  const pass = process.env.CAM_PASS;
+  if (!user || !pass) return {};
+  return { 'Authorization': 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64') };
+}
+
+async function camFetchMediaPlaylist(masterUrl) {
+  const r = await fetch(masterUrl, { headers: camHeaders() });
+  if (!r.ok) throw new Error(`MediaMTX playlist ${r.status}`);
+  const body = await r.text();
+  if (body.includes('#EXTINF') || body.includes('#EXT-X-TARGETDURATION')) {
+    return { url: masterUrl, body };
+  }
+  // Master playlist — follow the first variant
+  const variantLine = body.split('\n').find(l => l.trim() && !l.startsWith('#'));
+  if (!variantLine) throw new Error('No variant in master playlist');
+  const variantUrl = new URL(variantLine.trim(), masterUrl).toString();
+  const r2 = await fetch(variantUrl, { headers: camHeaders() });
+  if (!r2.ok) throw new Error(`MediaMTX variant ${r2.status}`);
+  return { url: variantUrl, body: await r2.text() };
+}
+
+const CAM_STREAMS = new Set(['tapo_cam', 'tapo_cam2', 'tapo_cam3']);
+const CAM_STREAMS2 = new Set(['kurachi_cam', 'kurachi_cam2']);
+
+app.get('/api/cam', requireCamAuth, async (req, res) => {
+  const stream = req.query.stream || 'tapo_cam';
+  let base, defaultStream, envName;
+  if (CAM_STREAMS.has(stream)) {
+    base = process.env.CAM_HLS_URL;
+    defaultStream = 'tapo_cam';
+    envName = 'CAM_HLS_URL';
+  } else if (CAM_STREAMS2.has(stream)) {
+    base = process.env.CAM_HLS_URL2;
+    defaultStream = 'kurachi_cam';
+    envName = 'CAM_HLS_URL2';
+  } else {
+    return res.status(400).json({ error: 'Unknown stream' });
+  }
+  if (!base) return res.status(404).json({ error: `${envName} not configured` });
+  // Swap the stream name in the base URL (e.g. tapo_cam → tapo_cam2)
+  const masterUrl = base.replace(defaultStream, stream);
+  try {
+    const { url: mediaUrl, body } = await camFetchMediaPlaylist(masterUrl);
+    const playlist = body.split('\n').map(line => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        const segUrl = new URL(trimmed, mediaUrl).toString();
+        return `/api/cam-seg?u=${encodeURIComponent(segUrl)}`;
+      }
+      return line;
+    }).join('\n');
+    res.setHeader('Content-Type', 'application/x-mpegURL');
+    res.setHeader('Cache-Control', 'no-cache, no-store');
+    res.send(playlist);
+  } catch (e) {
+    console.error('[cam]', e.message);
+    res.status(502).send('Camera unavailable');
+  }
+});
+
+app.get('/api/cam-seg', requireCamAuth, async (req, res) => {
+  const targetUrl = req.query.u ? decodeURIComponent(req.query.u) : null;
+  if (!targetUrl) return res.status(400).send('Missing segment URL');
+  try {
+    const sr = await fetch(targetUrl, { headers: camHeaders() });
+    if (!sr.ok) return res.status(sr.status).send('Segment unavailable');
+    res.setHeader('Content-Type', 'video/MP2T');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(Buffer.from(await sr.arrayBuffer()));
+  } catch (e) {
+    res.status(502).send('Segment unavailable');
+  }
+});
+
+// ── PCE File Upload (Google Drive) ───────────────────────────────────────────
+const { google } = require('googleapis');
+const { Readable } = require('stream');
+
+function _buildDriveClient() {
+  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  if (!clientEmail || !privateKey) throw new Error('Google Drive credentials not configured');
+  const auth = new google.auth.GoogleAuth({
+    credentials: { client_email: clientEmail, private_key: privateKey },
+    scopes: ['https://www.googleapis.com/auth/drive'],
+  });
+  return google.drive({ version: 'v3', auth });
+}
+
+app.get('/api/masterdb/pce-data', async (req, res) => {
+  try {
+    await client.connect();
+    const records = await client
+      .db('Sasaki_Coating_MasterDB')
+      .collection('masterDB')
+      .find({}, { projection: { 背番号: 1, 品番: 1, 品名: 1, imageURL: 1, _id: 0 } })
+      .toArray();
+    res.json(records);
+  } catch (error) {
+    console.error('❌ Error fetching PCE master data:', error);
+    res.status(500).json({ error: 'Failed to fetch master data', details: error.message });
+  }
+});
+
+app.post('/api/pce/upload', async (req, res) => {
+  try {
+    const { fileBase64, sebanggoList, machineSuffix, entries, overwrite } = req.body;
+    
+    let uploadEntries = [];
+    if (Array.isArray(entries) && entries.length) {
+      uploadEntries = entries;
+    } else if (Array.isArray(sebanggoList) && machineSuffix) {
+      uploadEntries = sebanggoList.map(code => ({ code, suffix: machineSuffix }));
+    } else {
+      return res.status(400).json({ error: 'fileBase64 and either entries or sebanggoList/machineSuffix are required' });
+    }
+    if (!fileBase64) return res.status(400).json({ error: 'fileBase64 is required' });
+
+    const folderId = process.env.GOOGLE_DRIVE_PCE_FOLDER_ID;
+    if (!folderId) {
+      return res.status(500).json({ error: 'GOOGLE_DRIVE_PCE_FOLDER_ID is not set in .env' });
+    }
+    const drive = _buildDriveClient();
+    const fileNames = uploadEntries.map((e) => `${e.code}${e.suffix ? '_' + e.suffix : ''}.pce`);
+
+    // Check for existing files in one query
+    const nameConditions = fileNames.map((n) => `name = '${n}'`).join(' or ');
+    const searchRes = await drive.files.list({
+      q: `(${nameConditions}) and '${folderId}' in parents and trashed = false`,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      fields: 'files(id, name)',
+    });
+    const conflictsFiles = searchRes.data.files || [];
+    const conflicts = conflictsFiles.map((f) => f.name);
+    
+    const authorizedToOverwrite = Array.isArray(overwrite) ? overwrite : (overwrite === true ? conflicts : []);
+    const unhandledConflicts = conflicts.filter(c => !authorizedToOverwrite.includes(c));
+
+    if (unhandledConflicts.length > 0) {
+      return res.status(409).json({ error: 'File already exists', conflicts: unhandledConflicts });
+    }
+
+    const fileBuffer = Buffer.from(fileBase64, 'base64');
+    const uploaded = [];
+    for (const entry of uploadEntries) {
+      const fileName = `${entry.code}${entry.suffix ? '_' + entry.suffix : ''}.pce`;
+      const existingFile = conflictsFiles.find((f) => f.name === fileName);
+      
+      // If file exists but is NOT authorized for overwrite, skip it.
+      if (existingFile && !authorizedToOverwrite.includes(fileName)) {
+        continue;
+      }
+      
+      const stream = new Readable();
+      stream.push(fileBuffer);
+      stream.push(null);
+
+      let response;
+      if (existingFile) {
+        response = await drive.files.update({
+          fileId: existingFile.id,
+          media: { mimeType: 'application/octet-stream', body: stream },
+          supportsAllDrives: true,
+          fields: 'id,name',
+        });
+      } else {
+        response = await drive.files.create({
+          requestBody: { name: fileName, parents: [folderId] },
+          media: { mimeType: 'application/octet-stream', body: stream },
+          supportsAllDrives: true,
+          fields: 'id,name',
+        });
+      }
+      uploaded.push({ code: entry.code, name: response.data.name, id: response.data.id });
+    }
+    res.json({ success: true, files: uploaded });
+  } catch (error) {
+    const googleDetails = error.response?.data || error.errors || null;
+    console.error('❌ Error uploading PCE file:', error.message, googleDetails || '');
+    res.status(500).json({
+      error: 'Failed to upload PCE file',
+      details: error.message,
+      google: googleDetails,
+    });
+  }
+});
+
+// ── Prototype (試作) Registration (Google Drive + MongoDB) ───────────────────
+const _shisakuSubfolderCache = new Map();
+
+async function _getShisakuSubfolderId(drive, subfolderName) {
+  if (_shisakuSubfolderCache.has(subfolderName)) return _shisakuSubfolderCache.get(subfolderName);
+
+  const parentFolderId = process.env.GOOGLE_DRIVE_PROTOTYPE_FOLDER_ID;
+  if (!parentFolderId) throw new Error('GOOGLE_DRIVE_PROTOTYPE_FOLDER_ID is not set in .env');
+
+  const searchRes = await drive.files.list({
+    q: `'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${subfolderName}' and trashed = false`,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    fields: 'files(id, name)',
+  });
+
+  const folder = (searchRes.data.files || [])[0];
+  if (!folder) throw new Error(`Drive subfolder "${subfolderName}" not found in prototype folder`);
+
+  _shisakuSubfolderCache.set(subfolderName, folder.id);
+  return folder.id;
+}
+
+async function _uploadShisakuFile(drive, subfolderName, fileName, base64, mimeType) {
+  const folderId = await _getShisakuSubfolderId(drive, subfolderName);
+  const fileBuffer = Buffer.from(base64, 'base64');
+  const stream = new Readable();
+  stream.push(fileBuffer);
+  stream.push(null);
+  const response = await drive.files.create({
+    requestBody: { name: fileName, parents: [folderId] },
+    media: { mimeType, body: stream },
+    supportsAllDrives: true,
+    fields: 'id, name, webViewLink',
+  });
+  return { id: response.data.id, name: response.data.name, link: response.data.webViewLink };
+}
+
+const _shisakuNestedFolderCache = new Map();
+
+async function _getOrCreateShisakuSubfolder(drive, parentFolderId, subfolderName) {
+  const cacheKey = `${parentFolderId}/${subfolderName}`;
+  if (_shisakuNestedFolderCache.has(cacheKey)) return _shisakuNestedFolderCache.get(cacheKey);
+
+  const searchRes = await drive.files.list({
+    q: `'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${subfolderName}' and trashed = false`,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    fields: 'files(id, name)',
+  });
+
+  let folder = (searchRes.data.files || [])[0];
+
+  if (!folder) {
+    const createRes = await drive.files.create({
+      requestBody: {
+        name: subfolderName,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentFolderId],
+      },
+      supportsAllDrives: true,
+      fields: 'id, name',
+    });
+    folder = createRes.data;
+  }
+
+  _shisakuNestedFolderCache.set(cacheKey, folder.id);
+  return folder.id;
+}
+
+async function _uploadShisakuPdfPreviewImage(shisakuNo, fileName, base64) {
+  const fileBuffer = Buffer.from(base64, 'base64');
+  const bucketName = 'imagestorage-e7ed3.firebasestorage.app';
+  const destPath = `shisakuJpg/${shisakuNo}/${fileName}`;
+  const bucket = admin.storage().bucket(bucketName);
+  const file = bucket.file(destPath);
+  
+  await file.save(fileBuffer, {
+    metadata: { 
+      contentType: 'image/jpeg',
+      metadata: { firebaseStorageDownloadTokens: 'masterDBToken69' }
+    }
+  });
+  
+  try {
+    await file.makePublic();
+  } catch (e) {
+    // Ignore error if bucket has uniform bucket-level access or is already public
+  }
+  
+  const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(destPath)}?alt=media&token=masterDBToken69`;
+  
+  return { id: destPath, name: fileName, link: publicUrl };
+}
+
+// Streams a Drive-hosted image (e.g. the PDF JPG preview) so it can be used directly as an <img> src.
+app.get('/api/shisaku/image/:fileId', async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    if (!fileId) return res.status(400).json({ error: 'fileId is required' });
+
+    const drive = _buildDriveClient();
+    const meta = await drive.files.get({ fileId, fields: 'mimeType, name', supportsAllDrives: true });
+    const fileRes = await drive.files.get(
+      { fileId, alt: 'media', supportsAllDrives: true },
+      { responseType: 'stream' }
+    );
+
+    res.setHeader('Content-Type', meta.data.mimeType || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    fileRes.data.pipe(res);
+  } catch (error) {
+    console.error('❌ Error streaming shisaku image:', error.message);
+    res.status(500).json({ error: 'Failed to load image', details: error.message });
+  }
+});
+
+// Older records stored Drive's webViewLink ("/file/d/<id>/view...") for pdfjpglink, which isn't a
+// renderable image URL. Rewrite those to the streaming proxy so previews work for existing records too.
+function _normalizeShisakuJpgLink(link, baseUrl) {
+  if (!link) return link;
+  const match = String(link).match(/\/file\/d\/([^/]+)/);
+  return match ? `${baseUrl}/api/shisaku/image/${match[1]}` : link;
+}
+
+app.get('/api/shisaku/list', async (req, res) => {
+  try {
+    await client.connect();
+    const records = await client
+      .db('Sasaki_Coating_MasterDB')
+      .collection('shisakuDB')
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    res.json(records.map((r) => ({ ...r, pdfjpglink: _normalizeShisakuJpgLink(r.pdfjpglink, baseUrl) })));
+  } catch (error) {
+    console.error('❌ Error fetching shisakuDB records:', error);
+    res.status(500).json({ error: 'Failed to fetch prototype records', details: error.message });
+  }
+});
+
+// Prototype (試作) Endpoints
+
+app.get('/api/shisaku', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 10);
+    const skip = (page - 1) * limit;
+
+    const sortColumn = req.query.sortColumn || 'createdAt';
+    const sortDirection = parseInt(req.query.sortDirection) || -1;
+
+    const sort = { [sortColumn]: sortDirection };
+
+    await client.connect();
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuDB');
+
+    const totalCount = await collection.countDocuments();
+    const rows = await collection.find({}).sort(sort).skip(skip).limit(limit).toArray();
+
+    res.json({
+      rows,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching prototype list:', error.message);
+    res.status(500).json({ error: 'Failed to fetch prototype list' });
+  }
+});
+
+app.post('/api/shisaku/register', async (req, res) => {
+  try {
+    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, cybozuLink, dxfFiles = [], pdfFiles = [], pdfImageFiles = [], pceFiles = [], colors = [], materials = [], boxTypes = [] } = req.body;
+
+    if (!shisakuNo || !deadline || !eventName || !modelName || !customerName || !registeredBy || !cybozuLink) {
+      return res.status(400).json({ error: 'shisakuNo, deadline, eventName, modelName, customerName, registeredBy, and cybozuLink are required' });
+    }
+
+    const drive = _buildDriveClient();
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+
+    const [dxfResults, pdfResults, pdfImageResults, pceResults] = await Promise.all([
+      Promise.all(dxfFiles.map(f => _uploadShisakuFile(drive, 'dxf', f.name, f.base64, 'application/octet-stream'))),
+      Promise.all(pdfFiles.map(f => _uploadShisakuFile(drive, 'pdf', f.name, f.base64, 'application/pdf'))),
+      Promise.all(pdfImageFiles.map(f => _uploadShisakuPdfPreviewImage(shisakuNo, f.name, f.base64))),
+      Promise.all(pceFiles.map(f => _uploadShisakuFile(drive, 'pce', f.name, f.base64, 'application/octet-stream'))),
+    ]);
+
+    const document = {
+      shisakuNo: String(shisakuNo).trim(),
+      deadline,
+      dxfLinks: dxfResults.map((r) => ({ name: r.name, link: r.link })),
+      pdfLinks: pdfResults.map((r, i) => ({ 
+        name: r.name, 
+        link: r.link,
+        jpgLink: pdfImageResults[i] ? pdfImageResults[i].link : null
+      })),
+      pdfJpgLinks: pdfImageResults.map((r) => ({ name: r.name, link: r.link })),
+      pcelinks: pceResults.map((r) => ({ name: r.name, link: r.link })),
+      eventName: String(eventName).trim(),
+      modelName: String(modelName).trim(),
+      customerName: String(customerName).trim(),
+      registeredBy: String(registeredBy).trim(),
+      colors: Array.isArray(colors) ? colors.map(String) : [],
+      materials: Array.isArray(materials) ? materials.map(String) : [],
+      boxTypes: Array.isArray(boxTypes) ? boxTypes.map(String) : [],
+      ...(req.body.createdBy ? { createdBy: String(req.body.createdBy).trim() } : {}),
+      cybozuLink: String(cybozuLink).trim(),
+      status: "pending",
+      createdAt: new Date(),
+    };
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').insertOne(document);
+
+    res.status(201).json({ success: true, insertedId: result.insertedId, document });
+  } catch (error) {
+    const googleDetails = error.response?.data || error.errors || null;
+    console.error('❌ Error registering prototype (試作):', error.message, googleDetails || '');
+    res.status(500).json({
+      error: 'Failed to register prototype',
+      details: error.message,
+      google: googleDetails,
+    });
+  }
+});
+
+app.post('/api/shisaku/update/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid ID' });
+
+    const { shisakuNo, deadline, eventName, modelName, customerName, registeredBy, cybozuLink, dxfFiles = [], pdfFiles = [], pdfImageFiles = [], pceFiles = [], colors = [], materials = [], boxTypes = [] } = req.body;
+    const drive = _buildDriveClient();
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+
+    async function processGenericFiles(files, type, mimeType) {
+      if (!Array.isArray(files)) return [];
+      return Promise.all(files.map(async (f) => {
+        if (f.link) return { name: f.name, link: f.link }; // Already uploaded
+        if (f.base64) {
+          const r = await _uploadShisakuFile(drive, type, f.name, f.base64, mimeType);
+          return { name: r.name, link: r.link };
+        }
+        return null;
+      })).then(r => r.filter(Boolean));
+    }
+
+    async function processPdfImages(files, shisakuNoStr) {
+      if (!Array.isArray(files)) return [];
+      return Promise.all(files.map(async (f) => {
+        if (f.link) return { name: f.name, link: f.link };
+        if (f.base64) {
+          const r = await _uploadShisakuPdfPreviewImage(shisakuNoStr, f.name, f.base64);
+          return { name: r.name, link: r.link };
+        }
+        return null;
+      })).then(r => r.filter(Boolean));
+    }
+
+    const [dxfLinks, pdfLinks, pdfJpgLinks, pcelinks] = await Promise.all([
+      processGenericFiles(dxfFiles, 'dxf', 'application/octet-stream'),
+      processGenericFiles(pdfFiles, 'pdf', 'application/pdf'),
+      processPdfImages(pdfImageFiles, String(shisakuNo).trim()),
+      processGenericFiles(pceFiles, 'pce', 'application/octet-stream')
+    ]);
+
+    const updateDoc = {
+      shisakuNo: String(shisakuNo).trim(),
+      deadline,
+      eventName: String(eventName).trim(),
+      modelName: String(modelName).trim(),
+      customerName: String(customerName).trim(),
+      registeredBy: String(registeredBy).trim(),
+      cybozuLink: String(cybozuLink).trim(),
+      colors: Array.isArray(colors) ? colors.map(String) : [],
+      materials: Array.isArray(materials) ? materials.map(String) : [],
+      boxTypes: Array.isArray(boxTypes) ? boxTypes.map(String) : [],
+      dxfLinks,
+      pdfLinks: pdfLinks.map((r, i) => ({
+        name: r.name,
+        link: r.link,
+        jpgLink: pdfJpgLinks[i] ? pdfJpgLinks[i].link : null
+      })),
+      pdfJpgLinks,
+      pcelinks,
+      updatedAt: new Date(),
+    };
+
+    await client.connect();
+    await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateDoc }
+    );
+
+    res.json({ success: true, document: updateDoc });
+  } catch (error) {
+    const googleDetails = error.response?.data || error.errors || null;
+    console.error('❌ Error updating prototype (試作):', error.message, googleDetails || '');
+    res.status(500).json({
+      error: 'Failed to update prototype',
+      details: error.message,
+      google: googleDetails,
+    });
+  }
+});
+
+// ShisakuTablet: Submit All Data (Images to Firebase, Text to MongoDB)
+app.post('/api/shisakuTablet/submit', async (req, res) => {
+  try {
+    const { prototypeId, shisakuNo, workerName, requests } = req.body;
+
+    if (!requests || Object.keys(requests).length === 0) {
+      return res.status(400).json({ error: 'No request data provided' });
+    }
+
+    const bucket = admin.storage().bucket();
+    const downloadToken = 'masterDBToken69';
+    const formattedRequests = {};
+
+    // Process each request
+    for (const [reqName, reqData] of Object.entries(requests)) {
+      const formattedData = {
+        Time_start: reqData.Time_start,
+        Time_end: reqData.Time_end,
+        cycleTime: reqData.cycleTime,
+        quantity: reqData.quantity,
+        Comment: reqData.Comment,
+        issue: {},
+        dxf: reqData.dxf || { name: "", link: "" },
+        pce: reqData.pce || { name: "", link: "" },
+        pdf: reqData.pdf || { name: "", link: "", jpgLink: "" },
+      };
+
+      let issueIndex = 0;
+
+      // Process images if any
+      if (reqData.images && Array.isArray(reqData.images)) {
+        for (let i = 0; i < reqData.images.length; i++) {
+          const img = reqData.images[i];
+          if (!img.base64) continue;
+          
+          let imageTypeSlug = img.type.replace(/\s+/g, '');
+          const fileName = `${reqName}_${imageTypeSlug}_${i}.jpg`;
+          const filePath = `shisaku/${shisakuNo}/${fileName}`;
+          
+          // Handle base64 prefix
+          const base64Data = img.base64.replace(/^data:image\/\w+;base64,/, "");
+          const buffer = Buffer.from(base64Data, 'base64');
+
+          const file = bucket.file(filePath);
+          await file.save(buffer, {
+            metadata: {
+              contentType: 'image/jpeg',
+              metadata: { firebaseStorageDownloadTokens: downloadToken }
+            }
+          });
+
+          // Make public if needed, or rely on token
+          const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+          if (img.type === 'MaterialSide') formattedData.materialSidePhoto = publicUrl;
+          else if (img.type === 'ReleasePaper') formattedData.releasePaperSidePhoto = publicUrl;
+          else if (img.type === 'MaterialLabel') formattedData.materialLabelPhoto = publicUrl;
+          else {
+            formattedData.issue[issueIndex.toString()] = publicUrl;
+            issueIndex++;
+          }
+        }
+      }
+
+      formattedRequests[reqName] = formattedData;
+    }
+
+    // Save to MongoDB
+    await client.connect();
+    const document = {
+      createdAt: new Date(),
+      createdBy: workerName,
+      Date: new Date().toISOString().split('T')[0],
+      shisakuNo: shisakuNo,
+      shisakudb_id: prototypeId,
+      requests: formattedRequests
+    };
+
+    const insertResult = await client.db('submittedDB').collection('shisakuSubmittedDB').insertOne(document);
+    const submittedId = insertResult.insertedId;
+    
+    // Update individual request documents with completedBy and completedDate
+    for (const reqName in req.body.requests) {
+       const reqData = req.body.requests[reqName];
+       if (reqData.reqId) {
+           await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').updateOne(
+               { _id: new ObjectId(reqData.reqId) },
+               { $set: { 
+                   completedBy: workerName, 
+                   completedDate: new Date(),
+                   shisakuSubmittedID: submittedId
+               } }
+           );
+       }
+    }
+
+    // Check if all requests completed
+    if (req.body.isAllCompleted && prototypeId) {
+       await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+           { _id: new ObjectId(prototypeId) },
+           { $set: { 
+               status: 'completed', 
+               updatedAt: new Date(),
+               completedBy: workerName,
+               completedDate: new Date(),
+               shisakuSubmittedID: submittedId
+           } }
+       );
+    }
+
+    res.json({ success: true, message: 'Data submitted successfully' });
+  } catch (error) {
+    console.error('❌ Error submitting shisakuTablet data:', error);
+    res.status(500).json({ error: 'Failed to submit data', details: error.message });
+  }
+});
+
+
+app.post('/api/shisaku/update-status/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid ID' });
+    
+    const { status } = req.body;
+    if (!status) return res.status(400).json({ error: 'Status is required' });
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status, updatedAt: new Date() } }
+    );
+    
+    res.json({ success: true, updatedCount: result.modifiedCount });
+  } catch (error) {
+    console.error('❌ Error updating prototype status:', error.message);
+    res.status(500).json({ error: 'Failed to update prototype status' });
+  }
+});
+
+app.get('/api/shisaku/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid shisaku ID' });
+    }
+    
+    await client.connect();
+    const document = await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').findOne({ _id: new ObjectId(id) });
+    
+    if (!document) {
+      return res.status(404).json({ error: 'Prototype record not found' });
+    }
+    
+    res.json(document);
+  } catch (error) {
+    console.error('❌ Error fetching prototype by id:', error.message);
+    res.status(500).json({ error: 'Failed to fetch prototype', details: error.message });
+  }
+});
+
+app.delete('/api/shisaku/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid prototype id' });
+    }
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Prototype record not found' });
+    }
+
+    res.json({ success: true, deletedId: id });
+  } catch (error) {
+    console.error('❌ Error deleting prototype (試作):', error.message);
+    res.status(500).json({ error: 'Failed to delete prototype', details: error.message });
+  }
+});
+
+app.get('/api/shisaku-request/available', async (req, res) => {
+  try {
+    await client.connect();
+    const shisakuColl = client.db('Sasaki_Coating_MasterDB').collection('shisakuDB');
+    
+    const available = await shisakuColl.aggregate([
+      {
+        $lookup: {
+          from: 'shisakuRequestDB',
+          let: { sId: { $toString: '$_id' } },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$shisakudb_id', '$$sId'] } } },
+            { $limit: 1 }
+          ],
+          as: 'requests'
+        }
+      },
+      {
+        $match: {
+          requests: { $size: 0 }
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          shisakuNo: 1,
+          eventName: 1,
+          modelName: 1
+        }
+      },
+      { $sort: { shisakuNo: 1 } }
+    ]).toArray();
+
+    res.json(available);
+  } catch (error) {
+    console.error('❌ Error fetching available shisaku for requests:', error);
+    res.status(500).json({ error: 'Failed to fetch available prototypes', details: error.message });
+  }
+});
+
+
+app.get('/api/shisaku-request/list', async (req, res) => {
+  try {
+    await client.connect();
+    
+    const query = {};
+    if (req.query.shisakudb_id && ObjectId.isValid(req.query.shisakudb_id)) {
+      query.shisakudb_id = new ObjectId(req.query.shisakudb_id);
+    }
+    if (req.query.machine) {
+      query.name = req.query.machine;
+    }
+    if (req.query.status) {
+      query.status = req.query.status;
+    }
+    
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 30);
+    const skip = (page - 1) * limit;
+
+    const sortColumn = req.query.sortColumn || 'createdAt';
+    const sortDirection = parseInt(req.query.sortDirection) || -1;
+    const sort = { [sortColumn]: sortDirection };
+
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB');
+    const totalCount = await collection.countDocuments(query);
+
+    const records = await collection
+      .aggregate([
+        { $match: query },
+        {
+          $lookup: {
+            from: "shisakuDB",
+            localField: "shisakudb_id",
+            foreignField: "_id",
+            as: "parentShisaku"
+          }
+        },
+        {
+          $addFields: {
+            shisakuNo: { $arrayElemAt: ["$parentShisaku.shisakuNo", 0] },
+            parentStatus: { $arrayElemAt: ["$parentShisaku.status", 0] }
+          }
+        },
+        { $project: { parentShisaku: 0 } },
+        { $sort: sort },
+        { $skip: skip },
+        { $limit: limit }
+      ])
+      .toArray();
+
+    res.json({
+      rows: records,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching shisakuRequestDB records:', error);
+    res.status(500).json({ error: 'Failed to fetch prototype request records', details: error.message });
+  }
+});
+
+app.get('/api/shisaku-request/grouped-list', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 30);
+    const skip = (page - 1) * limit;
+
+    const sortColumn = req.query.sortColumn || 'latestDate';
+    const sortDirection = parseInt(req.query.sortDirection) || -1;
+    const sort = { [sortColumn]: sortDirection };
+
+    await client.connect();
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB');
+
+    // Filter by machine name if provided
+    const matchStage = [];
+    if (req.query.machine) {
+      matchStage.push({ $match: { name: req.query.machine } });
+    }
+
+    // Grouping by shisakudb_id
+    const pipeline = [
+      ...matchStage,
+      {
+        $group: {
+          _id: "$shisakudb_id",
+          totalRequests: { $sum: 1 },
+          latestDate: { $max: "$createdAt" }
+        }
+      },
+      {
+        $lookup: {
+          from: "shisakuDB",
+          localField: "_id",
+          foreignField: "_id",
+          as: "parentShisaku"
+        }
+      },
+      {
+        $addFields: {
+          shisakuNo: { $arrayElemAt: ["$parentShisaku.shisakuNo", 0] },
+          parentStatus: { $ifNull: [{ $arrayElemAt: ["$parentShisaku.status", 0] }, "pending"] },
+          shisakudb_id: "$_id"
+        }
+      },
+      { $project: { parentShisaku: 0, _id: 0 } }
+    ];
+
+    if (req.query.status) {
+      pipeline.push({ $match: { parentStatus: req.query.status } });
+    }
+
+    const countPipeline = [...pipeline, { $count: "total" }];
+    const countResult = await collection.aggregate(countPipeline).toArray();
+    const totalCount = countResult.length > 0 ? countResult[0].total : 0;
+
+    const records = await collection.aggregate([
+      ...pipeline,
+      { $sort: sort },
+      { $skip: skip },
+      { $limit: limit }
+    ]).toArray();
+
+    res.json({
+      rows: records,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching grouped shisakuRequestDB records:', error);
+    res.status(500).json({ error: 'Failed to fetch grouped prototype request records', details: error.message });
+  }
+});
+
+app.post('/api/shisaku-request/register', async (req, res) => {
+  try {
+    const { name, dxf, pdf, pce, okuriPitch, pcPerCycle, color, material, boxType, quantity, shisakudb_id, orderNumber } = req.body;
+
+    if (!name || !pce || !okuriPitch || !color || !material || !boxType || !quantity) {
+      return res.status(400).json({ error: 'name, pce, okuriPitch, color, material, boxType, and quantity are required' });
+    }
+
+    if (!pce.name || !pce.link) {
+      return res.status(400).json({ error: 'pce must contain name and link' });
+    }
+
+    const document = {
+      name: String(name).trim(),
+      dxf: dxf && dxf.name && dxf.link ? { name: String(dxf.name).trim(), link: String(dxf.link).trim() } : null,
+      pdf: pdf && pdf.name && pdf.link ? { 
+        name: String(pdf.name).trim(), 
+        link: String(pdf.link).trim(),
+        jpgLink: pdf.jpgLink ? String(pdf.jpgLink).trim() : null
+      } : null,
+      pce: { name: String(pce.name).trim(), link: String(pce.link).trim() },
+      okuriPitch: Number(okuriPitch),
+      pcPerCycle: Number(pcPerCycle),
+      color: String(color).trim(),
+      material: String(material).trim(),
+      boxType: String(boxType).trim(),
+      quantity: Number(quantity),
+      ...(shisakudb_id && ObjectId.isValid(shisakudb_id) && { shisakudb_id: new ObjectId(shisakudb_id) }),
+      status: "pending",
+      createdAt: new Date(),
+      ...(req.body.createdBy ? { createdBy: String(req.body.createdBy).trim() } : {}),
+      ...(orderNumber !== undefined ? { orderNumber: Number(orderNumber) } : {}),
+    };
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').insertOne(document);
+
+    res.status(201).json({ success: true, insertedId: result.insertedId, document });
+  } catch (error) {
+    console.error('❌ Error registering prototype request:', error.message);
+    res.status(500).json({ error: 'Failed to register prototype request', details: error.message });
+  }
+});
+app.post('/api/shisaku-request/update/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
+    
+    const { name, dxf, pdf, pce, okuriPitch, pcPerCycle, color, material, boxType, quantity, orderNumber } = req.body;
+    
+    const updateDoc = {};
+    if (name !== undefined) updateDoc.name = String(name).trim();
+    if (dxf !== undefined) updateDoc.dxf = dxf && dxf.name && dxf.link ? { name: String(dxf.name).trim(), link: String(dxf.link).trim() } : null;
+    if (pdf !== undefined) updateDoc.pdf = pdf && pdf.name && pdf.link ? { name: String(pdf.name).trim(), link: String(pdf.link).trim(), jpgLink: pdf.jpgLink ? String(pdf.jpgLink).trim() : null } : null;
+    if (pce !== undefined) updateDoc.pce = pce && pce.name && pce.link ? { name: String(pce.name).trim(), link: String(pce.link).trim() } : null;
+    if (okuriPitch !== undefined) updateDoc.okuriPitch = Number(okuriPitch);
+    if (pcPerCycle !== undefined) updateDoc.pcPerCycle = Number(pcPerCycle);
+    if (color !== undefined) updateDoc.color = String(color).trim();
+    if (material !== undefined) updateDoc.material = String(material).trim();
+    if (boxType !== undefined) updateDoc.boxType = String(boxType).trim();
+    if (quantity !== undefined) updateDoc.quantity = Number(quantity);
+    if (req.body.status !== undefined) updateDoc.status = String(req.body.status).trim();
+    if (orderNumber !== undefined) updateDoc.orderNumber = Number(orderNumber);
+    
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateDoc }
+    );
+    
+    // Status Synchronization logic
+    if (updateDoc.status !== undefined) {
+      const updatedReq = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').findOne({ _id: new ObjectId(id) });
+      if (updatedReq && updatedReq.shisakudb_id) {
+        const siblingRequests = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').find({ shisakudb_id: updatedReq.shisakudb_id }).toArray();
+        
+        if (siblingRequests.length > 0) {
+          let allCompleted = true;
+          let anyInProgress = false;
+
+          for (const req of siblingRequests) {
+            const reqStatus = req.status || 'pending';
+            if (reqStatus !== 'completed') {
+              allCompleted = false;
+            }
+            if (reqStatus === 'in-progress') {
+              anyInProgress = true;
+            }
+          }
+
+          let newParentStatus = 'pending';
+          if (allCompleted) {
+            newParentStatus = 'completed';
+          } else if (anyInProgress) {
+            newParentStatus = 'in-progress';
+          }
+
+          await client.db('Sasaki_Coating_MasterDB').collection('shisakuDB').updateOne(
+            { _id: updatedReq.shisakudb_id },
+            { $set: { status: newParentStatus, updatedAt: new Date() } }
+          );
+        }
+      }
+    }
+    
+    res.json({ success: true, updatedCount: result.modifiedCount });
+  } catch (error) {
+    console.error('❌ Error updating prototype request:', error.message);
+    res.status(500).json({ error: 'Failed to update prototype request' });
+  }
+});
+app.get('/api/shisaku-submitted/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid submitted id' });
+    }
+
+    await client.connect();
+    const doc = await client.db('submittedDB').collection('shisakuSubmittedDB').findOne({ _id: new ObjectId(id) });
+    if (!doc) {
+      return res.status(404).json({ error: 'Submitted document not found' });
+    }
+
+    res.json(doc);
+  } catch (error) {
+    console.error('❌ Error fetching submitted document:', error.message);
+    res.status(500).json({ error: 'Failed to fetch submitted document' });
+  }
+});
+
+app.delete('/api/shisaku-request/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid prototype request id' });
+    }
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Prototype request record not found' });
+    }
+
+    res.json({ success: true, deletedId: id });
+  } catch (error) {
+    console.error('❌ Error deleting prototype request:', error.message);
+    res.status(500).json({ error: 'Failed to delete prototype request', details: error.message });
+  }
+});
+
+app.post('/api/shisaku-request/bulk-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids array is required' });
+    
+    const objectIds = ids.filter(id => ObjectId.isValid(id)).map(id => new ObjectId(id));
+    if (objectIds.length === 0) return res.status(400).json({ error: 'No valid ids provided' });
+
+    await client.connect();
+    const result = await client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB').deleteMany({ _id: { $in: objectIds } });
+
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (error) {
+    console.error('❌ Error in bulk deleting prototype requests:', error.message);
+    res.status(500).json({ error: 'Failed to bulk delete prototype requests', details: error.message });
+  }
+});
+
+app.post('/api/shisaku-request/reorder', async (req, res) => {
+  try {
+    const { updates } = req.body;
+    if (!Array.isArray(updates) || updates.length === 0) return res.status(400).json({ error: 'updates array is required' });
+
+    await client.connect();
+    const collection = client.db('Sasaki_Coating_MasterDB').collection('shisakuRequestDB');
+    
+    const bulkOps = updates.filter(u => u.id && ObjectId.isValid(u.id) && u.orderNumber !== undefined).map(u => ({
+      updateOne: {
+        filter: { _id: new ObjectId(u.id) },
+        update: { $set: { orderNumber: Number(u.orderNumber) } }
+      }
+    }));
+
+    if (bulkOps.length === 0) return res.status(400).json({ error: 'No valid updates provided' });
+
+    const result = await collection.bulkWrite(bulkOps);
+
+    res.json({ success: true, updatedCount: result.modifiedCount });
+  } catch (error) {
+    console.error('❌ Error in reordering prototype requests:', error.message);
+    res.status(500).json({ error: 'Failed to reorder prototype requests', details: error.message });
+  }
+});
+
+
+app.post("/api/analytics/stop-calls", async (req, res) => {
+  try {
+    const { dateFrom, dateTo, factory, page = 1, limit = 20, sortColumn, sortDirection } = req.body;
+    
+    const matchStage = { "StopCall.count": { $gt: 0 } };
+    if (dateFrom && dateTo) {
+      matchStage.Date = { $gte: dateFrom, $lte: dateTo };
+    } else if (dateFrom) {
+      matchStage.Date = dateFrom;
+    }
+    if (factory) matchStage["工場"] = factory;
+
+    const safeLimit = Math.max(1, Number(limit) || 20);
+    const safePage = Math.max(1, Number(page) || 1);
+    const skip = (safePage - 1) * safeLimit;
+
+    await client.connect();
+    const collection = client.db("submittedDB").collection("pressDB");
+
+    const projection = {
+      "品番": 1, "背番号": 1, "設備": 1, "工場": 1, "Worker_Name": 1,
+      "Date": 1, "Time_start": 1, "Time_end": 1,
+      "Process_Quantity": 1, "Total": 1, "Total_NG": 1,
+      "Total_Work_Hours": 1, "Cycle_Time": 1,
+      "StopCall": 1
+    };
+
+    let sortStage = { Date: -1, "StopCall.records.calledAt": -1 };
+    if (sortColumn) {
+      const dir = sortDirection === "asc" ? 1 : -1;
+      const colMap = {
+        "date": "Date",
+        "工場": "工場",
+        "設備": "設備",
+        "背番号": "背番号",
+        "品番": "品番",
+        "Worker_Name": "Worker_Name",
+        "leaderName": "StopCall.records.leaderName",
+        "calledAt": "StopCall.records.calledAt",
+        "arrivedAt": "StopCall.records.arrivedAt",
+        "waitSeconds": "StopCall.records.waitSeconds"
+      };
+      if (colMap[sortColumn]) {
+        sortStage = { [colMap[sortColumn]]: dir };
+        if (sortColumn !== "calledAt") sortStage["StopCall.records.calledAt"] = -1;
+      }
+    }
+
+    const aggregationPipeline = [
+      { $match: matchStage },
+      { $unwind: "$StopCall.records" },
+      { $sort: sortStage },
+      // Wrap it back in an array so the frontend's flattenStopCalls works unmodified
+      { $addFields: { "StopCall.records": ["$StopCall.records"] } }
+    ];
+
+    const [data, countResult, summaryData] = await Promise.all([
+      collection.aggregate([...aggregationPipeline, { $skip: skip }, { $limit: safeLimit }, { $project: projection }]).toArray(),
+      collection.aggregate([{ $match: matchStage }, { $unwind: "$StopCall.records" }, { $count: "count" }]).toArray(),
+      collection.aggregate([...aggregationPipeline, { $project: projection }]).toArray()
+    ]);
+
+    const totalItems = countResult[0]?.count || 0;
+    const totalPages = totalItems > 0 ? Math.ceil(totalItems / safeLimit) : 0;
+
+    res.json({
+      data,
+      summaryData,
+      pagination: {
+        currentPage: totalPages > 0 ? Math.min(safePage, totalPages) : 1,
+        totalPages,
+        totalItems,
+        itemsPerPage: safeLimit
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error in /api/analytics/stop-calls:", error);
+    res.status(500).json({ error: "Failed to fetch stop call analytics" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// First Factory Daily Schedule API (for firstKojoNippo Tablet & Nippo)
+// ---------------------------------------------------------------------------
+app.get('/api/production/schedule/daily', async (req, res) => {
+  try {
+    const { month, date } = req.query;
+    if (!month || date === undefined) {
+      return res.status(400).json({ error: 'month and date are required' });
+    }
+    const submittedDb = client.db('submittedDB');
+    const scheduleCollection = submittedDb.collection('firstFactorySchedule');
+    const schedule = await scheduleCollection.findOne({ type: 'dailySchedule', month, date: Number(date) });
+
+    if (schedule && Array.isArray(schedule.scheduleOrder) && schedule.scheduleOrder.length > 0) {
+      const hinbans = [...new Set(schedule.scheduleOrder.map(i => i.hinban).filter(Boolean))];
+      if (hinbans.length > 0) {
+        const masterDb = client.db('Sasaki_Coating_MasterDB');
+        const masterCollection = masterDb.collection('materialMasterDB3');
+        const masterDocs = await masterCollection.find({ "品番": { $in: hinbans } }).toArray();
+
+        const masterMap = {};
+        masterDocs.forEach(doc => {
+          let kizai = '';
+          let color = '';
+          let shori = '';
+          let habanaga = '';
+          if (doc['品番構造'] && Array.isArray(doc['品番構造'].segments)) {
+            const kizaiSeg = doc['品番構造'].segments.find(s => s.segment === '基材コード');
+            if (kizaiSeg) kizai = kizaiSeg.name || kizaiSeg['得意先'] || kizaiSeg['入出荷先'] || '';
+
+            const colorSeg = doc['品番構造'].segments.find(s => s.segment === '色コード');
+            if (colorSeg) color = colorSeg.name || colorSeg['得意先'] || colorSeg['入出荷先'] || '';
+
+            const shoriSeg = doc['品番構造'].segments.find(s => s.segment === '処理コード');
+            if (shoriSeg) shori = shoriSeg.name || shoriSeg['得意先'] || shoriSeg['入出荷先'] || '';
+
+            const habanagaSeg = doc['品番構造'].segments.find(s => s.segment === '幅長コード');
+            if (habanagaSeg) habanaga = habanagaSeg.name || habanagaSeg['得意先'] || habanagaSeg['入出荷先'] || '';
+          }
+
+          const shippingDest = doc['品目マスタ']?.['出荷先名'] || doc['品目マスタ']?.['入出荷先名'] || doc['品目マスタ']?.['得意先名'] || '';
+          const labelHinban = doc['品目マスタ']?.['ラベル品番'] || '';
+          const okyakuHinban = doc['品目マスタ']?.['お客様品番'] || doc['お客様品番'] || '';
+          const imageURL = doc['品目マスタ']?.['imageURL'] || doc['imageURL'] || '';
+
+          masterMap[doc['品番']] = {
+            hinmei: doc['品目マスタ']?.['品名'] || '',
+            kizai,
+            color,
+            shori,
+            habanaga,
+            shippingDest,
+            labelHinban,
+            okyakuHinban,
+            imageURL,
+            zuban: doc['品目マスタ']?.['図番'] || ''
+          };
+        });
+
+        schedule.scheduleOrder = schedule.scheduleOrder.map(item => {
+          if (item.type === 'hinban' && item.hinban) {
+            const info = masterMap[item.hinban] || {};
+            return {
+              ...item,
+              kizai: info.kizai || '',
+              color: info.color || '',
+              shori: info.shori || '',
+              habanaga: info.habanaga || '',
+              shippingDest: info.shippingDest || '',
+              labelHinban: info.labelHinban || '',
+              okyakuHinban: info.okyakuHinban || '',
+              imageURL: info.imageURL || '',
+              hinmei: info.hinmei || '',
+              zuban: info.zuban || ''
+            };
+          }
+          return item;
+        });
+      }
+    }
+
+    res.json({ success: true, schedule: schedule || null });
+  } catch (error) {
+    console.error('❌ Error in /api/production/schedule/daily:', error);
+    res.status(500).json({ error: 'Failed to fetch daily schedule' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// First Factory Material & Ingredient Detail API
+// ---------------------------------------------------------------------------
+app.get('/api/production/material-detail', async (req, res) => {
+  try {
+    const { hinban } = req.query;
+    if (!hinban) {
+      return res.status(400).json({ error: 'hinban is required' });
+    }
+    const masterDb = client.db('Sasaki_Coating_MasterDB');
+    const masterCollection = masterDb.collection('materialMasterDB3');
+    const bomCollection = masterDb.collection('bomMasterDB');
+
+    // 1. Fetch product master
+    const productDoc = await masterCollection.findOne({ "品番": hinban });
+
+    // 2. Fetch BOM data
+    let bomData = productDoc?.BOM || null;
+    if (!bomData) {
+      const bomDoc = await bomCollection.findOne({ "品番": hinban });
+      if (bomDoc && bomDoc.BOM) {
+        bomData = bomDoc.BOM;
+      }
+    }
+
+    // 3. Fetch Ingredient / Material Master (e.g. process 1010 or first 構成品番)
+    let ingredientDoc = null;
+    let ingredientHinban = null;
+
+    if (Array.isArray(bomData)) {
+      const bom1010 = bomData.find(b => b['工程コード'] === 1010 && b['構成品番']);
+      if (bom1010) {
+        ingredientHinban = bom1010['構成品番'];
+      } else {
+        const anyBom = bomData.find(b => b['構成品番'] && b['構成品番'] !== hinban);
+        if (anyBom) ingredientHinban = anyBom['構成品番'];
+      }
+    }
+
+    if (ingredientHinban) {
+      ingredientDoc = await masterCollection.findOne({ "品番": ingredientHinban });
+    }
+
+    res.json({
+      success: true,
+      product: productDoc,
+      bom: bomData,
+      ingredient: ingredientDoc,
+      ingredientHinban: ingredientHinban || null
+    });
+  } catch (error) {
+    console.error('❌ Error in /api/production/material-detail:', error);
+    res.status(500).json({ error: 'Failed to fetch material detail' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// First Factory Production Status Tracking API (submittedDB.firstFactoryProduction)
+// ---------------------------------------------------------------------------
+
+// Active SSE clients for instant realtime updates
+const productionSseClients = new Set();
+
+function broadcastProductionEvent(eventData) {
+  const payload = `data: ${JSON.stringify(eventData)}\n\n`;
+  const eventDateNorm = eventData && eventData.date ? String(eventData.date).replace(/\//g, '-').trim() : '';
+  productionSseClients.forEach(client => {
+    try {
+      const clientDateNorm = client && client.date ? String(client.date).replace(/\//g, '-').trim() : '';
+      if (!clientDateNorm || !eventDateNorm || clientDateNorm === eventDateNorm) {
+        client.res.write(payload);
+      }
+    } catch (e) {
+      productionSseClients.delete(client);
+    }
+  });
+}
+
+// Auto-broadcast scan data to pdfDisplayer when roll becomes in-progress
+async function broadcastScanForProductionItem(item) {
+  if (!item) return;
+  const hinban = item.hinban || item.kizai || '';
+  const zuban = item.zuban ? String(item.zuban).trim() : '';
+  if (!hinban && !zuban) return;
+
+  const targetMachine = item.machine || 'PSA2';
+  let peers = [];
+  try {
+    peers = await getRelatedMachineIds(targetMachine);
+  } catch (e) {
+    peers = [];
+  }
+  const allTargetMachines = Array.from(new Set([targetMachine, ...peers]));
+
+  const scanData = {
+    type: 'scan',
+    action: 'scan',
+    machineId: targetMachine,
+    sebanggo: '',
+    zuban: zuban,
+    hinban: hinban,
+    language: 'ja',
+    timestamp: new Date().toISOString(),
+    additionalData: {
+      factory: '第一工場',
+      工場: '第一工場',
+      Worker_Name: item.worker || item.feederWorker || '',
+      lotIndex: item.rollIndex || 1,
+      totalRolls: item.totalRolls || 1,
+      meters: item.rollMeters || item.meters || 0,
+      action: 'scan',
+      language: 'ja'
+    }
+  };
+
+  allTargetMachines.forEach(mid => {
+    const normalized = normalizeMachineSessionKey(mid);
+    machineLastScan.set(normalized, scanData);
+    broadcastToMachine(normalized, scanData);
+  });
+  console.log(`📄 Auto-broadcasted scan to pdfDisplayer for in-progress roll: [${hinban}] zuban: ${zuban} on ${targetMachine}`);
+}
+
+async function deleteFirebaseFileByUrl(photoUrl) {
+  if (!photoUrl || typeof photoUrl !== 'string' || !photoUrl.includes('firebasestorage.googleapis.com')) return;
+  try {
+    const urlObj = new URL(photoUrl);
+    const pathMatch = urlObj.pathname.match(/\/o\/(.+)$/);
+    if (pathMatch && pathMatch[1]) {
+      const storagePath = decodeURIComponent(pathMatch[1]);
+      const bucket = admin.storage().bucket();
+      await bucket.file(storagePath).delete({ ignoreNotFound: true });
+      console.log(`🗑️ Deleted Firebase Storage file upon cancel: ${storagePath}`);
+    }
+  } catch (err) {
+    console.warn('⚠️ Could not delete Firebase Storage file:', err.message);
+  }
+}
+
+app.get('/api/production/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (res.flushHeaders) res.flushHeaders();
+
+  const clientDate = req.query.date ? String(req.query.date).replace(/\//g, '-').trim() : '';
+  const clientObj = { res, date: clientDate };
+  productionSseClients.add(clientObj);
+
+  res.write(`data: ${JSON.stringify({ type: 'connected', time: new Date().toISOString() })}\n\n`);
+
+  // Heartbeat every 20s to keep connection alive through proxies
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': keep-alive\n\n');
+    } catch (e) {
+      clearInterval(keepAlive);
+      productionSseClients.delete(clientObj);
+    }
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(keepAlive);
+    productionSseClients.delete(clientObj);
+  });
+});
+
+app.get('/api/production/status', async (req, res) => {
+  try {
+    const { date, machine } = req.query;
+    if (!date) {
+      return res.status(400).json({ error: 'date is required (YYYY-MM-DD)' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const productionCollection = submittedDb.collection('firstFactoryProduction');
+
+    const query = { date };
+    if (machine) {
+      query.machine = machine;
+    }
+
+    const records = await productionCollection.find(query).toArray();
+    res.json({ success: true, records });
+  } catch (error) {
+    console.error('❌ Error in GET /api/production/status:', error);
+    res.status(500).json({ error: 'Failed to fetch production status' });
+  }
+});
+
+app.post('/api/production/status', async (req, res) => {
+  try {
+    const {
+      scheduleId,
+      groupId,
+      date,
+      machine,
+      worker,
+      hinban,
+      hinmei,
+      kizai,
+      color,
+      zuban,
+      totalRolls,
+      totalMeters,
+      status,
+      actualStartTime,
+      startEpoch,
+      actualEndTime,
+      endEpoch,
+      actualDurationMins,
+      items
+    } = req.body;
+
+    if (!groupId || !date) {
+      return res.status(400).json({ error: 'groupId and date are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const productionCollection = submittedDb.collection('firstFactoryProduction');
+
+    const filter = { date, groupId };
+    const updateDoc = {
+      $set: {
+        scheduleId: scheduleId || null,
+        groupId,
+        date,
+        machine: machine || 'PSA2',
+        worker: worker || '',
+        hinban: hinban || '',
+        hinmei: hinmei || '',
+        kizai: kizai || '',
+        color: color || '',
+        zuban: zuban || '',
+        totalRolls: Number(totalRolls) || 0,
+        totalMeters: Number(totalMeters) || 0,
+        status: status || 'pending',
+        actualStartTime: actualStartTime || null,
+        startEpoch: startEpoch || null,
+        actualEndTime: actualEndTime || null,
+        endEpoch: endEpoch || null,
+        actualDurationMins: actualDurationMins !== undefined ? Number(actualDurationMins) : null,
+        items: Array.isArray(items) ? items : [],
+        updatedAt: new Date()
+      },
+      $setOnInsert: {
+        createdAt: new Date()
+      }
+    };
+
+    const result = await productionCollection.findOneAndUpdate(
+      filter,
+      updateDoc,
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    console.log(`📝 Updated firstFactoryProduction for [${hinban || groupId}] -> status: ${status}, worker: ${worker}`);
+    
+    // Broadcast live event to all connected admin dashboards
+    broadcastProductionEvent({
+      type: 'status_update',
+      date,
+      groupId,
+      status: status || 'pending',
+      record: updateDoc.$set,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ success: true, record: result.value || result });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/status:', error);
+    res.status(500).json({ error: 'Failed to update production status' });
+  }
+});
+
+app.post('/api/production/print-log', async (req, res) => {
+  try {
+    const {
+      scheduleId,
+      groupId,
+      date,
+      machine,
+      worker,
+      hinban,
+      rollIndex,
+      totalRolls,
+      lotNo,
+      barcode,
+      timestamp,
+      timeStr
+    } = req.body;
+
+    if (!groupId || !date) {
+      return res.status(400).json({ error: 'groupId and date are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const productionCollection = submittedDb.collection('firstFactoryProduction');
+
+    const printEntry = {
+      rollIndex: Number(rollIndex) || 1,
+      totalRolls: Number(totalRolls) || 1,
+      lotNo: lotNo || '',
+      barcode: barcode || '',
+      worker: worker || '',
+      machine: machine || 'PSA2',
+      timestamp: timestamp || new Date().toISOString(),
+      timeStr: timeStr || new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: new Date()
+    };
+
+    const filter = { date, groupId };
+    await productionCollection.updateOne(
+      filter,
+      {
+        $push: { printHistory: printEntry },
+        $set: {
+          scheduleId: scheduleId || null,
+          groupId,
+          date,
+          machine: machine || 'PSA2',
+          hinban: hinban || '',
+          updatedAt: new Date()
+        },
+        $setOnInsert: {
+          status: 'pending',
+          createdAt: new Date()
+        }
+      },
+      { upsert: true }
+    );
+
+    console.log(`🖨️ Logged print event to firstFactoryProduction: [${hinban || groupId}] Roll #${rollIndex}/${totalRolls} (${lotNo})`);
+    
+    // Broadcast print event in realtime
+    broadcastProductionEvent({
+      type: 'print_log',
+      date,
+      groupId,
+      hinban,
+      printEntry,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ success: true, printEntry });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/print-log:', error);
+    res.status(500).json({ error: 'Failed to record print log' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// First Factory (第一工場) Raw Material QR Code Learning API
+// (Database: Sasaki_Coating_MasterDB, Collection: firstKojoLearnedQR)
+// ---------------------------------------------------------------------------
+
+// GET all learned QR patterns
+app.get('/api/firstkojo/learned-qr', async (req, res) => {
+  try {
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const col = db.collection('firstKojoLearnedQR');
+    const patterns = await col.find({}).sort({ updatedAt: -1 }).toArray();
+    res.json({ success: true, patterns });
+  } catch (error) {
+    console.error('❌ Error in GET /api/firstkojo/learned-qr:', error);
+    res.status(500).json({ error: 'Failed to fetch learned QR patterns', details: error.message });
+  }
+});
+
+// POST save / update learned QR pattern
+app.post('/api/firstkojo/learned-qr', async (req, res) => {
+  try {
+    const {
+      kizai,
+      kizaiPrefix,
+      supplier,
+      sampleRawQR,
+      patternType,
+      delimiter,
+      fieldsPresent,
+      mapping,
+      hasQR,
+      learnedBy
+    } = req.body;
+
+    if (!kizai && !kizaiPrefix) {
+      return res.status(400).json({ error: 'kizai or kizaiPrefix is required' });
+    }
+
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const col = db.collection('firstKojoLearnedQR');
+
+    const key = (kizai || kizaiPrefix).trim();
+    const filter = { kizai: key };
+
+    const updateDoc = {
+      $set: {
+        kizai: key,
+        kizaiPrefix: kizaiPrefix || key.slice(0, 5),
+        supplier: supplier || '',
+        sampleRawQR: sampleRawQR || '',
+        patternType: patternType || 'delimited',
+        delimiter: delimiter || ',',
+        fieldsPresent: fieldsPresent || {},
+        mapping: mapping || {},
+        hasQR: hasQR !== false,
+        learnedBy: learnedBy || '作業者',
+        updatedAt: new Date()
+      },
+      $setOnInsert: {
+        createdAt: new Date()
+      }
+    };
+
+    const result = await col.findOneAndUpdate(
+      filter,
+      updateDoc,
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    const savedPattern = result.value || result;
+    console.log(`🎓 Learned QR pattern saved for [${key}]:`, {
+      patternType,
+      delimiter,
+      hasQR: hasQR !== false,
+      mapping
+    });
+
+    // Broadcast update in realtime to all tablets
+    broadcastProductionEvent({
+      type: 'qr_patterns_updated',
+      kizai: key,
+      pattern: savedPattern,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ success: true, pattern: savedPattern });
+  } catch (error) {
+    console.error('❌ Error in POST /api/firstkojo/learned-qr:', error);
+    res.status(500).json({ error: 'Failed to save learned QR pattern', details: error.message });
+  }
+});
+
+// DELETE learned QR pattern
+app.delete('/api/firstkojo/learned-qr/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ObjectId } = require('mongodb');
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const col = db.collection('firstKojoLearnedQR');
+
+    const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { kizai: id };
+    await col.deleteOne(query);
+
+    broadcastProductionEvent({
+      type: 'qr_patterns_updated',
+      deletedId: id,
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in DELETE /api/firstkojo/learned-qr:', error);
+    res.status(500).json({ error: 'Failed to delete pattern', details: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// First Factory (第一工場) Label Photo Upload & Queue Management API
+// ---------------------------------------------------------------------------
+
+// 1. Dedicated Firebase Storage label photo upload
+app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], async (req, res) => {
+  try {
+    const { base64, date, machine, worker, lotNo, hinban, queueId, itemId } = req.body;
+
+    if (!base64) {
+      return res.status(400).json({ error: 'Missing base64 image data' });
+    }
+
+    const bucket = admin.storage().bucket();
+    const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(cleanBase64, 'base64');
+    const downloadToken = 'masterDBToken69';
+
+    const targetMachine = machine || 'PSA2';
+    const targetDate = date || new Date().toISOString().slice(0, 10);
+    const targetWorker = worker || 'worker';
+    const targetLotNo = lotNo || 'nolot';
+    const timestamp = Date.now();
+
+    // Directory structure: firstKojo/${date}/${machine}/${worker}_${lotNo}_${timestamp}_materialLabel.jpg
+    const filePath = req.body.filePath || `firstKojo/${targetDate}/${targetMachine}/${targetWorker}_${targetLotNo}_${timestamp}_materialLabel.jpg`;
+    const file = bucket.file(filePath);
+
+    await uploadToFirebaseWithRetry(file, buffer, {
+      metadata: {
+        contentType: 'image/jpeg',
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken
+        }
+      },
+      validation: false
+    });
+
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken}`;
+
+    console.log(`📸 Uploaded first factory label photo: ${publicUrl}`);
+
+    // If an item in firstFactoryQueue is associated, update its photoUrl in MongoDB
+    try {
+      const db = client.db('submittedDB');
+      const queueCol = db.collection('firstFactoryQueue');
+      let updateFilter = null;
+      if (queueId) {
+        const { ObjectId } = require('mongodb');
+        try { updateFilter = { _id: new ObjectId(queueId) }; } catch (e) { }
+      }
+      if (!updateFilter && itemId) {
+        updateFilter = { itemId: itemId };
+      }
+      if (!updateFilter && targetLotNo && targetLotNo !== 'nolot') {
+        updateFilter = { date: targetDate, lotNo: targetLotNo };
+      }
+
+      if (updateFilter) {
+        const updateDoc = { $set: { imageUrl: publicUrl, updatedAt: new Date() } };
+        const updateResult = await queueCol.updateMany(updateFilter, updateDoc);
+        let prodModified = 0;
+        try {
+          const prodCol = db.collection('firstFactoryProduction');
+          const prodRes = await prodCol.updateMany(updateFilter, updateDoc);
+          prodModified = prodRes.modifiedCount || 0;
+        } catch (prodErr) {
+          console.warn('⚠️ Could not link photo to firstFactoryProduction:', prodErr.message);
+        }
+        if (updateResult.modifiedCount > 0 || prodModified > 0) {
+          console.log(`🔗 Linked imageUrl to firstFactoryQueue & firstFactoryProduction:`, updateFilter);
+          broadcastProductionEvent({ type: 'queue_updated', date: targetDate, imageUrl: publicUrl });
+        }
+      }
+    } catch (dbErr) {
+      console.warn('⚠️ Could not link photo to firstFactoryQueue document:', dbErr.message);
+    }
+
+    res.json({
+      success: true,
+      url: publicUrl,
+      imageUrl: publicUrl,
+      filePath
+    });
+  } catch (error) {
+    console.error('❌ Error uploading first factory label photo:', error);
+    res.status(500).json({ error: 'Failed to upload label photo', details: error.message });
+  }
+});
+
+// 2. First Factory Queue API (MongoDB: submittedDB.firstFactoryProduction & firstFactoryQueue)
+
+// --- First Factory Unique 6-Character Base62 Roll ID Generator (Strategy 2: Atomic Central Counter) ---
+const ROLL_UNIQUE_ID_M = BigInt(62 ** 6); // 56,800,235,584 permutations
+const ROLL_UNIQUE_ID_A = 2865743789n;     // Coprime to 2 and 31 (gcd = 1)
+const ROLL_UNIQUE_ID_C = 1013904223n;
+const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+function encodeSeqTo6CharID(seqNumber) {
+  let val = (BigInt(seqNumber) * ROLL_UNIQUE_ID_A + ROLL_UNIQUE_ID_C) % ROLL_UNIQUE_ID_M;
+  let s = '';
+  for (let i = 0; i < 6; i++) {
+    s = BASE62_CHARS[Number(val % 62n)] + s;
+    val = val / 62n;
+  }
+  return s;
+}
+
+let firstFactoryIndexEnsured = false;
+async function ensureFirstFactoryIndexes(db) {
+  if (firstFactoryIndexEnsured) return;
+  try {
+    const prodCol = db.collection('firstFactoryProduction');
+    await prodCol.createIndex({ uniqueID: 1 }, { unique: true, sparse: true });
+    firstFactoryIndexEnsured = true;
+  } catch (err) {
+    console.warn('⚠️ Could not create index on firstFactoryProduction.uniqueID:', err.message);
+  }
+}
+
+async function getNextRollUniqueID(db) {
+  await ensureFirstFactoryIndexes(db);
+  const countersCol = db.collection('counters');
+  const counterResult = await countersCol.findOneAndUpdate(
+    { _id: 'firstFactoryProduction_uniqueID' },
+    { $inc: { seq: 1 } },
+    { returnDocument: 'after', upsert: true }
+  );
+  const doc = counterResult?.value || counterResult || {};
+  const seq = doc.seq || 1;
+  return encodeSeqTo6CharID(seq);
+}
+
+// GET active queue list
+app.get('/api/production/queue', async (req, res) => {
+  try {
+    const { date, machine, status } = req.query;
+    const query = {};
+    if (date) query.date = date;
+    if (machine) query.machine = machine;
+    if (status) {
+      if (status === 'active' || status === 'in-progress') {
+        query.status = { $in: ['active', 'in-progress'] };
+      } else if (status === 'queued' || status === 'queue') {
+        query.status = { $in: ['queued', 'queue'] };
+      } else {
+        query.status = status;
+      }
+    }
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    let queue = await productionCol
+      .find(query)
+      .sort({ queuePosition: 1, createdAt: 1 })
+      .toArray();
+
+    // Fallback to firstFactoryQueue if no records found in firstFactoryProduction
+    if (!queue || queue.length === 0) {
+      queue = await queueCol
+        .find(query)
+        .sort({ queuePosition: 1, createdAt: 1 })
+        .toArray();
+    }
+
+    // Backfill any active or queued items that don't have uniqueID yet
+    if (Array.isArray(queue) && queue.length > 0) {
+      for (const item of queue) {
+        if (!item.uniqueID && item._id && item.status !== 'completed' && item.status !== 'scrapped') {
+          try {
+            item.uniqueID = await getNextRollUniqueID(db);
+            await productionCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } }).catch(() => {});
+            await queueCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } }).catch(() => {});
+          } catch (e) {
+            console.warn('⚠️ Could not backfill uniqueID for queue item:', e.message);
+          }
+        }
+      }
+    }
+
+    res.json({ success: true, queue });
+  } catch (error) {
+    console.error('❌ Error in GET /api/production/queue:', error);
+    res.status(500).json({ error: 'Failed to fetch production queue' });
+  }
+});
+
+// Ensure an item in firstFactoryProduction has a uniqueID (e.g. before printing on Tablet 2)
+app.post('/api/production/queue/ensure-unique-id', async (req, res) => {
+  try {
+    const { _id, queueId, itemId } = req.body;
+    const targetId = _id || queueId;
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    let item = null;
+    const { ObjectId } = require('mongodb');
+    if (targetId && ObjectId.isValid(targetId)) {
+      item = await productionCol.findOne({ _id: new ObjectId(targetId) }) || await queueCol.findOne({ _id: new ObjectId(targetId) });
+    }
+    if (!item && targetId) {
+      item = await productionCol.findOne({ _id: targetId }) || await queueCol.findOne({ _id: targetId });
+    }
+    if (!item && itemId) {
+      item = await productionCol.findOne({ itemId }) || await queueCol.findOne({ itemId });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    if (!item.uniqueID) {
+      item.uniqueID = await getNextRollUniqueID(db);
+      await productionCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } });
+      await queueCol.updateOne({ _id: item._id }, { $set: { uniqueID: item.uniqueID } }).catch(() => {});
+    }
+
+    res.json({ success: true, uniqueID: item.uniqueID, item });
+  } catch (error) {
+    console.error('❌ Error in /api/production/queue/ensure-unique-id:', error);
+    res.status(500).json({ error: 'Failed to ensure uniqueID' });
+  }
+});
+
+// Enqueue new lot / roll item
+app.post('/api/production/queue/enqueue', async (req, res) => {
+  try {
+    const {
+      date,
+      machine,
+      worker,
+      groupId,
+      itemId,
+      orderIndex,
+      hinban,
+      hinmei,
+      kizai,
+      color,
+      zuban,
+      okyakuHinban,
+      labelHinban,
+      shippingDest,
+      totalRolls,
+      totalMeters,
+      rollMeters,
+      meters,
+      rollIndex,
+      lotNo,
+      rawMaterialQR,
+      rawMaterialLength,
+      manufacturerUid,
+      photoUrl,
+      imageUrl,
+      status,
+      socho,
+      shiki,
+      bicho
+    } = req.body;
+
+    const finalImageUrl = imageUrl || photoUrl || '';
+
+    if (!date) {
+      return res.status(400).json({ error: 'date is required' });
+    }
+
+    const targetDate = date;
+    const targetMachine = machine || 'PSA2';
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    // Duplicate Protection: check if this exact roll is already enqueued / active / completed across any tablet
+    const duplicateOrConds = [];
+    if (itemId) duplicateOrConds.push({ itemId: itemId });
+    if (groupId && rollIndex) duplicateOrConds.push({ groupId: groupId, rollIndex: Number(rollIndex) });
+    if (orderIndex && Number(orderIndex) > 0) duplicateOrConds.push({ orderIndex: Number(orderIndex) });
+
+    if (duplicateOrConds.length > 0) {
+      const duplicateQuery = {
+        date: targetDate,
+        machine: targetMachine,
+        status: { $nin: ['cancelled', 'deleted'] },
+        $or: duplicateOrConds
+      };
+
+      const existingItem = await productionCol.findOne(duplicateQuery) || await queueCol.findOne(duplicateQuery);
+      if (existingItem) {
+        console.log(`⚠️ Item already enqueued [${existingItem.hinban || existingItem.groupId}] (Roll #${existingItem.rollIndex}, Order #${existingItem.orderIndex}) -> returning existing _id: ${existingItem._id}`);
+        // If imageUrl was missing and is now provided, update it
+        if (finalImageUrl && (!existingItem.imageUrl && !existingItem.photoUrl)) {
+          const photoPatch = { imageUrl: finalImageUrl, updatedAt: new Date() };
+          await productionCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
+          await queueCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
+        }
+        broadcastProductionEvent({
+          type: 'queue_updated',
+          date: targetDate,
+          machine: targetMachine,
+          _id: existingItem._id,
+          status: existingItem.status
+        });
+        return res.json({
+          success: true,
+          alreadyEnqueued: true,
+          _id: existingItem._id,
+          id: existingItem._id,
+          item: existingItem
+        });
+      }
+    }
+
+    // Find highest queuePosition for (date, machine) across both collections
+    const lastItem = await productionCol
+      .find({ date: targetDate, machine: targetMachine })
+      .sort({ queuePosition: -1 })
+      .limit(1)
+      .toArray();
+    const maxPos = (lastItem.length > 0 && typeof lastItem[0].queuePosition === 'number')
+      ? lastItem[0].queuePosition
+      : 0;
+    const queuePosition = maxPos + 1;
+
+    // Check if there is already an active / in-progress item for (date, machine)
+    const activeItem = await productionCol.findOne({
+      date: targetDate,
+      machine: targetMachine,
+      status: { $in: ['active', 'in-progress'] }
+    });
+
+    // If an item is already in-progress on this machine, this roll is 'queue'.
+    // If NO roll is currently in-progress (e.g. shift start or previous lot finished), this roll directly becomes 'in-progress'!
+    const finalStatus = (status && status !== 'queue' && status !== 'queued')
+      ? status
+      : (activeItem ? 'queue' : 'in-progress');
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+
+    // Generate guaranteed unique 6-character Base62 uniqueID
+    const uniqueID = await getNextRollUniqueID(db);
+
+    const newItem = {
+      date: targetDate,
+      machine: targetMachine,
+      uniqueID,
+      worker: worker || '',
+      feederWorker: worker || '',
+      wrapperWorker: '',
+      groupId: groupId || '',
+      itemId: itemId || '',
+      orderIndex: Number(orderIndex) || null,
+      hinban: hinban || '',
+      hinmei: hinmei || '',
+      kizai: kizai || '',
+      color: color || '',
+      zuban: zuban || '',
+      okyakuHinban: okyakuHinban || '',
+      labelHinban: labelHinban || '',
+      shippingDest: shippingDest || '',
+      totalRolls: Number(totalRolls) || 1,
+      totalMeters: Number(totalMeters) || 0,
+      rollMeters: Number(rollMeters) || Number(meters) || 0,
+      meters: Number(rollMeters) || Number(meters) || 0,
+      socho: socho || '',
+      shiki: shiki || '0',
+      bicho: bicho !== undefined && bicho !== null ? Number(bicho) : (Number(rollMeters) || Number(meters) || 0),
+      rollIndex: Number(rollIndex) || 1,
+      currentRollIndex: Number(rollIndex) || 1,
+      lotNo: lotNo || '',
+      rawMaterialQR: rawMaterialQR || '',
+      rawMaterialLength: rawMaterialLength || '',
+      manufacturerUid: manufacturerUid || '',
+      imageUrl: finalImageUrl,
+      queuePosition,
+      status: finalStatus,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      printHistory: []
+    };
+
+    if (finalStatus === 'in-progress' || finalStatus === 'active') {
+      newItem.startedAt = new Date();
+      newItem.actualStartTime = timeNow;
+      newItem.startEpoch = Date.now();
+    }
+
+    // Insert into submittedDB.firstFactoryProduction
+    const insertResult = await productionCol.insertOne(newItem);
+    newItem._id = insertResult.insertedId;
+
+    // Mirror to firstFactoryQueue with identical _id for complete compatibility
+    try {
+      await queueCol.updateOne(
+        { _id: newItem._id },
+        { $set: newItem },
+        { upsert: true }
+      );
+    } catch (qErr) {
+      console.warn('⚠️ Could not mirror to firstFactoryQueue:', qErr.message);
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine,
+      _id: newItem._id,
+      uniqueID: newItem.uniqueID,
+      status: finalStatus
+    });
+
+    if (finalStatus === 'in-progress' || finalStatus === 'active') {
+      broadcastScanForProductionItem(newItem).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
+    }
+
+    console.log(`📋 Enqueued roll item to firstFactoryProduction [${newItem.hinban || newItem.groupId}] (Roll #${newItem.rollIndex}/${newItem.totalRolls}) [uniqueID: ${newItem.uniqueID}] -> pos: ${queuePosition}, status: ${finalStatus}, _id: ${newItem._id}`);
+    res.json({
+      success: true,
+      _id: newItem._id,
+      id: newItem._id,
+      uniqueID: newItem.uniqueID,
+      item: newItem
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/enqueue:', error);
+    res.status(500).json({ error: 'Failed to enqueue item' });
+  }
+});
+
+// Advance roll / lot (from in-progress to completed, and activate next queue item)
+app.post('/api/production/queue/advance', async (req, res) => {
+  try {
+    const {
+      _id,
+      queueId,
+      groupId,
+      date,
+      machine,
+      worker,
+      rollIndex,
+      totalRolls,
+      manualAdvance,
+      reason,
+      printLog
+    } = req.body;
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    const targetId = _id || queueId;
+    let item = null;
+
+    if (targetId) {
+      const { ObjectId } = require('mongodb');
+      if (ObjectId.isValid(targetId)) {
+        item = await productionCol.findOne({ _id: new ObjectId(targetId) });
+        if (!item) item = await queueCol.findOne({ _id: new ObjectId(targetId) });
+      }
+      if (!item) {
+        item = await productionCol.findOne({ _id: targetId });
+        if (!item) item = await queueCol.findOne({ _id: targetId });
+      }
+      if (!item) {
+        item = await productionCol.findOne({ queueId: targetId });
+        if (!item) item = await queueCol.findOne({ queueId: targetId });
+      }
+    }
+
+    if (!item && date && machine) {
+      item = await productionCol.findOne({ date, machine, status: { $in: ['in-progress', 'active'] } });
+      if (!item) item = await queueCol.findOne({ date, machine, status: { $in: ['in-progress', 'active'] } });
+    }
+
+    if (!item && groupId) {
+      item = await productionCol.findOne({ groupId, status: { $in: ['in-progress', 'active'] } });
+      if (!item) item = await queueCol.findOne({ groupId, status: { $in: ['in-progress', 'active'] } });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+    const targetWorker = worker || item.wrapperWorker || item.worker || '';
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+
+    // Mark current item completed
+    const completionUpdate = {
+      status: 'completed',
+      wrapperWorker: targetWorker,
+      completedAt: new Date(),
+      actualEndTime: timeNow,
+      endEpoch: Date.now(),
+      manualAdvance: Boolean(manualAdvance),
+      updatedAt: new Date()
+    };
+
+    if (item.startEpoch) {
+      completionUpdate.actualDurationMins = Math.max(1, Math.round((Date.now() - item.startEpoch) / 60000));
+    }
+
+    if (manualAdvance) {
+      completionUpdate.manualReason = reason || '印刷不可による手動進行';
+    }
+
+    if (req.body.meters !== undefined && req.body.meters !== null) {
+      completionUpdate.meters = Number(req.body.meters);
+      completionUpdate.rollMeters = Number(req.body.meters);
+    }
+
+    if (req.body.finishedEarly) {
+      completionUpdate.finishedEarly = true;
+    }
+
+    if (!item.uniqueID) {
+      item.uniqueID = await getNextRollUniqueID(db);
+      completionUpdate.uniqueID = item.uniqueID;
+    }
+
+    const printEntry = printLog || (manualAdvance ? {
+      manualAdvance: true,
+      reason: reason || '印刷不可による手動進行',
+      worker: targetWorker,
+      timestamp: new Date().toISOString(),
+      timeStr: timeNow
+    } : {
+      rollIndex: item.rollIndex || 1,
+      totalRolls: item.totalRolls || 1,
+      lotNo: item.lotNo || '',
+      worker: targetWorker,
+      machine: targetMachine,
+      timestamp: new Date().toISOString(),
+      timeStr: timeNow
+    });
+
+    if (!printEntry.uniqueID) {
+      printEntry.uniqueID = item.uniqueID || completionUpdate.uniqueID || '';
+    }
+
+    const updateQuery = { _id: item._id };
+    await productionCol.updateOne(updateQuery, {
+      $set: completionUpdate,
+      $push: { printHistory: printEntry }
+    });
+    await queueCol.updateOne(updateQuery, {
+      $set: completionUpdate,
+      $push: { printHistory: printEntry }
+    });
+
+    console.log(`✅ Completed roll [${item.hinban || item.groupId}] Roll #${item.rollIndex}/${item.totalRolls} (_id: ${item._id}) by ${targetWorker}${manualAdvance ? ' [MANUAL ADVANCE]' : ''}`);
+
+    // Find next queued item to activate
+    const nextItem = await productionCol.findOne(
+      { date: targetDate, machine: targetMachine, status: { $in: ['queue', 'queued'] } },
+      { sort: { queuePosition: 1, createdAt: 1 } }
+    );
+
+    let nextActivatedId = null;
+    if (nextItem) {
+      nextActivatedId = nextItem._id;
+      const nextUpdate = {
+        status: 'in-progress',
+        startedAt: new Date(),
+        actualStartTime: timeNow,
+        startEpoch: Date.now(),
+        updatedAt: new Date()
+      };
+
+      if (req.body.nextRollTemperatures && typeof req.body.nextRollTemperatures === 'object') {
+        const t = req.body.nextRollTemperatures;
+        nextUpdate.temperatures = t;
+        if (t.ambientTemp !== undefined) nextUpdate.ambientTemp = t.ambientTemp;
+        if (t.ambientHumidity !== undefined) nextUpdate.ambientHumidity = t.ambientHumidity;
+        if (t.ovenTemp1 !== undefined) nextUpdate.ovenTemp1 = t.ovenTemp1;
+        if (t.ovenTemp2 !== undefined) nextUpdate.ovenTemp2 = t.ovenTemp2;
+        if (t.ovenTemp3 !== undefined) nextUpdate.ovenTemp3 = t.ovenTemp3;
+        nextUpdate.tempSnapshotAt = t.capturedAt || new Date().toISOString();
+      }
+
+      await productionCol.updateOne({ _id: nextItem._id }, { $set: nextUpdate });
+      await queueCol.updateOne({ _id: nextItem._id }, { $set: nextUpdate });
+      console.log(`▶️ Activated next roll in queue [${nextItem.hinban || nextItem.groupId}] Roll #${nextItem.rollIndex}/${nextItem.totalRolls} (_id: ${nextItem._id})${nextUpdate.temperatures ? ' [SNAPSHOT TEMPS RECORDED]' : ''}`);
+      broadcastScanForProductionItem({ ...nextItem, ...nextUpdate, status: 'in-progress' }).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine,
+      completedId: item._id,
+      nextActiveId: nextActivatedId
+    });
+
+    broadcastProductionEvent({
+      type: 'queue_roll_printed',
+      date: targetDate,
+      machine: targetMachine,
+      groupId: item.groupId,
+      rollIndex: item.rollIndex || 1,
+      totalRolls: item.totalRolls || 1,
+      manualAdvance: Boolean(manualAdvance)
+    });
+
+    res.json({
+      success: true,
+      status: 'completed',
+      completedItem: { ...item, ...completionUpdate },
+      nextActiveItem: nextItem ? { ...nextItem, status: 'in-progress' } : null
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/advance:', error);
+    res.status(500).json({ error: 'Failed to advance queue' });
+  }
+});
+
+// Record temperature snapshot for an in-progress roll (and optionally set to in-progress if beginning)
+app.post('/api/production/queue/temperature-snapshot', async (req, res) => {
+  try {
+    const { _id, queueId, uniqueID, date, machine, temperatures, setInProgress } = req.body;
+    const targetId = _id || queueId;
+    if (!targetId && !uniqueID && (!date || !machine)) {
+      return res.status(400).json({ error: 'Target identifier is required' });
+    }
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+    const { ObjectId } = require('mongodb');
+
+    let item = null;
+    if (targetId && ObjectId.isValid(targetId)) {
+      item = await productionCol.findOne({ _id: new ObjectId(targetId) });
+      if (!item) item = await queueCol.findOne({ _id: new ObjectId(targetId) });
+    }
+    if (!item && targetId) {
+      item = await productionCol.findOne({ _id: targetId }) || await queueCol.findOne({ _id: targetId });
+    }
+    if (!item && targetId) {
+      item = await productionCol.findOne({ queueId: targetId }) || await queueCol.findOne({ queueId: targetId });
+    }
+    if (!item && uniqueID) {
+      item = await productionCol.findOne({ uniqueID }) || await queueCol.findOne({ uniqueID });
+    }
+    if (!item && date && machine) {
+      item = await productionCol.findOne({ date, machine, status: { $in: ['in-progress', 'active'] } });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const updateDoc = {
+      updatedAt: new Date()
+    };
+
+    if (temperatures && typeof temperatures === 'object') {
+      updateDoc.temperatures = temperatures;
+      if (temperatures.ambientTemp !== undefined) updateDoc.ambientTemp = temperatures.ambientTemp;
+      if (temperatures.ambientHumidity !== undefined) updateDoc.ambientHumidity = temperatures.ambientHumidity;
+      if (temperatures.ovenTemp1 !== undefined) updateDoc.ovenTemp1 = temperatures.ovenTemp1;
+      if (temperatures.ovenTemp2 !== undefined) updateDoc.ovenTemp2 = temperatures.ovenTemp2;
+      if (temperatures.ovenTemp3 !== undefined) updateDoc.ovenTemp3 = temperatures.ovenTemp3;
+      updateDoc.tempSnapshotAt = temperatures.capturedAt || new Date().toISOString();
+    }
+
+    if (setInProgress || item.status === 'queue' || item.status === 'queued') {
+      updateDoc.status = 'in-progress';
+      if (!item.startedAt) updateDoc.startedAt = new Date();
+      if (!item.actualStartTime) updateDoc.actualStartTime = timeNow;
+      if (!item.startEpoch) updateDoc.startEpoch = Date.now();
+    }
+
+    await productionCol.updateOne({ _id: item._id }, { $set: updateDoc });
+    await queueCol.updateOne({ _id: item._id }, { $set: updateDoc });
+
+    console.log(`🌡️ Saved temperature snapshot for [${item.hinban || item.groupId}] Roll #${item.rollIndex}/${item.totalRolls}:`, temperatures);
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: item.date || date,
+      machine: item.machine || machine,
+      _id: item._id,
+      status: updateDoc.status || item.status
+    });
+
+    res.json({
+      success: true,
+      _id: item._id,
+      status: updateDoc.status || item.status,
+      temperatures: updateDoc.temperatures || null
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/temperature-snapshot:', error);
+    res.status(500).json({ error: 'Failed to save temperature snapshot' });
+  }
+});
+
+// Skip / scrap lot or item
+app.post('/api/production/queue/skip', async (req, res) => {
+  try {
+    const { date, machine, queueId, groupId, rollIndex, reason, scrapEntireLot } = req.body;
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+
+    let item = null;
+    if (queueId) {
+      if (ObjectId.isValid(queueId)) {
+        item = await queueCollection.findOne({ _id: new ObjectId(queueId) });
+      }
+      if (!item) {
+        item = await queueCollection.findOne({ _id: queueId });
+      }
+      if (!item) {
+        item = await queueCollection.findOne({ queueId });
+      }
+    }
+    if (!item && groupId) {
+      item = await queueCollection.findOne({ groupId });
+    }
+    if (!item && date && machine) {
+      item = await queueCollection.findOne({ date, machine, status: 'active' });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+    const targetTotalRolls = Number(item.totalRolls) || 1;
+    const currentRoll = rollIndex !== undefined ? Number(rollIndex) : (item.currentRollIndex || 1);
+    const scrapReason = reason || '破棄 / スキップ';
+
+    // Check if scrapping just 1 roll or entire lot
+    const isEntireLot = scrapEntireLot === true || (currentRoll >= targetTotalRolls);
+
+    if (isEntireLot) {
+      await queueCollection.updateOne(
+        { _id: item._id },
+        {
+          $set: {
+            status: 'scrapped',
+            reason: scrapReason,
+            scrappedAt: new Date(),
+            updatedAt: new Date()
+          }
+        }
+      );
+
+      // Activate next item if available
+      const nextItem = await queueCollection.findOne(
+        { date: targetDate, machine: targetMachine, status: 'queued' },
+        { sort: { queuePosition: 1, createdAt: 1 } }
+      );
+
+      if (nextItem) {
+        await queueCollection.updateOne(
+          { _id: nextItem._id },
+          {
+            $set: {
+              status: 'active',
+              startedAt: new Date(),
+              updatedAt: new Date()
+            }
+          }
+        );
+
+        if (nextItem.groupId) {
+          const productionCollection = db.collection('firstFactoryProduction');
+          await productionCollection.updateOne(
+            { date: targetDate, groupId: nextItem.groupId },
+            {
+              $set: {
+                date: targetDate,
+                groupId: nextItem.groupId,
+                machine: nextItem.machine,
+                worker: nextItem.worker,
+                hinban: nextItem.hinban,
+                hinmei: nextItem.hinmei,
+                kizai: nextItem.kizai,
+                color: nextItem.color,
+                zuban: nextItem.zuban,
+                totalRolls: nextItem.totalRolls,
+                totalMeters: nextItem.totalMeters,
+                status: 'in-progress',
+                actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+                startEpoch: Date.now(),
+                updatedAt: new Date()
+              },
+              $setOnInsert: { createdAt: new Date() }
+            },
+            { upsert: true }
+          );
+        }
+      }
+    } else {
+      // 1 roll scrap: advance to next roll index and log scrap
+      const nextRollIndex = currentRoll + 1;
+      const scrappedList = Array.isArray(item.scrappedList) ? item.scrappedList : [];
+      scrappedList.push({
+        rollIndex: currentRoll,
+        reason: scrapReason,
+        scrappedAt: new Date()
+      });
+
+      await queueCollection.updateOne(
+        { _id: item._id },
+        {
+          $set: {
+            currentRollIndex: nextRollIndex,
+            rollIndex: nextRollIndex,
+            scrappedRolls: (Number(item.scrappedRolls) || 0) + 1,
+            scrappedList,
+            updatedAt: new Date()
+          }
+        }
+      );
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine
+    });
+
+    broadcastProductionEvent({
+      type: 'queue_scrapped',
+      date: targetDate,
+      machine: targetMachine,
+      queueId: item._id.toString(),
+      rollIndex: currentRoll,
+      reason: scrapReason,
+      isEntireLot
+    });
+
+    console.log(`⚠️ Scrapped queue item [${item.hinban || item._id}] roll #${currentRoll} (entireLot: ${isEntireLot}), reason: ${scrapReason}`);
+    res.json({ success: true, isEntireLot });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/skip:', error);
+    res.status(500).json({ error: 'Failed to skip queue item' });
+  }
+});
+
+// Finish lot early with shortage recorded
+app.post('/api/production/queue/finish-early', async (req, res) => {
+  try {
+    const { date, machine, queueId, actualRollsProduced } = req.body;
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+
+    let item = null;
+    if (queueId) {
+      if (ObjectId.isValid(queueId)) {
+        item = await queueCollection.findOne({ _id: new ObjectId(queueId) });
+      }
+      if (!item) {
+        item = await queueCollection.findOne({ _id: queueId });
+      }
+      if (!item) {
+        item = await queueCollection.findOne({ queueId });
+      }
+    }
+    if (!item && date && machine) {
+      item = await queueCollection.findOne({ date, machine, status: 'active' });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+    const rollsProduced = Number(actualRollsProduced) || 0;
+
+    const finishMeters = req.body.meters !== undefined ? Number(req.body.meters) : (req.body.actualMeters !== undefined ? Number(req.body.actualMeters) : null);
+
+    const updateFields = {
+      status: 'completed',
+      actualRollsProduced: rollsProduced,
+      finishedEarly: true,
+      completedAt: new Date(),
+      updatedAt: new Date()
+    };
+    if (finishMeters !== null) {
+      updateFields.meters = finishMeters;
+      updateFields.rollMeters = finishMeters;
+    }
+
+    await queueCollection.updateOne(
+      { _id: item._id },
+      { $set: updateFields }
+    );
+
+    if (item.groupId) {
+      const productionCollection = db.collection('firstFactoryProduction');
+      const prodUpdate = {
+        status: 'completed',
+        actualRollsProduced: rollsProduced,
+        finishedEarly: true,
+        actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        endEpoch: Date.now(),
+        updatedAt: new Date()
+      };
+      if (finishMeters !== null) {
+        prodUpdate.meters = finishMeters;
+        prodUpdate.rollMeters = finishMeters;
+      }
+      await productionCollection.updateOne(
+        { date: targetDate, groupId: item.groupId },
+        { $set: prodUpdate }
+      );
+    }
+
+    const nextItem = await queueCollection.findOne(
+      { date: targetDate, machine: targetMachine, status: 'queued' },
+      { sort: { queuePosition: 1, createdAt: 1 } }
+    );
+
+    if (nextItem) {
+      await queueCollection.updateOne(
+        { _id: nextItem._id },
+        {
+          $set: {
+            status: 'active',
+            startedAt: new Date(),
+            updatedAt: new Date()
+          }
+        }
+      );
+
+      if (nextItem.groupId) {
+        const productionCollection = db.collection('firstFactoryProduction');
+        await productionCollection.updateOne(
+          { date: targetDate, groupId: nextItem.groupId },
+          {
+            $set: {
+              date: targetDate,
+              groupId: nextItem.groupId,
+              machine: nextItem.machine,
+              worker: nextItem.worker,
+              hinban: nextItem.hinban,
+              hinmei: nextItem.hinmei,
+              kizai: nextItem.kizai,
+              color: nextItem.color,
+              zuban: nextItem.zuban,
+              totalRolls: nextItem.totalRolls,
+              totalMeters: nextItem.totalMeters,
+              status: 'in-progress',
+              actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+              startEpoch: Date.now(),
+              updatedAt: new Date()
+            },
+            $setOnInsert: { createdAt: new Date() }
+          },
+          { upsert: true }
+        );
+      }
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine
+    });
+
+    console.log(`⏹️ Lot finished early [${item.hinban || item._id}]: ${rollsProduced} rolls produced`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/finish-early:', error);
+    res.status(500).json({ error: 'Failed to finish queue item early' });
+  }
+});
+
+// Cancel / delete a queued roll item, returning it cleanly to the list tab
+app.post('/api/production/queue/cancel', async (req, res) => {
+  try {
+    const { date, machine, queueId, itemId } = req.body;
+    if (!queueId && !itemId) {
+      return res.status(400).json({ error: 'queueId or itemId is required' });
+    }
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    // 1. Locate the exact item by _id (preferred) or itemId
+    let item = null;
+    if (queueId) {
+      if (ObjectId.isValid(queueId)) {
+        item = await productionCol.findOne({ _id: new ObjectId(queueId) }) || await queueCol.findOne({ _id: new ObjectId(queueId) });
+      }
+      if (!item) {
+        item = await productionCol.findOne({ _id: queueId }) || await queueCol.findOne({ _id: queueId });
+      }
+      if (!item) {
+        item = await productionCol.findOne({ queueId }) || await queueCol.findOne({ queueId });
+      }
+    }
+    if (!item && itemId) {
+      item = await productionCol.findOne({ itemId, status: { $in: ['queue', 'queued'] } }) || await queueCol.findOne({ itemId, status: { $in: ['queue', 'queued'] } });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetId = item._id;
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+    const photoUrl = item.photoUrl || item.imageUrl || '';
+
+    // 2. Strictly delete ONLY this single exact document by its unique _id
+    await productionCol.deleteOne({ _id: targetId });
+    await queueCol.deleteOne({ _id: targetId });
+    if (ObjectId.isValid(targetId)) {
+      await productionCol.deleteOne({ _id: new ObjectId(targetId) });
+      await queueCol.deleteOne({ _id: new ObjectId(targetId) });
+    }
+
+    // 3. Delete photo from Firebase Storage in background
+    if (photoUrl) {
+      deleteFirebaseFileByUrl(photoUrl).catch(() => {});
+    }
+
+    // 3. Re-compact queue positions for remaining items
+    const remainingItems = await productionCol
+      .find({ date: targetDate, machine: targetMachine, status: { $in: ['queue', 'queued'] } })
+      .sort({ queuePosition: 1, createdAt: 1 })
+      .toArray();
+
+    for (let i = 0; i < remainingItems.length; i++) {
+      await productionCol.updateOne({ _id: remainingItems[i]._id }, { $set: { queuePosition: i + 1 } });
+      await queueCol.updateOne({ _id: remainingItems[i]._id }, { $set: { queuePosition: i + 1 } });
+    }
+
+    // 4. Broadcast SSE to all connected clients
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine,
+      cancelledId: item._id,
+      itemId: item.itemId
+    });
+
+    console.log(`🗑️ Cancelled & deleted queue item [${item.hinban || item.kizai}] (Roll #${item.rollIndex}, Order #${item.orderIndex}, itemId: ${item.itemId}) -> Returned to list`);
+    res.json({
+      success: true,
+      deletedItem: {
+        _id: item._id,
+        itemId: item.itemId,
+        orderIndex: item.orderIndex,
+        rollIndex: item.rollIndex,
+        hinban: item.hinban
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/cancel:', error);
+    res.status(500).json({ error: 'Failed to cancel queue item' });
+  }
+});
+
+// Reorder queue positions
+app.post('/api/production/queue/reorder', async (req, res) => {
+  try {
+    const { date, machine, orderedQueueIds } = req.body;
+
+    if (!Array.isArray(orderedQueueIds)) {
+      return res.status(400).json({ error: 'orderedQueueIds must be an array' });
+    }
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+    const productionCol = db.collection('firstFactoryProduction');
+
+    for (let i = 0; i < orderedQueueIds.length; i++) {
+      const qId = orderedQueueIds[i];
+      const query = ObjectId.isValid(qId)
+        ? { $or: [{ _id: new ObjectId(qId) }, { _id: qId }, { queueId: qId }] }
+        : { $or: [{ _id: qId }, { queueId: qId }] };
+
+      await queueCollection.updateOne(query, {
+        $set: {
+          queuePosition: i + 1,
+          updatedAt: new Date()
+        }
+      });
+      await productionCol.updateOne(query, {
+        $set: {
+          queuePosition: i + 1,
+          updatedAt: new Date()
+        }
+      });
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date,
+      machine
+    });
+
+    console.log(`🔢 Reordered queue for ${date} [${machine}]: ${orderedQueueIds.length} items`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/reorder:', error);
+    res.status(500).json({ error: 'Failed to reorder queue' });
+  }
+});
+
+// Select a specific item to become the active wrapping item
+app.post('/api/production/queue/select', async (req, res) => {
+  try {
+    const { date, machine, queueId } = req.body;
+    if (!queueId) {
+      return res.status(400).json({ error: 'queueId is required' });
+    }
+
+    const db = client.db('submittedDB');
+    const queueCollection = db.collection('firstFactoryQueue');
+
+    let item = null;
+    if (ObjectId.isValid(queueId)) {
+      item = await queueCollection.findOne({ _id: new ObjectId(queueId) });
+    }
+    if (!item) {
+      item = await queueCollection.findOne({ _id: queueId });
+    }
+    if (!item) {
+      item = await queueCollection.findOne({ queueId });
+    }
+
+    if (!item) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    const targetDate = item.date || date;
+    const targetMachine = item.machine || machine;
+
+    // Set any currently active item in this date/machine to 'queued'
+    await queueCollection.updateMany(
+      { date: targetDate, machine: targetMachine, status: 'active', _id: { $ne: item._id } },
+      { $set: { status: 'queued', updatedAt: new Date() } }
+    );
+
+    // Set selected item to 'active'
+    await queueCollection.updateOne(
+      { _id: item._id },
+      {
+        $set: {
+          status: 'active',
+          startedAt: item.startedAt || new Date(),
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    // Sync to firstFactoryProduction
+    if (item.groupId) {
+      const productionCollection = db.collection('firstFactoryProduction');
+      await productionCollection.updateOne(
+        { date: targetDate, groupId: item.groupId },
+        {
+          $set: {
+            date: targetDate,
+            groupId: item.groupId,
+            machine: item.machine,
+            worker: item.worker,
+            hinban: item.hinban,
+            hinmei: item.hinmei,
+            kizai: item.kizai,
+            color: item.color,
+            zuban: item.zuban,
+            totalRolls: item.totalRolls,
+            totalMeters: item.totalMeters,
+            status: 'in-progress',
+            actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+            startEpoch: Date.now(),
+            updatedAt: new Date()
+          },
+          $setOnInsert: { createdAt: new Date() }
+        },
+        { upsert: true }
+      );
+    }
+
+    broadcastProductionEvent({
+      type: 'queue_updated',
+      date: targetDate,
+      machine: targetMachine
+    });
+
+    broadcastScanForProductionItem({ ...item, machine: targetMachine, status: 'in-progress' }).catch(e => console.warn('⚠️ Auto-broadcast scan error:', e));
+
+    console.log(`🎯 Active wrapping item switched to: [${item.hinban || item._id}] (${targetDate} / ${targetMachine})`);
+    res.json({ success: true, item });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/select:', error);
+    res.status(500).json({ error: 'Failed to select queue item' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// First Factory Production Scheduling & Excel Sync Routes
+// ---------------------------------------------------------------------------
+
+function getFirstFactoryDriveAuth() {
+  const clientEmail = process.env.HABA_EXTRACTOR_CLIENT_EMAIL;
+  let privateKey = process.env.HABA_EXTRACTOR_PRIVATE_KEY;
+  
+  if (!clientEmail || !privateKey) {
+    throw new Error('Missing HABA_EXTRACTOR_CLIENT_EMAIL or HABA_EXTRACTOR_PRIVATE_KEY in .env');
+  }
+
+  if (privateKey.includes('\\n')) {
+    privateKey = privateKey.replace(/\\n/g, '\n');
+  }
+
+  const auth = new google.auth.GoogleAuth({
+    credentials: {
+      client_email: clientEmail,
+      private_key: privateKey
+    },
+    scopes: ['https://www.googleapis.com/auth/drive.readonly']
+  });
+
+  return google.drive({ version: 'v3', auth });
+}
+
+app.get('/api/production/schedule', async (req, res) => {
+  try {
+    const month = req.query.month || '2026-07';
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const collection = db.collection('firstFactoryProduction');
+    
+    const submittedDb = client.db('submittedDB');
+    const scheduleCollection = submittedDb.collection('firstFactorySchedule');
+
+    // Fetch live parsed data for the month
+    const liveData = await collection.find({ month }).toArray();
+
+    // Enrich with material master data and BOM master data
+    const hinbans = liveData.map(item => item.hinban);
+    const masterCollection = db.collection('materialMasterDB3');
+    const bomCollection = db.collection('bomMasterDB');
+
+    const [masterData, bomDataList] = await Promise.all([
+      masterCollection.find({ "品番": { $in: hinbans } }).toArray(),
+      bomCollection.find({ "品番": { $in: hinbans } }).toArray()
+    ]);
+
+    const bomMap = {};
+    bomDataList.forEach(b => {
+      if (b['品番'] && Array.isArray(b['BOM'])) {
+        bomMap[b['品番']] = b['BOM'];
+      }
+    });
+    
+    const masterMap = {};
+    masterData.forEach(master => {
+       const hinbanKey = master['品番'];
+       const packCount = master['品目マスタ']?.['梱包数'] || 0;
+       let workTime = 0;
+       let kataban = '';
+       let timeOption = '';
+       let unit = 'm';
+       let rawUnit = null;
+
+       const bomItems = (Array.isArray(master['BOM']) && master['BOM'].length > 0)
+         ? master['BOM']
+         : (bomMap[hinbanKey] || []);
+
+       const process2010 = bomItems.find(b => 
+         Number(b['工程コード']) === 2010 || 
+         String(b['工程コード'] || '').startsWith('2010') || 
+         b['工程名'] === '粘着工程' || 
+         b['工程略名'] === '粘着'
+       );
+
+       const hasProcess2010 = Boolean(
+         process2010 ||
+         String(master['品目マスタ']?.['工程コード'] || '').startsWith('2010') ||
+         Number(master['resolved']?.['工程コード']?.code) === 2010 ||
+         master['resolved']?.['工程コード']?.name === '粘着工程'
+       );
+
+       if (process2010) {
+          workTime = Number(process2010['作業時間']) || 0;
+          kataban = process2010['型番'] || '';
+          timeOption = process2010['時間オプション'] || '';
+          rawUnit = process2010['生産単位'] || null;
+          const unitName = typeof rawUnit === 'object' ? rawUnit?.name : String(rawUnit || '');
+          if (unitName === '枚') {
+            unit = '枚';
+          } else {
+            unit = 'm';
+          }
+       }
+       
+       masterMap[hinbanKey] = { 
+         packCount, 
+         workTime, 
+         hasProcess2010, 
+         kataban, 
+         timeOption, 
+         unit, 
+         rawUnit, 
+         rawMaster: { ...master, BOM: bomItems } 
+       };
+    });
+
+    // Also enrich any hinbans that exist in bomMasterDB but not in materialMasterDB3
+    bomDataList.forEach(b => {
+       const hinbanKey = b['品番'];
+       if (!masterMap[hinbanKey]) {
+         const bomItems = Array.isArray(b['BOM']) ? b['BOM'] : [];
+         const process2010 = bomItems.find(p => 
+           Number(p['工程コード']) === 2010 || 
+           String(p['工程コード'] || '').startsWith('2010') || 
+           p['工程名'] === '粘着工程' || 
+           p['工程略名'] === '粘着'
+         );
+         const hasProcess2010 = Boolean(process2010);
+         const workTime = process2010 ? (Number(process2010['作業時間']) || 0) : 0;
+         const kataban = process2010?.['型番'] || '';
+         const timeOption = process2010?.['時間オプション'] || '';
+         const rawUnit = process2010?.['生産単位'] || null;
+         const unitName = typeof rawUnit === 'object' ? rawUnit?.name : String(rawUnit || '');
+         const unit = unitName === '枚' ? '枚' : 'm';
+
+         masterMap[hinbanKey] = { 
+           packCount: 0, 
+           workTime, 
+           hasProcess2010, 
+           kataban, 
+           timeOption, 
+           unit, 
+           rawUnit, 
+           rawMaster: { 品番: hinbanKey, BOM: bomItems } 
+         };
+       }
+    });
+    
+    const enrichedData = liveData.map(item => {
+       const masterInfo = masterMap[item.hinban] || { packCount: 0, workTime: 0, hasProcess2010: false };
+       return { ...item, materialInfo: masterInfo };
+    });
+
+    // Fetch user's saved daily schedules for the month
+    const savedSchedules = await scheduleCollection.find({ type: 'dailySchedule', month }).toArray();
+    
+    // Enrich saved schedules with master material attributes (especially 品目マスタ.ラベル品番)
+    const allScheduledHinbans = [...new Set(savedSchedules.flatMap(s => (s.scheduleOrder || []).map(i => i.hinban)).filter(Boolean))];
+    if (allScheduledHinbans.length > 0) {
+      const schedMasterDocs = await masterCollection.find({ "品番": { $in: allScheduledHinbans } }).toArray();
+      const schedMasterMap = {};
+      schedMasterDocs.forEach(doc => {
+        let kizai = '';
+        let color = '';
+        let shori = '';
+        let habanaga = '';
+        if (doc['品番構造'] && Array.isArray(doc['品番構造'].segments)) {
+          const kizaiSeg = doc['品番構造'].segments.find(s => s.segment === '基材コード');
+          if (kizaiSeg) kizai = kizaiSeg.name || kizaiSeg['得意先'] || kizaiSeg['入出荷先'] || '';
+          const colorSeg = doc['品番構造'].segments.find(s => s.segment === '色コード');
+          if (colorSeg) color = colorSeg.name || colorSeg['得意先'] || colorSeg['入出荷先'] || '';
+          const shoriSeg = doc['品番構造'].segments.find(s => s.segment === '処理コード');
+          if (shoriSeg) shori = shoriSeg.name || shoriSeg['得意先'] || shoriSeg['入出荷先'] || '';
+          const habanagaSeg = doc['品番構造'].segments.find(s => s.segment === '幅長コード');
+          if (habanagaSeg) habanaga = habanagaSeg.name || habanagaSeg['得意先'] || habanagaSeg['入出荷先'] || '';
+        }
+        schedMasterMap[doc['品番']] = {
+          hinmei: doc['品目マスタ']?.['品名'] || '',
+          kizai,
+          color,
+          shori,
+          habanaga,
+          shippingDest: doc['品目マスタ']?.['出荷先名'] || doc['品目マスタ']?.['入出荷先名'] || doc['品目マスタ']?.['得意先名'] || '',
+          labelHinban: doc['品目マスタ']?.['ラベル品番'] || '',
+          okyakuHinban: doc['品目マスタ']?.['お客様品番'] || doc['お客様品番'] || '',
+          imageURL: doc['品目マスタ']?.['imageURL'] || doc['imageURL'] || '',
+          zuban: doc['品目マスタ']?.['図番'] || ''
+        };
+      });
+
+      savedSchedules.forEach(sched => {
+        if (Array.isArray(sched.scheduleOrder)) {
+          sched.scheduleOrder = sched.scheduleOrder.map(item => {
+            if (item.type === 'hinban' && item.hinban) {
+              const info = schedMasterMap[item.hinban] || {};
+              return {
+                ...item,
+                kizai: info.kizai || item.kizai || '',
+                color: info.color || item.color || '',
+                shori: info.shori || item.shori || '',
+                habanaga: info.habanaga || item.habanaga || '',
+                shippingDest: info.shippingDest || item.shippingDest || '',
+                labelHinban: info.labelHinban || item.labelHinban || '',
+                okyakuHinban: info.okyakuHinban || item.okyakuHinban || '',
+                imageURL: info.imageURL || item.imageURL || '',
+                hinmei: info.hinmei || item.hinmei || '',
+                zuban: info.zuban || item.zuban || ''
+              };
+            }
+            return item;
+          });
+        }
+      });
+    }
+    
+    res.json({ success: true, data: enrichedData, schedules: savedSchedules });
+  } catch (error) {
+    console.error('Error fetching schedule:', error);
+    res.status(500).json({ error: 'Failed to fetch schedule' });
+  }
+});
+
+app.post('/api/production/schedule', async (req, res) => {
+  try {
+    const { scheduleOrder, startTime, month, date, scheduledBy } = req.body;
+    if (!month || date === undefined) {
+      return res.status(400).json({ success: false, message: 'month and date are required' });
+    }
+
+    const submittedDb = client.db('submittedDB');
+    const scheduleCollection = submittedDb.collection('firstFactorySchedule');
+
+    const updateFields = {
+      type: 'dailySchedule',
+      month,
+      date: Number(date),
+      scheduleOrder,
+      startTime,
+      updatedAt: new Date()
+    };
+
+    if (scheduledBy) {
+      updateFields.scheduledBy = scheduledBy;
+    }
+
+    await scheduleCollection.updateOne(
+      { type: 'dailySchedule', month, date: Number(date) },
+      { $set: updateFields },
+      { upsert: true }
+    );
+
+    res.json({ success: true, message: 'Schedule saved successfully' });
+  } catch (error) {
+    console.error('Error saving schedule:', error);
+    res.status(500).json({ error: 'Failed to save schedule' });
+  }
+});
+
+app.post('/api/production/sync-excel', async (req, res) => {
+  try {
+    const FILE_ID = req.body.fileId || process.env.GOOGLE_DRIVE_EXCEL_FILE_ID;
+    
+    if (!FILE_ID) {
+      return res.status(400).json({ success: false, message: 'Please provide the fileId of the Excel file.' });
+    }
+
+    const drive = getFirstFactoryDriveAuth();
+    console.log(`Downloading file ${FILE_ID} from Google Drive to stream to client...`);
+    let response;
+    try {
+      response = await drive.files.export(
+        { fileId: FILE_ID, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        { responseType: 'stream' }
+      );
+    } catch (err) {
+      if (err.message && err.message.includes('fileNotExportable')) {
+        response = await drive.files.get(
+          { fileId: FILE_ID, alt: 'media' },
+          { responseType: 'stream' }
+        );
+      } else {
+        throw err;
+      }
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="sync.xlsx"');
+    
+    response.data
+      .on('error', err => {
+        console.error('Error streaming to client:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to stream Excel' });
+        }
+      })
+      .pipe(res);
+
+  } catch (error) {
+    console.error('Error initiating Excel stream:', error);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to initiate stream', details: error.message });
+  }
+});
+
+app.post('/api/production/sync-excel-save', async (req, res) => {
+  try {
+    const { month, data } = req.body;
+    if (!month || !data || !Array.isArray(data)) {
+      return res.status(400).json({ success: false, message: 'Invalid payload.' });
+    }
+
+    const db = client.db('Sasaki_Coating_MasterDB');
+    const collection = db.collection('firstFactoryProduction');
+    
+    await collection.deleteMany({ month });
+    if (data.length > 0) {
+      const formattedData = data.map(item => ({
+        ...item,
+        id: item.id || new ObjectId().toString(),
+        syncedAt: new Date()
+      }));
+      await collection.insertMany(formattedData);
+    }
+    
+    res.json({ success: true, message: `Successfully synced ${data.length} hinbans`, data });
+  } catch (error) {
+    console.error('Error saving Excel data:', error);
+    res.status(500).json({ error: 'Failed to save Excel data', details: error.message });
+  }
+});
+
+// ==========================================
+// Analytics: Material Lots (材料ロット) Usage, Meters, Shots & Traceability
+// ==========================================
+// MasterDB In-Memory Cache for Material Analytics
+let cachedMasterItems = null;
+let lastMasterItemsFetchTime = 0;
+const MASTER_ITEMS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+async function getMasterItemsMap(masterCollection) {
+  const now = Date.now();
+  if (cachedMasterItems && (now - lastMasterItemsFetchTime < MASTER_ITEMS_CACHE_TTL)) {
+    return cachedMasterItems;
+  }
+  const items = await masterCollection.find({}, {
+    projection: {
+      "品番": 1,
+      "背番号": 1,
+      "品名": 1,
+      "材料背番号": 1,
+      "材料品番": 1,
+      "材料": 1,
+      "色": 1,
+      "imageURL": 1
+    }
+  }).toArray();
+
+  const masterByHinban = new Map();
+  const masterBySeiban = new Map();
+  for (const item of items) {
+    if (item['品番']) masterByHinban.set(String(item['品番']).trim(), item);
+    if (item['背番号']) masterBySeiban.set(String(item['背番号']).trim(), item);
+  }
+
+  cachedMasterItems = { masterByHinban, masterBySeiban };
+  lastMasterItemsFetchTime = now;
+  return cachedMasterItems;
+}
+
+async function handleMaterialLotAnalytics(req, res) {
+  try {
+    const params = req.method === 'POST' ? req.body : req.query;
+    const {
+      startDate,
+      endDate,
+      factory,
+      machine,
+      lotNumber,
+      materialSeiban,
+      materialHinban,
+      hinban,
+      seiban,
+      worker,
+      search
+    } = params;
+
+    const db = client.db('submittedDB');
+    const collection = db.collection('pressDB');
+    const masterCollection = client.db('Sasaki_Coating_MasterDB').collection('masterDB');
+
+    // 1. Fetch MasterDB items with in-memory caching
+    const { masterByHinban, masterBySeiban } = await getMasterItemsMap(masterCollection);
+
+    // 2. Build PressDB Query - Only process documents that have Lot_Details
+    const query = {
+      "Lot_Details": { $exists: true, $type: 'array', $ne: [] }
+    };
+
+    // Date range filter on "Date" string field (YYYY-MM-DD)
+    if (startDate && endDate) {
+      query.Date = { $gte: String(startDate), $lte: String(endDate) };
+    } else if (startDate) {
+      query.Date = { $gte: String(startDate) };
+    } else if (endDate) {
+      query.Date = { $lte: String(endDate) };
+    } else {
+      // Defensive fallback: default to 1 week (past 7 days) if no date provided
+      const now = new Date();
+      const past7 = new Date(now);
+      past7.setDate(now.getDate() - 6);
+      const fmt = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
+      };
+      query.Date = { $gte: fmt(past7), $lte: fmt(now) };
+    }
+
+    if (factory) {
+      query['工場'] = factory;
+    }
+    if (machine) {
+      query.$or = [
+        { '設備': { $regex: machine, $options: 'i' } },
+        { 'Lot_Details.machine': { $regex: machine, $options: 'i' } }
+      ];
+    }
+    if (hinban) {
+      query['品番'] = { $regex: hinban, $options: 'i' };
+    }
+    if (seiban) {
+      query['背番号'] = { $regex: seiban, $options: 'i' };
+    }
+    if (worker) {
+      query['Worker_Name'] = { $regex: worker, $options: 'i' };
+    }
+    if (lotNumber) {
+      const lotRegex = { $regex: lotNumber, $options: 'i' };
+      query.$or = [
+        { '材料ロット': lotRegex },
+        { 'Lot_Details.lotNumber': lotRegex }
+      ];
+    }
+
+    if (search && String(search).trim()) {
+      const s = String(search).trim();
+      const sRegex = { $regex: s, $options: 'i' };
+      const searchClauses = [
+        { '材料ロット': sRegex },
+        { 'Lot_Details.lotNumber': sRegex },
+        { '品番': sRegex },
+        { '背番号': sRegex },
+        { '設備': sRegex },
+        { '工場': sRegex },
+        { 'Worker_Name': sRegex },
+        { 'Comment': sRegex }
+      ];
+      if (query.$or) {
+        query.$and = query.$and || [];
+        query.$and.push({ $or: query.$or });
+        query.$and.push({ $or: searchClauses });
+        delete query.$or;
+      } else {
+        query.$or = searchClauses;
+      }
+    }
+
+    // Sort by latest Date first
+    const records = await collection.find(query, {
+      projection: {
+        _id: 1,
+        "工場": 1,
+        "品番": 1,
+        "背番号": 1,
+        "Worker_Name": 1,
+        "Date": 1,
+        "Time_start": 1,
+        "Time_end": 1,
+        "設備": 1,
+        "Total_NG": 1,
+        "Comment": 1,
+        "createdAt": 1,
+        "materialLabelImages": 1,
+        "材料ラベル画像": 1,
+        "初物チェック画像": 1,
+        "終物チェック画像": 1,
+        "Lot_Details": 1
+      }
+    }).sort({ Date: -1, createdAt: -1, _id: -1 }).limit(3000).toArray();
+
+    // Aggregations
+    const lotMap = new Map();
+    const flatRuns = [];
+    const allFactories = new Set();
+    const allMachines = new Set();
+    const allHinbans = new Set();
+    const allSeibans = new Set();
+    const allWorkers = new Set();
+    const allLotNumbers = new Set();
+    const allMaterialSeibans = new Set();
+    const allMaterialHinbans = new Set();
+    const allMaterialNames = new Set();
+
+    let totalMetersOverall = 0;
+    let totalShotsOverall = 0;
+    let totalPiecesOverall = 0;
+    let totalImagesCountOverall = 0;
+    let totalDefectImagesCountOverall = 0;
+
+    for (const doc of records) {
+      const docId = doc._id ? doc._id.toString() : '';
+      const docFactory = doc['工場'] || '—';
+      const docHinban = String(doc['品番'] || '').trim();
+      const docSeiban = String(doc['背番号'] || '').trim();
+      const docWorker = doc['Worker_Name'] || '—';
+      const docDate = doc['Date'] || '';
+      const docTimeStart = doc['Time_start'] || '';
+      const docTimeEnd = doc['Time_end'] || '';
+      const docEquipment = doc['設備'] || '—';
+      const docTotalNg = Number(doc['Total_NG']) || 0;
+      const docComment = doc['Comment'] || '';
+      const docCreatedAt = doc.createdAt || '';
+
+      // Lookup Material & Product Info from MasterDB
+      const masterInfo = (docHinban ? masterByHinban.get(docHinban) : null)
+        || (docSeiban ? masterBySeiban.get(docSeiban) : null)
+        || {};
+
+      const matSeiban = masterInfo['材料背番号'] || '—';
+      const matHinban = masterInfo['材料品番'] || '—';
+      const matName = masterInfo['材料'] || '—';
+      const prodName = masterInfo['品名'] || '—';
+      const prodImage = masterInfo.imageURL || '';
+      const prodColor = masterInfo['色'] || '';
+
+      const firstCheckImg = doc['初物チェック画像'] || null;
+      const lastCheckImg = doc['終物チェック画像'] || null;
+
+      if (docFactory && docFactory !== '—') allFactories.add(docFactory);
+      if (docHinban) allHinbans.add(docHinban);
+      if (docSeiban) allSeibans.add(docSeiban);
+      if (docWorker && docWorker !== '—') allWorkers.add(docWorker);
+      if (docEquipment && docEquipment !== '—') {
+        docEquipment.split(',').map(m => m.trim()).filter(Boolean).forEach(m => allMachines.add(m));
+      }
+
+      const lotDetails = Array.isArray(doc.Lot_Details) ? doc.Lot_Details : [];
+
+      for (let lotIdx = 0; lotIdx < lotDetails.length; lotIdx++) {
+        const item = lotDetails[lotIdx];
+        const rawLotNum = String(item.lotNumber || '').trim();
+        if (!rawLotNum) continue;
+
+        allLotNumbers.add(rawLotNum);
+        const itemMachine = item.machine || docEquipment || '—';
+        if (itemMachine && itemMachine !== '—') {
+          itemMachine.split(',').map(m => m.trim()).filter(Boolean).forEach(m => allMachines.add(m));
+        }
+
+        const itemShots = Number(item.shots) || 0;
+        const itemMeters = Number(item.meters) || 0;
+        const itemPieces = Number(item.pieces) || 0;
+        const itemFeedPitch = item.feedPitch !== undefined && item.feedPitch !== null ? Number(item.feedPitch) : null;
+        const itemPcPerCycle = item.pcPerCycle !== undefined && item.pcPerCycle !== null ? Number(item.pcPerCycle) : null;
+
+        // Material Seiban: prefer item.materialSeiban from scanned QR, fallback to MasterDB matSeiban
+        const effectiveMatSeiban = (item.materialSeiban && String(item.materialSeiban).trim() && String(item.materialSeiban).trim() !== '—')
+          ? String(item.materialSeiban).trim()
+          : matSeiban;
+
+        if (effectiveMatSeiban && effectiveMatSeiban !== '—') allMaterialSeibans.add(effectiveMatSeiban);
+        if (matHinban && matHinban !== '—') allMaterialHinbans.add(matHinban);
+        if (matName && matName !== '—') allMaterialNames.add(matName);
+
+        // Filter by materialSeiban or materialHinban if requested
+        if (materialSeiban && effectiveMatSeiban.toLowerCase() !== String(materialSeiban).toLowerCase()) {
+          continue;
+        }
+        if (materialHinban && matHinban.toLowerCase() !== String(materialHinban).toLowerCase()) {
+          continue;
+        }
+
+        totalMetersOverall += itemMeters;
+        totalShotsOverall += itemShots;
+        totalPiecesOverall += itemPieces;
+
+        // Per-lot Images from new Lot_Details structure:
+        // 1. Label Image: item.image, fallback to doc.materialLabelImages[lotIdx] or doc['材料ラベル画像']
+        let lotItemLabelImage = item.image || null;
+        if (!lotItemLabelImage) {
+          if (Array.isArray(doc.materialLabelImages) && doc.materialLabelImages[lotIdx]) {
+            lotItemLabelImage = doc.materialLabelImages[lotIdx];
+          } else if (doc['材料ラベル画像'] && lotIdx === 0) {
+            lotItemLabelImage = doc['材料ラベル画像'];
+          }
+        }
+
+        // 2. Defect Images: item.defectImage (can be array or string)
+        let lotItemDefectImages = [];
+        if (Array.isArray(item.defectImage)) {
+          lotItemDefectImages = item.defectImage.filter(Boolean);
+        } else if (item.defectImage) {
+          lotItemDefectImages = [item.defectImage];
+        }
+
+        const runItem = {
+          pressId: docId,
+          rawRecord: doc,
+          lotNumber: rawLotNum,
+          factory: docFactory,
+          machine: itemMachine,
+          hinban: docHinban,
+          seiban: docSeiban,
+          productName: prodName,
+          productImage: prodImage,
+          productColor: prodColor,
+          materialSeiban: effectiveMatSeiban,
+          materialHinban: matHinban,
+          materialName: matName,
+          worker: docWorker,
+          date: docDate,
+          timeStart: docTimeStart,
+          timeEnd: docTimeEnd,
+          shots: itemShots,
+          feedPitch: itemFeedPitch,
+          pcPerCycle: itemPcPerCycle,
+          meters: itemMeters,
+          pieces: itemPieces,
+          totalNg: docTotalNg,
+          comment: docComment,
+          labelImage: lotItemLabelImage,
+          defectImages: lotItemDefectImages,
+          materialLabelImages: lotItemLabelImage ? [lotItemLabelImage] : [],
+          firstCheckImage: firstCheckImg,
+          lastCheckImage: lastCheckImg,
+          scannedQR: item.scannedQR || '',
+          timestamp: item.timestamp || '',
+          createdAt: docCreatedAt
+        };
+
+        flatRuns.push(runItem);
+
+        const lotKey = `${effectiveMatSeiban || 'UNKNOWN'}__${rawLotNum}`;
+
+        if (!lotMap.has(lotKey)) {
+          lotMap.set(lotKey, {
+            key: lotKey,
+            lotNumber: rawLotNum,
+            materialSeiban: effectiveMatSeiban,
+            materialHinban: matHinban,
+            materialName: matName,
+            totalMeters: 0,
+            totalShots: 0,
+            totalPieces: 0,
+            products: new Map(), // key: seiban+hinban -> { seiban, hinban, productName, productImage, shots, meters, pieces }
+            machines: new Set(),
+            factories: new Set(),
+            workers: new Set(),
+            dates: new Set(),
+            labelImages: new Set(),
+            defectImages: new Set(),
+            latestDate: docDate || '',
+            runs: []
+          });
+        }
+
+        const lotAgg = lotMap.get(lotKey);
+        lotAgg.totalMeters += itemMeters;
+        lotAgg.totalShots += itemShots;
+        lotAgg.totalPieces += itemPieces;
+
+        // In case earlier record didn't have material info but this one does
+        if (effectiveMatSeiban && effectiveMatSeiban !== '—' && (!lotAgg.materialSeiban || lotAgg.materialSeiban === '—')) lotAgg.materialSeiban = effectiveMatSeiban;
+        if (matHinban && matHinban !== '—' && (!lotAgg.materialHinban || lotAgg.materialHinban === '—')) lotAgg.materialHinban = matHinban;
+        if (matName && matName !== '—' && (!lotAgg.materialName || lotAgg.materialName === '—')) lotAgg.materialName = matName;
+
+        const prodKey = `${docSeiban}::${docHinban}`;
+        if (!lotAgg.products.has(prodKey)) {
+          lotAgg.products.set(prodKey, {
+            seiban: docSeiban,
+            hinban: docHinban,
+            productName: prodName,
+            productImage: prodImage,
+            productColor: prodColor,
+            totalShots: 0,
+            totalMeters: 0,
+            totalPieces: 0,
+            machines: new Set()
+          });
+        }
+        const prodSummary = lotAgg.products.get(prodKey);
+        prodSummary.totalShots += itemShots;
+        prodSummary.totalMeters += itemMeters;
+        prodSummary.totalPieces += itemPieces;
+        if (itemMachine && itemMachine !== '—') prodSummary.machines.add(itemMachine);
+
+        if (itemMachine && itemMachine !== '—') {
+          itemMachine.split(',').map(m => m.trim()).filter(Boolean).forEach(m => lotAgg.machines.add(m));
+        }
+        if (docFactory && docFactory !== '—') lotAgg.factories.add(docFactory);
+        if (docWorker && docWorker !== '—') lotAgg.workers.add(docWorker);
+        if (docDate) {
+          lotAgg.dates.add(docDate);
+          if (!lotAgg.latestDate || docDate > lotAgg.latestDate) {
+            lotAgg.latestDate = docDate;
+          }
+        }
+
+        if (lotItemLabelImage) {
+          lotAgg.labelImages.add(lotItemLabelImage);
+          totalImagesCountOverall++;
+        }
+        lotItemDefectImages.forEach(img => {
+          lotAgg.defectImages.add(img);
+          totalDefectImagesCountOverall++;
+        });
+
+        lotAgg.runs.push(runItem);
+      }
+    }
+
+    // Convert lotMap to sorted array: sort by latest Date first, then highest meters
+    const lots = Array.from(lotMap.values()).map(lot => {
+      const datesArr = Array.from(lot.dates).sort().reverse();
+      const labelImgs = Array.from(lot.labelImages);
+      const defectImgs = Array.from(lot.defectImages);
+      return {
+        key: lot.key,
+        lotNumber: lot.lotNumber,
+        materialSeiban: lot.materialSeiban || '—',
+        materialHinban: lot.materialHinban || '—',
+        materialName: lot.materialName || '—',
+        displayTitle: lot.materialSeiban && lot.materialSeiban !== '—' ? `${lot.materialSeiban} - ${lot.lotNumber}` : lot.lotNumber,
+        totalMeters: Number(lot.totalMeters.toFixed(2)),
+        totalShots: lot.totalShots,
+        totalPieces: lot.totalPieces,
+        latestDate: datesArr[0] || lot.latestDate || '',
+        products: Array.from(lot.products.values()).map(p => ({
+          ...p,
+          totalMeters: Number(p.totalMeters.toFixed(2)),
+          machines: Array.from(p.machines)
+        })),
+        machines: Array.from(lot.machines),
+        factories: Array.from(lot.factories),
+        workers: Array.from(lot.workers),
+        dates: datesArr,
+        runsCount: lot.runs.length,
+        labelImages: labelImgs,
+        defectImages: defectImgs,
+        images: [...labelImgs, ...defectImgs],
+        runs: lot.runs.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '') || (b.createdAt || '').localeCompare(a.createdAt || ''))
+      };
+    }).sort((a, b) => (b.latestDate || '').localeCompare(a.latestDate || '') || b.totalMeters - a.totalMeters);
+
+    res.json({
+      success: true,
+      summary: {
+        totalDistinctLots: lots.length,
+        totalMeters: Number(totalMetersOverall.toFixed(2)),
+        totalShots: totalShotsOverall,
+        totalPieces: totalPiecesOverall,
+        totalPressRuns: records.length,
+        totalImagesCount: totalImagesCountOverall,
+        totalDefectImagesCount: totalDefectImagesCountOverall
+      },
+      lots,
+      runs: flatRuns.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '') || (b.createdAt || '').localeCompare(a.createdAt || '')),
+      filterOptions: {
+        materialSeibans: Array.from(allMaterialSeibans).sort(),
+        materialHinbans: Array.from(allMaterialHinbans).sort(),
+        materialNames: Array.from(allMaterialNames).sort(),
+        factories: Array.from(allFactories).sort(),
+        machines: Array.from(allMachines).sort(),
+        hinbanList: Array.from(allHinbans).sort(),
+        seibanList: Array.from(allSeibans).sort(),
+        workers: Array.from(allWorkers).sort(),
+        lotNumbers: Array.from(allLotNumbers).sort()
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in /api/analytics/material-lots:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch material lots analytics', details: error.message });
+  }
+}
+
+app.get('/api/analytics/material-lots', handleMaterialLotAnalytics);
+app.post('/api/analytics/material-lots', handleMaterialLotAnalytics);
+
+// ── FREYA Industrial AI Copilot ───────────────────────────────────────────────
+const { processCopilotPrompt } = require('./aiCopilotService');
+
+app.post('/api/ai/copilot', async (req, res) => {
+  try {
+    const { prompt, currentPersona, kpiContext, history } = req.body || {};
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Missing prompt in request body' });
+    }
+
+    const result = await processCopilotPrompt({
+      prompt,
+      currentPersona,
+      kpiContext,
+      history,
+      client
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [copilot-route] Error processing AI prompt:', error);
+    res.status(500).json({
+      error: 'AI Copilot processing failed',
+      details: error.message
+    });
+  }
+});
 
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);

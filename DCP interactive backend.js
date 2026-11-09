@@ -1,0 +1,18601 @@
+// ===== Required URL parameters guard =====
+// The page must be opened with BOTH ?filter=<工場> and ?machine=<設備>. Without
+// them (e.g. opened directly) the app is blocked — no default machine is allowed.
+(function enforceRequiredParams() {
+  const params = new URLSearchParams(window.location.search);
+  const f = (params.get('filter') || '').trim();
+  const m = (params.get('machine') || '').trim();
+  if (f && m) return; // valid — continue loading the app
+
+  window.__dcpBlocked = true;
+  const showError = () => {
+    if (document.getElementById('paramErrorOverlay')) return;
+    const ov = document.createElement('div');
+    ov.id = 'paramErrorOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#F4F6FA;display:flex;align-items:center;justify-content:center;padding:24px;font-family:\'Nunito Sans\',-apple-system,BlinkMacSystemFont,sans-serif;';
+    ov.innerHTML = '<div style="max-width:440px;width:100%;text-align:center;background:#fff;border:1px solid #E6E8EF;border-radius:12px;padding:32px 24px;box-shadow:0 12px 32px rgba(16,24,40,0.14);">'
+      + '<div style="font-size:44px;line-height:1;">⚠️</div>'
+      + '<h1 style="font-size:1.25rem;font-weight:800;margin:14px 0 10px;color:#1F2733;">アクセスできません / Access Denied</h1>'
+      + '<p style="color:#6B7280;font-size:0.95rem;line-height:1.6;margin:0;">工場 (filter) と 設備 (machine) のパラメータが必要です。<br>Missing required parameters: <strong>filter</strong> and <strong>machine</strong>.<br><br>正しいQRコードまたはリンクからアクセスしてください。<br>Please open this page from the correct QR code / link.</p>'
+      + '<p style="color:#9AA1AC;font-size:0.72rem;margin-top:18px;word-break:break-all;">例 / Example:<br>?filter=小瀬&amp;machine=OZNC02</p>'
+      + '</div>';
+    (document.body || document.documentElement).appendChild(ov);
+  };
+  if (document.body) showError();
+  else document.addEventListener('DOMContentLoaded', showError);
+  // Halt the rest of backend.js (uncaught throw stops further top-level execution)
+  throw new Error('DCP: missing required URL parameters (filter, machine) — app blocked.');
+})();
+
+//link for ip address database
+const ipURL = 'https://script.google.com/macros/s/AKfycbyC6-KiT3xwGiahhzhB-L-OOL8ufG0WqnT5mjEelGBKGnbiqVAS6qjT78FlzBUHqTn3Gg/exec';
+
+// link for pictures database
+const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
+
+//link for live status (google sheets live status)
+const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30hlX9nBlQH4dwxlbdxSM5kJtgtNEQJQInA1mgXlEhYJxFHykZkdXV38deR6P83Ow/exec';
+
+// Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
+const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
+
+const serverURL = "https://kurachi.onrender.com";
+//const serverURL = "http://localhost:3000";
+//const serverURL = "http://192.168.0.20:3000";
+window.serverURL = serverURL;
+
+// Global variable to track if sendtoNC button has been pressed
+let sendtoNCButtonisPressed = false;
+
+// Global variable to track which input field is currently using the worker modal
+let currentModalInputField = null; // Can be 'worker' or 'kensa'
+
+// ============================================
+// SESSION ID MANAGEMENT SYSTEM
+// ============================================
+/**
+ * Get current sessionID from localStorage
+ * @returns {string|null} sessionID or null if not found
+ */
+function getSessionID() {
+  return localStorage.getItem(`${uniquePrefix}sessionID`);
+}
+
+/**
+ * Save sessionID to localStorage
+ * @param {string} sessionID - The session ID to store
+ */
+function setSessionID(sessionID) {
+  localStorage.setItem(`${uniquePrefix}sessionID`, sessionID);
+  console.log(`📌 SessionID saved to localStorage: ${sessionID}`);
+}
+
+/**
+ * Clear sessionID from localStorage (called on Submit/Reset)
+ */
+function clearSessionID() {
+  const oldSessionID = localStorage.getItem(`${uniquePrefix}sessionID`);
+  localStorage.removeItem(`${uniquePrefix}sessionID`);
+  console.log(`🗑️ SessionID cleared from localStorage: ${oldSessionID}`);
+}
+
+/**
+ * Generate new sessionID by calling backend for order number
+ * @param {string} 背番号 - Kanban serial number
+ * @param {string} 設備 - Machine/Equipment name
+ * @param {string} 工場 - Factory name
+ * @param {string} date - Date in yyyy-mm-dd format
+ * @returns {Promise<string|null>} Generated sessionID or null on error
+ */
+async function generateSessionID(背番号, 設備, 工場, date) {
+  try {
+    const response = await fetch(`${serverURL}/api/generate-session-id?背番号=${encodeURIComponent(背番号)}&設備=${encodeURIComponent(設備)}&工場=${encodeURIComponent(工場)}&Date=${encodeURIComponent(date)}`);
+    const data = await response.json();
+
+    if (data.success) {
+      console.log(`✅ Generated new sessionID: ${data.sessionID} (Order #${data.orderNumber})`);
+      return data.sessionID;
+    } else {
+      console.error('❌ Failed to generate sessionID:', data.error);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Error generating sessionID:', error);
+    return null;
+  }
+}
+
+// ============================================
+// TABLET LOGGING SYSTEM WITH RETRY QUEUE
+// ============================================
+
+// Persistent queue for failed log entries
+let logQueue = [];
+const MAX_RETRY_ATTEMPTS = 100;      // keep retrying for a long time — don't drop tablet logs
+const INITIAL_RETRY_DELAY = 2000;    // 2 seconds
+const MAX_RETRY_DELAY = 60000;       // cap backoff so retries keep flowing on a 24/7 tablet
+let isProcessingQueue = false;
+
+/**
+ * Get the localStorage key for the log queue (dynamic based on uniquePrefix)
+ */
+function getLogQueueKey() {
+  // uniquePrefix is defined later in the code, so we compute it here
+  const pageName = location.pathname.split('/').pop();
+  const currentSelectedFactory = document.getElementById('selected工場')?.value || '';
+  const selectedMachine = new URLSearchParams(window.location.search).get('machine') || '';
+  return `${pageName}_${currentSelectedFactory}_${selectedMachine}_logQueue`;
+}
+
+/**
+ * Load pending logs from localStorage
+ */
+function loadLogQueue() {
+  try {
+    const saved = localStorage.getItem(getLogQueueKey());
+    if (saved) {
+      logQueue = JSON.parse(saved);
+      console.log(`📦 Loaded ${logQueue.length} pending logs from queue`);
+    }
+  } catch (error) {
+    console.error('❌ Error loading log queue:', error);
+    logQueue = [];
+  }
+}
+
+/**
+ * Save pending logs to localStorage
+ */
+function saveLogQueue() {
+  try {
+    localStorage.setItem(getLogQueueKey(), JSON.stringify(logQueue));
+  } catch (error) {
+    console.error('❌ Error saving log queue:', error);
+  }
+}
+
+/**
+ * Add log entry to queue
+ */
+function addToLogQueue(logData) {
+  const queueEntry = {
+    id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    logData: logData,
+    attempts: 0,
+    timestamp: new Date().toISOString(),
+    nextRetryTime: Date.now()
+  };
+
+  logQueue.push(queueEntry);
+  saveLogQueue();
+  console.log(`📥 Added to queue: ${logData.Action} (Queue size: ${logQueue.length})`);
+
+  // Start processing queue if not already running
+  if (!isProcessingQueue) {
+    processLogQueue();
+  }
+}
+
+/**
+ * Send log to server with timeout
+ */
+async function sendLogToServer(logData, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${serverURL}/api/tablet-log`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(logData),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      return { success: true };
+    } else {
+      const errorText = await response.text();
+      return { success: false, error: errorText };
+    }
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      return { success: false, error: 'Request timeout' };
+    }
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Process the log queue - retry failed entries
+ */
+async function processLogQueue() {
+  if (isProcessingQueue || logQueue.length === 0) {
+    return;
+  }
+
+  isProcessingQueue = true;
+  console.log(`🔄 Processing log queue (${logQueue.length} entries)...`);
+
+  const now = Date.now();
+  const entriesToProcess = logQueue.filter(entry => entry.nextRetryTime <= now);
+
+  for (const entry of entriesToProcess) {
+    entry.attempts++;
+
+    console.log(`🔁 Retry attempt ${entry.attempts}/${MAX_RETRY_ATTEMPTS} for: ${entry.logData.Action}`);
+
+    const result = await sendLogToServer(entry.logData);
+
+    if (result.success) {
+      // Success - remove from queue
+      console.log(`✅ Successfully logged (retry): ${entry.logData.Action}`);
+      logQueue = logQueue.filter(e => e.id !== entry.id);
+      saveLogQueue();
+    } else {
+      // Failed - check if we should retry
+      if (entry.attempts >= MAX_RETRY_ATTEMPTS) {
+        console.error(`❌ Max retries reached for: ${entry.logData.Action} - Removing from queue`);
+        logQueue = logQueue.filter(e => e.id !== entry.id);
+        saveLogQueue();
+      } else {
+        // Exponential backoff (2s, 4s, 8s, …) capped so retries keep flowing
+        const delay = Math.min(MAX_RETRY_DELAY, INITIAL_RETRY_DELAY * Math.pow(2, entry.attempts - 1));
+        entry.nextRetryTime = now + delay;
+        saveLogQueue();
+        console.warn(`⏳ Will retry in ${delay / 1000}s: ${entry.logData.Action}`);
+      }
+    }
+
+    // Small delay between processing entries
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  isProcessingQueue = false;
+
+  // Schedule next queue check if there are still entries
+  if (logQueue.length > 0) {
+    const nextRetry = Math.min(...logQueue.map(e => e.nextRetryTime));
+    const delayUntilNext = Math.max(1000, nextRetry - Date.now());
+    setTimeout(processLogQueue, delayUntilNext);
+    console.log(`⏰ Next queue check in ${(delayUntilNext / 1000).toFixed(1)}s`);
+  }
+}
+
+/**
+ * Logs tablet actions to MongoDB tabletLogDB with guaranteed delivery
+ * @param {string} action - Description of the action (e.g., "Scanned kanban", "Worker name selected")
+ * @param {string} status - Status of the workflow (default: "in-progress", can be "Completed", "Reset")
+ * @param {object} additionalData - Any extra data to log
+ */
+async function logTabletAction(action, status = 'in-progress', additionalData = {}) {
+  try {
+    const 背番号 = document.getElementById('sub-dropdown')?.value || '';
+    const 品番 = document.getElementById('product-number')?.value || '';
+    const 工場 = document.getElementById('selected工場')?.value || '';
+    const 設備 = document.getElementById('process')?.value || '';
+    const Worker_Name = document.getElementById('Machine Operator')?.value || '';
+    const lotNumber = document.getElementById('Lot No.')?.value || '';
+
+    // Don't log if machine info is missing - tablet not initialized yet
+    if (!設備) {
+      console.log('⚠️ Skipping log: Machine (設備) not selected yet');
+      return;
+    }
+
+    // For most actions, 背番号 is required (except setup actions like checkbox toggle)
+    const setupActions = ['Kensa mode checkbox toggled', 'Break', 'Reset'];
+    const isSetupAction = setupActions.some(setupAction => action.includes(setupAction));
+
+    if (!背番号 && !isSetupAction) {
+      console.log('⚠️ Skipping log: Kanban (背番号) not scanned yet');
+      return;
+    }
+
+    // Get sessionID from localStorage
+    let sessionID = getSessionID();
+
+    // ✅ CRITICAL: sessionID is REQUIRED - Auto-generate if missing
+    if (!sessionID) {
+      console.warn(`⚠️ No sessionID found! Auto-generating for action: ${action}`);
+
+      // Generate sessionID immediately
+      const todayDate = new Date().toISOString().split('T')[0];
+      sessionID = await generateSessionID(背番号 || 'setup', 設備, 工場, todayDate);
+
+      if (sessionID) {
+        setSessionID(sessionID);
+        console.log(`✅ Emergency sessionID created: ${sessionID}`);
+      } else {
+        console.error(`❌ CRITICAL: Failed to generate sessionID for action: ${action}`);
+        console.error('❌ Logging blocked - cannot proceed without sessionID');
+        return; // Block logging if sessionID cannot be generated
+      }
+    }
+
+    const logData = {
+      背番号,
+      品番,
+      工場,
+      設備,
+      Worker_Name,
+      Action: action,
+      Status: status,
+      sessionID: sessionID,
+      AdditionalData: additionalData
+    };
+
+    // Try to send immediately
+    const result = await sendLogToServer(logData, 8000); // 8 second timeout
+
+    if (result.success) {
+      console.log(`📝 Tablet action logged: ${action}`);
+    } else {
+      // Failed - add to retry queue
+      console.warn(`⚠️ Failed to log immediately: ${action} - Adding to queue`);
+      console.warn(`⚠️ Error: ${result.error}`);
+      addToLogQueue(logData);
+    }
+  } catch (error) {
+    console.error('❌ Error in logTabletAction:', error);
+    // Still try to queue it if we have the basic data
+    try {
+      const 背番号 = document.getElementById('sub-dropdown')?.value || '';
+      const 品番 = document.getElementById('product-number')?.value || '';
+      const 工場 = document.getElementById('selected工場')?.value || '';
+      const 設備 = document.getElementById('process')?.value || '';
+      const Worker_Name = document.getElementById('Machine Operator')?.value || '';
+      const sessionID = getSessionID();
+
+      if (設備 && sessionID) {
+        addToLogQueue({
+          背番号, 品番, 工場, 設備, Worker_Name,
+          Action: action,
+          Status: status,
+          sessionID: sessionID,
+          AdditionalData: additionalData
+        });
+      }
+    } catch (queueError) {
+      console.error('❌ Failed to queue log entry:', queueError);
+    }
+  }
+}
+
+// Initialize queue system on page load
+document.addEventListener('DOMContentLoaded', () => {
+  loadLogQueue();
+  if (logQueue.length > 0) {
+    console.log(`🚀 Starting queue processor for ${logQueue.length} pending logs`);
+    setTimeout(processLogQueue, 2000); // Start processing after 2 seconds
+  }
+});
+
+// Failsafe: flush any pending logs when the network returns, when the tab
+// becomes visible again, and on a steady interval — so a 24/7 tablet never
+// silently strands queued logs.
+function flushLogQueue() {
+  try { if (logQueue.length > 0 && !isProcessingQueue) processLogQueue(); } catch (e) { }
+}
+window.addEventListener('online', flushLogQueue);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') flushLogQueue(); });
+setInterval(flushLogQueue, 30000);
+
+//this code listens to incoming parameters passed
+function getQueryParam(param) {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get(param);
+}
+
+const selectedFactory = getQueryParam('filter');
+const selectedMachine = getQueryParam('machine');
+
+console.log("🔵 ========== SCRIPT INITIALIZATION ==========");
+console.log("🔵 URL:", window.location.href);
+console.log("🔵 selectedFactory:", selectedFactory);
+console.log("🔵 selectedMachine:", selectedMachine);
+
+// ===== GROUPED MACHINE DETECTION =====
+// Check if this is a grouped machine page (decode URI to handle %20 spaces)
+const decodedPath = decodeURIComponent(window.location.pathname);
+const isGroupedMachinePage = decodedPath.includes('DCP Grouping') || (decodedPath.includes('DCP interactive') && selectedMachine && selectedMachine.includes(','));
+console.log("🔵 Decoded pathname:", decodedPath);
+console.log("🔵 isGroupedMachinePage:", isGroupedMachinePage);
+
+let groupedMachines = []; // Array to store multiple machine names
+let groupedMachineIPs = {}; // Object to store IPs: {machineA: "IP1", machineB: "IP2"}
+
+// Parse comma-separated machines if grouped
+if (selectedMachine && selectedMachine.includes(',')) {
+  groupedMachines = selectedMachine.split(',').map(m => m.trim());
+  console.log("✅ Grouped machines detected:", groupedMachines);
+} else if (selectedMachine) {
+  groupedMachines = [selectedMachine];
+  console.log("🔵 Single machine detected:", groupedMachines);
+} else {
+  console.log("❌ No selectedMachine found");
+}
+
+// Set factory and machine values when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  console.log("🔵 ========== Early DOMContentLoaded (factory/machine setup) ==========");
+  console.log("🔵 selectedFactory:", selectedFactory);
+  console.log("🔵 selectedMachine:", selectedMachine);
+  console.log("🔵 groupedMachines at this point:", groupedMachines);
+  const processInput = document.getElementById('process');
+
+  if (processInput && !processInput.dataset.sendToMachineVisibilityBound) {
+    processInput.addEventListener('change', updateSendToMachineVisibility);
+    processInput.dataset.sendToMachineVisibilityBound = 'true';
+  }
+
+  if (selectedFactory) {
+    const factoryInput = document.getElementById('selected工場');
+    const nippoTitle = document.getElementById('nippoTitle');
+    if (factoryInput) factoryInput.value = selectedFactory;
+    if (nippoTitle) nippoTitle.textContent = selectedFactory + "日報";
+    console.log("✅ kojo changed to: " + selectedFactory);
+  }
+
+  if (selectedMachine) {
+    if (processInput) {
+      processInput.value = selectedMachine;
+      console.log("✅ machine set to: " + selectedMachine);
+
+      // Create dynamic shot inputs after machine value is set
+      setTimeout(() => {
+        console.log("🔵 ⏰ setTimeout fired - About to call createGroupedShotInputs");
+        console.log("🔵 groupedMachines before call:", groupedMachines);
+        createGroupedShotInputs();
+      }, 100);
+    } else {
+      console.log("❌ processInput element not found!");
+    }
+  } else {
+    console.log("❌ selectedMachine is null/undefined");
+  }
+
+  updateSendToMachineVisibility();
+}, { once: true }); // Use once option to ensure this runs first
+
+// Add CSS styles for time input fields and edit buttons
+const timeInputStyles = `
+<style>
+  .time-input-wrapper {
+    display: inline-block;
+    position: relative;
+    margin-bottom: 10px;
+  }
+  
+  .time-input-wrapper input[type="time"] {
+    padding: 5px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    transition: border-color 0.2s;
+  }
+  
+  .time-input-wrapper input[type="time"].locked {
+    background-color: #f8f9fa;
+    border-color: #dee2e6;
+    color: #495057;
+  }
+  
+  .time-input-wrapper .edit-btn {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-left: 5px;
+    transition: background-color 0.2s;
+    vertical-align: middle;
+  }
+  
+  .time-input-wrapper .edit-btn:hover {
+    background-color: #0069d9;
+  }
+</style>`;
+
+// Inject styles into document head
+document.head.insertAdjacentHTML('beforeend', timeInputStyles);
+
+// Select all input, select, and button elements
+const inputs = document.querySelectorAll('input, select, button,textarea');
+const currentSelectedFactory = document.getElementById('selected工場').value; // Get the current factory value
+const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+const uniquePrefix = `${pageName}_${currentSelectedFactory}_${selectedMachine}_`;
+
+// Save the value of each input to localStorage on change
+inputs.forEach(input => {
+  input.addEventListener('input', () => {
+    const key = `${uniquePrefix}${input.id || input.name}`; // Prefix key with pageName and selected工場
+    if (key) {
+      safeSetItem(key, input.value);
+    }
+  });
+
+  if (input.type === 'checkbox' || input.type === 'radio') {
+    input.addEventListener('change', () => {
+      const key = `${uniquePrefix}${input.id || input.name}`;
+      if (key) {
+        safeSetItem(key, input.checked); // Save checkbox/radio state
+      }
+    });
+  }
+});
+
+// Restore the values of input fields, images, and textContent from localStorage on page load
+document.addEventListener('DOMContentLoaded', () => {
+  getIP(); // ip address for machine
+  document.getElementById('uploadingModal').style.display = 'none';
+  const inputs = document.querySelectorAll('input, select, button, textarea'); // Get all input elements
+  const images = document.querySelectorAll('img'); // Get all <img> elements
+  const textElements = document.querySelectorAll('[id]'); // Get all elements with an ID
+  const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+  const selected工場 = document.getElementById('selected工場')?.value; // Get the selected 工場 value
+  const processElement = document.getElementById("process");
+  const subDropdown = document.getElementById("sub-dropdown");
+
+  if (!selected工場) {
+    console.error("Selected 工場 is not set or found.");
+    return;
+  }
+
+  // Explicitly restore sub-dropdown value first
+  if (subDropdown) {
+    const subDropdownKey = `${uniquePrefix}sub-dropdown`;
+    const savedSubDropdownValue = localStorage.getItem(subDropdownKey);
+
+    if (savedSubDropdownValue) {
+      console.log(`Found saved sub-dropdown value: ${savedSubDropdownValue}`);
+
+      // Wait for options to be populated before setting value
+      setTimeout(() => {
+        if ([...subDropdown.options].some(option => option.value === savedSubDropdownValue)) {
+          subDropdown.value = savedSubDropdownValue;
+          previousSubDropdownValue = savedSubDropdownValue; // Initialize previous value
+          console.log(`Restored sub-dropdown to: ${savedSubDropdownValue}`);
+
+          // Fetch product details after setting dropdown value
+          fetchProductDetails();
+        } else {
+          console.error(`Option '${savedSubDropdownValue}' not found in sub-dropdown options.`);
+        }
+      }, 500);
+    }
+  }
+
+  // Loop through all keys in localStorage
+  Object.keys(localStorage).forEach(key => {
+    // Check if the key belongs to the current HTML file and selected 工場
+    if (key.startsWith(`${uniquePrefix}`)) {
+      const savedValue = localStorage.getItem(key);
+
+      if (savedValue !== null) {
+        // Match each input with its respective localStorage key
+        inputs.forEach(input => {
+          const inputKey = `${uniquePrefix}${input.id || input.name}`;
+          if (inputKey === key) {
+            if (input.type === 'checkbox' || input.type === 'radio') {
+              input.checked = savedValue === 'true'; // Restore checkbox/radio state
+            } else if (input.tagName === 'SELECT') {
+              // For select elements, wait for options to populate
+              setTimeout(() => {
+                if ([...input.options].some(option => option.value === savedValue)) {
+                  input.value = savedValue; // Restore select value
+                  console.log(`Restored ${input.id || input.name}:`, savedValue);
+                  fetchProductDetails();
+
+                } else {
+                  console.error(`Option '${savedValue}' not found in select '${input.id || input.name}'.`);
+                }
+              }, 2000); // Adjust delay if options are populated dynamically
+            } else if (input.type === 'file') {
+              // Ignore file input elements (browsers forbid setting non-empty strings)
+            } else if (input.id === 'Machine Operator' || input.name === 'Machine Operator') {
+              if (savedValue && savedValue.startsWith('[') && savedValue.endsWith(']')) {
+                try {
+                  const parsed = JSON.parse(savedValue);
+                  input.value = Array.isArray(parsed) ? parsed.filter(Boolean).map(s => String(s).trim()).join(',') : savedValue;
+                } catch (_) {
+                  input.value = savedValue;
+                }
+              } else {
+                input.value = savedValue || '';
+              }
+            } else {
+              input.value = savedValue; // Restore value for text, hidden, and other inputs
+            }
+          }
+        });
+
+        // Restore textContent dynamically for all elements with IDs
+        textElements.forEach(element => {
+          const textKey = `${uniquePrefix}${element.id}.textContent`;
+          if (key === textKey) {
+            element.textContent = savedValue; // Restore textContent
+            console.log(`Restored textContent for ${element.id}:`, savedValue);
+          }
+        });
+
+        // Restore image sources dynamically
+        images.forEach(image => {
+          const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
+          if (key === imageKey) {
+            image.src = savedValue; // Restore the image source
+            image.style.display = 'block'; // Ensure the image is visible
+            //console.log(`Restored ${image.id || image.name} image src:`, savedValue);
+          }
+        });
+        updateTotal();
+      }
+    }
+  });
+
+  // Log the restored value for debugging (Optional)
+  if (processElement) {
+    console.log('Process value after restoration:', processElement.value); // Debugging the restored process value
+  }
+
+  // Calculate break time and trouble time after restoring values
+  calculateTotalBreakTime();
+  calculateTotalMachineTroubleTime();
+
+  // Restore the sendtoNCButtonisPressed state
+  const sendToNCKey = `${uniquePrefix}sendtoNCButtonisPressed`;
+  const savedSendToNCState = localStorage.getItem(sendToNCKey);
+  const currentSebanggo = document.getElementById('sub-dropdown')?.value;
+
+  // Set up processing time inputs with edit buttons
+  const startTimeInput = document.getElementById('Start Time');
+  const endTimeInput = document.getElementById('End Time');
+
+  if (startTimeInput) {
+    // Wrap start time input in a container if not already wrapped
+    if (!startTimeInput.closest('.time-input-wrapper')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'time-input-wrapper';
+      startTimeInput.parentNode.insertBefore(wrapper, startTimeInput);
+      wrapper.appendChild(startTimeInput);
+
+      // Add edit button
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'edit-btn';
+      editBtn.id = 'edit-start-time';
+      editBtn.textContent = 'Edit';
+      editBtn.style.display = 'none';
+      editBtn.onclick = function () { unlockProcessingTime('start'); };
+      wrapper.appendChild(editBtn);
+
+      // Update focus handler to use our custom handler
+      startTimeInput.onfocus = function () { handleProcessingTimeFocus(this); };
+
+      // Update lock status based on current value
+      updateProcessingTimeLockStatus('start');
+    }
+  }
+
+  if (endTimeInput) {
+    // Wrap end time input in a container if not already wrapped
+    if (!endTimeInput.closest('.time-input-wrapper')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'time-input-wrapper';
+      endTimeInput.parentNode.insertBefore(wrapper, endTimeInput);
+      wrapper.appendChild(endTimeInput);
+
+      // Add edit button
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'edit-btn';
+      editBtn.id = 'edit-end-time';
+      editBtn.textContent = 'Edit';
+      editBtn.style.display = 'none';
+      editBtn.onclick = function () { unlockProcessingTime('end'); };
+      wrapper.appendChild(editBtn);
+
+      // Update focus handler to use our custom handler
+      endTimeInput.onfocus = function () { handleProcessingTimeFocus(this); };
+
+      // Update lock status based on current value
+      updateProcessingTimeLockStatus('end');
+    }
+  }
+
+  // Initialize previous sebanggo if it doesn't exist
+  if (!localStorage.getItem(`${uniquePrefix}previous-sebanggo`) && currentSebanggo) {
+    localStorage.setItem(`${uniquePrefix}previous-sebanggo`, currentSebanggo);
+    console.log(`Initialized previous-sebanggo to current value: ${currentSebanggo}`);
+  }
+
+  if (savedSendToNCState === 'true') {
+    sendtoNCButtonisPressed = true;
+    console.log("Restored sendtoNCButtonisPressed to true on page load");
+  } else {
+    sendtoNCButtonisPressed = false;
+    localStorage.setItem(sendToNCKey, 'false'); // Ensure false state is saved
+    console.log("Restored sendtoNCButtonisPressed to false on page load");
+  }
+
+  // Add event listeners to all break time inputs
+  for (let i = 1; i <= 4; i++) {
+    const startInput = document.getElementById(`break${i}-start`);
+    const endInput = document.getElementById(`break${i}-end`);
+
+    if (startInput && endInput) {
+      startInput.addEventListener('change', function () {
+        calculateTotalBreakTime();
+        // Save to localStorage
+        const key = `${uniquePrefix}${this.id}`;
+        localStorage.setItem(key, this.value);
+      });
+
+      endInput.addEventListener('change', function () {
+        calculateTotalBreakTime();
+        // Save to localStorage
+        const key = `${uniquePrefix}${this.id}`;
+        localStorage.setItem(key, this.value);
+      });
+    }
+  }
+
+  // Initialize maintenance system
+  loadMaintenanceRecords();
+
+  // ============================================
+  // STEP PERSISTENCE LOGIC - REMOVED
+  // ============================================
+  // Step persistence is now handled in window.addEventListener('load') 
+  // to ensure dropdown is fully restored before checking
+  // See bottom of file for step restoration logic
+
+  // Initialize material label photo system
+  loadMaterialLabelPhotos();
+
+  // Initialize cycle-check (初物/終物) photo system (restores previews from IndexedDB)
+  loadCycleCheckPhotos();
+
+  // Add maintenance button
+  const addMaintenanceBtn = document.getElementById('add-maintenance-btn');
+  if (addMaintenanceBtn) {
+    addMaintenanceBtn.addEventListener('click', () => showMaintenanceModal());
+  }
+
+  updateSendToMachineVisibility();
+  toggleInputs(); //enable or disable the kensa page
+});
+
+// this function fetches setsubi list (process.value)
+async function fetchSetsubiList() {
+  const factory = document.getElementById("selected工場").value;
+
+  if (factory === '肥田瀬' || factory === '第二工場') {
+    disableInputs();
+    console.log("this is runned");
+  }
+
+  try {
+    // Fetch data for the process dropdown
+    const response = await fetch(`${serverURL}/getSetsubiList?factory=${encodeURIComponent(factory)}`);
+    const data = await response.json();
+
+    // Get unique values of `設備`
+    const uniqueSetsubi = [...new Set(data.map(item => item.設備))];
+
+    // Select the process dropdown element
+    const processDropdown = document.getElementById("process");
+
+    if (!processDropdown) {
+      console.error("Process dropdown with id 'process' not found.");
+      return;
+    }
+
+    // Clear any existing options
+    processDropdown.innerHTML = "";
+
+    // Populate the process dropdown with unique 設備 values
+    uniqueSetsubi.forEach(equipment => {
+      const option = document.createElement("option");
+      option.value = equipment;
+      option.textContent = equipment;
+      processDropdown.appendChild(option);
+    });
+
+    console.log("Process dropdown populated with options.");
+    updateSendToMachineVisibility();
+
+    // Automatically call fetchSebanggo to populate the sub-dropdown
+    fetchSebanggo();
+
+  } catch (error) {
+    console.error("Error fetching data:", error);
+  }
+}
+
+// this function fetches sebanggo list
+async function fetchSebanggo() {
+  // Get the selected process from the process dropdown
+  const 工場 = document.getElementById("selected工場").value;
+  blankInfo();
+
+  try {
+    let data = [];
+
+    // OZMANAS-only: show only 背番号 where 加工設備 is OZMANAS in masterDB
+    if (isOZMANASMachine()) {
+      const query = { 加工設備: 'OZMANAS' };
+      if (工場) query.工場 = 工場;
+
+      const response = await fetch(`${serverURL}/queries`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "masterDB",
+          query
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      data = [...new Set((result || [])
+        .map(item => String(item?.背番号 || '').trim())
+        .filter(Boolean))];
+    } else {
+      // Existing behavior for all non-OZMANAS machines
+      const response = await fetch(`${serverURL}/getSeBanggoListPress?工場=${encodeURIComponent(工場)}`);
+      data = await response.json();
+    }
+
+    data.sort((a, b) => a.localeCompare(b, 'ja')); // 'ja' for Japanese sorting if needed // sort alphabetically
+
+    // Get the sub-dropdown element
+    const subDropdown = document.getElementById("sub-dropdown");
+
+    // Clear any existing options in the sub-dropdown
+    subDropdown.innerHTML = "";
+
+    // Add a blank option at the top
+    const blankOption = document.createElement("option");
+    blankOption.value = "";
+    blankOption.textContent = "Select 背番号";
+    subDropdown.appendChild(blankOption);
+
+    // Populate the sub-dropdown with new options based on the 背番号 values
+    data.forEach(item => {
+      const option = document.createElement("option");
+      option.value = item;
+      option.textContent = item;
+      subDropdown.appendChild(option);
+    });
+
+    console.log("Sub-dropdown populated with 背番号 options:", data);
+
+  } catch (error) {
+    console.error("Error fetching 背番号 data:", error);
+  }
+}
+
+// Call fetchSetsubiList when the page loads
+document.addEventListener("DOMContentLoaded", fetchSetsubiList);
+
+function toggleCallButtonsState(isEnabled) {
+  const boxBtn = document.getElementById('callBoxBtn');
+  const matBtn = document.getElementById('callMaterialBtn');
+  if (boxBtn) {
+    boxBtn.disabled = !isEnabled;
+    boxBtn.style.opacity = isEnabled ? '1' : '0.4';
+    boxBtn.style.pointerEvents = isEnabled ? 'auto' : 'none';
+  }
+  if (matBtn) {
+    matBtn.disabled = !isEnabled;
+    matBtn.style.opacity = isEnabled ? '1' : '0.4';
+    matBtn.style.pointerEvents = isEnabled ? 'auto' : 'none';
+  }
+}
+
+//blanks the info page
+function blankInfo() {
+  // Clear the value of the label with id "SRScode"
+  //document.getElementById("SRScode").textContent = "";
+
+  // Clear the values of all input fields
+  document.getElementById("product-number").value = "";
+  document.getElementById("model").value = "";
+  document.getElementById("shape").value = "";
+  document.getElementById("R-L").value = "";
+  document.getElementById("material").value = "";
+  document.getElementById("material-code").value = "";
+  document.getElementById("material-color").value = "";
+  document.getElementById("送りピッチ").textContent = ""; // Corrected to textContent for label
+
+  if (typeof window.updateParamsGuide === 'function') {
+    window.updateParamsGuide();
+  }
+
+  toggleCallButtonsState(false);
+}
+
+async function fetchProductDetails() {
+  const serialNumber = document.getElementById("sub-dropdown").value;
+  const factory = document.getElementById("selected工場").value;
+  const dynamicImage = document.getElementById("dynamicImage");
+  dynamicImage.src = "";
+
+  // Always refresh dates to the current date to prevent stale dates when tablet is left idle overnight
+  const lotDateInput = document.getElementById("Lot No.");
+  if (lotDateInput && typeof setDefaultDate === 'function') setDefaultDate(lotDateInput);
+  const kDateInput = document.getElementById("KDate");
+  if (kDateInput && typeof setDefaultDate === 'function') setDefaultDate(kDateInput);
+
+  if (!serialNumber) {
+    console.error("Please select a valid 背番号.");
+    blankInfo();
+    return;
+  }
+
+  try {
+    console.log(`Fetching product details for ${serialNumber}`);
+
+    // Step 1: Try query by 背番号
+    let response = await fetch(`${serverURL}/queries`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "masterDB",
+        query: {
+          背番号: serialNumber
+        }
+      }),
+    });
+
+    // Check if response is ok before trying to parse JSON
+    if (!response.ok) {
+      throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+    }
+
+    let result = await response.json();
+
+    // Step 2: If not found, try query by 品番
+    if (!result || result.length === 0) {
+      console.log(`No results found for 背番号: ${serialNumber}, trying 品番 instead`);
+
+      const altRes = await fetch(`${serverURL}/queries`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "masterDB",
+          query: {
+            品番: serialNumber
+          }
+        }),
+      });
+
+      // Check if alt response is ok
+      if (!altRes.ok) {
+        throw new Error(`Server returned ${altRes.status}: ${altRes.statusText}`);
+      }
+
+      const altResult = await altRes.json();
+
+      if (altResult.length > 0) {
+        console.log(`Found result using 品番: ${serialNumber}`);
+        const matched = altResult[0];
+        if (matched.背番号) {
+          document.getElementById("sub-dropdown").value = matched.背番号;
+        }
+        result = [matched];
+      }
+    }
+
+    // Step 3: Still no result
+    if (!result || result.length === 0) {
+      console.error(`No matching product found for ${serialNumber}`);
+      blankInfo();
+      return;
+    }
+
+    const data = result[0];
+    console.log(`Successfully found product data for ${serialNumber}`);
+
+    // Ensure we have valid data before populating fields
+    if (!data) {
+      throw new Error("Retrieved data is null or undefined");
+    }
+
+    // Stash the full master record so the per-lot tracker can resolve
+    // 送りピッチ / pcPerCycle per machine (machineConfig or the encoded string).
+    window.currentMasterRecord = data;
+    try {
+      localStorage.setItem(`${uniquePrefix}feedConfig`, JSON.stringify({
+        送りピッチ: data.送りピッチ != null ? data.送りピッチ : '',
+        pcPerCycle: data.pcPerCycle != null ? data.pcPerCycle : '',
+        machineConfig: data.machineConfig || null
+      }));
+    } catch (e) { /* non-fatal */ }
+
+    // Populate fields
+    document.getElementById("product-number").value = data.品番 || "";
+    document.getElementById("model").value = data.モデル || "";
+    document.getElementById("shape").value = data.形状 || "";
+    document.getElementById("R-L").value = data["R/L"] || "";
+    document.getElementById("material").value = data.材料 || "";
+    document.getElementById("material-code").value = data.材料背番号 || "";
+    document.getElementById("material-color").value = data.色 || "";
+    document.getElementById("kataban").value = data.型番 || "";
+    document.getElementById("収容数").value = data.収容数 || "";
+    let displayPitch = data.送りピッチ || "";
+    const processVal = document.getElementById("process") ? document.getElementById("process").value : "";
+    if (data.machineConfig && processVal) {
+      const machines = processVal.split(',').map(m => m.trim()).filter(Boolean);
+      const pitches = [];
+      let foundInConfig = false;
+      for (const m of machines) {
+        if (data.machineConfig[m] && data.machineConfig[m].送りピッチ !== undefined) {
+          pitches.push(data.machineConfig[m].送りピッチ);
+          foundInConfig = true;
+        } else {
+          pitches.push(data.送りピッチ || "");
+        }
+      }
+      if (foundInConfig) {
+        displayPitch = [...new Set(pitches)].filter(Boolean).join(", ");
+      }
+    }
+    document.getElementById("送りピッチ").textContent = "送りピッチ: " + displayPitch;
+
+    // Set 離型紙 value with Japanese/English labels
+    const rikeshiValue = data.離型紙上下 || data["離型紙上/下"] || "";
+    if (rikeshiValue === "上") {
+      document.getElementById("rikeshitext").textContent = "上 (Up)";
+    } else if (rikeshiValue === "下") {
+      document.getElementById("rikeshitext").textContent = "下 (Down)";
+    } else {
+      document.getElementById("rikeshitext").textContent = rikeshiValue;
+    }
+
+    document.getElementById("SRS").value = data.SRS || "";
+
+    // Set image
+    if (data.imageURL) {
+      dynamicImage.src = data.imageURL;
+      dynamicImage.alt = "Product Image";
+      dynamicImage.style.display = "block";
+    } else {
+      dynamicImage.src = "";
+      dynamicImage.alt = "No Image Available";
+      dynamicImage.style.display = "none";
+    }
+
+    // Update Params guide dynamically if it was already on screen before this fetch finished
+    if (typeof window.updateParamsGuide === 'function') {
+      window.updateParamsGuide();
+    }
+
+    toggleCallButtonsState(true);
+
+  } catch (error) {
+    console.error("Error fetching product details:", error);
+    blankInfo(); // Make sure we blank fields on error
+
+    // Display user-friendly error
+    const scanAlertModal = document.getElementById('scanAlertModal');
+    const scanAlertText = document.getElementById('scanAlertText');
+
+    if (scanAlertModal && scanAlertText) {
+      scanAlertText.innerText = `製品情報の取得中にエラーが発生しました / Error fetching product details: ${error.message}`;
+      scanAlertModal.style.display = 'block';
+
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      if (closeScanModalButton) {
+        closeScanModalButton.onclick = function () {
+          scanAlertModal.style.display = 'none';
+        };
+      }
+    }
+  }
+  // Call getRikeshi after product details are fetched
+  //getRikeshi(serialNumber);
+}
+
+// Variable to store the previous dropdown value
+let previousSubDropdownValue = document.getElementById("sub-dropdown").value;
+
+// Trigger when 背番号 is selected - with leader verification
+document.getElementById("sub-dropdown").addEventListener("change", function (event) {
+  const currentValue = document.getElementById("sub-dropdown").value;
+  const subDropdown = document.getElementById('sub-dropdown');
+
+  // Check if value actually changed
+  if (currentValue === previousSubDropdownValue) {
+    return; // No change, exit early
+  }
+
+  // Immediately revert the dropdown to previous value
+  subDropdown.value = previousSubDropdownValue;
+
+  // User is trying to change the dropdown - trigger leader verification with the attempted value
+  showLeaderVerification(currentValue);
+});
+
+// Global variable to hold the leader verification scanner
+let leaderVerificationScanner = null;
+
+// Function to show leader verification modal
+function showLeaderVerification(attemptedValue) {
+  const modal = document.getElementById('leaderVerificationModal');
+  const statusText = document.getElementById('leaderVerificationStatus');
+  const subDropdown = document.getElementById('sub-dropdown');
+
+  // Reset status text
+  statusText.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
+  statusText.style.color = '#2d5f4f';
+
+  // Reset the warning text to original (for sub-dropdown flow)
+  const modalContent = modal.querySelector('.modal-content');
+  const warningTextElement = modalContent.querySelector('p[style*="font-size"]');
+
+  if (warningTextElement) {
+    // Restore original warning text
+    warningTextElement.innerHTML = `価値観を変えることができるのはリーダーだけ<br>
+        <span style="font-size: 14px;">Only leaders can change value</span>`;
+    warningTextElement.style.fontSize = '15px';
+    warningTextElement.style.margin = '8px 0';
+    warningTextElement.style.color = '#666';
+    warningTextElement.style.lineHeight = '1.5';
+  }
+
+  // Show modal
+  modal.style.display = 'block';
+
+  // Initialize QR scanner for leader verification
+  leaderVerificationScanner = new Html5Qrcode("leaderQrReader");
+  const html5QrCode = leaderVerificationScanner;
+
+  html5QrCode.start(
+    { facingMode: "environment" },
+    {
+      fps: 30,
+      qrbox: { width: 800, height: 800 },
+      aspectRatio: 1.0,
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
+    },
+    async (decodedText) => {
+      console.log("Leader QR Code scanned:", decodedText);
+
+      // Verify leader with backend
+      try {
+        const response = await fetch(`${serverURL}/verifyLeader`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: decodedText })
+        });
+
+        const result = await response.json();
+
+        if (result.authorized) {
+          // Leader verified successfully
+          statusText.textContent = `✅ 認証成功！ / Verified: ${result.firstName} ${result.lastName} (${result.role})`;
+          statusText.style.color = '#006400';
+
+          // Stop scanner
+          html5QrCode.stop().then(() => {
+            // Close modal after short delay
+            setTimeout(() => {
+              modal.style.display = 'none';
+
+              // Allow the change to happen
+              previousSubDropdownValue = attemptedValue;
+              subDropdown.value = attemptedValue;
+
+              // Save the sub-dropdown value to localStorage
+              localStorage.setItem(`${uniquePrefix}sub-dropdown`, attemptedValue);
+              console.log(`Leader authorized change to: ${attemptedValue}`);
+
+              // Apply the proper sendtoNCButtonisPressed logic
+              NCPresstoFalse();
+
+              // Fetch product details
+              fetchProductDetails();
+            }, 1500);
+          }).catch(err => console.error("Error stopping scanner:", err));
+        } else {
+          // Not authorized
+          statusText.textContent = `❌ 権限がありません / Not authorized: ${result.error}`;
+          statusText.style.color = '#cc0000';
+
+          // Revert dropdown to previous value
+          subDropdown.value = previousSubDropdownValue;
+        }
+      } catch (error) {
+        console.error("Error verifying leader:", error);
+        statusText.textContent = '❌ エラーが発生しました / Error occurred during verification';
+        statusText.style.color = '#cc0000';
+
+        // Revert dropdown to previous value
+        subDropdown.value = previousSubDropdownValue;
+      }
+    },
+    (errorMessage) => {
+      // QR scan error (ignore continuous scanning errors)
+    }
+  ).catch(err => {
+    console.error("Error starting QR scanner:", err);
+    statusText.textContent = '❌ カメラを起動できませんでした / Could not start camera';
+    statusText.style.color = '#cc0000';
+  });
+
+  // Close button handler
+  document.getElementById('closeLeaderVerificationModal').onclick = function () {
+    // Stop the leader verification scanner and close modal
+    if (leaderVerificationScanner) {
+      leaderVerificationScanner.stop().then(() => {
+        modal.style.display = 'none';
+        // Revert dropdown to previous value
+        subDropdown.value = previousSubDropdownValue;
+        console.log("Leader verification cancelled, reverted to:", previousSubDropdownValue);
+        leaderVerificationScanner = null;
+      }).catch(err => {
+        console.error("Error stopping scanner:", err);
+        modal.style.display = 'none';
+        subDropdown.value = previousSubDropdownValue;
+        leaderVerificationScanner = null;
+      });
+    } else {
+      modal.style.display = 'none';
+      subDropdown.value = previousSubDropdownValue;
+    }
+  };
+}
+
+// Update previous value when scan button successfully changes the dropdown
+function updatePreviousDropdownValue(newValue) {
+  previousSubDropdownValue = newValue;
+}
+
+// Function to get link from Google Drive
+function picLINK(headerValue) {
+  fetch(`${picURL}?link=${headerValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text(); // Use .json() if your API returns JSON
+    })
+    .then(data => {
+      const cleanedData = data.replace(/"/g, ''); // Remove unnecessary quotes
+      updateImageSrc(cleanedData);
+      //console.log("image: " + cleanedData);
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+// Function to update the image src attribute
+function updateImageSrc(link) {
+  const imageElement = document.getElementById('dynamicImage');
+
+  if (imageElement) {
+    imageElement.src = `${link}&sz=s4000`; // Ensure valid URL structure
+  } else {
+    console.error("Error: Image element not found!");
+  }
+}
+
+//function to manage sendtoNCButtonisPressed state when dropdown changes
+function NCPresstoFalse() {
+  checkValue();
+  // Get current values
+  const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+  const currentSebanggo = document.getElementById('sub-dropdown').value;
+  const previousSebanggo = localStorage.getItem(`${uniquePrefix}previous-sebanggo`);
+
+  console.log(`Dropdown changed: Previous=${previousSebanggo}, Current=${currentSebanggo}`);
+
+  // Check if the selection has changed to a different value
+  if (currentSebanggo !== previousSebanggo && currentSebanggo !== "Select 背番号") {
+    // Different sebanggo selected, reset the state to false
+    sendtoNCButtonisPressed = false;
+    popupShown = false;
+    localStorage.setItem(key, 'false');
+    localStorage.setItem(`${uniquePrefix}previous-sebanggo`, currentSebanggo);
+    console.log(`Reset sendtoNCButtonisPressed to false - sebanggo changed from ${previousSebanggo} to ${currentSebanggo}`);
+  }
+  else if (currentSebanggo === "Select 背番号") {
+    // "Select 背番号" was chosen, always reset to false
+    sendtoNCButtonisPressed = false;
+    popupShown = false;
+    localStorage.setItem(key, 'false');
+    localStorage.setItem(`${uniquePrefix}previous-sebanggo`, currentSebanggo);
+    console.log(`Reset sendtoNCButtonisPressed to false - "Select 背番号" selected`);
+  }
+  else {
+    // Same sebanggo selected again, preserve the current state
+    const currentState = localStorage.getItem(key);
+    sendtoNCButtonisPressed = currentState === 'true';
+    console.log(`Preserved sendtoNCButtonisPressed state: ${sendtoNCButtonisPressed}`);
+  }
+}
+
+// when time is pressed
+// Set current time as default when time is pressed
+function setDefaultTime(input) {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const timeValue = `${hours}:${minutes}`;
+  input.value = timeValue;
+
+  // Save the time to local storage with unique prefix
+  localStorage.setItem(`${uniquePrefix}${input.id}`, timeValue);
+
+  // Log time input based on type
+  if (input.id === 'Start Time') {
+    logTabletAction('Start time set', 'in-progress', {
+      startTime: timeValue
+    });
+  } else if (input.id === 'End Time') {
+    logTabletAction('End time set', 'in-progress', {
+      endTime: timeValue
+    });
+    setTimeout(() => {
+      if (typeof window.promptFinalLots === 'function') {
+        window.promptFinalLots();
+      }
+    }, 150);
+  } else if (input.id.includes('break')) {
+    logTabletAction(`Break time ${input.id} set`, 'in-progress', {
+      breakTimeField: input.id,
+      time: timeValue
+    });
+  } else if (input.id === 'KStart Time') {
+    logTabletAction('Kensa start time set', 'in-progress', {
+      kensaStartTime: timeValue
+    });
+  } else if (input.id === 'KEnd Time') {
+    logTabletAction('Kensa end time set', 'in-progress', {
+      kensaEndTime: timeValue
+    });
+  }
+
+  // If this is a break time input, calculate total break time
+  if (input.id.includes('break')) {
+    calculateTotalBreakTime();
+  }
+
+  // If this is a trouble time input, calculate total trouble time
+  if (input.id.includes('trouble')) {
+    calculateTotalMachineTroubleTime();
+  }
+
+  // If this is the Start Time input, lock it to prevent accidental changes
+  if (input.id === 'Start Time') {
+    // Update lock status for start time
+    setTimeout(() => {
+      updateProcessingTimeLockStatus('start');
+    }, 100);
+  }
+
+  // If this is the End Time input, lock it to prevent accidental changes
+  if (input.id === 'End Time') {
+    // Update lock status for end time
+    setTimeout(() => {
+      updateProcessingTimeLockStatus('end');
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, 100);
+  }
+}
+
+// Handle processing time input focus - check if locked before setting time
+function handleProcessingTimeFocus(input) {
+  // Check if the input is locked
+  if (input.classList.contains('locked') || input.readOnly) {
+    console.log(`🔒 Processing time input ${input.id} is locked - focus ignored to prevent accidental changes`);
+    input.blur(); // Remove focus to prevent interaction
+    return;
+  }
+
+  // If not locked, proceed with normal setDefaultTime behavior
+  setDefaultTime(input);
+}
+
+// Function to reset individual break time
+function resetBreakTime(breakNumber) {
+  const startInput = document.getElementById(`break${breakNumber}-start`);
+  const endInput = document.getElementById(`break${breakNumber}-end`);
+
+  if (startInput && endInput) {
+    // Log reset action with current values before clearing
+    if (startInput.value || endInput.value) {
+      logTabletAction(`Break time ${breakNumber} reset`, 'Reset', {
+        breakNumber: breakNumber,
+        previousStart: startInput.value,
+        previousEnd: endInput.value
+      });
+    }
+
+    // Clear the values
+    startInput.value = '';
+    endInput.value = '';
+
+    // Create the unique prefix for localStorage
+    const pageName = location.pathname.split('/').pop();
+    const selected工場 = document.getElementById('selected工場').value;
+    const selectedMachine = getQueryParam('machine');
+    const prefix = `${pageName}_${selected工場}_${selectedMachine}_`;
+
+    // Remove from localStorage
+    const startKey = `${prefix}break${breakNumber}-start`;
+    const endKey = `${prefix}break${breakNumber}-end`;
+    localStorage.removeItem(startKey);
+    localStorage.removeItem(endKey);
+
+    // Recalculate total break time
+    calculateTotalBreakTime();
+
+    console.log(`Break time ${breakNumber} has been reset`);
+  }
+}
+
+// Processing time lock functions
+// Function to lock processing time inputs when they have values
+function lockProcessingTime(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+  const editBtn = document.getElementById(timeType === 'start' ? 'edit-start-time' : 'edit-end-time');
+
+  if (timeInput) {
+    // Add locked class and disable input
+    timeInput.classList.add('locked');
+    timeInput.readOnly = true;
+    timeInput.style.pointerEvents = 'none';
+
+    // Show edit button
+    if (editBtn) {
+      editBtn.style.display = 'inline-block';
+    }
+
+    console.log(`🔒 Processing ${timeType} time locked to prevent accidental changes`);
+  }
+}
+
+// Function to unlock processing time inputs for editing
+function unlockProcessingTime(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+  const editBtn = document.getElementById(timeType === 'start' ? 'edit-start-time' : 'edit-end-time');
+
+  if (timeInput) {
+    // Remove locked class and enable input
+    timeInput.classList.remove('locked');
+    timeInput.readOnly = false;
+    timeInput.style.pointerEvents = 'auto';
+
+    // Hide edit button
+    if (editBtn) {
+      editBtn.style.display = 'none';
+    }
+
+    console.log(`🔓 Processing ${timeType} time unlocked for editing`);
+  }
+}
+
+// Function to check and update lock status for processing times
+function updateProcessingTimeLockStatus(timeType) {
+  const timeInput = document.getElementById(timeType === 'start' ? 'Start Time' : 'End Time');
+
+  if (timeInput) {
+    const timeValue = timeInput.value;
+
+    // Lock only if time has a value
+    if (timeValue && timeValue.trim() !== '') {
+      lockProcessingTime(timeType);
+    } else {
+      unlockProcessingTime(timeType);
+    }
+  }
+}
+
+// Function to update all processing time lock statuses
+function updateAllProcessingTimeLockStatus() {
+  updateProcessingTimeLockStatus('start');
+  updateProcessingTimeLockStatus('end');
+}
+
+// Expose break and maint times for the TV monitor sync
+window.appGetTotalBreakAndMaintMinutes = function () {
+  try {
+    let b = 0; if (typeof calculateTotalBreakTime === 'function') b = calculateTotalBreakTime();
+    let m = 0; if (typeof calculateTotalMachineTroubleTime === 'function') m = calculateTotalMachineTroubleTime();
+    return b + m;
+  } catch (e) { return 0; }
+};
+
+// Function to calculate total break time in minutes
+function calculateTotalBreakTime() {
+  let totalMinutes = 0;
+
+  for (let i = 1; i <= 4; i++) {
+    const startInput = document.getElementById(`break${i}-start`);
+    const endInput = document.getElementById(`break${i}-end`);
+
+    if (startInput && endInput) {
+      const startTime = startInput.value;
+      const endTime = endInput.value;
+
+      if (startTime && endTime) {
+        const start = new Date(`2000-01-01T${startTime}:00`);
+        const end = new Date(`2000-01-01T${endTime}:00`);
+        if (end < start) end.setDate(end.getDate() + 1);
+
+        if (end > start) {
+          const diffMs = end - start;
+          const diffMinutes = Math.floor(diffMs / (1000 * 60));
+          totalMinutes += diffMinutes;
+        }
+      }
+    }
+  }
+
+  // Update the display and the input field
+  const totalDisplay = document.getElementById('total-break-display');
+  const breaktimeMins = document.getElementById('breaktime-mins');
+
+  if (totalDisplay) {
+    totalDisplay.textContent = `${totalMinutes}分`;
+  }
+  if (breaktimeMins) {
+    breaktimeMins.value = totalMinutes;
+  }
+
+  // Save to localStorage with proper prefix
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場')?.value;
+  const selectedMachine = getQueryParam('machine');
+
+  if (pageName && selected工場 && selectedMachine) {
+    const prefix = `${pageName}_${selected工場}_${selectedMachine}_`;
+    localStorage.setItem(`${prefix}breaktime-mins`, totalMinutes);
+    localStorage.setItem(`${prefix}total-break-display`, `${totalMinutes}分`);
+  }
+  return totalMinutes; // Return total minutes for calculation in submit
+}
+
+// Dynamic Maintenance Time System
+let maintenanceRecords = [];
+let currentEditingIndex = -1;
+let maintenancePhotos = []; // Array to store multiple photos for current maintenance
+const MAX_MAINTENANCE_PHOTOS = 5; // Maximum photos per maintenance record
+
+// Material Label Photo System
+let materialLabelPhotos = []; // Array to store multiple material label photos
+const MAX_MATERIAL_PHOTOS = 25; // Maximum number of photos allowed
+
+// IndexedDB helper for material label photos (keyed by uniquePrefix to avoid cross-form collisions)
+const materialLabelDB = (() => {
+  let _db = null;
+  const DB_VERSION = 1;
+  const STORE = 'photos';
+
+  function open() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(`${uniquePrefix}materialLabelDB`, DB_VERSION);
+      req.onupgradeneeded = e => e.target.result.createObjectStore(STORE, { keyPath: 'id' });
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  return {
+    put(record) {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(record).onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    },
+    getAll() {
+      return open().then(db => new Promise((res, rej) => {
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+        req.onsuccess = e => res(e.target.result);
+        req.onerror = e => rej(e.target.error);
+      }));
+    },
+    delete(id) {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(id).onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    },
+    clear() {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).clear().onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    }
+  };
+})();
+
+// IndexedDB for cycle-check photos (初物 / 終物) — keeps image bytes out of
+// localStorage (avoids the ~5MB quota), mirroring the material-label store.
+// These are single photos, so each record is keyed by its imgId
+// ('hatsumonoPic' / 'atomonoPic'); re-capturing simply overwrites it.
+const cycleCheckDB = (() => {
+  let _db = null;
+  const DB_VERSION = 1;
+  const STORE = 'photos';
+
+  function open() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(`${uniquePrefix}cycleCheckDB`, DB_VERSION);
+      req.onupgradeneeded = e => e.target.result.createObjectStore(STORE, { keyPath: 'id' });
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  return {
+    put(record) {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(record).onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    },
+    get(id) {
+      return open().then(db => new Promise((res, rej) => {
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(id);
+        req.onsuccess = e => res(e.target.result);
+        req.onerror = e => rej(e.target.error);
+      }));
+    },
+    getAll() {
+      return open().then(db => new Promise((res, rej) => {
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+        req.onsuccess = e => res(e.target.result);
+        req.onerror = e => rej(e.target.error);
+      }));
+    },
+    delete(id) {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(id).onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    },
+    clear() {
+      return open().then(db => new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).clear().onsuccess = () => res();
+        tx.onerror = e => rej(e.target.error);
+      }));
+    }
+  };
+})();
+
+// Live object URLs for the cycle-check (初物/終物) preview <img>s, so the previous
+// one can be revoked when a photo is replaced or cleared (no localStorage involved).
+const cycleCheckObjectURLs = {};
+
+
+async function compressBlobToLimit(dataURL, maxBytes = 1024 * 1024) {
+  const img = await new Promise((res, rej) => {
+    const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataURL;
+  });
+  const canvas = document.createElement('canvas');
+  let w = img.width, h = img.height;
+  if (w > 2048) { h = Math.round(h * 2048 / w); w = 2048; }
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+
+  for (const q of [0.95, 0.85, 0.75, 0.65, 0.55, 0.45, 0.35]) {
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', q));
+    if (blob && blob.size <= maxBytes) return blob;
+  }
+  // Last resort: halve dimensions
+  canvas.width = Math.round(w / 2); canvas.height = Math.round(h / 2);
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  return new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.7));
+}
+
+// IndexedDB for maintenance photos — keeps base64 out of localStorage (avoids the ~5MB
+// quota). Stores full photos keyed by id, plus an unsaved-photo "draft" for refresh recovery.
+const maintenanceDB = (() => {
+  let _db = null;
+  const DB_VERSION = 1;
+  const PHOTOS = 'photos';
+  const DRAFT = 'draft';
+
+  function open() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(`${uniquePrefix}maintenanceDB`, DB_VERSION);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(PHOTOS)) db.createObjectStore(PHOTOS, { keyPath: 'id' });
+        if (!db.objectStoreNames.contains(DRAFT)) db.createObjectStore(DRAFT, { keyPath: 'key' });
+      };
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+  const tx = (store, mode, fn) => open().then(db => new Promise((res, rej) => {
+    const t = db.transaction(store, mode);
+    const r = fn(t.objectStore(store));
+    if (r) r.onsuccess = e => res(e.target.result);
+    t.oncomplete = () => res(r ? r.result : undefined);
+    t.onerror = e => rej(e.target.error);
+  }));
+
+  return {
+    putPhoto(rec) { return tx(PHOTOS, 'readwrite', s => s.put(rec)); },
+    getPhoto(id) { return tx(PHOTOS, 'readonly', s => s.get(id)); },
+    deletePhoto(id) { return tx(PHOTOS, 'readwrite', s => s.delete(id)); },
+    saveDraft(photos) { return tx(DRAFT, 'readwrite', s => s.put({ key: 'current', photos })); },
+    getDraft() { return tx(DRAFT, 'readonly', s => s.get('current')).then(r => r ? r.photos : null); },
+    clearDraft() { return tx(DRAFT, 'readwrite', s => s.delete('current')); },
+    // Wipe every stored maintenance photo blob AND the unsaved-photo draft. Used on
+    // reset / successful submit so photo blobs don't pile up in IndexedDB across sessions.
+    clearAll() {
+      return Promise.all([
+        tx(PHOTOS, 'readwrite', s => s.clear()),
+        tx(DRAFT, 'readwrite', s => s.clear())
+      ]);
+    }
+  };
+})();
+
+// Returns the base64 for a maintenance photo — from the object itself (legacy records /
+// in-memory) or hydrated from IndexedDB by id (new reference-only records).
+async function getMaintenancePhotoBase64(photo) {
+  if (!photo) return null;
+  if (photo.base64) return photo.base64;
+  try { const rec = await maintenanceDB.getPhoto(photo.id); return rec ? rec.base64 : null; }
+  catch (e) { console.warn('Maintenance photo hydrate failed:', e); return null; }
+}
+
+// Fill base64 for an array of photo references (used when editing a saved record).
+async function hydrateMaintenancePhotos(photos) {
+  const out = [];
+  for (const p of (photos || [])) {
+    const base64 = await getMaintenancePhotoBase64(p);
+    out.push({ id: p.id, timestamp: p.timestamp, uploaded: p.uploaded || false, base64: base64 || undefined });
+  }
+  return out;
+}
+
+// Persist the current unsaved maintenance photos as a draft (add mode only) so a refresh
+// mid-capture doesn't lose freshly-taken photos.
+function persistMaintenanceDraft() {
+  if (currentEditingIndex >= 0) return; // editing a saved record: not an unsaved draft
+  try { maintenanceDB.saveDraft(maintenancePhotos.map(p => ({ id: p.id, timestamp: p.timestamp, base64: p.base64, uploaded: p.uploaded }))); }
+  catch (e) { console.warn('Maintenance draft save failed:', e); }
+}
+
+// localStorage.setItem with QuotaExceededError handling + a throttled user warning, so a
+// full store fails loudly instead of silently dropping the write.
+let _storageWarnShown = 0;
+function safeSetItem(key, value) {
+  try { localStorage.setItem(key, value); return true; }
+  catch (e) {
+    const quota = e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014 || e.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+    if (quota) {
+      const now = Date.now();
+      if (now - _storageWarnShown > 10000) {
+        _storageWarnShown = now;
+        const msg = 'ストレージ容量が不足しています。データを送信して空き容量を確保してください / Storage is full — please submit to free space.';
+        if (typeof window.showAppToast === 'function') window.showAppToast(msg);
+        else if (typeof showAlert === 'function') showAlert(msg, false);
+      }
+      console.error('QuotaExceededError while saving', key, e);
+    } else {
+      console.error('localStorage.setItem failed for', key, e);
+    }
+    return false;
+  }
+}
+
+// Load maintenance records from localStorage
+function loadMaintenanceRecords() {
+  const saved = localStorage.getItem(`${uniquePrefix}maintenanceRecords`);
+  if (saved) {
+    maintenanceRecords = JSON.parse(saved);
+    renderMaintenanceRecords();
+    calculateTotalMachineTroubleTime();
+  }
+}
+
+// Save maintenance records to localStorage (photo bytes live in IndexedDB, not here)
+function saveMaintenanceRecords() {
+  safeSetItem(`${uniquePrefix}maintenanceRecords`, JSON.stringify(maintenanceRecords));
+}
+
+// Clear maintenance photos
+function clearMaintenancePhotos() {
+  maintenancePhotos = [];
+  renderMaintenancePhotoThumbnails();
+  persistMaintenanceDraft();
+}
+
+// Add photo to maintenance photos
+function addMaintenancePhoto(base64Data) {
+  if (maintenancePhotos.length >= MAX_MAINTENANCE_PHOTOS) {
+    showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚まで撮影できます / Maximum ${MAX_MAINTENANCE_PHOTOS} photos allowed`);
+    return false;
+  }
+
+  // SIMPLIFIED validation like test HTML - just check if it's not empty
+  if (!base64Data || base64Data.length === 0) {
+    console.error('❌ addMaintenancePhoto ERROR: Empty base64 data');
+    showAlert('無効な画像データです。再試行してください。', false);
+    return false;
+  }
+
+  console.log(`🔍 addMaintenancePhoto: Received ${base64Data.length} bytes of base64 data`);
+  console.log(`🔍 addMaintenancePhoto: First 50 chars: ${base64Data.substring(0, 50)}`);
+
+  const photoData = {
+    base64: base64Data, // Clean base64 without data URL prefix  
+    timestamp: Date.now(),
+    id: `maintenance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    uploaded: false // Track upload status
+  };
+
+  maintenancePhotos.push(photoData);
+
+  console.log(`📷 Photo added: ID=${photoData.id}, base64Length=${base64Data.length}, timestamp=${photoData.timestamp}`);
+
+  renderMaintenancePhotoThumbnails();
+  persistMaintenanceDraft();
+  return true;
+}
+
+// Remove photo from maintenance photos
+function removeMaintenancePhoto(index) {
+  if (index >= 0 && index < maintenancePhotos.length) {
+    maintenancePhotos.splice(index, 1);
+    renderMaintenancePhotoThumbnails();
+    persistMaintenanceDraft();
+  }
+}
+
+// Render photo thumbnails in the modal
+function renderMaintenancePhotoThumbnails() {
+  const container = document.getElementById('maintenance-photo-thumbnails');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  if (maintenancePhotos.length === 0) {
+    container.innerHTML = '<p style="text-align: center; color: #666; margin: 20px 0;">写真がありません / No photos</p>';
+  } else {
+    maintenancePhotos.forEach((photo, index) => {
+      const thumbItem = document.createElement('div');
+      thumbItem.style.cssText = `
+        position: relative;
+        display: inline-block;
+        margin: 5px;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        overflow: hidden;
+        background: #f9f9f9;
+      `;
+
+      const img = document.createElement('img');
+      // Use firebaseUrl if uploaded, otherwise use base64 data
+      let imageSrc;
+      if (photo.firebaseUrl && photo.uploaded) {
+        imageSrc = photo.firebaseUrl;
+      } else if (photo.base64) {
+        // Use clean base64 data with proper data URL prefix for display
+        imageSrc = `data:image/jpeg;base64,${photo.base64}`;
+      } else {
+        // Fallback for photos without either source
+        console.warn('Photo has no displayable source:', photo);
+        imageSrc = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5JbWFnZTwvdGV4dD4KPHR0ZXh0IHg9IjQwIiB5PSI1NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+'; // Placeholder SVG
+      }
+      img.src = imageSrc;
+      img.style.cssText = `
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        cursor: pointer;
+        display: block;
+      `;
+      img.onclick = () => showMaintenancePhotoPreview(imageSrc);
+
+      // Add error handling for failed image loads
+      img.onerror = () => {
+        console.error('Failed to load maintenance photo:', imageSrc);
+        img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5GYWlsZWQ8L3RleHQ+CjwvdGV4dD4KPC9zdmc+'; // Error placeholder
+      };
+
+      const removeBtn = document.createElement('button');
+      removeBtn.innerHTML = '×';
+      removeBtn.style.cssText = `
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        background: #ff4444;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        font-size: 12px;
+        cursor: pointer;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      `;
+      removeBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeMaintenancePhoto(index);
+      };
+
+      thumbItem.appendChild(img);
+      thumbItem.appendChild(removeBtn);
+      container.appendChild(thumbItem);
+    });
+  }
+
+  // Update photo count display
+  const photoCount = document.getElementById('maintenance-photo-count');
+  if (photoCount) {
+    photoCount.textContent = `${maintenancePhotos.length}/${MAX_MAINTENANCE_PHOTOS}`;
+  }
+}
+
+// Show full size photo preview
+function showMaintenancePhotoPreview(imageDataURL) {
+  // Create a modal for full preview
+  const previewModal = document.createElement('div');
+  previewModal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10001;
+  `;
+
+  const img = document.createElement('img');
+  img.src = imageDataURL;
+  img.style.cssText = `
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+  `;
+
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '×';
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: #ff4444;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    cursor: pointer;
+  `;
+
+  closeBtn.onclick = () => document.body.removeChild(previewModal);
+  previewModal.onclick = (e) => {
+    if (e.target === previewModal) document.body.removeChild(previewModal);
+  };
+
+  previewModal.appendChild(img);
+  previewModal.appendChild(closeBtn);
+  document.body.appendChild(previewModal);
+}
+
+// Show Quick Maintenance Reason Modal
+function showQuickMaintenanceReasonModal(startStr, endStr) {
+  const modal = document.createElement('div');
+  modal.id = 'quickMaintenanceReasonModal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    padding: 20px;
+    box-sizing: border-box;
+    font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  `;
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = `
+    background: white;
+    padding: 30px;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 450px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    font-family: inherit;
+  `;
+
+  modalContent.innerHTML = `
+    <div style="text-align:center; margin-bottom:24px;">
+      <div style="font-size:1.25rem;font-weight:800;color:#1F2733;">理由を選択 / Select Reason</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <button type="button" class="quick-reason-btn" data-reason="刃物交換" style="
+        display:flex; align-items:center; justify-content:space-between;
+        width:100%; padding:16px 18px; margin-bottom:10px;
+        background:#E8F0FE; border:1.5px solid #2E6FF2;
+        border-radius:12px; font-family:inherit; font-size:1.05rem;
+        font-weight:700; color:#2E6FF2; cursor:pointer;
+        transition:background 0.15s;
+      ">
+        <span>🔧 刃物交換 (Change Blade)</span>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+      
+      <button type="button" id="manual-reason-btn" style="
+        display:flex; align-items:center; justify-content:space-between;
+        width:100%; padding:16px 18px; margin-bottom:10px;
+        background:#F7F8FB; border:1.5px solid #9AA1AC;
+        border-radius:12px; font-family:inherit; font-size:1.05rem;
+        font-weight:700; color:#374151; cursor:pointer;
+        transition:background 0.15s;
+      ">
+        <span>✍️ 手動入力 / Manual Entry</span>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+  `;
+
+  modal.appendChild(modalContent);
+  document.body.appendChild(modal);
+
+  // Quick reason buttons
+  modalContent.querySelectorAll('.quick-reason-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const reason = btn.dataset.reason;
+
+      // Replace modal content with "Take Photo?" prompt
+      modalContent.innerHTML = `
+        <div style="text-align:center; margin-bottom:24px;">
+          <div style="font-size:1.25rem;font-weight:800;color:#1F2733;">写真を追加しますか？</div>
+          <div style="font-size:0.95rem;color:#6B7280;margin-top:8px;">Add a photo for this maintenance?</div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button type="button" id="quick-photo-no" style="
+            flex: 1; padding: 16px; background: #F7F8FB; color: #374151; border: 1.5px solid #9AA1AC; border-radius: 12px; font-size: 1.05rem; font-weight: bold; cursor: pointer; transition: background 0.15s;">
+            いいえ (No)
+          </button>
+          <button type="button" id="quick-photo-yes" style="
+            flex: 1; padding: 16px; background: #E8F0FE; color: #2E6FF2; border: 1.5px solid #2E6FF2; border-radius: 12px; font-size: 1.05rem; font-weight: bold; cursor: pointer; transition: background 0.15s;">
+            📷 はい (Yes)
+          </button>
+        </div>
+      `;
+
+      // If "No", save instantly (like before)
+      modalContent.querySelector('#quick-photo-no').addEventListener('click', () => {
+        const recordId = Date.now();
+        const record = {
+          id: recordId,
+          startTime: startStr,
+          endTime: endStr,
+          comment: reason,
+          photos: [],
+          timestamp: new Date().toISOString()
+        };
+
+        maintenanceRecords.push(record);
+        if (typeof logTabletAction === 'function') {
+          logTabletAction('Maintenance record added', 'Completed', {
+            startTime: record.startTime,
+            endTime: record.endTime,
+            comment: record.comment,
+            photoCount: 0
+          });
+        }
+
+        saveMaintenanceRecords();
+        renderMaintenanceRecords();
+        calculateTotalMachineTroubleTime();
+
+        document.body.removeChild(modal);
+      });
+
+      // If "Yes", open normal modal, prefill reason, and auto-open camera
+      modalContent.querySelector('#quick-photo-yes').addEventListener('click', () => {
+        document.body.removeChild(modal);
+        showMaintenanceModal(-1);
+        setTimeout(() => {
+          const s = document.getElementById('maintenance-start');
+          const e = document.getElementById('maintenance-end');
+          const reasonInput = document.getElementById('maintenance-comment');
+          if (s) s.value = startStr;
+          if (e) e.value = endStr;
+          if (reasonInput) {
+            reasonInput.value = reason;
+            reasonInput.focus();
+          }
+          if (typeof showToast === 'function') showToast(_t('toast_enter_reason_photo'));
+
+          // Auto-open camera since they said yes to photo
+          setTimeout(() => {
+            if (typeof openMaintenanceCamera === 'function') openMaintenanceCamera();
+          }, 300);
+        }, 120);
+      });
+    });
+  });
+
+  // Manual entry button
+  modalContent.querySelector('#manual-reason-btn').addEventListener('click', () => {
+    document.body.removeChild(modal);
+    // Show normal modal
+    showMaintenanceModal(-1);
+    setTimeout(() => {
+      const s = document.getElementById('maintenance-start');
+      const e = document.getElementById('maintenance-end');
+      if (s) s.value = startStr;
+      if (e) e.value = endStr;
+      const reasonInput = document.getElementById('maintenance-comment');
+      if (reasonInput) reasonInput.focus();
+      if (typeof showToast === 'function') showToast(_t('toast_enter_reason_photo'));
+    }, 120);
+  });
+}
+
+// Show maintenance modal
+function showMaintenanceModal(editIndex = -1) {
+  currentEditingIndex = editIndex;
+  const isEditing = editIndex >= 0;
+
+  // Photos are hydrated asynchronously below (after the modal DOM exists): from IndexedDB
+  // for a saved record (edit), or from the unsaved draft (add). Start empty.
+  maintenancePhotos = [];
+
+  // Create modal
+  const modal = document.createElement('div');
+  modal.id = 'maintenanceModal';
+  modal.className = 'maintenance-modal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  `;
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = `
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+  `;
+
+  // Pre-fill data if editing
+  let existingRecord = {};
+  if (isEditing && maintenanceRecords[editIndex]) {
+    existingRecord = maintenanceRecords[editIndex];
+  }
+
+  modalContent.innerHTML = `
+    <h2 style="margin-top: 0; text-align: center;">
+      ${isEditing ? '機械故障時間編集' : '機械故障時間追加'} / ${isEditing ? 'Edit Maintenance' : 'Add Maintenance'}
+    </h2>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 5px; font-weight: bold;">開始時間 / Start Time:</label>
+      <input type="time" id="maintenance-start" value="${existingRecord.startTime || ''}" 
+             style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 5px; font-weight: bold;">終了時間 / End Time:</label>
+      <input type="time" id="maintenance-end" value="${existingRecord.endTime || ''}"
+             style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px;">
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 5px; font-weight: bold;">理由・説明 / Reason/Comment:</label>
+      <textarea id="maintenance-comment" rows="4" placeholder="機械故障の理由を入力してください..."
+                style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; resize: vertical;">${existingRecord.comment || ''}</textarea>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 10px; font-weight: bold;">
+        写真 / Photos (<span id="maintenance-photo-count">0/${MAX_MAINTENANCE_PHOTOS}</span>):
+      </label>
+      <div style="margin-bottom: 10px;">
+        <button type="button" id="take-maintenance-photo" 
+                style="padding: 10px 20px; background: #007cba; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+          📷 写真を撮る / Take Photo
+        </button>
+        <button type="button" id="clear-maintenance-photos" 
+                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer;">
+          🗑️ 全削除 / Clear All
+        </button>
+      </div>
+      <div id="maintenance-photo-thumbnails" style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; min-height: 60px; background: #f9f9f9;">
+        <!-- Photo thumbnails will be rendered here -->
+      </div>
+    </div>
+    
+    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+      <button type="button" id="cancel-maintenance" 
+              style="padding: 10px 20px; background: #ccc; color: black; border: none; border-radius: 5px; cursor: pointer;">
+        キャンセル / Cancel
+      </button>
+      ${isEditing ? `
+        <button type="button" id="delete-maintenance" 
+                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer;">
+          削除 / Delete
+        </button>
+      ` : ''}
+      <button type="button" id="save-maintenance" 
+              style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        保存 / Save
+      </button>
+    </div>
+  `;
+
+  modal.appendChild(modalContent);
+  document.body.appendChild(modal);
+
+  // Render existing photos (empty initially; filled by the async hydration below)
+  renderMaintenancePhotoThumbnails();
+
+  // Hydrate photos: edit -> from the saved record's IndexedDB blobs; add -> from an
+  // unsaved draft recovered after a refresh mid-capture.
+  (async () => {
+    try {
+      if (isEditing && existingRecord.photos && existingRecord.photos.length) {
+        maintenancePhotos = await hydrateMaintenancePhotos(existingRecord.photos);
+      } else if (!isEditing) {
+        const draft = await maintenanceDB.getDraft();
+        if (draft && draft.length) {
+          maintenancePhotos = draft;
+          if (typeof window.showAppToast === 'function') {
+            window.showAppToast(_t('toast_restored_maintenance'));
+          }
+        }
+      }
+      renderMaintenancePhotoThumbnails();
+    } catch (e) {
+      console.warn('Maintenance photo hydration failed:', e);
+    }
+  })();
+
+  // Add event listeners
+  setupMaintenanceModalEvents(modal, existingRecord);
+}
+
+// Setup modal event listeners
+function setupMaintenanceModalEvents(modal, existingRecord) {
+  const takePhotoBtn = modal.querySelector('#take-maintenance-photo');
+  const clearPhotosBtn = modal.querySelector('#clear-maintenance-photos');
+  const saveBtn = modal.querySelector('#save-maintenance');
+  const cancelBtn = modal.querySelector('#cancel-maintenance');
+  const deleteBtn = modal.querySelector('#delete-maintenance');
+
+  // Take photo functionality
+  takePhotoBtn.addEventListener('click', async () => {
+    if (maintenancePhotos.length >= MAX_MAINTENANCE_PHOTOS) {
+      showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚まで撮影できます / Maximum ${MAX_MAINTENANCE_PHOTOS} photos allowed`);
+      return;
+    }
+
+    await openMaintenanceCamera();
+  });
+
+  // Clear all photos functionality
+  clearPhotosBtn.addEventListener('click', () => {
+    if (maintenancePhotos.length > 0) {
+      if (confirm(_t('confirm_delete_all_photos'))) {
+        clearMaintenancePhotos();
+      }
+    }
+  });
+
+  // Save functionality
+  saveBtn.addEventListener('click', async () => {
+    const startTime = modal.querySelector('#maintenance-start').value;
+    const endTime = modal.querySelector('#maintenance-end').value;
+    const comment = modal.querySelector('#maintenance-comment').value;
+
+    if (!startTime || !endTime) {
+      showAlert('開始時間と終了時間を入力してください / Please enter start and end times');
+      return;
+    }
+
+    if (!comment.trim()) {
+      showAlert('理由・説明を入力してください / Please enter a reason/comment');
+      return;
+    }
+
+    const wasEditing = currentEditingIndex >= 0;
+    const recordId = wasEditing ? maintenanceRecords[currentEditingIndex].id : Date.now();
+
+    // Persist photo bytes to IndexedDB; the localStorage record keeps references only.
+    const photoRefs = [];
+    for (const p of maintenancePhotos) {
+      try {
+        if (p.base64) await maintenanceDB.putPhoto({ id: p.id, base64: p.base64, timestamp: p.timestamp, recordId });
+      } catch (e) { console.warn('Failed to persist maintenance photo to IndexedDB:', e); }
+      photoRefs.push({ id: p.id, timestamp: p.timestamp, uploaded: p.uploaded || false });
+    }
+
+    // Clean up blobs for photos removed while editing this record.
+    if (wasEditing) {
+      const keepIds = new Set(photoRefs.map(r => r.id));
+      for (const op of (maintenanceRecords[currentEditingIndex].photos || [])) {
+        if (op.id && !keepIds.has(op.id)) { try { await maintenanceDB.deletePhoto(op.id); } catch (e) { } }
+      }
+    }
+
+    const record = {
+      id: recordId,
+      startTime,
+      endTime,
+      comment: comment.trim(),
+      photos: photoRefs, // references only — base64 lives in IndexedDB
+      timestamp: wasEditing ? maintenanceRecords[currentEditingIndex].timestamp : new Date().toISOString()
+    };
+
+    if (wasEditing) {
+      maintenanceRecords[currentEditingIndex] = record;
+      // Log maintenance record edit
+      logTabletAction('Maintenance record edited', 'Completed', {
+        startTime: record.startTime,
+        endTime: record.endTime,
+        comment: record.comment,
+        photoCount: record.photos.length
+      });
+    } else {
+      maintenanceRecords.push(record);
+      // Log maintenance record add
+      logTabletAction('Maintenance record added', 'Completed', {
+        startTime: record.startTime,
+        endTime: record.endTime,
+        comment: record.comment,
+        photoCount: record.photos.length
+      });
+    }
+
+    saveMaintenanceRecords();
+    renderMaintenanceRecords();
+    calculateTotalMachineTroubleTime();
+
+    // Consume the unsaved-photo draft (add flow) and clear the working array
+    if (!wasEditing) { try { await maintenanceDB.clearDraft(); } catch (e) { } }
+    maintenancePhotos = [];
+
+    document.body.removeChild(modal);
+  });
+
+  // Cancel functionality
+  cancelBtn.addEventListener('click', async () => {
+    // Discard the unsaved-photo draft (add flow) and clear the working array
+    if (currentEditingIndex < 0) { try { await maintenanceDB.clearDraft(); } catch (e) { } }
+    maintenancePhotos = [];
+    document.body.removeChild(modal);
+  });
+
+  // Delete functionality
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      if (confirm(_t('confirm_delete_maintenance'))) {
+        const deletedRecord = maintenanceRecords[currentEditingIndex];
+        // Log maintenance record delete
+        logTabletAction('Maintenance record deleted', 'Reset', {
+          startTime: deletedRecord.startTime,
+          endTime: deletedRecord.endTime,
+          comment: deletedRecord.comment
+        });
+
+        // Remove this record's photo blobs from IndexedDB
+        for (const p of (deletedRecord.photos || [])) {
+          if (p.id) { try { await maintenanceDB.deletePhoto(p.id); } catch (e) { } }
+        }
+
+        maintenanceRecords.splice(currentEditingIndex, 1);
+        saveMaintenanceRecords();
+        renderMaintenanceRecords();
+        calculateTotalMachineTroubleTime();
+
+        // Clear the working photos array
+        maintenancePhotos = [];
+
+        document.body.removeChild(modal);
+      }
+    });
+  }
+
+  // (Removed close on background click so users don't accidentally lose data)
+}
+
+// === Material Label Photo Functions ===
+function clearMaterialLabelPhotos() {
+  materialLabelPhotos.forEach(p => URL.revokeObjectURL(p.blobUrl));
+  materialLabelPhotos = [];
+  // Also drop the persisted blobs — clearing only the in-memory array would leave
+  // them in IndexedDB to be reloaded (and re-submitted) on the next page load.
+  materialLabelDB.clear().catch(e => console.warn('materialLabelDB clear failed:', e));
+  renderMaterialPhotoThumbnails();
+  updateMaterialPhotoCount();
+}
+
+async function addMaterialLabelPhoto(photoDataURL, lotTarget = undefined, options = {}) {
+  // Resolve which lot this photo links to. An explicitly supplied value — including
+  // null, which means "no lot" (e.g. a general gallery capture or an extra defect
+  // photo) — is always respected. We only fall back to the global capture target
+  // when the caller didn't specify a lot at all, and consume it so a later photo
+  // can't accidentally reuse it.
+  let lotNumber;
+  if (lotTarget !== undefined) {
+    lotNumber = lotTarget;
+  } else if (window.__captureLotTarget) {
+    lotNumber = window.__captureLotTarget;
+    window.__captureLotTarget = null;
+  } else {
+    lotNumber = null;
+  }
+
+  const shouldReplace = options.replace !== false && !options.isExtra && options.photoType !== 'defect';
+  const photoType = options.photoType || 'label';
+  const machine = options.machine || null;
+
+  if (materialLabelPhotos.length >= MAX_MATERIAL_PHOTOS) {
+    const _mpLang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
+    const _mpMsg = _mpLang === 'en' ? `Maximum ${MAX_MATERIAL_PHOTOS} photos allowed` : _mpLang === 'pt' ? `Máximo de ${MAX_MATERIAL_PHOTOS} fotos permitidas` : `最大${MAX_MATERIAL_PHOTOS}枚まで撮影できます`;
+    alert(_mpMsg);
+    return false;
+  }
+
+  if (typeof photoDataURL !== 'string' || !photoDataURL) {
+    console.error('Invalid photo data provided to addMaterialLabelPhoto');
+    return false;
+  }
+
+  // Normalise to full data URL for canvas processing
+  const displayURL = photoDataURL.startsWith('data:') ? photoDataURL : `data:image/jpeg;base64,${photoDataURL}`;
+
+  const originalBytes = Math.round(displayURL.length * 3 / 4);
+  console.log(`Material label photo original size: ~${(originalBytes / 1024).toFixed(1)} KB`);
+
+  // Compress to a raw Blob under 1 MB — highest quality that fits
+  const blob = await compressBlobToLimit(displayURL, 1024 * 1024);
+  console.log(`Compressed to: ${(blob.size / 1024).toFixed(1)} KB`);
+
+  const id = `material-label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const timestamp = new Date().toISOString();
+
+  // Retaking a photo for a lot that already has one: replace it (keep the link), unless shouldReplace is false
+  if (shouldReplace && lotNumber && typeof materialLabelPhotos !== 'undefined') {
+    const existingIdx = materialLabelPhotos.findIndex(p => p.lotNumber === lotNumber && p.photoType !== 'defect');
+    if (existingIdx >= 0) {
+      const old = materialLabelPhotos[existingIdx];
+      try { URL.revokeObjectURL(old.blobUrl); } catch (e) { }
+      try { await materialLabelDB.delete(old.id); } catch (e) { }
+      materialLabelPhotos.splice(existingIdx, 1);
+    }
+  }
+
+  // Persist raw blob in IndexedDB (no base64 at rest)
+  await materialLabelDB.put({ id, blob, timestamp, lotNumber, photoType, machine });
+
+  // Object URL is used only for display in this session
+  const blobUrl = URL.createObjectURL(blob);
+  materialLabelPhotos.push({ id, timestamp, blobUrl, lotNumber, photoType, machine });
+
+  console.log(`Added material label photo #${materialLabelPhotos.length}`);
+
+  logTabletAction('Material label photo captured', 'in-progress', {
+    photoNumber: materialLabelPhotos.length,
+    totalPhotos: materialLabelPhotos.length,
+    timestamp
+  });
+
+  renderMaterialPhotoThumbnails();
+  updateMaterialPhotoCount();
+  updateMaterialLabelElement();
+  if (typeof renderMaterialLotTags === 'function') renderMaterialLotTags();
+  return true;
+}
+
+function removeMaterialLabelPhoto(index) {
+  if (index >= 0 && index < materialLabelPhotos.length) {
+    const removedPhoto = materialLabelPhotos[index];
+    materialLabelPhotos.splice(index, 1);
+
+    URL.revokeObjectURL(removedPhoto.blobUrl);
+    materialLabelDB.delete(removedPhoto.id);
+
+    logTabletAction('Material label photo removed', 'in-progress', {
+      photoIndex: index + 1,
+      remainingPhotos: materialLabelPhotos.length,
+      timestamp: removedPhoto.timestamp
+    });
+
+    renderMaterialPhotoThumbnails();
+    updateMaterialPhotoCount();
+    updateMaterialLabelElement();
+  }
+}
+
+function renderMaterialPhotoThumbnails() {
+  console.log('Rendering material photo thumbnails');
+
+  // Use existing HTML structure (defined in HTML)
+  const container = document.getElementById('material-photo-thumbnails');
+  const photoCountSpan = document.getElementById('material-photo-count');
+
+  if (!container) {
+    console.error('material-photo-thumbnails container not found in HTML - this element should exist in DCP iReporter.html');
+    console.log('Creating fallback container...');
+
+    // Create fallback container dynamically
+    const fallbackContainer = document.createElement('div');
+    fallbackContainer.id = 'material-photo-thumbnails';
+    fallbackContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;';
+
+    // Try to find the material label button area
+    const makerButton = document.getElementById('makerLabelButton');
+    if (makerButton && makerButton.parentElement) {
+      makerButton.parentElement.appendChild(fallbackContainer);
+      console.log('Created fallback material-photo-thumbnails container');
+
+      // Also create photo count if missing
+      if (!photoCountSpan) {
+        const countDiv = document.createElement('div');
+        countDiv.id = 'material-photo-count';
+        countDiv.style.cssText = 'margin: 10px 0; font-weight: bold; color: #007cba;';
+        makerButton.parentElement.insertBefore(countDiv, fallbackContainer);
+      }
+
+      // Retry rendering now that container exists
+      return renderMaterialPhotoThumbnails();
+    } else {
+      console.error('Could not create fallback container - makerLabelButton not found');
+      return;
+    }
+  }
+
+  // Clear existing thumbnails
+  container.innerHTML = '';
+
+  // Update photo count display
+  if (photoCountSpan) {
+    photoCountSpan.textContent = `Photo ${materialLabelPhotos.length}/${MAX_MATERIAL_PHOTOS}`;
+    photoCountSpan.style.display = materialLabelPhotos.length > 0 ? 'inline' : 'none';
+  }
+
+  // Hide/show container based on photo count
+  if (materialLabelPhotos.length === 0) {
+    container.style.display = 'none';
+    console.log('No material label photos to display');
+  } else {
+    container.style.display = 'flex';
+    console.log(`Rendering ${materialLabelPhotos.length} material label photos`);
+
+    materialLabelPhotos.forEach((photo, index) => {
+      const thumbItem = document.createElement('div');
+      thumbItem.style.cssText = `
+        position: relative;
+        display: inline-block;
+        margin: 5px;
+      `;
+
+      const img = document.createElement('img');
+
+      // Determine image source — blobUrl is created from IndexedDB on load
+      const imageSrc = photo.blobUrl || '';
+
+      img.src = imageSrc;
+      img.style.cssText = `
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        cursor: pointer;
+        display: block;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+      `;
+      img.onclick = () => showMaterialPhotoPreview(imageSrc);
+
+      // Add error handling
+      img.onerror = () => {
+        console.error('Failed to load material label photo:', imageSrc);
+        img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjBmMGYwIi8+Cjx0ZXh0IHg9IjQwIiB5PSI0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOTk5Ij5FcnJvcjwvdGV4dD4KPC9zdmc+';
+      };
+
+      // Delete button
+      const deleteBtn = document.createElement('button');
+      deleteBtn.innerHTML = '×';
+      deleteBtn.style.cssText = `
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        background: #ff4444;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        font-size: 14px;
+        cursor: pointer;
+        line-height: 1;
+      `;
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm(_t('confirm_delete_material_photo'))) {
+          removeMaterialLabelPhoto(index);
+        }
+      };
+
+      thumbItem.appendChild(img);
+      thumbItem.appendChild(deleteBtn);
+      container.appendChild(thumbItem);
+    });
+  }
+}
+
+function showMaterialPhotoPreview(imageDataURL) {
+  const previewModal = document.createElement('div');
+  previewModal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10001;
+  `;
+
+  const img = document.createElement('img');
+  img.src = imageDataURL;
+  img.style.cssText = `
+    max-width: 90%;
+    max-height: 90%;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    cursor: pointer;
+  `;
+
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '×';
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: #ff4444;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    cursor: pointer;
+  `;
+
+  closeBtn.onclick = () => document.body.removeChild(previewModal);
+  img.onclick = () => document.body.removeChild(previewModal);
+  previewModal.onclick = (e) => {
+    if (e.target === previewModal) document.body.removeChild(previewModal);
+  };
+
+  previewModal.appendChild(img);
+  previewModal.appendChild(closeBtn);
+  document.body.appendChild(previewModal);
+}
+
+function updateMaterialPhotoCount() {
+  const countElement = document.getElementById('material-photo-count');
+  const statusLabel = document.getElementById('makerLabel');
+  const statusLabelJP = document.getElementById('材料ラベル_L');
+
+  if (countElement) {
+    countElement.textContent = `Photo ${materialLabelPhotos.length}/${MAX_MATERIAL_PHOTOS}`;
+    countElement.style.display = materialLabelPhotos.length > 0 ? 'block' : 'none';
+  }
+
+  // Update Material Label status based on photo count
+  const hasPhotos = materialLabelPhotos.length > 0;
+
+  if (statusLabel) {
+    statusLabel.textContent = hasPhotos ? 'TRUE' : 'FALSE';
+  }
+
+  if (statusLabelJP) {
+    statusLabelJP.textContent = hasPhotos ? 'TRUE' : 'FALSE';
+  }
+
+  // Update the hidden 材料ラベル element as well (for compatibility)
+  updateMaterialLabelElement();
+}
+
+// Function to load material label photos from IndexedDB
+async function loadMaterialLabelPhotos() {
+  console.log('Loading material label photos from IndexedDB');
+  // Clean up any legacy localStorage entry left from the old system
+  localStorage.removeItem(`${uniquePrefix}materialLabelPhotos`);
+  try {
+    const records = await materialLabelDB.getAll();
+    materialLabelPhotos = records.map(r => ({
+      id: r.id,
+      timestamp: r.timestamp,
+      blobUrl: URL.createObjectURL(r.blob),
+      lotNumber: r.lotNumber || null,
+      photoType: r.photoType || 'label',
+      machine: r.machine || null
+    }));
+    console.log(`Loaded ${materialLabelPhotos.length} material label photos from IndexedDB`);
+    renderMaterialPhotoThumbnails();
+    updateMaterialPhotoCount();
+    updateMaterialLabelElement();
+    if (typeof renderMaterialLotTags === 'function') renderMaterialLotTags();
+  } catch (error) {
+    console.error('Error loading material label photos from IndexedDB:', error);
+    materialLabelPhotos = [];
+  }
+}
+
+// Point a cycle-check <img> at a stored blob via an object URL, revoking the
+// previous one first. Used both on capture and when restoring on load.
+function setCycleCheckImage(imgId, blob) {
+  const img = document.getElementById(imgId);
+  if (!img) return;
+  const prev = cycleCheckObjectURLs[imgId];
+  if (prev) { try { URL.revokeObjectURL(prev); } catch (e) { } }
+  const url = URL.createObjectURL(blob);
+  cycleCheckObjectURLs[imgId] = url;
+  img.src = url;
+  img.style.display = 'block';
+}
+
+// Restore 初物/終物 previews from IndexedDB on page load. Runs after the generic
+// localStorage→img restore, so it wins. Also drops any legacy localStorage image
+// bytes (and migrates them into IndexedDB once) so images never live in
+// localStorage going forward.
+async function loadCycleCheckPhotos() {
+  const ids = ['hatsumonoPic', 'atomonoPic'];
+  // Capture + remove any legacy localStorage image bytes so they can't be
+  // resurrected by the generic restore on later loads.
+  const legacy = {};
+  ids.forEach(id => {
+    const k = `${uniquePrefix}${id}.src`;
+    const v = localStorage.getItem(k);
+    if (v) { legacy[id] = v; localStorage.removeItem(k); }
+  });
+  try {
+    const records = await cycleCheckDB.getAll();
+    const byId = {};
+    (records || []).forEach(r => { byId[r.id] = r; });
+    for (const id of ids) {
+      if (!document.getElementById(id)) continue;
+      let blob = byId[id] ? byId[id].blob : null;
+      // One-time migration of a photo captured under the old localStorage system.
+      if (!blob && legacy[id]) {
+        try {
+          blob = await compressBlobToLimit(legacy[id], 1024 * 1024);
+          await cycleCheckDB.put({ id, blob, timestamp: new Date().toISOString() });
+          console.log(`Migrated legacy ${id} image from localStorage to IndexedDB`);
+        } catch (e) { console.warn(`Cycle-check migrate failed for ${id}:`, e); }
+      }
+      if (blob) setCycleCheckImage(id, blob);
+    }
+    console.log('Loaded cycle-check photos from IndexedDB');
+  } catch (error) {
+    console.error('Error loading cycle-check photos from IndexedDB:', error);
+  }
+}
+
+// Function to update the hidden 材料ラベル element for compatibility
+function updateMaterialLabelElement() {
+  // Try different possible selectors for material label image element
+  const makerPic = document.getElementById('材料ラベル') ||
+    document.querySelector('img[id="材料ラベル"]') ||
+    document.querySelector('img[name="材料ラベル"]');
+
+  if (!makerPic) {
+    console.warn('Could not find 材料ラベル element to update. Creating one if needed.');
+
+    // Try to find a parent element to attach to
+    const makerLabelButton = document.getElementById('makerLabelButton');
+    const makerLabelArea = document.querySelector('div:has(> #材料ラベル_L)') ||
+      makerLabelButton?.parentElement;
+
+    if (makerLabelArea) {
+      // Create the image element if it doesn't exist
+      const newImg = document.createElement('img');
+      newImg.id = '材料ラベル';
+      newImg.style.cssText = 'max-width: 200px; max-height: 200px; margin-top: 10px; display: none;';
+
+      // Insert after the button's parent div or at the end of the target area
+      makerLabelArea.appendChild(newImg);
+      console.log('Created new 材料ラベル image element');
+
+      // Now use the newly created element
+      updateMaterialLabelElement();
+      return;
+    } else {
+      console.error('Could not find appropriate parent for 材料ラベル element');
+      return;
+    }
+  }
+
+  // Try different possible selectors for material label status elements
+  const materialLabelJP = document.getElementById('材料ラベル_L');
+  const materialLabelEN = document.getElementById('makerLabel');
+
+  console.log('Material label elements found for update:', {
+    '材料ラベル': !!makerPic,
+    '材料ラベル_L': !!materialLabelJP,
+    'makerLabel': !!materialLabelEN
+  });
+
+  if (materialLabelPhotos.length > 0) {
+    // Use the blobUrl of the first photo for the legacy single-image element
+    const src = materialLabelPhotos[0].blobUrl;
+    try {
+      makerPic.src = src;
+      makerPic.style.display = 'block';
+      // Don't write blobUrl to localStorage — it's session-only; IndexedDB is the durable store
+      localStorage.removeItem(`${uniquePrefix}材料ラベル.src`);
+      if (materialLabelJP) {
+        materialLabelJP.textContent = 'TRUE';
+        localStorage.setItem(`${uniquePrefix}材料ラベル_L.textContent`, 'TRUE');
+      }
+      if (materialLabelEN) {
+        materialLabelEN.textContent = 'TRUE';
+        localStorage.setItem(`${uniquePrefix}makerLabel.textContent`, 'TRUE');
+      }
+      console.log('Successfully updated 材料ラベル element with first material photo');
+    } catch (error) {
+      console.error('Error setting material label image:', error);
+    }
+  } else {
+    // No photos, clear the element
+    try {
+      makerPic.src = '';
+      makerPic.style.display = 'none';
+      localStorage.removeItem(`${uniquePrefix}材料ラベル.src`);
+      if (materialLabelJP) {
+        materialLabelJP.textContent = 'FALSE';
+        localStorage.setItem(`${uniquePrefix}材料ラベル_L.textContent`, 'FALSE');
+      }
+      if (materialLabelEN) {
+        materialLabelEN.textContent = 'FALSE';
+        localStorage.setItem(`${uniquePrefix}makerLabel.textContent`, 'FALSE');
+      }
+      console.log('Cleared 材料ラベル element (no photos)');
+    } catch (error) {
+      console.error('Error clearing material label image:', error);
+    }
+  }
+}
+
+// Render maintenance records as clickable items
+function renderMaintenanceRecords() {
+  const container = document.getElementById('maintenance-records-container');
+  if (!container) {
+    console.error('Maintenance records container not found');
+    return;
+  }
+
+  container.innerHTML = '';
+
+  maintenanceRecords.forEach((record, index) => {
+    const duration = calculateDuration(record.startTime, record.endTime);
+    const photoCount = record.photos ? record.photos.length : 0;
+
+    const row = document.createElement('div');
+    row.className = 'record-row';
+
+    // Order number (1, 2, 3 ...)
+    const num = document.createElement('span');
+    num.className = 'record-num';
+    num.textContent = index + 1;
+    row.appendChild(num);
+
+    // Main (tap to edit)
+    const main = document.createElement('div');
+    main.className = 'record-main';
+    main.style.cursor = 'pointer';
+    const title = document.createElement('div');
+    title.className = 'record-title';
+    title.innerHTML = `${record.startTime} ~ ${record.endTime} <span class="record-dur">(${duration}分)</span>` +
+      (photoCount > 0 ? ` <span class="record-dur">· 📷 ${photoCount}</span>` : '');
+    const sub = document.createElement('div');
+    sub.className = 'record-sub';
+    sub.textContent = record.comment || '';
+    main.appendChild(title);
+    main.appendChild(sub);
+    main.addEventListener('click', () => showMaintenanceModal(index));
+    row.appendChild(main);
+
+    // Quick delete
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'record-del';
+    del.setAttribute('aria-label', 'delete maintenance');
+    del.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+    del.addEventListener('click', (e) => { e.stopPropagation(); deleteMaintenanceRecord(index); });
+    row.appendChild(del);
+
+    container.appendChild(row);
+  });
+}
+
+// Delete a maintenance record (also removes its linked photos from IndexedDB)
+async function deleteMaintenanceRecord(index) {
+  const rec = maintenanceRecords[index];
+  if (!rec) return;
+  if (!confirm(_t('confirm_delete_maintenance'))) return;
+  for (const ph of (rec.photos || [])) {
+    if (ph && ph.id) { try { await maintenanceDB.deletePhoto(ph.id); } catch (e) { } }
+  }
+  if (typeof logTabletAction === 'function') {
+    logTabletAction('Maintenance record deleted', 'Reset', { startTime: rec.startTime, endTime: rec.endTime, comment: rec.comment });
+  }
+  maintenanceRecords.splice(index, 1);
+  saveMaintenanceRecords();
+  renderMaintenanceRecords();
+  calculateTotalMachineTroubleTime();
+}
+
+// Calculate duration between start and end time
+function calculateDuration(startTime, endTime) {
+  if (!startTime || !endTime) return 0;
+
+  const start = new Date(`2000-01-01T${startTime}:00`);
+  const end = new Date(`2000-01-01T${endTime}:00`);
+
+  if (end > start) {
+    return Math.floor((end - start) / (1000 * 60));
+  }
+  return 0;
+}
+
+// Calculate total maintenance time
+function calculateTotalMachineTroubleTime() {
+  let totalMinutes = 0;
+
+  maintenanceRecords.forEach(record => {
+    totalMinutes += calculateDuration(record.startTime, record.endTime);
+  });
+
+  const totalElement = document.getElementById('total-trouble-display');
+  if (totalElement) {
+    totalElement.textContent = `${totalMinutes}分`;
+  }
+
+  const troubleTimeDisplay = document.getElementById('trouble-time-display');
+  if (troubleTimeDisplay) {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    troubleTimeDisplay.value = `${hours.toString().padStart(2, '0')}h ${minutes.toString().padStart(2, '0')}m`;
+  }
+
+  // Save to localStorage
+  const pageName = location.pathname.split('/').pop();
+  const selected工場 = document.getElementById('selected工場')?.value;
+  const selectedMachine = getQueryParam('machine');
+
+  if (pageName && selected工場 && selectedMachine) {
+    const prefix = `${pageName}_${selected工場}_${selectedMachine}_`;
+    localStorage.setItem(`${prefix}total-trouble-display`, `${totalMinutes}分`);
+    localStorage.setItem(`${prefix}trouble-time-mins`, totalMinutes);
+  }
+
+  return totalMinutes;
+}
+
+
+// Upload maintenance photos to Firebase via server endpoint
+// Legacy uploadMaintenancePhotos function removed - now using atomic submission via /submitToDCP
+
+async function testMaintenanceData() {
+  const selectedSebanggo = document.getElementById("sub-dropdown").value;
+  const currentDate = document.getElementById("Lot No.").value;
+  const selectedWorker = document.getElementById("Machine Operator").value;
+  const selectedFactory = document.getElementById("selected工場").value;
+  const selectedMachine = document.getElementById("process").value;
+
+  console.log("🧪 Testing maintenance data transmission...");
+  console.log("🔍 Values from frontend:", {
+    selectedSebanggo: `"${selectedSebanggo}"`,
+    currentDate: `"${currentDate}"`,
+    selectedWorker: `"${selectedWorker}"`,
+    selectedFactory: `"${selectedFactory}"`,
+    selectedMachine: `"${selectedMachine}"`
+  });
+
+  try {
+    const testPayload = {
+      factory: selectedFactory,
+      machine: selectedMachine,
+      worker: selectedWorker,
+      sebanggo: selectedSebanggo,
+      date: currentDate
+    };
+
+    console.log("🧪 Sending test payload:", JSON.stringify(testPayload, null, 2));
+
+    const testResponse = await fetch(`${serverURL}/testMaintenanceData`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(testPayload)
+    });
+
+    const testResult = await testResponse.json();
+    console.log("🧪 Test response received:", testResult);
+    alert("Check console for test results");
+  } catch (error) {
+    console.error("🧪 Test failed:", error);
+    alert("Test failed: " + error.message);
+  }
+}
+
+// Legacy functions for compatibility (keep these as they are)
+function resetMachineTrouble(troubleNumber) {
+  // This function is kept for backward compatibility but now just opens the maintenance modal
+  showMaintenanceModal();
+}
+
+function resetTroubleTime(troubleNumber) {
+  // This function is kept for backward compatibility but now just opens the maintenance modal
+  showMaintenanceModal();
+}
+
+
+// When date is pressed or on page load, set current date as default
+// Set current date as default when date is pressed or on page load
+function setDefaultDate(input) {
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const dateValue = `${year}-${month}-${day}`;
+  input.value = dateValue;
+
+  // Save the date to local storage with unique prefix
+  localStorage.setItem(`${uniquePrefix}${input.id}`, dateValue);
+}
+
+// Set current date as default on page load
+document.addEventListener("DOMContentLoaded", function () {
+  const dateInput = document.getElementById("Lot No.");
+  setDefaultDate(dateInput);
+});
+
+//Get worker list
+document.addEventListener("DOMContentLoaded", async function () {
+  const selectedFactory = document.getElementById("selected工場").value;
+
+  if (selectedFactory) {
+    try {
+      const response = await fetch(`${serverURL}/getWorkerNames?selectedFactory=${encodeURIComponent(selectedFactory)}`);
+      if (!response.ok) throw new Error("Failed to fetch worker names");
+
+      const workerNames = await response.json();
+
+      // Store worker names for modal
+      workerNamesData = workerNames;
+
+      const dataList = document.getElementById("machine-operator-suggestions");
+      if (dataList) {
+        dataList.innerHTML = ""; // Clear any existing options
+
+        workerNames.forEach(name => {
+          const option = document.createElement("option");
+          option.value = name;
+          dataList.appendChild(option);
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching worker names:", error);
+    }
+  }
+});
+
+//function for plus minus button
+function incrementCounter(counterId) {
+  const counterElement = document.getElementById(`counter-${counterId}`);
+  let currentValue = parseInt(counterElement.value, 10);
+  currentValue += 1;
+  counterElement.value = currentValue;
+
+  // Save the updated value to local storage with the unique prefix
+  localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
+
+  // Log counter increment
+  logTabletAction(`Counter ${counterId} incremented`, 'in-progress', {
+    counterId: counterId,
+    newValue: currentValue
+  });
+
+  updateTotal();
+}
+
+function decrementCounter(counterId) {
+  const counterElement = document.getElementById(`counter-${counterId}`);
+  let currentValue = parseInt(counterElement.value, 10);
+  if (currentValue > 0) {
+    currentValue -= 1;
+    counterElement.value = currentValue;
+
+    // Save the updated value to local storage with the unique prefix
+    localStorage.setItem(`${uniquePrefix}counter-${counterId}`, currentValue);
+
+    // Log counter decrement
+    logTabletAction(`Counter ${counterId} decremented`, 'in-progress', {
+      counterId: counterId,
+      newValue: currentValue
+    });
+
+    updateTotal();
+  }
+}
+
+// Helper function to handle alert modal display
+function showAlert(message) {
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  document.getElementById('scanAlertText').innerText = message;
+  scanAlertModal.style.display = 'block';
+
+  if (alertSound) {
+    alertSound.muted = false; // Unmute to alert user
+    alertSound.volume = 1; // Set full volume
+    alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+  }
+
+  document.body.classList.add('flash-red');
+
+  const closeScanModalButton = document.getElementById('closeScanModalButton');
+  closeScanModalButton.onclick = function () {
+    scanAlertModal.style.display = 'none';
+    alertSound.pause();
+    alertSound.currentTime = 0; // Reset sound to the beginning
+    alertSound.muted = true; // Mute again for next time
+    document.body.classList.remove('flash-red');
+  };
+}
+
+// Helper function to handle success modal display without sound/flashing
+function showSuccessModal(message) {
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  document.getElementById('scanAlertText').innerText = message;
+  scanAlertModal.style.display = 'block';
+
+  const closeScanModalButton = document.getElementById('closeScanModalButton');
+  closeScanModalButton.onclick = function () {
+    scanAlertModal.style.display = 'none';
+  };
+}
+
+/**
+ * Show a confirmation dialog with Cancel / Confirm buttons.
+ * Styled to match the app's design system (flat white card, design tokens).
+ *
+ * @param {Object} opts
+ * @param {string}   opts.title        - Bold heading text
+ * @param {string}   opts.message      - Body message (HTML allowed)
+ * @param {string}  [opts.confirmText] - Confirm button label (default: '削除 / Delete')
+ * @param {string}  [opts.cancelText]  - Cancel button label  (default: 'キャンセル / Cancel')
+ * @param {Function} opts.onConfirm    - Called when user presses Confirm
+ * @param {Function}[opts.onCancel]    - Called when user presses Cancel (optional)
+ */
+function showConfirm({ title, message, confirmText = '削除 / Delete', cancelText = 'キャンセル / Cancel', onConfirm, onCancel }) {
+  // Remove any previous instance
+  const existing = document.getElementById('_confirmDialog');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = '_confirmDialog';
+  overlay.style.cssText = [
+    'position:fixed', 'inset:0', 'width:100vw', 'height:100vh',
+    'background:rgba(16,24,40,0.55)', 'z-index:200000',
+    'display:flex', 'align-items:center', 'justify-content:center', 'padding:20px'
+  ].join(';');
+
+  overlay.innerHTML = `
+    <div style="
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--card-radius);
+      padding: 28px 24px 24px;
+      box-shadow: var(--shadow-pop);
+      max-width: 400px;
+      width: 100%;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      text-align: center;
+    ">
+      <!-- Warning icon -->
+      <div style="margin: 0 auto; width:52px; height:52px; border-radius:50%; background:var(--red-soft); color:var(--red); display:flex; align-items:center; justify-content:center;">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+      </div>
+      <!-- Title -->
+      <div style="font-size:1.0625rem; font-weight:800; color:var(--text-main); letter-spacing:-0.01em;">${title}</div>
+      <!-- Message -->
+      <div style="font-size:0.9rem; color:var(--text-muted); line-height:1.55;">${message}</div>
+      <!-- Buttons -->
+      <div style="display:flex; gap:10px; margin-top:4px;">
+        <button id="_confirmCancel" type="button" style="
+          flex:1; min-height:48px; font-family:inherit; font-size:0.9375rem;
+          font-weight:700; border-radius:var(--btn-radius);
+          border:1px solid var(--border-strong);
+          background:var(--bg-surface); color:var(--text-main);
+          cursor:pointer; transition:background 0.18s;
+        ">${cancelText}</button>
+        <button id="_confirmOk" type="button" style="
+          flex:1; min-height:48px; font-family:inherit; font-size:0.9375rem;
+          font-weight:700; border-radius:var(--btn-radius);
+          border:1px solid transparent;
+          background:var(--red); color:#fff;
+          cursor:pointer; transition:background 0.18s;
+        ">${confirmText}</button>
+      </div>
+    </div>`;
+
+  const close = () => overlay.remove();
+
+  overlay.querySelector('#_confirmCancel').addEventListener('click', () => {
+    close();
+    if (typeof onCancel === 'function') onCancel();
+  });
+
+  overlay.querySelector('#_confirmOk').addEventListener('click', () => {
+    close();
+    if (typeof onConfirm === 'function') onConfirm();
+  });
+
+  // Tap backdrop to cancel
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) { close(); if (typeof onCancel === 'function') onCancel(); }
+  });
+
+  document.body.appendChild(overlay);
+}
+
+
+// Worker Name Selection Modal Functionality
+let workerNamesData = [];
+const RECENT_WORKERS_KEY = 'recentWorkerNames';
+const MAX_RECENT_WORKERS = 6;
+
+// Get recent workers from localStorage
+function getRecentWorkers() {
+  const recent = localStorage.getItem(RECENT_WORKERS_KEY);
+  return recent ? JSON.parse(recent) : [];
+}
+
+// Add worker to recent list
+function addToRecentWorkers(name) {
+  if (!name || name.trim() === '') return; // Don't add empty names
+
+  let recent = getRecentWorkers();
+
+  // Remove if already exists
+  recent = recent.filter(w => w !== name);
+
+  // Add to beginning
+  recent.unshift(name);
+
+  // Keep only max recent
+  recent = recent.slice(0, MAX_RECENT_WORKERS);
+
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+}
+
+// Remove worker from recent list
+function removeFromRecentWorkers(name) {
+  let recent = getRecentWorkers();
+  recent = recent.filter(w => w !== name);
+  localStorage.setItem(RECENT_WORKERS_KEY, JSON.stringify(recent));
+  renderWorkerNames(); // Re-render to update UI
+}
+
+// Group names alphabetically
+function groupNamesByLetter(names) {
+  const grouped = {};
+
+  names.forEach(name => {
+    // Get first character (handle Japanese, English, etc.)
+    let firstChar = name.charAt(0).toUpperCase();
+
+    // For Japanese characters, try to group by first character
+    if (firstChar.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/)) {
+      // Japanese character - use as is
+      firstChar = name.charAt(0);
+    } else if (firstChar.match(/[A-Z]/)) {
+      // English letter - use uppercase
+      firstChar = firstChar.toUpperCase();
+    } else {
+      // Other characters - group under '#'
+      firstChar = '#';
+    }
+
+    if (!grouped[firstChar]) {
+      grouped[firstChar] = [];
+    }
+    grouped[firstChar].push(name);
+  });
+
+  // Sort each group
+  Object.keys(grouped).forEach(key => {
+    grouped[key].sort();
+  });
+
+  return grouped;
+}
+
+// Render worker names in modal
+function renderWorkerNames() {
+  const container = document.getElementById('workerNamesContainer');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const currentSlotIdx = Number.isInteger(window.activeWorkerSlotIndex) ? window.activeWorkerSlotIndex : 0;
+  const otherSelectedNames = (window.selectedWorkerNames || [])
+    .filter((n, idx) => idx !== currentSlotIdx && typeof n === 'string' && n.trim().length > 0)
+    .map(n => n.trim().toLowerCase());
+
+  // Helper to build a worker button with duplicate prevention
+  function createWorkerBtn(name) {
+    const isAlreadySelectedElsewhere = otherSelectedNames.includes(name.trim().toLowerCase());
+    const btn = document.createElement('button');
+    btn.type = 'button';
+
+    if (isAlreadySelectedElsewhere) {
+      btn.className = 'worker-name-btn is-disabled-selected';
+      btn.disabled = true;
+      btn.title = '既に他の枠で選択されています / Already selected';
+      btn.style.opacity = '0.4';
+      btn.style.cursor = 'not-allowed';
+      btn.style.filter = 'grayscale(1)';
+      btn.style.borderStyle = 'dashed';
+      btn.innerHTML = `${name} <span style="font-size:0.75rem; margin-left:4px; opacity:0.8; font-weight:normal;">(選択中)</span>`;
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      };
+    } else {
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectWorkerName(name);
+    }
+    return btn;
+  }
+
+  // Get recent workers
+  const recentWorkers = getRecentWorkers();
+
+  // Add recent section if there are recent workers
+  if (recentWorkers.length > 0) {
+    const recentSection = document.createElement('div');
+    recentSection.className = 'worker-section recent-section';
+
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = '⭐ 最近使用 / Recent';
+    recentSection.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+
+    recentWorkers.forEach(name => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+
+      const btn = createWorkerBtn(name);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-recent-btn';
+      deleteBtn.innerHTML = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation(); // Prevent selecting the worker
+        removeFromRecentWorkers(name);
+      };
+
+      wrapper.appendChild(btn);
+      wrapper.appendChild(deleteBtn);
+      grid.appendChild(wrapper);
+    });
+
+    recentSection.appendChild(grid);
+    container.appendChild(recentSection);
+  }
+
+  // Group all names alphabetically
+  const grouped = groupNamesByLetter(workerNamesData);
+  const sortedKeys = Object.keys(grouped).sort();
+
+  // Render each alphabetical group
+  sortedKeys.forEach(letter => {
+    const section = document.createElement('div');
+    section.className = 'worker-section';
+
+    const header = document.createElement('div');
+    header.className = 'worker-section-header';
+    header.textContent = letter;
+    section.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'worker-names-grid';
+
+    grouped[letter].forEach(name => {
+      const btn = createWorkerBtn(name);
+      grid.appendChild(btn);
+    });
+
+    section.appendChild(grid);
+    container.appendChild(section);
+  });
+}
+
+window.selectedWorkerNames = window.selectedWorkerNames || [];
+window.activeWorkerSlotIndex = 0;
+
+function formatWorkerDisplayLines(input) {
+  let list = [];
+  if (Array.isArray(input)) {
+    list = input;
+  } else if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) list = parsed;
+      } catch (_) { }
+    }
+    if (list.length === 0 && trimmed) {
+      list = trimmed.split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
+    }
+  }
+  const clean = list.map(n => (n || '').trim()).filter(Boolean);
+  if (clean.length === 0) return '';
+  return clean.map((n, i) => `${i + 1}. ${n}`).join('\n');
+}
+window.formatWorkerDisplayLines = formatWorkerDisplayLines;
+
+window.saveWorkerNamesToStorage = function () {
+  const seen = new Set();
+  const activeNames = (window.selectedWorkerNames || [])
+    .map(n => (n || '').trim())
+    .filter(n => {
+      if (!n) return false;
+      const lower = n.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  localStorage.setItem(`${prefix}selectedWorkerNames`, JSON.stringify(activeNames));
+
+  const pageName = location.pathname.split('/').pop();
+  const currentSelectedFactory = document.getElementById('selected工場')?.value;
+  const currentSelectedMachine = getQueryParam('machine');
+  const input = document.getElementById('Machine Operator');
+  if (pageName && currentSelectedFactory && currentSelectedMachine && input) {
+    const key = `${pageName}_${currentSelectedFactory}_${currentSelectedMachine}_${input.id || input.name}`;
+    localStorage.setItem(key, activeNames.join(','));
+  }
+};
+
+window.loadWorkerNamesFromStorage = function () {
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  let stored = localStorage.getItem(`${prefix}selectedWorkerNames`);
+  if (!stored) {
+    const pageName = location.pathname.split('/').pop();
+    const currentSelectedFactory = document.getElementById('selected工場')?.value;
+    const currentSelectedMachine = getQueryParam('machine');
+    if (pageName && currentSelectedFactory && currentSelectedMachine) {
+      const key = `${pageName}_${currentSelectedFactory}_${currentSelectedMachine}_Machine Operator`;
+      stored = localStorage.getItem(key);
+    }
+  }
+
+  if (stored) {
+    try {
+      let rawList = [];
+      if (stored.startsWith('[')) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          rawList = parsed;
+        }
+      } else if (stored.trim()) {
+        rawList = stored.split(',').map(s => s.trim()).filter(Boolean);
+      }
+
+      const seen = new Set();
+      const unique = [];
+      rawList.forEach(item => {
+        const clean = (item || '').trim();
+        if (clean) {
+          const lower = clean.toLowerCase();
+          if (!seen.has(lower)) {
+            seen.add(lower);
+            unique.push(clean);
+          }
+        }
+      });
+
+      if (unique.length > 0) {
+        window.selectedWorkerNames = unique;
+      }
+    } catch (e) {
+      console.warn('Could not parse stored worker names:', e);
+    }
+  }
+
+  const activeNames = (window.selectedWorkerNames || []).map(n => (n || '').trim()).filter(Boolean);
+  const input = document.getElementById('Machine Operator');
+  if (input && activeNames.length > 0) {
+    input.value = activeNames.join(',');
+  }
+};
+
+// IndexedDB Helper for Checklist Draft Photos (keeps image bytes out of localStorage)
+const DB_NAME_CHECKLIST = typeof uniquePrefix !== 'undefined' ? `${uniquePrefix}checklistPhotosDB` : 'DCP_checklistPhotosDB';
+const DB_VERSION_CHECKLIST = 1;
+const STORE_NAME_CHECKLIST = 'checklistPhotos';
+
+function openChecklistPhotosDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME_CHECKLIST, DB_VERSION_CHECKLIST);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME_CHECKLIST)) {
+        db.createObjectStore(STORE_NAME_CHECKLIST, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveChecklistPhotoToIDB(id, dataUrl) {
+  if (!id || !dataUrl) return;
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readwrite');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    store.put({ id, dataUrl, updatedAt: Date.now() });
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) {
+    console.warn('Failed to save checklist photo to IndexedDB:', e);
+  }
+}
+
+async function getChecklistPhotoFromIDB(id) {
+  if (!id) return null;
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readonly');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    const req = store.get(id);
+    return new Promise((res, rej) => {
+      req.onsuccess = () => res(req.result ? req.result.dataUrl : null);
+      req.onerror = () => rej(req.error);
+    });
+  } catch (e) {
+    console.warn('Failed to read checklist photo from IndexedDB:', e);
+    return null;
+  }
+}
+
+async function clearChecklistPhotosFromIDB() {
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readwrite');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    store.clear();
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) {
+    console.warn('Failed to clear checklist photos from IndexedDB:', e);
+  }
+}
+
+async function deleteChecklistPhotoFromIDB(id) {
+  if (!id) return;
+  try {
+    const db = await openChecklistPhotosDB();
+    const tx = db.transaction(STORE_NAME_CHECKLIST, 'readwrite');
+    const store = tx.objectStore(STORE_NAME_CHECKLIST);
+    store.delete(id);
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) {
+    console.warn('Failed to delete photo from IndexedDB:', e);
+  }
+}
+
+async function deleteTicketPhotosFromIDB(fieldId) {
+  const factory = window.checklistState?.factory;
+  const machine = window.checklistState?.machine;
+  if (!factory || !machine || !fieldId) return;
+
+  for (let i = 0; i < 10; i++) {
+    const idbKey = `tp_${factory}_${machine}_${fieldId}_${i}`;
+    await deleteChecklistPhotoFromIDB(idbKey);
+  }
+}
+
+function getJSTDateString(date = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  } catch (_) {
+    return new Date().toISOString().split('T')[0];
+  }
+}
+window.getJSTDateString = getJSTDateString;
+
+window.saveChecklistDraftToStorage = async function () {
+  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const factory = window.checklistState.factory;
+  const machine = window.checklistState.machine;
+  const key = `${prefix}checklistDraft_${factory}_${machine}`;
+
+  // Process field photos: save base64 to IndexedDB, save reference keys in draft
+  const fieldPhotoRefs = {};
+  if (window.checklistState.fieldPhotos) {
+    for (const fId of Object.keys(window.checklistState.fieldPhotos)) {
+      const base64 = window.checklistState.fieldPhotos[fId];
+      if (base64) {
+        const idbKey = `fp_${factory}_${machine}_${fId}`;
+        if (base64.startsWith('data:image')) {
+          await saveChecklistPhotoToIDB(idbKey, base64);
+        }
+        fieldPhotoRefs[fId] = idbKey;
+      }
+    }
+  }
+
+  // Process ticket photos: save base64 to IndexedDB, save reference keys in draft
+  const ticketsClean = {};
+  if (window.checklistState.tickets) {
+    for (const fId of Object.keys(window.checklistState.tickets)) {
+      const ticket = window.checklistState.tickets[fId];
+      if (ticket) {
+        const imgRefs = [];
+        if (Array.isArray(ticket.images)) {
+          for (let i = 0; i < ticket.images.length; i++) {
+            const imgVal = ticket.images[i];
+            if (imgVal) {
+              const idbKey = `tp_${factory}_${machine}_${fId}_${i}`;
+              if (imgVal.startsWith('data:image')) {
+                await saveChecklistPhotoToIDB(idbKey, imgVal);
+              }
+              imgRefs.push(idbKey);
+            }
+          }
+        }
+        ticketsClean[fId] = {
+          reason: ticket.reason || '',
+          saved: ticket.saved || false,
+          chatworkMessageId: ticket.chatworkMessageId || '',
+          images: imgRefs
+        };
+      }
+    }
+  }
+
+  const draftData = {
+    answers: window.checklistState.answers || {},
+    answeredAt: window.checklistState.answeredAt || {},
+    tickets: ticketsClean,
+    fieldPhotos: fieldPhotoRefs,
+    recordIds: window.checklistState.recordIds || {},
+    queueIndex: window.checklistState.queueIndex || 0,
+    isPreComplete: window.checklistState.isPreComplete || false,
+    isPostComplete: window.checklistState.isPostComplete || false,
+    isBypassed: window.checklistState.isBypassed || false,
+    dateStr: getJSTDateString(),
+    timestamp: Date.now()
+  };
+
+  localStorage.setItem(key, JSON.stringify(draftData));
+  if (typeof window.assertMachineState === 'function') {
+    window.assertMachineState();
+  }
+};
+
+window.loadChecklistDraftFromStorage = async function () {
+  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const factory = window.checklistState.factory;
+  const machine = window.checklistState.machine;
+  const key = `${prefix}checklistDraft_${factory}_${machine}`;
+  const raw = localStorage.getItem(key);
+  if (!raw) return;
+
+  try {
+    const draft = JSON.parse(raw);
+    const todayIso = getJSTDateString();
+    if ((draft.dateStr && draft.dateStr !== todayIso) || (draft.timestamp && (Date.now() - draft.timestamp > 86400000))) {
+      console.log(`🧹 Clearing previous day's draft data (draft date: ${draft.dateStr}, today: ${todayIso})`);
+      localStorage.removeItem(key);
+      await clearChecklistPhotosFromIDB();
+      return;
+    }
+
+    if (draft.answers) window.checklistState.answers = { ...window.checklistState.answers, ...draft.answers };
+    if (draft.answeredAt) window.checklistState.answeredAt = { ...(window.checklistState.answeredAt || {}), ...draft.answeredAt };
+    if (draft.recordIds) window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...draft.recordIds };
+    if (typeof draft.queueIndex === 'number' && draft.queueIndex < (window.checklistState.queue?.length || 1)) {
+      window.checklistState.queueIndex = draft.queueIndex;
+    }
+    if (draft.isPreComplete) window.checklistState.isPreComplete = true;
+    if (typeof draft.isPostComplete === 'boolean') window.checklistState.isPostComplete = draft.isPostComplete;
+    if (draft.isBypassed) window.checklistState.isBypassed = true;
+
+    // Hydrate field photos from IndexedDB
+    if (draft.fieldPhotos) {
+      window.checklistState.fieldPhotos = window.checklistState.fieldPhotos || {};
+      for (const fId of Object.keys(draft.fieldPhotos)) {
+        const val = draft.fieldPhotos[fId];
+        if (val && val.startsWith('data:image')) {
+          window.checklistState.fieldPhotos[fId] = val;
+        } else if (val) {
+          const base64 = await getChecklistPhotoFromIDB(val);
+          if (base64) window.checklistState.fieldPhotos[fId] = base64;
+        }
+      }
+    }
+
+    // Hydrate ticket photos from IndexedDB
+    if (draft.tickets) {
+      window.checklistState.tickets = window.checklistState.tickets || {};
+      for (const fId of Object.keys(draft.tickets)) {
+        const t = draft.tickets[fId];
+        if (t) {
+          const hydratedImages = [];
+          if (Array.isArray(t.images)) {
+            for (const imgRef of t.images) {
+              if (imgRef && imgRef.startsWith('data:image')) {
+                hydratedImages.push(imgRef);
+              } else if (imgRef) {
+                const base64 = await getChecklistPhotoFromIDB(imgRef);
+                if (base64) hydratedImages.push(base64);
+              }
+            }
+          }
+          window.checklistState.tickets[fId] = {
+            reason: t.reason || '',
+            saved: t.saved || false,
+            chatworkMessageId: t.chatworkMessageId || '',
+            images: hydratedImages
+          };
+        }
+      }
+    }
+
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
+  } catch (e) {
+    console.warn('Error loading checklist draft:', e);
+  }
+};
+
+window.clearChecklistDraftFromStorage = async function () {
+  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const key = `${prefix}checklistDraft_${window.checklistState.factory}_${window.checklistState.machine}`;
+  localStorage.removeItem(key);
+  await clearChecklistPhotosFromIDB();
+};
+
+window.renderWorkerListUI = function () {
+  const container = document.getElementById('workerListContainer');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (!window.selectedWorkerNames || window.selectedWorkerNames.length === 0) {
+    window.selectedWorkerNames = [''];
+  }
+
+  window.selectedWorkerNames.forEach((name, idx) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display: flex; gap: 8px; align-items: center; width: 100%;';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.readOnly = true;
+    input.className = 'tap-field';
+    input.style.cssText = 'flex: 1; margin: 0; background: #f8f9fa; cursor: pointer; font-weight: 700; border: 1px solid #e6e8ef; border-radius: 10px; padding: 12px; font-size: 1rem;';
+    input.value = name || '';
+    input.placeholder = `👤 Select Worker ${idx + 1}...`;
+    input.onclick = () => openWorkerModal(idx);
+
+    row.appendChild(input);
+
+    if (window.selectedWorkerNames.length > 1) {
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn btn-alert';
+      removeBtn.style.cssText = 'padding: 8px 14px; font-weight: 800; font-size: 1.1rem; border-radius: 10px; min-width: 44px;';
+      removeBtn.textContent = '✕';
+      removeBtn.onclick = () => removeWorkerSlot(idx);
+      row.appendChild(removeBtn);
+    }
+
+    container.appendChild(row);
+  });
+
+  const hiddenInput = document.getElementById('Machine Operator');
+  if (hiddenInput) {
+    const activeNames = window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean);
+    hiddenInput.value = activeNames.join(',');
+  }
+};
+
+window.addWorkerSlot = function () {
+  if (!window.selectedWorkerNames) window.selectedWorkerNames = [];
+  window.selectedWorkerNames = window.selectedWorkerNames.filter(n => (n || '').trim().length > 0);
+  window.selectedWorkerNames.push('');
+  renderWorkerListUI();
+  saveWorkerNamesToStorage();
+  saveChecklistDraftToStorage();
+  if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
+  openWorkerModal(window.selectedWorkerNames.length - 1);
+};
+
+window.removeWorkerSlot = function (index) {
+  if (!window.selectedWorkerNames || window.selectedWorkerNames.length <= 1) return;
+  window.selectedWorkerNames.splice(index, 1);
+  if (window.selectedWorkerNames.length === 0) {
+    window.selectedWorkerNames = [''];
+  }
+  renderWorkerListUI();
+  saveWorkerNamesToStorage();
+  saveChecklistDraftToStorage();
+  if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
+};
+
+function selectWorkerName(name) {
+  if (!name || !name.trim()) return;
+  const trimmedName = name.trim();
+  if (!window.selectedWorkerNames) window.selectedWorkerNames = [];
+  const idx = Number.isInteger(window.activeWorkerSlotIndex) ? window.activeWorkerSlotIndex : 0;
+
+  // Prevent duplicate worker names across slots
+  const isAlreadyChosen = window.selectedWorkerNames.some((n, i) => i !== idx && n && n.trim().toLowerCase() === trimmedName.toLowerCase());
+  if (isAlreadyChosen) {
+    if (typeof window.showToast === 'function') {
+      window.showToast(`⚠️ ${trimmedName} は既に選択されています / Already selected`, 'warning');
+    } else {
+      alert(`⚠️ ${trimmedName} は既に選択されています / ${trimmedName} is already selected in another slot.`);
+    }
+    return;
+  }
+
+  window.selectedWorkerNames[idx] = trimmedName;
+
+  const seen = new Set();
+  const activeNames = window.selectedWorkerNames
+    .map(n => (n || '').trim())
+    .filter(n => {
+      if (!n) return false;
+      const lower = n.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
+
+  const input = document.getElementById('Machine Operator');
+  if (input) input.value = activeNames.join(',');
+
+  if (window.checklistState && window.checklistState.answers) {
+    const queue = window.checklistState.queue;
+    const queueIndex = window.checklistState.queueIndex;
+    if (queue && queue[queueIndex] && Array.isArray(queue[queueIndex].fields)) {
+      queue[queueIndex].fields.forEach(field => {
+        if (field.type === 'name') {
+          window.checklistState.answers[field.id] = activeNames.length > 0 ? activeNames : [trimmedName];
+        }
+      });
+    }
+  }
+
+  renderWorkerListUI();
+  saveWorkerNamesToStorage();
+  saveChecklistDraftToStorage();
+
+  if (typeof window.renderCurrentChecklistTemplate === 'function') {
+    window.renderCurrentChecklistTemplate();
+  }
+
+  addToRecentWorkers(trimmedName);
+
+  logTabletAction('Worker name selected', 'in-progress', {
+    workerNames: window.selectedWorkerNames
+  });
+
+  closeWorkerModal();
+
+  if (input) input.dispatchEvent(new Event('change'));
+  if (typeof updateSubmitSummary === 'function') updateSubmitSummary();
+}
+
+function openWorkerModal(slotIndex = 0) {
+  currentModalInputField = 'worker';
+  window.activeWorkerSlotIndex = slotIndex;
+  const modal = document.getElementById('workerNameModal');
+  if (modal) modal.style.display = 'flex';
+  renderWorkerNames();
+}
+
+function closeWorkerModal() {
+  const modal = document.getElementById('workerNameModal');
+  if (modal) modal.style.display = 'none';
+}
+
+// Initialize worker name modal (runs after DOMContentLoaded)
+setTimeout(function () {
+  const workerInput = document.getElementById('Machine Operator');
+  const closeModalBtn = document.getElementById('closeWorkerModal');
+  const manualEntryBtn = document.getElementById('manualEntryBtn');
+
+  // Open modal when clicking on worker input (only if readonly)
+  if (workerInput) {
+    // Prevent default keyboard from showing on mobile
+    workerInput.addEventListener('click', function (e) {
+      // Only open modal if input is readonly (not in manual entry mode)
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+
+    // Also open on focus
+    workerInput.addEventListener('focus', function (e) {
+      // Only open modal if input is readonly (not in manual entry mode)
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+
+    // Prevent keyboard from showing on touch devices
+    workerInput.addEventListener('touchstart', function (e) {
+      // Only prevent and open modal if input is readonly
+      if (workerInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openWorkerModal();
+      }
+    });
+
+    // When the production worker name changes, mirror it into the Kensa
+    // inspector name — but only if kensa is toggled on and the inspector
+    // name is still empty (never overwrite an existing inspector value).
+    const mirrorWorkerToKensa = function () {
+      const kensaToggle = document.getElementById('enable-inputs');
+      if (!kensaToggle || !kensaToggle.checked) return;
+      const kensaInput = document.getElementById('Kensa Name');
+      if (!kensaInput || kensaInput.value) return;
+      const workerValue = workerInput.value || '';
+      if (!workerValue) return;
+      kensaInput.value = workerValue;
+      kensaInput.dispatchEvent(new Event('input', { bubbles: true }));
+      kensaInput.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    workerInput.addEventListener('change', mirrorWorkerToKensa);
+    workerInput.addEventListener('input', mirrorWorkerToKensa);
+  }
+
+  // Close modal button
+  if (closeModalBtn) {
+    closeModalBtn.addEventListener('click', closeWorkerModal);
+  }
+
+  // Manual entry button - close modal and let user type
+  if (manualEntryBtn) {
+    manualEntryBtn.addEventListener('click', function () {
+      // Determine which input field to enable for manual entry
+      const targetInput = currentModalInputField === 'kensa'
+        ? document.getElementById('Kensa Name')
+        : document.getElementById('Machine Operator');
+
+      // Close the modal
+      if (currentModalInputField === 'kensa') {
+        closeKensaModal();
+      } else {
+        closeWorkerModal();
+      }
+
+      if (targetInput) {
+        // Remove readonly and datalist to allow free typing
+        targetInput.removeAttribute('list');
+        targetInput.removeAttribute('readonly');
+        targetInput.readOnly = false;
+        targetInput.style.cursor = 'text';
+        targetInput.placeholder = currentModalInputField === 'kensa'
+          ? 'Type inspector name manually...'
+          : 'Type worker name manually...';
+
+        // Clear current value and focus after modal closes
+        setTimeout(function () {
+          targetInput.value = '';
+          targetInput.focus();
+
+          // Trigger click to ensure keyboard shows on mobile
+          targetInput.click();
+        }, 100);
+      }
+    });
+  }
+
+  // Close modal when clicking outside
+  const modal = document.getElementById('workerNameModal');
+  if (modal) {
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) {
+        closeWorkerModal();
+      }
+    });
+  }
+
+  // Save manually entered worker name to recents when user finishes typing
+  if (workerInput) {
+    workerInput.addEventListener('blur', function () {
+      const enteredName = workerInput.value.trim();
+      if (enteredName && !workerInput.readOnly) {
+        // Only save if user manually typed (not readonly)
+        addToRecentWorkers(enteredName);
+      }
+    });
+
+    // Also save on Enter key
+    workerInput.addEventListener('keypress', function (e) {
+      if (e.key === 'Enter') {
+        const enteredName = workerInput.value.trim();
+        if (enteredName && !workerInput.readOnly) {
+          addToRecentWorkers(enteredName);
+        }
+      }
+    });
+  }
+}, 100);
+
+// Initialize Kensa Name modal (same as worker modal but for inspector)
+setTimeout(function () {
+  const kensaInput = document.getElementById('Kensa Name');
+  const enableInputsCheckbox = document.getElementById('enable-inputs');
+
+  if (!kensaInput) return; // Element doesn't exist, skip
+
+  // Function to check if kensa is enabled
+  function isKensaEnabled() {
+    return enableInputsCheckbox && enableInputsCheckbox.checked;
+  }
+
+  // Open worker modal when clicking on kensa input (only if checkbox is checked)
+  if (kensaInput) {
+    // Prevent default keyboard from showing on mobile
+    kensaInput.addEventListener('click', function (e) {
+      // Only open modal if checkbox is checked and input is readonly
+      if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openKensaModal();
+      }
+    });
+
+    // Also open on focus
+    kensaInput.addEventListener('focus', function (e) {
+      // Only open modal if checkbox is checked and input is readonly
+      if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openKensaModal();
+      }
+    });
+
+    // Prevent keyboard from showing on touch devices
+    kensaInput.addEventListener('touchstart', function (e) {
+      // Only prevent and open modal if checkbox is checked and input is readonly
+      if (isKensaEnabled() && kensaInput.readOnly && workerNamesData.length > 0) {
+        e.preventDefault();
+        openKensaModal();
+      }
+    });
+
+    // Save manually entered kensa name to recents when user finishes typing
+    kensaInput.addEventListener('blur', function () {
+      const enteredName = kensaInput.value.trim();
+      if (enteredName && !kensaInput.readOnly && isKensaEnabled()) {
+        // Only save if user manually typed (not readonly) and checkbox is checked
+        addToRecentWorkers(enteredName);
+      }
+    });
+
+    // Also save on Enter key
+    kensaInput.addEventListener('keypress', function (e) {
+      if (e.key === 'Enter') {
+        const enteredName = kensaInput.value.trim();
+        if (enteredName && !kensaInput.readOnly && isKensaEnabled()) {
+          addToRecentWorkers(enteredName);
+        }
+      }
+    });
+  }
+}, 100);
+
+// Select kensa name (inspector)
+function selectKensaName(name) {
+  const input = document.getElementById('Kensa Name');
+  if (!input) return;
+
+  input.value = name;
+
+  // Add to recent workers
+  addToRecentWorkers(name);
+
+  // Log inspector name selection
+  logTabletAction('Inspector name selected', 'in-progress', {
+    inspectorName: name
+  });
+
+  // Close modal
+  closeKensaModal();
+
+  // Trigger change event
+  input.dispatchEvent(new Event('change'));
+}
+
+// Open kensa modal (reuses worker modal)
+function openKensaModal() {
+  currentModalInputField = 'kensa'; // Track which field opened the modal
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'flex'; // flex so the .modal centering applies
+  renderKensaNames();
+}
+
+// Close kensa modal
+function closeKensaModal() {
+  const modal = document.getElementById('workerNameModal');
+  modal.style.display = 'none';
+}
+
+// Render kensa names (similar to renderWorkerNames but calls selectKensaName)
+function renderKensaNames() {
+  const container = document.getElementById('workerNamesContainer');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  // Get recent workers
+  const recentWorkers = getRecentWorkers();
+
+  // Create recent section if there are recent workers
+  if (recentWorkers.length > 0) {
+    const recentSection = document.createElement('div');
+    recentSection.className = 'worker-section recent-section';
+
+    const recentHeader = document.createElement('div');
+    recentHeader.className = 'worker-section-header';
+    recentHeader.textContent = '最近使用 / Recent';
+    recentSection.appendChild(recentHeader);
+
+    const recentGrid = document.createElement('div');
+    recentGrid.className = 'worker-names-grid';
+
+    recentWorkers.forEach(name => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'worker-name-btn';
+      btn.textContent = name;
+      btn.onclick = () => selectKensaName(name);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'delete-recent-btn';
+      deleteBtn.textContent = '×';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeFromRecentWorkers(name);
+        renderKensaNames(); // Re-render
+      };
+
+      wrapper.appendChild(btn);
+      wrapper.appendChild(deleteBtn);
+      recentGrid.appendChild(wrapper);
+    });
+
+    recentSection.appendChild(recentGrid);
+    container.appendChild(recentSection);
+  }
+
+  // Create all workers section
+  const allSection = document.createElement('div');
+  allSection.className = 'worker-section';
+
+  const allHeader = document.createElement('div');
+  allHeader.className = 'worker-section-header';
+  allHeader.textContent = 'すべての作業者 / All Workers';
+  allSection.appendChild(allHeader);
+
+  const allGrid = document.createElement('div');
+  allGrid.className = 'worker-names-grid';
+
+  workerNamesData.forEach(name => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'worker-name-btn';
+    btn.textContent = name;
+    btn.onclick = () => selectKensaName(name);
+    allGrid.appendChild(btn);
+  });
+
+  allSection.appendChild(allGrid);
+  container.appendChild(allSection);
+
+  // Update modal button handlers for kensa
+  const closeModalBtn = document.getElementById('closeWorkerModal');
+  const manualEntryBtn = document.getElementById('manualEntryBtn');
+
+  // Note: Manual entry button handler is set globally in the initialization
+  // No need to override it here, it will use currentModalInputField to determine which field to edit
+}
+
+// Updates cycle times for pressDB and kensaDB
+function updateCycleTime() {
+  // PressDB cycle time
+  const startTime = document.getElementById("Start Time").value;
+  const endTime = document.getElementById("End Time").value;
+  const quantity = parseInt(document.getElementById("ProcessQuantity").value, 10) || 1; // Avoid division by 0
+
+  if (startTime && endTime) {
+    const start = new Date(`1970-01-01T${startTime}:00Z`);
+    const end = new Date(`1970-01-01T${endTime}:00Z`);
+
+    // Calculate difference in milliseconds and convert to seconds
+    const diffInSeconds = (end - start) / 1000;
+
+    // Calculate cycle time (in seconds per item)
+    const cycleTime = diffInSeconds / quantity;
+
+    // Update the Cycle Time field in the form
+    document.getElementById("cycleTime").value = cycleTime.toFixed(2);
+  }
+
+  // KensaDB cycle time (only if elements exist)
+  const kStartTimeElement = document.getElementById("KStart Time");
+  const kEndTimeElement = document.getElementById("KEnd Time");
+  const totalElement = document.getElementById("total");
+
+  if (kStartTimeElement && kEndTimeElement && totalElement) {
+    const kStartTime = kStartTimeElement.value;
+    const kEndTime = kEndTimeElement.value;
+    const kQuantity = parseInt(totalElement.value, 10) || 1; // Total quantity for kensaDB
+
+    if (kStartTime && kEndTime) {
+      const kStart = new Date(`1970-01-01T${kStartTime}:00Z`);
+      const kEnd = new Date(`1970-01-01T${kEndTime}:00Z`);
+
+      // Calculate difference in milliseconds and convert to seconds
+      const kDiffInSeconds = (kEnd - kStart) / 1000;
+
+      // Calculate cycle time (in seconds per item)
+      const cycleTimeK = kDiffInSeconds / kQuantity;
+
+      // Update the Cycle Time K field in the form
+      const cycleTimeKElement = document.getElementById("cycleTimeK");
+      if (cycleTimeKElement) {
+        cycleTimeKElement.value = cycleTimeK.toFixed(2);
+      }
+    }
+  }
+}
+
+//scan BUtton javascript
+document.getElementById('scan-button')?.addEventListener('click', function () {
+  const qrScannerModal = document.getElementById('qrScannerModal');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  const scanAlertText = document.getElementById('scanAlertText');
+  const html5QrCode = new Html5Qrcode("qrReader");
+  const alertSound = document.getElementById('alert-sound');
+
+  // Preload the alert sound without playing it
+  if (alertSound) {
+    alertSound.muted = true; // Mute initially to preload
+    alertSound.loop = false; // Disable looping
+    alertSound.load(); // Preload the audio file
+  }
+
+  // Show the modal
+  qrScannerModal.style.display = 'block';
+
+  // Start QR code scanning with near-focus detection (optimized for 10-inch tablet)
+  html5QrCode.start(
+    {
+      facingMode: "environment"
+    }, {
+    fps: 30,
+    qrbox: {
+      width: 800,
+      height: 800
+    },
+    aspectRatio: 1.0,
+    disableFlip: false,
+    advanced: [{
+      focusMode: "continuous",
+      focusDistance: { ideal: 0 }
+    }]
+  },
+    async qrCodeMessage => {
+      const subDropdown = document.getElementById('sub-dropdown');
+      const options = [...subDropdown.options].map(option => option.value);
+
+      console.log("Scanned QR Code:", qrCodeMessage);
+
+      // Save current state of sendtoNCButtonisPressed before potentially changing dropdown
+      const currentState = localStorage.getItem(`${uniquePrefix}sendtoNCButtonisPressed`);
+      console.log("Current sendtoNCButtonisPressed state before scan:", currentState);
+
+      // Check if the scanned QR code does NOT exist in the dropdown options
+      if (!options.includes(qrCodeMessage)) {
+        // Display error modal
+        scanAlertText.innerText = "背番号が存在しません。 / Sebanggo does not exist.";
+        scanAlertModal.style.display = 'block';
+
+        // Play alert sound
+        if (alertSound) {
+          alertSound.muted = false; // Unmute to alert user
+          alertSound.volume = 1; // Set full volume
+          alertSound.play().catch(error => console.error("Failed to play alert sound:", error));
+        }
+
+        // Add blinking red background
+        document.body.classList.add('flash-red');
+
+        const closeScanModalButton = document.getElementById('closeScanModalButton');
+        closeScanModalButton.onclick = function () {
+          scanAlertModal.style.display = 'none';
+          alertSound.pause();
+          alertSound.currentTime = 0; // Reset sound to the beginning
+          alertSound.muted = true; // Mute again for next time
+          document.body.classList.remove('flash-red');
+        };
+
+        // Stop QR scanning
+        html5QrCode.stop().then(() => {
+          qrScannerModal.style.display = 'none';
+        }).catch(err => console.error("Failed to stop scanning:", err));
+
+        return;
+      }
+
+      // If QR code matches an option, set the dropdown value and close scanner
+      if (subDropdown && subDropdown.value !== qrCodeMessage) {
+        // Save current button state before changing dropdown
+        const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+        const currentButtonState = localStorage.getItem(key);
+        console.log(`Saving current button state before changing dropdown: ${currentButtonState}`);
+
+        try {
+          // First stop the QR scanner to prevent continued scanning during processing
+          await html5QrCode.stop();
+          qrScannerModal.style.display = 'none';
+
+          // Update the previous dropdown value to allow this change (bypassing leader verification)
+          updatePreviousDropdownValue(qrCodeMessage);
+
+          // Now that the scanner is closed, change dropdown value
+          console.log(`Setting sub-dropdown value to: ${qrCodeMessage}`);
+          subDropdown.value = qrCodeMessage;
+
+          // Save the dropdown value to localStorage so it persists on refresh
+          localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
+
+          // Call fetchProductDetails but don't reset button state
+          await fetchProductDetails();
+
+          // Restore button state if it was true (do this after product details are fetched)
+          if (currentButtonState === 'true') {
+            localStorage.setItem(key, 'true');
+            sendtoNCButtonisPressed = true;
+            console.log("Restored sendtoNCButtonisPressed to true after QR scan");
+          }
+        } catch (err) {
+          console.error("Error processing QR code:", err);
+          // Ensure QR scanner is stopped even if there's an error
+          html5QrCode.stop().catch(stopErr => console.error("Error stopping QR scanner:", stopErr));
+          qrScannerModal.style.display = 'none';
+        }
+
+        return;
+      }
+    }
+  ).catch(err => {
+    console.error("Failed to start scanning:", err);
+  });
+
+  // Close the QR scanner modal
+  document.getElementById('closeQRScannerModal').onclick = function () {
+    html5QrCode.stop().then(() => {
+      qrScannerModal.style.display = 'none';
+    }).catch(err => console.error("Failed to stop scanning:", err));
+  };
+
+  // Close scanner if user clicks outside the modal
+  window.onclick = function (event) {
+    if (event.target == qrScannerModal) {
+      html5QrCode.stop().then(() => {
+        qrScannerModal.style.display = 'none';
+      }).catch(err => console.error("Failed to stop scanning:", err));
+    }
+  };
+});
+
+// CSS for blinking red background and success animation
+const style = document.createElement('style');
+style.innerHTML = `
+.flash-red {
+  animation: flash-red 1s infinite;
+}
+
+@keyframes flash-red {
+  50% {
+    background-color: red;
+  }
+}
+
+.flash-green {
+  animation: flash-green 0.5s ease-in-out;
+}
+
+@keyframes flash-green {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(76, 175, 80, 0.3);
+  }
+}
+
+.success-checkmark {
+  display: inline-block;
+  font-size: 48px;
+  color: #4CAF50;
+  animation: checkmark-pop 0.3s ease-in-out;
+}
+
+@keyframes checkmark-pop {
+  0% {
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.material-code-blink {
+  animation: materialBlink 1s ease-in-out infinite;
+  display: inline-block;
+  font-size: 1.8em;
+  font-weight: 900;
+  color: #dc3545;
+}
+
+@keyframes materialBlink {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0.15;
+  }
+}
+`;
+document.head.appendChild(style);
+
+// Global reference for lot scanner
+window.lotHtml5QrCode = null;
+
+// Scan Lot Button functionality (only if button exists)
+const scanLotButton = document.getElementById('scan-lot');
+if (scanLotButton) {
+  scanLotButton.addEventListener('click', function () {
+    const scanLotModal = document.getElementById('scanLotModal');
+    const scanLotStatus = document.getElementById('scanLotStatus');
+    const materialCodeInput = document.getElementById('material-code');
+    const materialLotInput = document.getElementById('材料ロット');
+    const html5QrCode = new Html5Qrcode("lotQrReader");
+
+    // Store reference globally
+    window.lotHtml5QrCode = html5QrCode;
+
+    // Reset status
+    scanLotStatus.textContent = '';
+    scanLotStatus.style.color = '#666';
+
+    // Show modal
+    scanLotModal.style.display = 'block';
+
+    // Start QR code scanning with near-focus detection (optimized for 10-inch tablet)
+    html5QrCode.start(
+      { facingMode: "environment" },
+      {
+        fps: 30,
+        qrbox: { width: 800, height: 800 },
+        aspectRatio: 1.0,
+        disableFlip: false,
+        advanced: [{
+          focusMode: "continuous",
+          focusDistance: { ideal: 0 }
+        }]
+      },
+      async (qrCodeMessage) => {
+        console.log("Scanned Lot QR Code:", qrCodeMessage);
+
+        try {
+          // ✅ IMMEDIATELY stop the scanner to prevent multiple scans
+          await html5QrCode.stop();
+
+          // Parse QR code: "97B,251020-1,12000"
+          const parts = qrCodeMessage.split(',');
+
+          if (parts.length < 2) {
+            throw new Error('Invalid QR code format');
+          }
+
+          const scannedMaterialCode = parts[0].trim();
+          const lotNumber = parts[1].trim();
+          // parts[2] is ignored for now
+
+          // Get Material Code from the form (may contain comma-separated values)
+          const materialCodeString = materialCodeInput ? materialCodeInput.value.trim() : '';
+
+          console.log("Comparison:", { scannedMaterialCode, materialCodeString, lotNumber });
+
+          // Validate Material Code using new multi-value support
+          const validation = validateMaterialCode(scannedMaterialCode, materialCodeString);
+
+          console.log("Lot Scanner Validation:", {
+            scanned: scannedMaterialCode,
+            allValidCodes: validation.allCodes,
+            isValid: validation.isValid,
+            matchedCode: validation.matchedCode
+          });
+
+          // Compare Material Codes
+          if (!validation.isValid) {
+            // Material code mismatch - show error
+            const expectedDisplay = formatMaterialCodesForDisplay(materialCodeString);
+
+            scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ 材料コードが一致しません<br>Material code mismatch</span>';
+
+            // Use showAlert function
+            showAlert(`材料コードが一致しません / Material code mismatch\n\nExpected: ${expectedDisplay}\nScanned: ${scannedMaterialCode}`);
+
+            // Close modal
+            scanLotModal.style.display = 'none';
+            return;
+          }
+
+          // Log which specific code was matched
+          console.log(`Lot scanner: Material code validated successfully. Matched: ${validation.matchedCode}`);
+
+          // Material code matches - add lot number using the new system
+          const success = addScannedLot(lotNumber);
+
+          if (!success) {
+            // Duplicate
+            scanLotStatus.innerHTML = '<span style="color: #f39c12;">⚠️ このロット番号は既に追加されています<br>Lot number already added</span>';
+
+            // Close after showing message briefly
+            setTimeout(() => {
+              scanLotModal.style.display = 'none';
+            }, 1500);
+
+            return;
+          }
+
+          // Show success animation
+          scanLotStatus.innerHTML = '<span class="success-checkmark">✓</span><br><span style="color: #4CAF50; font-weight: bold;">成功！ / Success!</span>';
+          document.body.classList.add('flash-green');
+
+          // Close modal after short delay
+          setTimeout(() => {
+            document.body.classList.remove('flash-green');
+            scanLotModal.style.display = 'none';
+          }, 1000);
+
+        } catch (error) {
+          console.error("Error processing lot QR code:", error);
+          scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ QRコードの処理エラー<br>QR code processing error</span>';
+
+          showAlert('QRコードの形式が正しくありません / Invalid QR code format');
+
+          // Scanner already stopped, just close modal
+          scanLotModal.style.display = 'none';
+        }
+      },
+      (errorMessage) => {
+        // QR scan error (ignore continuous scanning errors)
+      }
+    ).catch(err => {
+      console.error("Failed to start lot scanning:", err);
+      scanLotStatus.innerHTML = '<span style="color: #e74c3c;">❌ カメラを起動できませんでした<br>Could not start camera</span>';
+    });
+
+    // Close button handler
+    document.getElementById('closeScanLotModal').onclick = function () {
+      html5QrCode.stop().then(() => {
+        scanLotModal.style.display = 'none';
+      }).catch(err => {
+        console.error("Failed to stop scanning:", err);
+        scanLotModal.style.display = 'none';
+      });
+    };
+  });
+}
+
+// ===== MATERIAL LOT TRACKING SYSTEM =====
+// Track lots with their source (scanned vs manual)
+let materialLots = []; // Array of {lotNumber: string, source: 'scanned'|'manual'}
+let manualEntryAllowed = false; // Flag for override mode
+
+// Load lots from localStorage
+function loadMaterialLots() {
+  const savedLots = localStorage.getItem(`${uniquePrefix}材料ロット-data`);
+  if (savedLots) {
+    try {
+      materialLots = JSON.parse(savedLots);
+      renderMaterialLotTags();
+      updateMaterialLotInput();
+    } catch (e) {
+      console.error("Error loading material lots:", e);
+      materialLots = [];
+    }
+  }
+}
+
+// Save lots to localStorage
+function saveMaterialLots() {
+  localStorage.setItem(`${uniquePrefix}材料ロット-data`, JSON.stringify(materialLots));
+  updateMaterialLotInput();
+}
+
+// Update the hidden input value (comma-separated)
+function updateMaterialLotInput() {
+  const materialLotInput = document.getElementById('材料ロット');
+  if (materialLotInput) {
+    materialLotInput.value = materialLots.map(lot => lot.lotNumber).join(',');
+  }
+}
+
+// Popup (speech bubble) showing a lot's linked photo + a Replace action
+let _lotPopupAnchor = null;
+function positionLotPopup() {
+  const pop = document.getElementById('lotPhotoPopup');
+  if (!pop || !_lotPopupAnchor) return;
+  const r = _lotPopupAnchor.getBoundingClientRect();
+  // Pill scrolled out of view -> close the popup
+  if (r.bottom < 56 || r.top > window.innerHeight - 16) { closeLotPhotoPopup(); return; }
+  let top = r.top - pop.offsetHeight - 10;
+  if (top < 56) top = r.bottom + 10; // not enough room above -> show below
+  let left = r.left + r.width / 2 - pop.offsetWidth / 2;
+  left = Math.max(10, Math.min(left, window.innerWidth - pop.offsetWidth - 10));
+  pop.style.top = top + 'px';
+  pop.style.left = left + 'px';
+}
+function closeLotPhotoPopup() {
+  const pop = document.getElementById('lotPhotoPopup');
+  if (pop) pop.remove();
+  document.removeEventListener('click', lotPopupOutsideHandler, true);
+  document.removeEventListener('scroll', positionLotPopup, true);
+  window.removeEventListener('resize', positionLotPopup);
+  _lotPopupAnchor = null;
+}
+function lotPopupOutsideHandler(e) {
+  const pop = document.getElementById('lotPhotoPopup');
+  if (pop && !pop.contains(e.target)) closeLotPhotoPopup();
+}
+function showLotPhotoPopup(lotNumber, anchorEl) {
+  closeLotPhotoPopup();
+  _lotPopupAnchor = anchorEl;
+  const photo = (typeof materialLabelPhotos !== 'undefined')
+    ? (materialLabelPhotos.find(p => p.lotNumber === lotNumber && p.photoType !== 'defect') ||
+      materialLabelPhotos.find(p => p.lotNumber === lotNumber)) : null;
+
+  const pop = document.createElement('div');
+  pop.id = 'lotPhotoPopup';
+  pop.style.cssText = `
+    position: fixed; z-index: 100050; width: 220px;
+    background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(16,24,40,0.18); padding: 10px;
+    display: flex; flex-direction: column; gap: 8px;`;
+  pop.innerHTML = `
+    <div style="font-size:0.74rem;font-weight:800;color:var(--text-main);display:flex;justify-content:space-between;align-items:center;gap:6px;">
+      <span style="min-width:0;word-break:break-word;">📷 ${typeof formatLotTagLabel === 'function' ? formatLotTagLabel(lotNumber) : lotNumber}</span>
+      <span id="lotPopupClose" style="cursor:pointer;color:var(--text-muted);font-size:1rem;line-height:1;flex-shrink:0;padding:2px;">✕</span>
+    </div>
+    <img id="lotPopupThumb" src="${photo ? photo.blobUrl : ''}" alt="lot photo"
+         style="width:100%;height:160px;object-fit:contain;border-radius:8px;background:var(--bg-inset);cursor:zoom-in;">
+    <button type="button" id="lotReplaceBtn"
+            style="background:var(--blue);color:#fff;border:none;border-radius:8px;padding:11px;font-weight:800;cursor:pointer;font-family:inherit;font-size:0.85rem;">
+      🔁 置き換え / Replace
+    </button>`;
+  document.body.appendChild(pop);
+
+  positionLotPopup();
+
+  // Tap the thumbnail to preview it full-size (close the popup first to avoid z-index overlap)
+  const thumb = pop.querySelector('#lotPopupThumb');
+  if (thumb && photo) {
+    thumb.onclick = (e) => {
+      e.stopPropagation();
+      const src = photo.blobUrl;
+      closeLotPhotoPopup();
+      if (typeof window.openPreview === 'function') window.openPreview(src);
+    };
+  }
+  pop.querySelector('#lotPopupClose').onclick = closeLotPhotoPopup;
+  pop.querySelector('#lotReplaceBtn').onclick = () => {
+    closeLotPhotoPopup();
+    // Redirect to the Images tab and re-take (edit) the photo for this lot
+    window.__captureLotTarget = lotNumber;
+    if (typeof window.goToTab === 'function') window.goToTab(3);
+    setTimeout(() => { document.getElementById('makerLabelButton')?.click(); }, 350);
+  };
+
+  // Close on outside tap; follow the pill on scroll/resize (deferred so the
+  // opening click doesn't immediately close it)
+  setTimeout(() => {
+    document.addEventListener('click', lotPopupOutsideHandler, true);
+    document.addEventListener('scroll', positionLotPopup, true);
+    window.addEventListener('resize', positionLotPopup);
+  }, 0);
+}
+
+// Format label for lot tag (e.g. "2323-1 (6shots)" or "2323-1 (in-progress)")
+function formatLotTagLabel(lotNumber) {
+  if (!lotNumber) return '';
+  let records = [];
+  if (typeof window.getAllLotRecords === 'function') {
+    records = window.getAllLotRecords().filter(r => r && r.lotNumber === lotNumber);
+  }
+
+  const lang = (typeof getCurrentLanguage === 'function' ? getCurrentLanguage() : null)
+    || localStorage.getItem('appLanguage')
+    || 'ja';
+
+  const isClosed = records.length > 0 && records.every(r => !r.open && r.shots != null && r.shots !== '');
+
+  if (isClosed) {
+    const totalShots = records.reduce((sum, r) => sum + (parseInt(r.shots, 10) || 0), 0);
+    let unit = (typeof _t === 'function' ? _t('lot_shots_unit') : null) || 'ショット';
+    if (lang === 'en') {
+      unit = (totalShots === 1) ? 'shot' : 'shots';
+    }
+    const space = (lang === 'pt') ? ' ' : '';
+    return `${lotNumber} (${totalShots}${space}${unit})`;
+  } else {
+    let inProg = (typeof _t === 'function' ? _t('lot_in_progress') : null) || '進行中';
+    return `${lotNumber} (${inProg})`;
+  }
+}
+
+// Re-render lot tags when the language changes
+document.addEventListener('languageChanged', () => {
+  if (typeof renderMaterialLotTags === 'function') {
+    renderMaterialLotTags();
+  }
+});
+
+// Render lot tags
+function renderMaterialLotTags() {
+  // Render the lot pills into every lot container (Production card + Kensa tab)
+  const containers = document.querySelectorAll('.lot-tags');
+  if (!containers.length) return;
+
+  const anyMissing = materialLots.some(lot =>
+    !(typeof materialLabelPhotos !== 'undefined' && materialLabelPhotos.some(p => p.lotNumber === lot.lotNumber)));
+
+  containers.forEach(tagsContainer => {
+    tagsContainer.innerHTML = '';
+    // Leave headroom above the first row so the "no photo" callouts don't overlap the input
+    tagsContainer.style.marginTop = anyMissing ? '30px' : '8px';
+
+    materialLots.forEach((lot, index) => {
+      const hasPhoto = (typeof materialLabelPhotos !== 'undefined') &&
+        materialLabelPhotos.some(p => p.lotNumber === lot.lotNumber);
+
+      const tag = document.createElement('div');
+      tag.className = 'lot-pill' + (hasPhoto ? '' : ' lot-pill-nophoto');
+      tag.style.cssText = `
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      background: #4CAF50;
+      color: white;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 14px;
+      gap: 6px;
+      cursor: pointer;
+    `;
+      tag.title = hasPhoto ? '写真を変更 / Tap to change photo' : '写真がありません / Tap to add photo';
+
+      const icon = document.createElement('span');
+      icon.textContent = hasPhoto ? '📷' : '⚠️';
+      icon.style.fontSize = '13px';
+      tag.appendChild(icon);
+
+      const lotText = document.createElement('span');
+      lotText.textContent = formatLotTagLabel(lot.lotNumber);
+      tag.appendChild(lotText);
+
+      // Delete button — also deletes the lot's linked photo
+      const deleteBtn = document.createElement('span');
+      deleteBtn.textContent = '×';
+      deleteBtn.style.cssText = `cursor: pointer; font-size: 18px; font-weight: bold; margin-left: 2px;`;
+      deleteBtn.onclick = async (e) => {
+        e.stopPropagation();
+        const lotNum = lot.lotNumber;
+        showConfirm({
+          title: 'ロット番号を削除しますか？ / Delete lot number?',
+          message: `ロット番号 <strong>${lotNum}</strong> および紐付けられた写真を削除します。<br>この操作は取り消せません。<br><br>Delete lot <strong>${lotNum}</strong> and its linked photo(s).<br>This action cannot be undone.`,
+          confirmText: '削除 / Delete',
+          cancelText: 'キャンセル / Cancel',
+          onConfirm: async () => {
+            if (typeof materialLabelPhotos !== 'undefined') {
+              const linked = materialLabelPhotos.filter(p => p.lotNumber === lotNum);
+              for (const ph of linked) {
+                try { URL.revokeObjectURL(ph.blobUrl); } catch (err) { }
+                try { await materialLabelDB.delete(ph.id); } catch (err) { }
+              }
+              materialLabelPhotos = materialLabelPhotos.filter(p => p.lotNumber !== lotNum);
+            }
+            // Also purge the shot-count records for this lot so ショット数 total stays correct
+            if (typeof window.removeLotFromTracking === 'function') {
+              window.removeLotFromTracking(lotNum);
+            }
+            materialLots.splice(index, 1);
+            saveMaterialLots();
+            renderMaterialLotTags();
+            if (typeof renderMaterialPhotoThumbnails === 'function') renderMaterialPhotoThumbnails();
+            if (typeof updateMaterialPhotoCount === 'function') updateMaterialPhotoCount();
+            if (typeof updateMaterialLabelElement === 'function') updateMaterialLabelElement();
+            if (typeof window.renderImageGallery === 'function') window.renderImageGallery();
+          }
+        });
+      };
+      tag.appendChild(deleteBtn);
+
+      // "No photo" speech-bubble callout
+      if (!hasPhoto) {
+        const callout = document.createElement('span');
+        callout.className = 'lot-callout';
+        callout.textContent = '写真なし・タップで撮影 / Tap to add photo';
+        tag.appendChild(callout);
+      }
+
+      // Tap a pill: with a photo -> popup (thumbnail + Replace); without -> capture
+      tag.onclick = () => {
+        if (hasPhoto) {
+          showLotPhotoPopup(lot.lotNumber, tag);
+        } else {
+          window.__captureLotTarget = lot.lotNumber;
+          const b = document.getElementById('makerLabelButton');
+          if (b) b.click();
+        }
+      };
+
+      tagsContainer.appendChild(tag);
+    });
+  });
+}
+
+// Add scanned lot
+function addScannedLot(lotNumber) {
+  // Check for maximum limit (25 lots)
+  if (materialLots.length >= 25) {
+    showAlert(`最大25個のロット番号のみ追加可能です\n\nMaximum 25 lot numbers allowed\n\nCurrent: ${materialLots.length} lots`);
+    return false; // At maximum
+  }
+  // Check for duplicates
+  if (materialLots.some(lot => lot.lotNumber === lotNumber)) {
+    return false; // Duplicate
+  }
+  materialLots.push({ lotNumber, source: 'scanned' });
+  // The next captured material-label photo links to this lot
+  window.__captureLotTarget = lotNumber;
+  saveMaterialLots();
+  renderMaterialLotTags();
+  return true; // Success
+}
+
+// Add manual lot
+function addManualLot(lotNumber) {
+  if (!lotNumber || !lotNumber.trim()) return false;
+  lotNumber = lotNumber.trim();
+
+  // Check for maximum limit (25 lots)
+  if (materialLots.length >= 25) {
+    showAlert(`最大25個のロット番号のみ追加可能です\n\nMaximum 25 lot numbers allowed\n\nCurrent: ${materialLots.length} lots`);
+    return false; // At maximum
+  }
+  // Check for duplicates
+  if (materialLots.some(lot => lot.lotNumber === lotNumber)) {
+    return false; // Duplicate
+  }
+  materialLots.push({ lotNumber, source: 'manual' });
+  // The next captured material-label photo links to this lot
+  window.__captureLotTarget = lotNumber;
+  // Track on the machine timeline. Capture the previous open lot so the
+  // override flow can prompt for its ショット数 (same as the scanned path).
+  if (typeof window.recordLotScan === 'function') {
+    const _m = window.__lotScanMachine
+      || (typeof groupedMachines !== 'undefined' && groupedMachines[0])
+      || (document.getElementById('process') ? document.getElementById('process').value : '');
+    window.__pendingPrevLot = window.recordLotScan(lotNumber, _m, 'manual');
+    if (typeof window.assertMachineState === 'function') window.assertMachineState();
+  }
+  saveMaterialLots();
+  renderMaterialLotTags();
+  return true; // Success
+}
+
+// Intercept 材料ロット input click to open QR scanner instead of keypad
+const materialLotInput = document.getElementById('材料ロット');
+if (materialLotInput) {
+  // Flag to control if we should allow keypad
+  let allowKeypadForManualEntry = false;
+
+  materialLotInput.addEventListener('focus', (e) => {
+    // If manual entry is allowed, let the keypad open naturally
+    if (allowKeypadForManualEntry) {
+      return; // Let the default behavior happen (keypad opens)
+    }
+
+    // Check if sub-dropdown has a value
+    const subDropdown = document.getElementById('sub-dropdown');
+    if (!subDropdown || !subDropdown.value) {
+      // No value in sub-dropdown, just blur and do nothing
+      e.preventDefault();
+      materialLotInput.blur();
+      showAlert('Please select a product code first / まず製品コードを選択してください');
+      return;
+    }
+
+    // Block keypad and open the material QR scanner (same flow as the
+    // "Scan Material" button). The legacy #scan-lot button no longer exists
+    // in the redesigned HTML, so route through triggerMaterialScan().
+    e.preventDefault();
+    materialLotInput.blur();
+    if (typeof window.triggerMaterialScan === 'function') {
+      window.triggerMaterialScan();
+    } else if (typeof showStep2Modal === 'function') {
+      window.__materialScanMode = 'production';
+      showStep2Modal();
+      setTimeout(() => document.getElementById('startStep2Scan')?.click(), 250);
+    }
+  });
+
+  // Store reference to allow keypad function
+  window.enableManualLotEntry = function () {
+    allowKeypadForManualEntry = true;
+
+    // Store current lots before opening keypad
+    const lotsBeforeKeypad = materialLots.map(lot => lot.lotNumber);
+
+    // Open the keypad directly in NEW ENTRY MODE (starts empty, appends on confirm)
+    window.openDirectNumericKeypad('材料ロット', true);
+
+    // Set up listener for when keypad closes to detect new lots
+    const checkForNewLot = setInterval(() => {
+      const keypadModal = document.getElementById('numericKeypadModalDirect');
+      const isKeypadOpen = keypadModal && keypadModal.style.display === 'block';
+
+      // Only check after keypad is closed
+      if (!isKeypadOpen) {
+        const currentValue = materialLotInput.value;
+        const valuesInInput = currentValue ? currentValue.split(',').map(v => v.trim()).filter(v => v) : [];
+
+        // Check if there's a new lot added (compare with lots before keypad)
+        const newLots = valuesInInput.filter(lot => lot && !lotsBeforeKeypad.includes(lot));
+
+        if (newLots.length > 0) {
+          // New lot(s) added via keypad - add as blue tags
+          newLots.forEach(lotNumber => {
+            const success = addManualLot(lotNumber);
+            if (success) {
+              console.log("Manual lot added as blue tag:", lotNumber);
+            }
+          });
+        }
+
+        // Disable manual entry mode and stop checking
+        allowKeypadForManualEntry = false;
+        clearInterval(checkForNewLot);
+      }
+    }, 300);
+  };
+}
+
+// Override button - Leader verification for manual entry
+document.getElementById('overrideLotButton').addEventListener('click', function () {
+  const scanLotModal = document.getElementById('scanLotModal');
+  const leaderVerificationModal = document.getElementById('leaderVerificationModal');
+  const leaderVerificationStatus = document.getElementById('leaderVerificationStatus');
+
+  // Close scan lot modal first
+  if (window.lotHtml5QrCode) {
+    window.lotHtml5QrCode.stop().catch(err => console.error("Error stopping lot scanner:", err));
+  }
+  scanLotModal.style.display = 'none';
+
+  // Get material code from input
+  const materialCodeInput = document.getElementById('material-code');
+  const materialCode = materialCodeInput ? materialCodeInput.value.trim() : 'N/A';
+
+  // Find and update the warning text to show material code instead
+  const modalContent = leaderVerificationModal.querySelector('.modal-content');
+  const warningTextElement = modalContent.querySelector('p[style*="color: #666"]');
+
+  if (warningTextElement) {
+    // Replace the warning text with blinking material code
+    warningTextElement.innerHTML = `<span class="material-code-blink">材料: ${materialCode} / Material Code: ${materialCode}</span>`;
+    warningTextElement.style.fontSize = '18px';
+    warningTextElement.style.margin = '15px 0';
+  }
+
+  // Show leader verification modal
+  leaderVerificationStatus.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
+  leaderVerificationStatus.style.color = '#2d5f4f';
+  leaderVerificationModal.style.display = 'block';
+
+  // Use global scanner variable for leader verification
+  leaderVerificationScanner = new Html5Qrcode("leaderQrReader");
+
+  leaderVerificationScanner.start(
+    { facingMode: "environment" },
+    {
+      fps: 30,
+      qrbox: { width: 800, height: 800 },
+      aspectRatio: 1.0,
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
+    },
+    async (decodedText) => {
+      console.log("Leader QR Code scanned for override:", decodedText);
+
+      try {
+        const response = await fetch(`${serverURL}/verifyLeader`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: decodedText })
+        });
+
+        const result = await response.json();
+
+        if (result.authorized) {
+          leaderVerificationStatus.textContent = `✅ 認証成功！ / Verified! Opening keypad...`;
+          leaderVerificationStatus.style.color = '#006400';
+
+          leaderVerificationScanner.stop().then(() => {
+            setTimeout(() => {
+              leaderVerificationModal.style.display = 'none';
+              leaderVerificationScanner = null;
+
+              // Enable keypad for manual entry
+              if (window.enableManualLotEntry) {
+                window.enableManualLotEntry();
+              }
+            }, 1000);
+          }).catch(err => console.error("Error stopping scanner:", err));
+        } else {
+          leaderVerificationStatus.textContent = `❌ 権限がありません / Not authorized`;
+          leaderVerificationStatus.style.color = '#cc0000';
+        }
+      } catch (error) {
+        console.error("Error verifying leader for override:", error);
+        leaderVerificationStatus.textContent = '❌ エラーが発生しました / Error occurred';
+        leaderVerificationStatus.style.color = '#cc0000';
+      }
+    },
+    (errorMessage) => {
+      // QR scan error (ignore continuous scanning errors)
+    }
+  ).catch(err => {
+    console.error("Error starting QR scanner:", err);
+    leaderVerificationStatus.textContent = '❌ カメラを起動できませんでした / Could not start camera';
+    leaderVerificationStatus.style.color = '#cc0000';
+  });
+
+  // Set up cancel button handler for override flow
+  document.getElementById('closeLeaderVerificationModal').onclick = function () {
+    if (leaderVerificationScanner) {
+      leaderVerificationScanner.stop().then(() => {
+        leaderVerificationModal.style.display = 'none';
+        leaderVerificationScanner = null;
+        console.log("Leader verification cancelled from override flow");
+      }).catch(err => {
+        console.error("Error stopping scanner:", err);
+        leaderVerificationModal.style.display = 'none';
+        leaderVerificationScanner = null;
+      });
+    } else {
+      leaderVerificationModal.style.display = 'none';
+    }
+  };
+});
+
+// Load lots on page load
+document.addEventListener('DOMContentLoaded', () => {
+  loadMaterialLots();
+});
+
+// Function to reset everything and reload the page
+function resetForm() {
+  // Log reset action with current values BEFORE clearing session
+  const current背番号 = document.getElementById('sub-dropdown')?.value || '';
+  const current品番 = document.getElementById('product-number')?.value || '';
+  const current工場 = document.getElementById('selected工場')?.value || '';
+  const current設備 = document.getElementById('process')?.value || '';
+
+  // Return a promise to handle the async log
+  let logPromise = Promise.resolve();
+
+  // Log if we have machine info at minimum (before clearing session)
+  if (current設備 && (current背番号 || current品番 || current工場)) {
+    logPromise = logTabletAction('Reset button pressed', 'Reset', {
+      previous背番号: current背番号,
+      previous品番: current品番,
+      previous工場: current工場,
+      previous設備: current設備
+    }).catch(err => console.error("Reset log failed:", err));
+  }
+
+  return logPromise.then(async () => {
+    // Release box and material calls
+    try {
+      const factory = document.getElementById('selected工場')?.value || '';
+      const machine = new URLSearchParams(window.location.search).get('machine') || '';
+      if (factory && machine) {
+        // We must await these fetches before the page reloads, otherwise the browser will cancel them
+        await Promise.all([
+          fetch(`${serverURL}/api/stop-call`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ factory, machine, action: 'clear', callType: 'box', zairyoSebanggo: '' })
+          }).catch(() => { }),
+          fetch(`${serverURL}/api/stop-call`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ factory, machine, action: 'clear', callType: 'material', zairyoSebanggo: '' })
+          }).catch(() => { })
+        ]);
+      }
+    } catch (e) { console.error('Error clearing calls on reset:', e); }
+
+    localStorage.removeItem(`${uniquePrefix}activeCall_box`);
+    localStorage.removeItem(`${uniquePrefix}activeCall_material`);
+
+    // Clear session AFTER logging
+    clearSessionID();
+    closeVideoManualPicker();
+    currentProductDetails = {
+      sebanggo: '',
+      hinban: '',
+      materialCode: '',
+      model: '',
+      kataban: ''
+    };
+    localStorage.removeItem(`${uniquePrefix}cached-model`);
+    localStorage.removeItem(`${uniquePrefix}cached-kataban`);
+    syncVideoManualLauncherState();
+
+    const excludedInputs = ['process', 'languageSelector', 'Machine Operator']; // IDs or names of inputs to exclude from reset
+
+    // Preserve language preference
+    const currentLanguage = localStorage.getItem('appLanguage');
+
+    // Clear all form inputs with unique prefix except excluded ones
+    const inputs = document.querySelectorAll('input, select, textarea');
+    inputs.forEach(input => {
+      const key = `${uniquePrefix}${input.id || input.name}`;
+      if (!excludedInputs.includes(input.id) && !excludedInputs.includes(input.name)) {
+        localStorage.removeItem(key);
+        input.value = ''; // Reset input value
+      }
+    });
+
+    // Clear counters with unique prefix
+    for (let i = 1; i <= 20; i++) { // Adjusted loop to clear all counter values
+      const key = `${uniquePrefix}counter-${i}`;
+      localStorage.removeItem(key);
+      const counterElement = document.getElementById(`counter-${i}`);
+      if (counterElement) {
+        counterElement.value = '0'; // Reset counter display
+      }
+    }
+
+    // Clear break time inputs and total
+    for (let i = 1; i <= 4; i++) {
+      localStorage.removeItem(`${uniquePrefix}break${i}-start`);
+      localStorage.removeItem(`${uniquePrefix}break${i}-end`);
+    }
+    localStorage.removeItem(`${uniquePrefix}breaktime-mins`);
+    localStorage.removeItem(`${uniquePrefix}total-break-display`);
+
+    // Clear machine trouble inputs and total
+    for (let i = 1; i <= 4; i++) {
+      localStorage.removeItem(`${uniquePrefix}trouble${i}-start`);
+      localStorage.removeItem(`${uniquePrefix}trouble${i}-end`);
+    }
+    localStorage.removeItem(`${uniquePrefix}trouble-time-mins`);
+    localStorage.removeItem(`${uniquePrefix}total-trouble-display`);
+
+    // Clear maintenance records
+    localStorage.removeItem(`${uniquePrefix}maintenanceRecords`);
+    maintenanceRecords = [];
+
+    // Revoke object URLs and drop the in-memory array now; the persisted blobs in
+    // IndexedDB are wiped (awaited) just before the reload below so they can't be
+    // reloaded into the next session.
+    materialLabelPhotos.forEach(p => URL.revokeObjectURL(p.blobUrl));
+    materialLabelPhotos = [];
+    renderMaterialPhotoThumbnails();
+    updateMaterialPhotoCount();
+
+    // Revoke cycle-check (初物/終物) object URLs; their blobs in IndexedDB are wiped
+    // (awaited) just before the reload below.
+    Object.keys(cycleCheckObjectURLs).forEach(id => {
+      try { URL.revokeObjectURL(cycleCheckObjectURLs[id]); } catch (e) { }
+      delete cycleCheckObjectURLs[id];
+    });
+
+    // Clear material lots
+    localStorage.removeItem(`${uniquePrefix}材料ロット-data`);
+    materialLots = [];
+    renderMaterialLotTags();
+
+    // Clear any stop/call-leader events for this session
+    localStorage.removeItem(`${uniquePrefix}stopCallData`);
+    localStorage.removeItem(`${uniquePrefix}activeStopCallStart`);
+
+
+    // Reset all textContent elements
+    const textContentElements = document.querySelectorAll('[id]'); // Select all elements with an ID
+    textContentElements.forEach(element => {
+      const textKey = `${uniquePrefix}${element.id}.textContent`;
+      if (localStorage.getItem(textKey)) {
+        localStorage.removeItem(textKey); // Remove from localStorage
+        element.textContent = ''; // Reset to default empty textContent
+        console.log(`Reset textContent for element with ID: ${element.id}`);
+      }
+    });
+
+    // Reset all <img> elements
+    const images = document.querySelectorAll('img'); // Get all <img> elements
+    images.forEach(image => {
+      const imageKey = `${uniquePrefix}${image.id || image.name}.src`;
+      localStorage.removeItem(imageKey); // Remove image source from localStorage
+      image.src = ''; // Reset the image source
+      image.style.display = 'none'; // Hide the image
+      console.log(`Reset image ${image.id || image.name}`);
+    });
+
+    // Explicitly reset the sendtoNCButtonisPressed state
+    sendtoNCButtonisPressed = false;
+    localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'false');
+    localStorage.removeItem(`${uniquePrefix}previous-sebanggo`);
+    console.log('Reset button pressed: Set sendtoNCButtonisPressed to false');
+
+    // Restore language preference after reset
+    if (currentLanguage) {
+      localStorage.setItem('appLanguage', currentLanguage);
+    }
+
+    // Empty the on-disk photo stores BEFORE reloading. A fire-and-forget clear
+    // races the reload and can leave the previous session's blobs in IndexedDB —
+    // which loadMaterialLabelPhotos() would then read back in (and could re-submit)
+    // on the next load, piling up tablet storage. We await the clears, but guard
+    // each with a timeout so a blocked IndexedDB transaction can never wedge the
+    // reload.
+    const withTimeout = (p, ms) => Promise.race([
+      Promise.resolve(p).catch(e => console.warn('IndexedDB clear failed:', e)),
+      new Promise(res => setTimeout(res, ms))
+    ]);
+    await withTimeout(materialLabelDB.clear(), 2000);
+    await withTimeout(maintenanceDB.clearAll(), 2000);
+    await withTimeout(cycleCheckDB.clear(), 2000);
+
+    // Reload the page - the load event will broadcast clear if dropdown is empty
+    window.location.reload();
+  });
+}
+
+function showPrintStatusMessage(message) {
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  const scanAlertText = document.getElementById('scanAlertText');
+  const closeScanModalButton = document.getElementById('closeScanModalButton');
+
+  if (scanAlertText && scanAlertModal) {
+    scanAlertText.innerText = message;
+    scanAlertModal.style.display = 'block';
+
+    if (closeScanModalButton) {
+      closeScanModalButton.onclick = function () {
+        scanAlertModal.style.display = 'none';
+      };
+    }
+    return;
+  }
+
+  window.alert(message);
+}
+
+function promptLaptopAutoPrintCopies(defaultCopies = 3) {
+  return new Promise(resolve => {
+    const existingOverlay = document.getElementById('laptopAutoPrintCopiesOverlay');
+    if (existingOverlay) {
+      existingOverlay.remove();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'laptopAutoPrintCopiesOverlay';
+    overlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10002;
+      padding: 20px;
+    `;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      width: min(360px, 100%);
+      padding: 24px;
+      text-align: center;
+    `;
+
+    const title = document.createElement('h3');
+    title.textContent = 'Print copies / 印刷枚数';
+    title.style.cssText = 'margin: 0 0 12px; font-size: 22px;';
+
+    const description = document.createElement('p');
+    description.textContent = 'How many labels do you want to print? / 何枚印刷しますか？';
+    description.style.cssText = 'margin: 0 0 18px; color: #555;';
+
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 18px;';
+
+    const decrementButton = document.createElement('button');
+    decrementButton.type = 'button';
+    decrementButton.textContent = '-';
+    decrementButton.style.cssText = 'width: 52px; height: 52px; font-size: 28px; border: none; border-radius: 8px; background: #e9ecef; cursor: pointer;';
+
+    const copiesInput = document.createElement('input');
+    copiesInput.type = 'number';
+    copiesInput.min = '1';
+    copiesInput.step = '1';
+    copiesInput.readOnly = true;
+    copiesInput.value = String(defaultCopies);
+    copiesInput.style.cssText = 'width: 96px; padding: 12px; font-size: 24px; text-align: center; border: 1px solid #ced4da; border-radius: 8px;';
+
+    const incrementButton = document.createElement('button');
+    incrementButton.type = 'button';
+    incrementButton.textContent = '+';
+    incrementButton.style.cssText = 'width: 52px; height: 52px; font-size: 28px; border: none; border-radius: 8px; background: #e9ecef; cursor: pointer;';
+
+    controls.appendChild(decrementButton);
+    controls.appendChild(copiesInput);
+    controls.appendChild(incrementButton);
+
+    const buttonRow = document.createElement('div');
+    buttonRow.style.cssText = 'display: flex; justify-content: center; gap: 12px;';
+
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.textContent = 'Cancel';
+    cancelButton.style.cssText = 'padding: 12px 20px; border: none; border-radius: 8px; background: #adb5bd; color: white; cursor: pointer;';
+
+    const confirmButton = document.createElement('button');
+    confirmButton.type = 'button';
+    confirmButton.textContent = 'Print';
+    confirmButton.style.cssText = 'padding: 12px 20px; border: none; border-radius: 8px; background: #28a745; color: white; cursor: pointer;';
+
+    buttonRow.appendChild(cancelButton);
+    buttonRow.appendChild(confirmButton);
+
+    modal.appendChild(title);
+    modal.appendChild(description);
+    modal.appendChild(controls);
+    modal.appendChild(buttonRow);
+    overlay.appendChild(modal);
+
+    const closeModal = value => {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+      resolve(value);
+    };
+
+    const getSafeCopiesValue = () => {
+      const parsedValue = parseInt(copiesInput.value, 10);
+      return Number.isInteger(parsedValue) && parsedValue > 0 ? parsedValue : 1;
+    };
+
+    decrementButton.onclick = () => {
+      copiesInput.value = String(Math.max(1, getSafeCopiesValue() - 1));
+    };
+
+    incrementButton.onclick = () => {
+      copiesInput.value = String(getSafeCopiesValue() + 1);
+    };
+
+    copiesInput.addEventListener('input', () => {
+      if (copiesInput.value === '') {
+        return;
+      }
+      copiesInput.value = String(getSafeCopiesValue());
+    });
+
+    copiesInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        confirmButton.click();
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeModal(null);
+      }
+    });
+
+    cancelButton.onclick = () => closeModal(null);
+    confirmButton.onclick = () => closeModal(getSafeCopiesValue());
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay) {
+        closeModal(null);
+      }
+    });
+
+    document.body.appendChild(overlay);
+    confirmButton.focus();
+  });
+}
+
+async function resolveEquipmentPrinterIP(machineName) {
+  const machineNames = String(machineName || '')
+    .split(',')
+    .map(name => name.trim())
+    .filter(Boolean);
+  const primaryMachineName = machineNames[0];
+
+  if (!primaryMachineName) {
+    throw new Error('設備名がありません / Equipment name is missing.');
+  }
+
+  if (groupedMachineIPs[primaryMachineName]) {
+    return groupedMachineIPs[primaryMachineName];
+  }
+
+  const ipInput = document.getElementById('ipInfo');
+  const cachedIPs = String(ipInput?.value || '')
+    .split(',')
+    .map(ip => ip.replace(/"/g, '').trim())
+    .filter(Boolean);
+
+  if (cachedIPs.length > 0) {
+    return cachedIPs[0];
+  }
+
+  const response = await fetch(`${ipURL}?filter=${encodeURIComponent(primaryMachineName)}`);
+  if (!response.ok) {
+    throw new Error(`設備IPの取得に失敗しました / Failed to fetch IP for ${primaryMachineName}`);
+  }
+
+  const ipAddress = (await response.text()).replace(/"/g, '').trim();
+  if (!ipAddress) {
+    throw new Error(`設備IPが未設定です / No IP configured for ${primaryMachineName}`);
+  }
+
+  if (ipInput) {
+    ipInput.value = ipAddress;
+  }
+
+  return ipAddress;
+}
+
+async function request047JAutoPrint(machineName, sebanggo, copies) {
+  const printerIP = await resolveEquipmentPrinterIP(machineName);
+  const requestURL = `http://${printerIP}:5001/request?${new URLSearchParams({
+    filename: sebanggo,
+    qty: String(copies)
+  }).toString()}`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const response = await fetch(requestURL, {
+      method: 'GET',
+      signal: controller.signal
+    });
+    const responseText = await response.text();
+
+    let payload = {};
+    if (responseText) {
+      try {
+        payload = JSON.parse(responseText);
+      } catch (error) {
+        payload = { success: response.ok, error: responseText };
+      }
+    }
+
+    if (!response.ok || payload.success === false) {
+      const errorMessage = payload.error || `Printer server returned HTTP ${response.status}`;
+      throw new Error(`HTTP ${response.status}: ${errorMessage}`);
+    }
+
+    return { printerIP, payload };
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('Label print request timed out / ラベル印刷リクエストがタイムアウトしました');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Print label using "Smooth Print" app for mobile devices
+async function printLabel() {
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  const scanAlertText = document.getElementById('scanAlertText');
+  const 背番号 = document.getElementById("sub-dropdown").value;
+  const モデル = document.getElementById("model")?.value?.trim() || "";
+  const selectedEquipmentName = document.getElementById("process")?.value?.trim() || "";
+
+  // Preload the alert sound without playing it
+  if (alertSound) {
+    alertSound.muted = true; // Mute initially to preload
+    alertSound.loop = false; // Disable looping
+    alertSound.load(); // Preload the audio file
+  }
+
+  // Check if 背番号 is selected
+  if (!背番号) {
+    // Show alert modal
+    scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+    scanAlertModal.style.display = 'block';
+
+    // Play alert sound
+    if (alertSound) {
+      alertSound.muted = false; // Unmute to alert user
+      alertSound.volume = 1; // Set full volume
+      alertSound.play().catch(error => console.error('Failed to play alert sound:', error));
+    }
+
+    // Add blinking red background
+    document.body.classList.add('flash-red');
+
+    // Close modal on button click
+    const closeScanModalButton = document.getElementById('closeScanModalButton');
+    closeScanModalButton.onclick = function () {
+      scanAlertModal.style.display = 'none';
+      alertSound.pause();
+      alertSound.currentTime = 0; // Reset sound to the beginning
+      alertSound.muted = true; // Mute again for next time
+      document.body.classList.remove('flash-red');
+    };
+
+    return; // Stop the submission process
+  }
+
+  if (モデル === '047J') {
+    const copies = await promptLaptopAutoPrintCopies();
+    if (copies === null) {
+      return;
+    }
+
+    try {
+      const { printerIP, payload } = await request047JAutoPrint(selectedEquipmentName, 背番号, copies);
+
+      setPrintBtnState('success');
+
+      logTabletAction('047J laptop auto-print success', 'Completed', {
+        machine: selectedEquipmentName,
+        背番号,
+        copies,
+        printerIP,
+        productNumber: payload.productNumber || '',
+        lotNumber: payload.lotNumber || ''
+      });
+    } catch (error) {
+      console.error('047J laptop auto-print failed:', error);
+      setPrintBtnState('error', error.message);
+      logTabletAction('047J laptop auto-print failed', 'in-progress', {
+        machine: selectedEquipmentName,
+        背番号,
+        copies,
+        error: error.message
+      });
+    }
+
+    return;
+  }
+
+  // List of 背番号 values requiring 収容数 selection
+  const specialValues = ["P05K", "P06K", "P07K", "P08K", "P13K", "P14K", "P15K", "P16K", "UFS5", "UFS6", "UFS7", "UFS8", "URB5", "URB6", "URB7", "URB8"];
+
+  // Check if 背番号 matches special values
+  if (specialValues.includes(背番号)) {
+    // Create and show a modal for 収容数 selection
+    const modal = document.createElement('div');
+    modal.classList.add('modal');
+    modal.style.display = 'flex';
+    modal.style.position = 'fixed';
+    modal.style.top = '50%';
+    modal.style.left = '50%';
+    modal.style.transform = 'translate(-50%, -50%)';
+    modal.style.flexDirection = 'column';
+    modal.style.justifyContent = 'center';
+    modal.style.alignItems = 'center';
+    modal.style.padding = '30px';
+    modal.style.backgroundColor = 'white';
+    modal.style.boxShadow = '0 0 15px rgba(0, 0, 0, 0.5)';
+    modal.style.borderRadius = '10px';
+
+    const message = document.createElement('p');
+    message.innerText = '収容数を選んでください / Please choose the value for Quantity';
+    message.style.fontSize = '24px';
+    message.style.textAlign = 'center';
+    message.style.marginBottom = '20px';
+    modal.appendChild(message);
+
+    const button50 = document.createElement('button');
+    button50.innerText = '50';
+    button50.style.margin = '10px';
+    button50.style.padding = '15px 30px';
+    button50.style.fontSize = '20px';
+    button50.style.cursor = 'pointer';
+    button50.style.borderRadius = '5px';
+    button50.onclick = () => {
+      redirectWith収容数(50);
+    };
+    modal.appendChild(button50);
+
+    const button100 = document.createElement('button');
+    button100.innerText = '100';
+    button100.style.margin = '10px';
+    button100.style.padding = '15px 30px';
+    button100.style.fontSize = '20px';
+    button100.style.cursor = 'pointer';
+    button100.style.borderRadius = '5px';
+    button100.onclick = () => {
+      redirectWith収容数(100);
+    };
+    modal.appendChild(button100);
+
+    const button200 = document.createElement('button');
+    button200.innerText = '200';
+    button200.style.margin = '10px';
+    button200.style.padding = '15px 30px';
+    button200.style.fontSize = '20px';
+    button200.style.cursor = 'pointer';
+    button200.style.borderRadius = '5px';
+    button200.onclick = () => {
+      redirectWith収容数(200);
+    };
+    modal.appendChild(button200);
+
+    document.body.appendChild(modal);
+
+    function redirectWith収容数(value) {
+      document.body.removeChild(modal); // Remove modal
+
+      // Retrieve dynamic values from the form
+      const 品番 = document.getElementById("product-number").value;
+      const 車型 = document.getElementById("model").value;
+      const R_L = document.getElementById("R-L").value;
+      const 材料 = document.getElementById("material").value;
+      const 色 = document.getElementById("material-color").value;
+      const extension = document.getElementById("Labelextension").value;
+      const Date2 = document.getElementById('Lot No.').value;
+      const 品番収容数 = `${品番},${value}`;
+      const SRS = document.getElementById("SRS").value;
+      const 設備名 = document.getElementById("process").value;
+      let filename = "";
+
+      // Get current time for DateT
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const currentTime = `${hours}:${minutes}`;
+
+      const WorkDate = extension ? `${Date2} - ${extension} - ${currentTime}` : `${Date2} - ${currentTime}`;
+
+      // Smooth Print URL scheme
+      if (SRS === "有り") {
+        filename = "SRS3.lbx";
+      } else if (背番号 === "NC2") {
+        filename = "NC21.lbx"
+      } else if (背番号 === "RA01" || 背番号 === "RA02") {
+        filename = "311BPlr3.lbx";
+      } else {
+        filename = "sample6.lbx";
+      }
+      const size = "RollW62";
+      const copies = 1;
+      const query =
+        `filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+        `&text_品番=${encodeURIComponent(品番)}` +
+        `&text_車型=${encodeURIComponent(車型)}` +
+        `&text_収容数=${encodeURIComponent(value)}` +
+        `&text_背番号=${encodeURIComponent(背番号)}` +
+        `&text_RL=${encodeURIComponent(R_L)}` +
+        `&text_材料=${encodeURIComponent(材料)}` +
+        `&text_色=${encodeURIComponent(色)}` +
+        `&text_DateT=${encodeURIComponent(WorkDate)}` +
+        `&text_setsubi=${encodeURIComponent(設備名)}` +
+        `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+      console.log(WorkDate);
+      sendBrotherPrint(query); // iOS: brotherwebprint:// · Android: localhost:8088
+    }
+
+    return; // Stop the submission process until user chooses 収容数
+  }
+
+  // Default process for other 背番号 values
+  const 品番 = document.getElementById("product-number").value;
+  const 車型 = document.getElementById("model").value;
+  const 収容数 = document.getElementById("収容数").value;
+  const R_L = document.getElementById("R-L").value;
+  const 材料 = document.getElementById("material").value;
+  const 色 = document.getElementById("material-color").value;
+  const extension = document.getElementById("Labelextension").value;
+  const Date2 = document.getElementById('Lot No.').value;
+  const 品番収容数 = `${品番},${収容数}`;
+  const SRS = document.getElementById("SRS").value;
+  const 設備名 = document.getElementById("process").value;
+  let filename = "";
+
+  // Get current time for DateT
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const currentTime = `${hours}:${minutes}`;
+
+  const WorkDate = extension ? `${Date2} - ${extension} - ${currentTime}` : `${Date2} - ${currentTime}`;
+
+  if (SRS === "有り") {
+    filename = "SRS3.lbx";
+  } else if (背番号 === "NC2") {
+    filename = "NC21.lbx"
+  } else if (背番号 === "RA01" || 背番号 === "RA02") {
+    filename = "311BPlr2.lbx";
+  } else {
+    filename = "sample6.lbx";
+  }
+
+  const size = "RollW62";
+  const copies = 1;
+  const query =
+    `filename=${encodeURIComponent(filename)}&size=${encodeURIComponent(size)}&copies=${encodeURIComponent(copies)}` +
+    `&text_品番=${encodeURIComponent(品番)}` +
+    `&text_車型=${encodeURIComponent(車型)}` +
+    `&text_収容数=${encodeURIComponent(収容数)}` +
+    `&text_背番号=${encodeURIComponent(背番号)}` +
+    `&text_RL=${encodeURIComponent(R_L)}` +
+    `&text_材料=${encodeURIComponent(材料)}` +
+    `&text_色=${encodeURIComponent(色)}` +
+    `&text_DateT=${encodeURIComponent(WorkDate)}` +
+    `&text_setsubi=${encodeURIComponent(設備名)}` +
+    `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
+
+  console.log(WorkDate);
+  sendBrotherPrint(query);
+}
+
+// Take photo hatsumono and atomono and label
+// Send a label print to the Brother QL-820. iOS uses the brotherwebprint:// URL
+// scheme (fire-and-forget); Android posts to the local SmoothPrint service on
+// :8088 and checks the response. Mirrors firstKojoLabelPrinter.js.
+
+// ---------- Print button state helpers ----------
+function _getPrintBtn() {
+  return document.getElementById('prodPrintLabelButton');
+}
+function _isJapanese() {
+  return (localStorage.getItem('appLanguage') || 'ja') === 'ja';
+}
+function _defaultPrintLabel() {
+  return _isJapanese()
+    ? 'ラベル印刷<small>Print Label</small>'
+    : 'Print Label<small>ラベル印刷</small>';
+}
+
+/**
+ * Set the print button to one of: 'printing', 'success', 'error', 'idle'
+ * For 'error' pass an optional message string.
+ */
+function setPrintBtnState(state, errorMsg) {
+  const btn = _getPrintBtn();
+  if (!btn) return;
+  const label = btn.querySelector('.print-btn-label');
+  if (!label) return;
+
+  // Clear previous state classes
+  btn.classList.remove('printing', 'print-success', 'print-error');
+
+  const ja = _isJapanese();
+
+  switch (state) {
+    case 'printing':
+      btn.classList.add('printing');
+      label.innerHTML = ja ? '印刷中...' : 'Printing...';
+      break;
+    case 'success':
+      btn.classList.add('print-success');
+      label.innerHTML = ja
+        ? '✓ 印刷成功!<small>Print Success!</small>'
+        : '✓ Print Success!<small>印刷成功!</small>';
+      // Reset back to default after 3s
+      setTimeout(() => setPrintBtnState('idle'), 3000);
+      break;
+    case 'error':
+      btn.classList.add('print-error');
+      label.innerHTML = ja
+        ? '✕ 印刷エラー<small>' + (errorMsg || 'Print Error') + '</small>'
+        : '✕ Print Error<small>' + (errorMsg || '印刷エラー') + '</small>';
+      // Reset back to default after 4s
+      setTimeout(() => setPrintBtnState('idle'), 4000);
+      break;
+    case 'idle':
+    default:
+      label.innerHTML = _defaultPrintLabel();
+      break;
+  }
+}
+window.setPrintBtnState = setPrintBtnState;
+
+// Legacy aliases — keep them functional for any external callers
+function showPrintingIndicator() { setPrintBtnState('printing'); }
+function hidePrintingIndicator() { /* handled by setPrintBtnState */ }
+
+function sendBrotherPrint(query) {
+  const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
+  setPrintBtnState('printing');
+  if (isIOS) {
+    // Fire-and-forget URL scheme — iOS has no return status, assume success
+    window.location.href = `brotherwebprint://print?${query}`;
+    setTimeout(() => setPrintBtnState('success'), 2500);
+    return;
+  }
+  // Android (and desktop): Brother SmoothPrint listens on localhost:8088
+  fetch(`http://localhost:8088/print?${query}`)
+    .then(res => res.text())
+    .then(res => {
+      if (res.includes('<result>SUCCESS</result>')) {
+        setPrintBtnState('success');
+      } else {
+        console.error('Android label print response:', res);
+        const errMsg = /coveropen/i.test(res)
+          ? 'カバーが開いています / Cover open'
+          : 'ラベル印刷エラー / Label print error';
+        setPrintBtnState('error', errMsg);
+      }
+    })
+    .catch(err => {
+      console.error('Android label print failed:', err);
+      setPrintBtnState('error', 'ラベル印刷に失敗しました / Print failed');
+    });
+}
+
+// Helper function to convert File to base64 string
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
+// Mapping of buttons to labels and images
+const buttonMappings = [{
+  buttonId: 'hatsumonoButton',
+  labelId: 'hatsumonoLabel',
+  imgId: 'hatsumonoPic',
+  labelText: '初物チェック',
+  fileInputId: 'hatsumonoFileInput'
+}, {
+  buttonId: 'atomonoButton',
+  labelId: 'atomonoLabel',
+  imgId: 'atomonoPic',
+  labelText: '終物チェック',
+  fileInputId: 'atomonoFileInput'
+}, {
+  buttonId: 'makerLabelButton',
+  labelId: '材料ラベル_L',
+  imgId: '材料ラベル',
+  labelText: '材料ラベル',
+  fileInputId: 'makerLabelFileInput'
+},];
+
+// Device detection
+function isMobileDevice() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+// Compress image function
+async function compressBase64Image(base64DataURL, maxWidth = 1024, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+
+      // Calculate new dimensions
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Compress with specified quality
+      const compressedDataURL = canvas.toDataURL('image/jpeg', quality);
+      resolve(compressedDataURL);
+    };
+
+    img.onerror = (error) => {
+      console.error('Error loading image for compression:', error);
+      reject(error);
+    };
+    img.src = base64DataURL;
+  });
+}
+
+// --- Blur Detection Utilities ---
+async function detectBlur(base64Image, threshold = 100) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      // Downscale to max 400x400 for speed
+      const scale = Math.min(400 / img.width, 400 / img.height, 1);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const pixels = imgData.data;
+      const width = imgData.width;
+      const height = imgData.height;
+
+      // Convert to grayscale
+      const gray = new Uint8Array(width * height);
+      for (let i = 0; i < pixels.length; i += 4) {
+        gray[i / 4] = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
+      }
+
+      // Laplacian kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0]
+      let sum = 0;
+      let sumSq = 0;
+      let count = 0;
+
+      for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+          const idx = y * width + x;
+          const val =
+            gray[idx - width] +
+            gray[idx - 1] +
+            (gray[idx] * -4) +
+            gray[idx + 1] +
+            gray[idx + width];
+
+          sum += val;
+          sumSq += val * val;
+          count++;
+        }
+      }
+
+      const mean = sum / count;
+      const variance = (sumSq / count) - (mean * mean);
+
+      console.log(`Blur score (Laplacian Variance): ${variance.toFixed(2)} (Threshold: ${threshold})`);
+      resolve({ isBlurry: variance < threshold, score: variance });
+    };
+    img.onerror = () => resolve({ isBlurry: false, score: 999 }); // bypass on error
+    img.src = base64Image.startsWith('data:') ? base64Image : 'data:image/jpeg;base64,' + base64Image;
+  });
+}
+
+function showBlurWarning(score, onRetake, onOk) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:100500;display:flex;justify-content:center;align-items:center;padding:20px;';
+
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:24px;max-width:350px;width:100%;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.3);font-family:inherit;">
+      <div style="font-size:3rem;margin-bottom:10px;">⚠️</div>
+      <h3 style="margin:0 0 8px;color:#b3261e;font-size:1.3rem;">写真が少しぼやけています<br><span style="font-size:1rem;font-weight:600;">Photo appears blurry</span></h3>
+      <p style="margin:0 0 20px;color:#49454f;font-size:0.95rem;">
+        このまま使用しますか？<br>Would you like to use this photo?
+      </p>
+      <div style="display:flex;gap:12px;flex-direction:column;">
+        <button id="blurRetakeBtn" style="width:100%;padding:14px;background:#2E6FF2;color:#fff;border:none;border-radius:10px;font-size:1.1rem;font-weight:700;cursor:pointer;">
+          📸 再撮影 / Retake
+        </button>
+        <button id="blurOkBtn" style="width:100%;padding:14px;background:#F2F4F7;color:#344054;border:none;border-radius:10px;font-size:1.1rem;font-weight:700;cursor:pointer;">
+          このまま使用 / OK (Ignore)
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#blurRetakeBtn').onclick = () => {
+    document.body.removeChild(modal);
+    if (onRetake) onRetake();
+  };
+
+  modal.querySelector('#blurOkBtn').onclick = () => {
+    document.body.removeChild(modal);
+    if (onOk) onOk();
+  };
+}
+
+async function checkBlurAndProceed(base64Image, onProceed, onRetake) {
+  const result = await detectBlur(base64Image, 100);
+  if (result.isBlurry) {
+    showBlurWarning(result.score,
+      () => { console.log('User chose to retake blurry photo'); if (onRetake) onRetake(); }, // Retake
+      () => { onProceed(); } // OK proceeds anyway
+    );
+  } else {
+    onProceed();
+  }
+}
+
+// Create hidden file inputs for each button
+buttonMappings.forEach(mapping => {
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.id = mapping.fileInputId;
+  fileInput.accept = 'image/*';
+  if (isMobileDevice()) {
+    fileInput.capture = 'camera'; // Trigger native camera on mobile
+  }
+  // On desktop, don't set capture attribute - allows file browser
+  fileInput.style.display = 'none';
+  document.body.appendChild(fileInput);
+});
+
+// Create webcam modal for desktop use
+const webcamModalHTML = `
+<div id="webcamModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 10000; justify-content: center; align-items: center;">
+  <div style="background: white; padding: 20px; border-radius: 10px; max-width: 800px; width: 90%; text-align: center;">
+    <h2 id="webcamModalTitle" data-i18n="take_photo_webcam" style="margin-top: 0;">写真撮影</h2>
+    <video id="webcamVideo" autoplay playsinline style="width: 100%; max-width: 640px; border: 2px solid #333; border-radius: 8px; background: #000;"></video>
+    <canvas id="webcamCanvas" style="display: none;"></canvas>
+    <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+      <button id="captureWebcamBtn" data-i18n="capture_webcam_btn" style="padding: 12px 24px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        📸 撮影
+      </button>
+      <button id="closeWebcamBtn" data-i18n="close_webcam_btn" style="padding: 12px 24px; font-size: 16px; background: #f44336; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        ✕ 閉じる
+      </button>
+    </div>
+  </div>
+</div>`;
+
+document.body.insertAdjacentHTML('beforeend', webcamModalHTML);
+// Apply current language to the newly injected modal
+if (typeof applyTranslations === 'function' && typeof getCurrentLanguage === 'function') {
+  applyTranslations(getCurrentLanguage());
+}
+
+let webcamStream = null;
+let currentButtonId = null;
+let currentPhotoMapping = null;
+
+// Webcam functions
+async function openWebcamModal(mapping) {
+  const modal = document.getElementById('webcamModal');
+  const video = document.getElementById('webcamVideo');
+  const title = document.getElementById('webcamModalTitle');
+
+  currentPhotoMapping = mapping;
+  // Keep currentButtonId set (it was set before calling this function)
+  title.textContent = `写真撮影: ${mapping.labelText} / Take Photo: ${mapping.labelText}`;
+  modal.style.display = 'flex';
+
+  console.log(`Opening webcam for ${mapping.labelText}, buttonId: ${currentButtonId}`);
+
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    video.srcObject = webcamStream;
+    console.log('📹 Webcam opened successfully');
+  } catch (error) {
+    console.error('❌ Error accessing webcam:', error);
+    closeWebcamModal();
+    showAlert('カメラにアクセスできませんでした。ファイルを選択してください。\n\nCannot access camera. Please select a file instead.');
+  }
+}
+
+function closeWebcamModal() {
+  const modal = document.getElementById('webcamModal');
+  const video = document.getElementById('webcamVideo');
+
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(track => track.stop());
+    webcamStream = null;
+  }
+
+  video.srcObject = null;
+  modal.style.display = 'none';
+  currentPhotoMapping = null;
+  console.log('📹 Webcam closed');
+}
+
+async function captureFromWebcam() {
+  const video = document.getElementById('webcamVideo');
+  const canvas = document.getElementById('webcamCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Set canvas dimensions to match video
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  // Draw video frame to canvas
+  ctx.drawImage(video, 0, 0);
+
+  // Convert to base64
+  const base64Image = canvas.toDataURL('image/jpeg', 0.95);
+
+  // For material-label captures, bind to the lot held by the capture session (set
+  // on the makerLabelButton click). Reusing the session holder keeps a blur retake
+  // — the user re-clicks Capture — bound to the SAME lot, even if another lot was
+  // scanned in the background meanwhile.
+  const lotTarget = (currentButtonId === 'makerLabelButton')
+    ? (window.__captureSessionLot ? window.__captureSessionLot.lot : (window.__captureLotTarget || null))
+    : null;
+
+  checkBlurAndProceed(base64Image, async () => {
+    console.log(`📸 Captured from webcam: ${(base64Image.length / 1024).toFixed(2)} KB`);
+    console.log(`Current mapping:`, currentPhotoMapping);
+    console.log(`Current buttonId:`, currentButtonId);
+
+    // Save these before closeWebcamModal() resets them
+    const savedMapping = currentPhotoMapping;
+    const savedButtonId = currentButtonId;
+
+    // Close webcam
+    closeWebcamModal();
+
+    // Check if this is for material label (multi-photo system)
+    if (savedButtonId === 'makerLabelButton') {
+      console.log('📸 Processing material label photo (multi-photo system)');
+
+      const added = await addMaterialLabelPhoto(base64Image, lotTarget);
+      // Photo saved — release the session's lot binding.
+      window.__captureSessionLot = null;
+
+      if (added) {
+        console.log('✅ Successfully added material label photo from webcam');
+        logTabletAction('Photo captured: 材料ラベル (webcam)', 'in-progress', {
+          photoType: '材料ラベル',
+          photoCount: materialLabelPhotos.length
+        });
+      } else {
+        showAlert(`最大${MAX_MATERIAL_PHOTOS}枚までです / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
+      }
+    } else if (savedMapping && savedButtonId) {
+      // Process single photo for 初物 or 終物
+      console.log('✅ Processing single photo for', savedMapping.labelText);
+      await processPhotoCapture(base64Image, savedMapping, savedButtonId);
+    } else {
+      console.error('❌ Missing mapping or buttonId for webcam capture');
+    }
+  }, () => {
+    // onRetake for webcam: do nothing — let them click Capture again. The webcam
+    // modal stays open and __captureSessionLot stays armed, so the retaken photo
+    // binds to the same lot.
+  });
+}
+
+// Setup webcam modal buttons
+document.getElementById('captureWebcamBtn').addEventListener('click', captureFromWebcam);
+document.getElementById('closeWebcamBtn').addEventListener('click', closeWebcamModal);
+
+// Shared function to process photo capture (from webcam or file)
+async function processPhotoCapture(base64Image, mapping, buttonId) {
+  try {
+    console.log(`📸 Processing photo for ${mapping.labelText}...`);
+    console.log(`   - Button ID: ${buttonId}`);
+    console.log(`   - Image ID: ${mapping.imgId}`);
+    console.log(`   - Label ID: ${mapping.labelId}`);
+
+    // Persist the photo as a Blob in IndexedDB (no base64 in localStorage), then
+    // show it via an object URL — mirroring the material-label photo system.
+    const photoPreview = document.getElementById(mapping.imgId);
+    console.log(`   - Photo element found: ${!!photoPreview}`);
+
+    if (photoPreview) {
+      const blob = await compressBlobToLimit(base64Image, 1024 * 1024);
+      await cycleCheckDB.put({ id: mapping.imgId, blob, timestamp: new Date().toISOString() });
+      setCycleCheckImage(mapping.imgId, blob);
+      console.log(`✅ Saved ${mapping.imgId} to IndexedDB (${(blob.size / 1024).toFixed(1)} KB) and set object URL`);
+    } else {
+      console.error(`❌ Photo preview element not found: ${mapping.imgId}`);
+    }
+
+    // Update label to TRUE
+    const label = document.getElementById(mapping.labelId);
+    console.log(`   - Label element found: ${!!label}`);
+
+    if (label) {
+      label.textContent = 'TRUE';
+      const labelKey = `${uniquePrefix}${mapping.labelId}.textContent`;
+      localStorage.setItem(labelKey, label.textContent);
+      console.log(`✅ Updated ${mapping.labelId} to TRUE`);
+    } else {
+      console.error(`❌ Label element not found: ${mapping.labelId}`);
+    }
+
+    // Log photo capture
+    logTabletAction(`Photo captured: ${mapping.labelText}`, 'in-progress', {
+      photoType: mapping.labelText,
+      buttonId: buttonId
+    });
+
+    currentButtonId = null;
+
+  } catch (error) {
+    console.error(`❌ Error processing ${mapping.labelText}:`, error);
+    showAlert(`写真撮影エラー: ${error.message}`);
+    currentButtonId = null;
+  }
+}
+
+// Show photo option modal (webcam or file)
+function showPhotoOptionModal(mapping, buttonId, fileInput) {
+  currentButtonId = buttonId;
+
+  // On mobile, directly use file input (native camera)
+  if (isMobileDevice()) {
+    fileInput.click();
+    return;
+  }
+
+  // On desktop, show option modal
+  const optionModal = document.createElement('div');
+  optionModal.style.cssText = 'display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center;';
+  optionModal.innerHTML = `
+    <div style="background: white; padding: 30px; border-radius: 10px; max-width: 500px; width: 90%; text-align: center;">
+      <h2 style="margin-top: 0;">${mapping.labelText}</h2>
+      <p style="color: #666; margin-bottom: 30px;">写真の取得方法を選択してください<br>Choose how to capture photo</p>
+      <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+        <button id="useWebcamBtn" style="padding: 15px 25px; font-size: 16px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer; min-width: 180px;">
+          📹 カメラで撮影<br><span style="font-size: 13px;">Use Webcam</span>
+        </button>
+        <button id="chooseFileBtn" style="padding: 15px 25px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; min-width: 180px;">
+          📁 ファイルを選択<br><span style="font-size: 13px;">Choose File</span>
+        </button>
+      </div>
+      <button id="cancelOptionBtn" style="margin-top: 20px; padding: 10px 20px; font-size: 14px; background: #f44336; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        ✕ キャンセル / Cancel
+      </button>
+    </div>
+  `;
+
+  document.body.appendChild(optionModal);
+
+  // Button handlers
+  document.getElementById('useWebcamBtn').addEventListener('click', () => {
+    document.body.removeChild(optionModal);
+    openWebcamModal(mapping);
+  });
+
+  document.getElementById('chooseFileBtn').addEventListener('click', () => {
+    document.body.removeChild(optionModal);
+    fileInput.click();
+  });
+
+  document.getElementById('cancelOptionBtn').addEventListener('click', () => {
+    document.body.removeChild(optionModal);
+    currentButtonId = null;
+  });
+}
+
+// Handle hatsumonoButton and atomonoButton with smart photo capture
+['hatsumonoButton', 'atomonoButton'].forEach(buttonId => {
+  const button = document.getElementById(buttonId);
+  if (!button) return;
+
+  const mapping = buttonMappings.find(m => m.buttonId === buttonId);
+  if (!mapping) return;
+
+  const fileInput = document.getElementById(mapping.fileInputId);
+  if (!fileInput) return;
+
+  // Button click shows options or triggers native camera
+  button.addEventListener('click', () => {
+    const subDropdown = document.getElementById('sub-dropdown');
+    const selectedValue = subDropdown?.value;
+
+    if (!selectedValue) {
+      // Trigger modal message instead of alert
+      const scanAlertModal = document.getElementById('scanAlertModal');
+      const scanAlertText = document.getElementById('scanAlertText');
+      const alertSound = document.getElementById('alert-sound');
+
+      scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+      scanAlertModal.style.display = 'block';
+
+      // Flash body and sub-dropdown
+      document.body.classList.add('flash-red');
+      subDropdown.classList.add('flash-red-border');
+
+      // Play alert sound
+      if (alertSound) {
+        alertSound.muted = false;
+        alertSound.volume = 1;
+        alertSound.play().catch(err => console.error("Failed to play sound:", err));
+      }
+
+      // Set modal close behavior
+      const closeScanModalButton = document.getElementById('closeScanModalButton');
+      closeScanModalButton.onclick = function () {
+        scanAlertModal.style.display = 'none';
+        document.body.classList.remove('flash-red');
+        subDropdown.classList.remove('flash-red-border');
+
+        if (alertSound) {
+          alertSound.pause();
+          alertSound.currentTime = 0;
+          alertSound.muted = true;
+        }
+      };
+
+      return; // stop further action
+    }
+
+    // If value is selected, show photo options
+    showPhotoOptionModal(mapping, buttonId, fileInput);
+  });
+
+  // Handle file selection from file browser
+  fileInput.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    try {
+      // Convert to base64
+      const base64Image = await fileToBase64(file);
+      console.log(`📸 Original image size: ${(base64Image.length / 1024).toFixed(2)} KB`);
+
+      checkBlurAndProceed(base64Image, async () => {
+        // Process the photo
+        await processPhotoCapture(base64Image, mapping, currentButtonId);
+        // Reset file input
+        event.target.value = '';
+      }, () => {
+        event.target.value = ''; // Clear on retake
+        fileInput.click();       // Immediately re-open camera
+      });
+
+    } catch (error) {
+      console.error(`❌ Error capturing ${mapping.labelText}:`, error);
+      showAlert(`写真撮影エラー: ${error.message}`);
+      event.target.value = '';
+      currentButtonId = null;
+    }
+  });
+});
+
+// Handle makerLabelButton with multi-photo functionality using native camera
+const makerLabelButton = document.getElementById('makerLabelButton');
+if (makerLabelButton) {
+  const mapping = buttonMappings.find(m => m.buttonId === 'makerLabelButton');
+  const fileInput = mapping ? document.getElementById(mapping.fileInputId) : null;
+
+  if (fileInput) {
+    // Button click triggers file input
+    makerLabelButton.addEventListener('click', () => {
+      const subDropdown = document.getElementById('sub-dropdown');
+      const selectedValue = subDropdown?.value;
+
+      if (!selectedValue) {
+        // Trigger modal message instead of alert
+        const scanAlertModal = document.getElementById('scanAlertModal');
+        const scanAlertText = document.getElementById('scanAlertText');
+        const alertSound = document.getElementById('alert-sound');
+
+        scanAlertText.innerText = '背番号を選択してください / Please select a Sebanggo first.';
+        scanAlertModal.style.display = 'block';
+
+        // Flash body and sub-dropdown
+        document.body.classList.add('flash-red');
+        subDropdown.classList.add('flash-red-border');
+
+        // Play alert sound
+        if (alertSound) {
+          alertSound.muted = false;
+          alertSound.volume = 1;
+          alertSound.play().catch(err => console.error("Failed to play sound:", err));
+        }
+
+        // Set modal close behavior
+        const closeScanModalButton = document.getElementById('closeScanModalButton');
+        closeScanModalButton.onclick = function () {
+          scanAlertModal.style.display = 'none';
+          document.body.classList.remove('flash-red');
+          subDropdown.classList.remove('flash-red-border');
+
+          if (alertSound) {
+            alertSound.pause();
+            alertSound.currentTime = 0;
+            alertSound.muted = true;
+          }
+        };
+
+        return; // stop further action
+      }
+
+      // Open a capture SESSION bound to the lot that is active right now. This
+      // holder is the single source of truth for which lot the photo belongs to:
+      // it survives blur retakes (which re-open the camera without re-clicking
+      // this button) and is immune to the user scanning the next lot in the
+      // background while the photo processes. It is cleared only once the photo
+      // is actually saved.
+      window.__captureSessionLot = { lot: window.__captureLotTarget || null };
+
+      // Show photo options modal for material label
+      showPhotoOptionModalForMaterial(mapping, fileInput);
+    });
+
+    // Handle file selection from file browser for material label
+    fileInput.addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      // Bind to the lot held by this capture session (set on the makerLabelButton
+      // click). Reusing the session holder — rather than re-reading the global —
+      // means a blur retake re-opens the camera and still binds to the SAME lot,
+      // even if another lot was scanned in the background meanwhile.
+      const lotTarget = window.__captureSessionLot
+        ? window.__captureSessionLot.lot
+        : (window.__captureLotTarget || null);
+
+      try {
+        console.log('📸 Processing material label photo...');
+
+        // Convert to base64 for localStorage (full quality)
+        const base64Image = await fileToBase64(file);
+
+        checkBlurAndProceed(base64Image, async () => {
+          // Add to material label photos array
+          const added = await addMaterialLabelPhoto(base64Image, lotTarget);
+          // Photo saved — release the session's lot binding.
+          window.__captureSessionLot = null;
+
+          if (added) {
+            console.log('✅ Successfully added material label photo');
+            logTabletAction('Photo captured: 材料ラベル', 'in-progress', {
+              photoType: '材料ラベル',
+              photoCount: materialLabelPhotos.length
+            });
+          } else {
+            showAlert(`最大${MAX_MATERIAL_PHOTOS}枚までです / Maximum ${MAX_MATERIAL_PHOTOS} photos allowed`);
+          }
+
+          // Reset file input
+          event.target.value = '';
+          currentButtonId = null;
+        }, () => {
+          // Blurry → retake. Keep __captureSessionLot armed so the re-opened
+          // camera binds to the same lot, then re-open the camera.
+          event.target.value = '';
+          currentButtonId = null;
+          fileInput.click();       // Immediately re-open camera
+        });
+
+      } catch (error) {
+        window.__captureSessionLot = null;
+        console.error('❌ Error capturing material label photo:', error);
+        showAlert(`写真撮影エラー: ${error.message}`);
+        event.target.value = '';
+        currentButtonId = null;
+      }
+    });
+  }
+}
+
+// Photo option modal for material label (with webcam support)
+function showPhotoOptionModalForMaterial(mapping, fileInput) {
+  currentButtonId = 'makerLabelButton';
+
+  // On mobile, directly use file input (native camera)
+  if (isMobileDevice()) {
+    fileInput.click();
+    return;
+  }
+
+  // On desktop, show option modal
+  const optionModal = document.createElement('div');
+  optionModal.style.cssText = 'display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center;';
+  optionModal.innerHTML = `
+    <div style="background: white; padding: 30px; border-radius: 10px; max-width: 500px; width: 90%; text-align: center;">
+      <h2 style="margin-top: 0;">${mapping.labelText}</h2>
+      <p style="color: #666; margin-bottom: 30px;">写真の取得方法を選択してください<br>Choose how to capture photo</p>
+      <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+        <button id="useMaterialWebcamBtn" style="padding: 15px 25px; font-size: 16px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer; min-width: 180px;">
+          📹 カメラで撮影<br><span style="font-size: 13px;">Use Webcam</span>
+        </button>
+        <button id="chooseMaterialFileBtn" style="padding: 15px 25px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; min-width: 180px;">
+          📁 ファイルを選択<br><span style="font-size: 13px;">Choose File</span>
+        </button>
+      </div>
+      <button id="cancelMaterialOptionBtn" style="margin-top: 20px; padding: 10px 20px; font-size: 14px; background: #f44336; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        ✕ キャンセル / Cancel
+      </button>
+    </div>
+  `;
+
+  document.body.appendChild(optionModal);
+
+  // Button handlers
+  document.getElementById('useMaterialWebcamBtn').addEventListener('click', () => {
+    document.body.removeChild(optionModal);
+    openWebcamModalForMaterial(mapping);
+  });
+
+  document.getElementById('chooseMaterialFileBtn').addEventListener('click', () => {
+    document.body.removeChild(optionModal);
+    fileInput.click();
+  });
+
+  document.getElementById('cancelMaterialOptionBtn').addEventListener('click', () => {
+    document.body.removeChild(optionModal);
+    currentButtonId = null;
+  });
+}
+
+// Open webcam modal for material label
+async function openWebcamModalForMaterial(mapping) {
+  const modal = document.getElementById('webcamModal');
+  const video = document.getElementById('webcamVideo');
+  const title = document.getElementById('webcamModalTitle');
+
+  currentPhotoMapping = mapping;
+  currentButtonId = 'makerLabelButton'; // Set this explicitly
+  title.textContent = `写真撮影: ${mapping.labelText} (${materialLabelPhotos.length + 1}/${MAX_MATERIAL_PHOTOS}) / Take Photo`;
+  modal.style.display = 'flex';
+
+  // Start webcam
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    video.srcObject = webcamStream;
+    console.log('📹 Webcam opened for material label');
+  } catch (error) {
+    console.error('❌ Error accessing webcam:', error);
+    closeWebcamModal();
+    showAlert('カメラにアクセスできませんでした。ファイルを選択してください。\n\nCannot access camera. Please select a file instead.');
+  }
+}
+
+// Legacy message handler (kept for backward compatibility if captureImage.html is still used elsewhere)
+// NEW: Native camera system above replaces this for 初物/終物/材料ラベル
+window.addEventListener('message', async function (event) {
+  if (event.origin === window.location.origin) {
+    const data = event.data;
+
+    // Bind to the active capture session's lot if one is open, else the current
+    // global target. Read synchronously before any await so background processing
+    // can't rebind the photo to a lot scanned afterwards.
+    const lotTarget = window.__captureSessionLot
+      ? window.__captureSessionLot.lot
+      : (window.__captureLotTarget || null);
+
+    // First, preserve the sub-dropdown value if it exists
+    const subDropdown = document.getElementById('sub-dropdown');
+    const selectedSubDropdownValue = subDropdown?.value;
+    if (selectedSubDropdownValue) {
+      localStorage.setItem(`${uniquePrefix}sub-dropdown`, selectedSubDropdownValue);
+      console.log(`Preserved sub-dropdown value: ${selectedSubDropdownValue}`);
+    }
+
+    if (data.image && currentButtonId) {
+      try {
+        // Handle material label photos separately using the multi-photo system
+        if (currentButtonId === 'makerLabelButton') {
+          console.log('Processing material label photo from popup window');
+
+          // Log elements for debugging
+          const materialLabelJP = document.getElementById('材料ラベル_L');
+          const materialLabelEN = document.getElementById('makerLabel');
+          const materialImg = document.getElementById('材料ラベル');
+
+          console.log('Material label elements found:', {
+            '材料ラベル_L': !!materialLabelJP,
+            'makerLabel': !!materialLabelEN,
+            '材料ラベル': !!materialImg
+          });
+
+          // Create/ensure elements exist if they don't
+          if (!materialLabelJP && !materialLabelEN) {
+            console.warn('Material label status elements not found, attempting to create...');
+
+            // Find a place to add them if they don't exist
+            const makerLabelButton = document.getElementById('makerLabelButton');
+            if (makerLabelButton && makerLabelButton.parentElement) {
+              const container = document.createElement('div');
+              container.style.cssText = 'margin: 5px 0;';
+
+              const jpLabel = document.createElement('span');
+              jpLabel.id = '材料ラベル_L';
+              jpLabel.textContent = 'FALSE';
+              jpLabel.style.cssText = 'display: none;'; // Hidden by default
+
+              const enLabel = document.createElement('span');
+              enLabel.id = 'makerLabel';
+              enLabel.textContent = 'FALSE';
+              enLabel.style.cssText = 'display: none;'; // Hidden by default
+
+              container.appendChild(jpLabel);
+              container.appendChild(enLabel);
+
+              makerLabelButton.parentElement.appendChild(container);
+              console.log('Created material label status elements');
+            }
+          }
+
+          // We pass the full data URL to addMaterialLabelPhoto, with the lot
+          // resolved at message-receive time (above) so background processing
+          // can't bind it to a lot the user scanned afterwards.
+          const added = await addMaterialLabelPhoto(data.image, lotTarget);
+          // Photo saved — release the session's lot binding.
+          window.__captureSessionLot = null;
+
+          if (added) {
+            console.log('Successfully added material label photo');
+          }
+
+          // Reset the current button ID after processing
+          currentButtonId = null;
+          return;
+        }
+
+        // Handle other buttons with original functionality
+        // Find the mapping for the current button
+        const mapping = buttonMappings.find(({
+          buttonId
+        }) => buttonId === currentButtonId);
+
+        if (mapping) {
+          const {
+            labelId,
+            imgId
+          } = mapping;
+
+          // Update photo preview — persist as a Blob in IndexedDB (no base64 in
+          // localStorage) and display via an object URL.
+          const photoPreview = document.getElementById(imgId);
+          if (photoPreview) {
+            try {
+              const blob = await compressBlobToLimit(data.image, 1024 * 1024);
+              await cycleCheckDB.put({ id: imgId, blob, timestamp: new Date().toISOString() });
+              setCycleCheckImage(imgId, blob);
+              console.log(`Updated and saved image for ${imgId} to IndexedDB`);
+            } catch (e) {
+              console.error(`Failed to store ${imgId} in IndexedDB:`, e);
+            }
+          } else {
+            console.error(`Image element ${imgId} not found`);
+          }
+
+          // Update the associated label to TRUE
+          const label = document.getElementById(labelId);
+          if (label) {
+            label.textContent = 'TRUE';
+
+            // Save label textContent to localStorage
+            const labelKey = `${uniquePrefix}${labelId}.textContent`;
+            localStorage.setItem(labelKey, label.textContent);
+            console.log(`Updated and saved ${labelId} as TRUE`);
+
+            // Log photo capture
+            const photoType = mapping.labelText;
+            logTabletAction(`Photo captured: ${photoType}`, 'in-progress', {
+              photoType: photoType,
+              buttonId: currentButtonId
+            });
+          } else {
+            console.error(`Label element ${labelId} not found`);
+          }
+        } else {
+          console.error(`No mapping found for button ID ${currentButtonId}`);
+        }
+      } catch (error) {
+        console.error('Error processing image from popup:', error);
+      } finally {
+        // Reset the current button ID after processing
+        currentButtonId = null;
+
+        // Double check the sub-dropdown value is preserved
+        if (selectedSubDropdownValue && subDropdown) {
+          setTimeout(() => {
+            subDropdown.value = selectedSubDropdownValue;
+            console.log(`Re-applied sub-dropdown value: ${selectedSubDropdownValue}`);
+
+            // Make sure the "send to machine" button isn't reset
+            const sendtoNCKey = `${uniquePrefix}sendtoNCButtonisPressed`;
+            const savedSendToNCState = localStorage.getItem(sendtoNCKey);
+            if (savedSendToNCState === 'true') {
+              sendtoNCButtonisPressed = true;
+              console.log("Preserved sendtoNCButtonisPressed state");
+            }
+          }, 100);
+        }
+      }
+    }
+  }
+});
+
+// Upload Photo Function for multiple images
+function uploadPhotou() {
+  const selectedSebanggo = document.getElementById("sub-dropdown").value;
+  const currentDate = document.getElementById("Lot No.").value;
+  const selectedWorker = document.getElementById("Machine Operator").value;
+  const selectedFactory = document.getElementById("selected工場").value;
+  const selectedMachine = document.getElementById("process").value;
+
+  // Mapping of images to their respective IDs
+  const imageMappings = [{
+    imgId: 'hatsumonoPic',
+    label: '初物チェック'
+  }, {
+    imgId: 'atomonoPic',
+    label: '終物チェック'
+  }, {
+    imgId: '材料ラベル',
+    label: '材料ラベル'
+  },];
+
+  imageMappings.forEach(({
+    imgId,
+    label
+  }) => {
+    const photoPreview = document.getElementById(imgId);
+
+    if (!photoPreview || !photoPreview.src) {
+      console.error(`No photo preview available for ${label}`);
+      return;
+    }
+
+    // Convert the image to a blob
+    fetch(photoPreview.src)
+      .then(response => response.blob())
+      .then(blob => {
+        const reader = new FileReader();
+        reader.onloadend = function () {
+          const base64data = reader.result.split(',')[1]; // Get the base64 encoded string
+
+          const formData = new FormData();
+          formData.append('imageBlob', base64data);
+          formData.append(
+            'fileName',
+            `${selectedSebanggo}_${currentDate}_${selectedWorker}_${selectedFactory}_${selectedMachine}_${label}.jpg`
+          );
+          formData.append('mimeType', blob.type);
+          formData.append('selectedFactory', selectedFactory);
+
+          // Send the blob to Apps Script via POST request
+          fetch(
+            'https://script.google.com/macros/s/AKfycbxDWa2RTdI2_aHBgzq9GA9GtQx5MrwqaRnW4F26VZdoptwJ1Pg_Enr_xI3vw1t7WHYbTw/exec', {
+            method: 'POST',
+            body: formData,
+          }
+          )
+            .then((response) => response.text()) // Fetch raw text response
+            .then((text) => {
+              console.log(`Raw response for ${label}:`, text); // Log the raw response
+              try {
+                const data = JSON.parse(text); // Attempt to parse JSON
+                if (data.status === 'success') {
+                  console.log(`File uploaded successfully for ${label}: ` + data.fileUrl);
+                } else {
+                  console.error(`Upload failed for ${label}: ` + data.message);
+                }
+              } catch (error) {
+                console.error(`Error parsing JSON for ${label}:`, error);
+              }
+            })
+            .catch((error) => {
+              console.error(`Error uploading file for ${label}: `, error);
+            });
+        };
+        reader.readAsDataURL(blob);
+      })
+      .catch((error) => console.error(`Error converting image to blob for ${label}: `, error));
+  });
+}
+
+//Submit Button
+
+// document.getElementById('submit').addEventListener('click', async (event) => {
+//   event.preventDefault();
+//   updateCycleTime();
+
+//   const hatsumono = document.getElementById("hatsumonoLabel").textContent;
+//   const atomono = document.getElementById("atomonoLabel").textContent;
+//   const isToggleChecked = document.getElementById('enable-inputs').checked;
+
+//   const alertSound = document.getElementById('alert-sound');
+//   const scanAlertModal = document.getElementById('scanAlertModal');
+//   const scanAlertText = document.getElementById('scanAlertText');
+//   const uploadingModal = document.getElementById('uploadingModal');
+
+//   const shotInput = document.getElementById('shot');
+
+//   // Add this validation for the 'shot' field
+//   if (!shotInput.value || parseInt(shotInput.value) < 1) {
+//     showAlert('ショット数 (Shot Count) is required and must be at least 1.');
+//     shotInput.focus();
+//     return; // Stop form submission
+//   }
+
+//   // Show loading modal
+//   uploadingModal.style.display = 'flex';
+
+//   const makerPic = document.getElementById('材料ラベル');
+//   if (!makerPic || !makerPic.src || makerPic.style.display === 'none') {
+//     uploadingModal.style.display = 'none';
+//     showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
+//     return;
+//   }
+
+//   try {
+//     const 品番 = document.getElementById('product-number').value;
+//     const 背番号 = document.getElementById('sub-dropdown').value;
+//     const 工場 = document.getElementById('selected工場').value;
+//     const 設備 = document.getElementById('process').value;
+//     const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
+//     const 疵引不良 = parseInt(document.getElementById('counter-18').value, 10) || 0;
+//     const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
+//     const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
+//     const Total_NG = 疵引不良 + 加工不良 + その他;
+//     const Total_PressDB = Process_Quantity - Total_NG;
+//     const Worker_Name = document.getElementById('Machine Operator').value;
+//     const WorkDate = document.getElementById('Lot No.').value;
+//     const Time_start = document.getElementById('Start Time').value;
+//     const Time_end = document.getElementById('End Time').value;
+//     const 材料ロット = document.getElementById('材料ロット').value;
+//     const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
+//     const Comment = document.querySelector('textarea[name="Comments1"]').value;
+//     const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
+//     const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
+
+//     // Collect break time data
+//     const breakTimeData = {
+//       break1: {
+//         start: document.getElementById('break1-start')?.value || '',
+//         end: document.getElementById('break1-end')?.value || ''
+//       },
+//       break2: {
+//         start: document.getElementById('break2-start')?.value || '',
+//         end: document.getElementById('break2-end')?.value || ''
+//       },
+//       break3: {
+//         start: document.getElementById('break3-start')?.value || '',
+//         end: document.getElementById('break3-end')?.value || ''
+//       },
+//       break4: {
+//         start: document.getElementById('break4-start')?.value || '',
+//         end: document.getElementById('break4-end')?.value || ''
+//       }
+//     };
+
+//     // Calculate total break time in minutes
+//     const totalBreakMinutes = calculateTotalBreakTime();
+//     const totalBreakHours = totalBreakMinutes / 60;
+
+//     // Calculate total machine trouble/maintenance time in minutes
+//     const totalTroubleMinutes = calculateTotalMachineTroubleTime();
+//     const totalTroubleHours = totalTroubleMinutes / 60;
+
+//     // Upload maintenance photos before submitting
+//     if (maintenanceRecords.length > 0) {
+//       console.log(`📸 Uploading maintenance photos for ${maintenanceRecords.length} maintenance records...`);
+//       await uploadMaintenancePhotos();
+//       console.log("✅ Maintenance photo upload process completed");
+//     }
+
+//     // Prepare maintenance data for submission (only Firebase URLs, no base64)
+//     const maintenanceDataForSubmission = {
+//       records: maintenanceRecords.map(record => ({
+//         id: record.id,
+//         startTime: record.startTime,
+//         endTime: record.endTime,
+//         comment: record.comment,
+//         timestamp: record.timestamp,
+//         // Only include Firebase URLs, not base64 data
+//         photos: record.photos ? record.photos.map(photo => ({
+//           id: photo.id,
+//           timestamp: photo.timestamp,
+//           firebaseUrl: photo.firebaseUrl,
+//           uploaded: photo.uploaded,
+//           uploadError: photo.uploadError
+//         })).filter(photo => photo.firebaseUrl) : [] // Only include photos with Firebase URLs
+//       })),
+//       totalMinutes: totalTroubleMinutes,
+//       totalHours: totalTroubleHours
+//     };
+
+//     console.log("📊 Maintenance data prepared for submission:", {
+//       recordCount: maintenanceDataForSubmission.records.length,
+//       totalPhotosWithUrls: maintenanceDataForSubmission.records.reduce((sum, record) => sum + record.photos.length, 0),
+//       totalMinutes: totalTroubleMinutes
+//     });
+
+//     // Calculate total work hours (Time_end - Time_start - break time - maintenance time)
+//     let totalWorkHours = 0;
+//     if (Time_start && Time_end) {
+//       const startWork = new Date(`2000-01-01T${Time_start}:00`);
+//       const endWork = new Date(`2000-01-01T${Time_end}:00`);
+
+//       if (endWork > startWork) {
+//         const workDiffMs = endWork - startWork;
+//         const workHours = workDiffMs / (1000 * 60 * 60); // Convert to hours
+//         totalWorkHours = Math.max(0, workHours - totalBreakHours - totalTroubleHours); // Subtract break and maintenance time, ensure not negative
+//       }
+//     }
+
+//     // Log the calculations for debugging
+//     console.log('Time Calculations:', {
+//       totalBreakMinutes,
+//       totalBreakHours: totalBreakHours.toFixed(2),
+//       totalMaintenanceMinutes: totalTroubleMinutes,
+//       totalMaintenanceHours: totalTroubleHours.toFixed(2),
+//       workTimeWithoutBreakAndMaintenance: totalWorkHours.toFixed(2),
+//       startTime: Time_start,
+//       endTime: Time_end,
+//       maintenanceRecordsCount: maintenanceRecords.length
+//     });
+
+//     if (!背番号) {
+//       uploadingModal.style.display = 'none';
+//       scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+//       scanAlertModal.style.display = 'block';
+//       if (alertSound) {
+//         alertSound.muted = false;
+//         alertSound.volume = 1;
+//         alertSound.play().catch(console.error);
+//       }
+//       document.body.classList.add('flash-red');
+//       document.getElementById('closeScanModalButton').onclick = function() {
+//         scanAlertModal.style.display = 'none';
+//         alertSound.pause();
+//         alertSound.currentTime = 0;
+//         alertSound.muted = true;
+//         document.body.classList.remove('flash-red');
+//       };
+//       return;
+//     }
+
+//     // Upload images and map to data
+//     const uploadedImages = await collectImagesForUpload();
+//     const pressDBData = {
+//       品番,
+//       背番号,
+//       設備,
+//       Total: Total_PressDB,
+//       工場,
+//       Worker_Name,
+//       Process_Quantity,
+//       Date: WorkDate,
+//       Time_start,
+//       Time_end,
+//       材料ロット,
+//       疵引不良,
+//       加工不良,
+//       その他,
+//       Total_NG,
+//       Spare,
+//       Comment,
+//       Cycle_Time,
+//       ショット数,
+//       Break_Time_Data: breakTimeData,
+//       Total_Break_Minutes: totalBreakMinutes,
+//       Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
+//       Maintenance_Data: maintenanceDataForSubmission,
+//       Total_Trouble_Minutes: totalTroubleMinutes,
+//       Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
+//       Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2))
+//     };
+
+//     uploadedImages.forEach(img => {
+//       if (img.label === "初物チェック") {
+//         pressDBData["初物チェック画像"] = img.url;
+//       } else if (img.label === "終物チェック") {
+//         pressDBData["終物チェック画像"] = img.url;
+//       } else if (img.label === "材料ラベル") {
+//         pressDBData["材料ラベル画像"] = img.url;
+//       }
+//     });
+
+//     // Attach base64 for backend processing
+//     pressDBData.images = uploadedImages;
+
+//     const pressDBResponse = await fetch(`${serverURL}/submitTopressDBiReporter`, {
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json'
+//       },
+//       body: JSON.stringify(pressDBData),
+//     });
+
+//     if (!pressDBResponse.ok) {
+//       const errorData = await pressDBResponse.json();
+//       throw new Error(errorData.error || 'Failed to save data to pressDB');
+//     }
+
+//     // Optionally submit to kensaDB
+//     if (isToggleChecked) {
+//       const counters = Array.from({
+//         length: 12
+//       }, (_, i) => {
+//         const counter = document.getElementById(`counter-${i + 1}`);
+//         return parseInt(counter?.value || 0, 10);
+//       });
+
+//       const Total_NG_Kensa = counters.reduce((sum, val) => sum + val, 0);
+//       const Total_KensaDB = Total_PressDB - Total_NG_Kensa;
+
+//       const kensaDBData = {
+//         品番,
+//         背番号,
+//         工場,
+//         Total: Total_KensaDB,
+//         Worker_Name,
+//         Process_Quantity,
+//         Remaining_Quantity: Total_PressDB,
+//         Date: WorkDate,
+//         Time_start,
+//         Time_end,
+//         設備,
+//         Cycle_Time,
+//         製造ロット: 材料ロット,
+//         Comment,
+//         Spare,
+//         Counters: counters.reduce((acc, val, i) => {
+//           acc[`counter-${i + 1}`] = val;
+//           return acc;
+//         }, {}),
+//         Total_NG: Total_NG_Kensa,
+//         Break_Time_Data: breakTimeData,
+//         Total_Break_Minutes: totalBreakMinutes,
+//         Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
+//         Maintenance_Data: maintenanceDataForSubmission,
+//         Total_Trouble_Minutes: totalTroubleMinutes,
+//         Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
+//         Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2))
+//       };
+
+//       const kensaDBResponse = await fetch(`${serverURL}/submitToKensaDBiReporter`, {
+//         method: 'POST',
+//         headers: {
+//           'Content-Type': 'application/json'
+//         },
+//         body: JSON.stringify(kensaDBData),
+//       });
+
+//       if (!kensaDBResponse.ok) {
+//         const errorData = await kensaDBResponse.json();
+//         throw new Error(errorData.error || 'Failed to save data to kensaDB');
+//       }
+//     }
+
+//     setTimeout(() => {
+//       uploadingModal.style.display = 'none';
+//       scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+//       scanAlertModal.style.display = 'block';
+//       document.body.classList.add('flash-green');
+//       document.getElementById('closeScanModalButton').onclick = function() {
+//         scanAlertModal.style.display = 'none';
+//         document.body.classList.remove('flash-green');
+//         window.location.reload();
+//         resetForm();
+//       };
+//     }, 3000);
+
+//   } catch (error) {
+//     console.error('Error during submission:', error);
+//     uploadingModal.style.display = 'none';
+//     scanAlertText.innerText = 'An error occurred. Please try again.';
+//     scanAlertModal.style.display = 'block';
+//     if (alertSound) {
+//       alertSound.muted = false;
+//       alertSound.volume = 1;
+//       alertSound.play().catch(console.error);
+//     }
+//     document.body.classList.add('flash-red');
+//     document.getElementById('closeScanModalButton').onclick = function() {
+//       scanAlertModal.style.display = 'none';
+//       alertSound.pause();
+//       alertSound.currentTime = 0;
+//       alertSound.muted = true;
+//       document.body.classList.remove('flash-red');
+//     };
+//   }
+// });
+
+// ==================== DATE CHOICE MODAL ====================
+function getTodayDateString() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function ensureDateChoiceModal() {
+  let modal = document.getElementById('dateChoiceModal');
+  if (modal) {
+    return modal;
+  }
+
+  modal = document.createElement('div');
+  modal.id = 'dateChoiceModal';
+  modal.style.cssText = `
+    display: none;
+    position: fixed;
+    z-index: 10050;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.7);
+    justify-content: center;
+    align-items: center;
+  `;
+
+  modal.innerHTML = `
+    <div style="
+      background: white;
+      padding: 25px;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 520px;
+      text-align: center;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      position: relative;
+    ">
+      <button id="closeDateChoiceModal" style="
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        background: transparent;
+        border: none;
+        font-size: 24px;
+        font-weight: bold;
+        color: #666;
+        cursor: pointer;
+        line-height: 1;
+      ">×</button>
+      <style>
+        @keyframes dateBlink {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0.2; }
+        }
+        .date-mismatch {
+          color: #dc3545;
+          font-weight: 800;
+          animation: dateBlink 1s infinite;
+        }
+        .date-mismatch-button {
+          font-weight: 800;
+          animation: dateBlink 1s infinite;
+        }
+        .date-btn-label {
+          line-height: 1;
+          margin: 0;
+          padding: 0;
+          display: block;
+        }
+        .date-btn-date {
+          line-height: 1;
+          margin: 0;
+          padding: 0;
+          display: block;
+        }
+      </style>
+      <h2 style="margin: 0 0 10px;">日付確認 / Date Confirmation</h2>
+      <p id="dateChoiceMessage" style="margin: 0 0 20px; color: #444; line-height: 1.5;"></p>
+      <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+        <button id="useEnteredDateBtn" style="
+          width: 160px;
+          height: 160px;
+          background: #dc3545;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          white-space: nowrap;
+          gap: 0;
+          padding: 6px 10px;
+        ">Entered Date</button>
+        <button id="useCurrentDateBtn" style="
+          width: 160px;
+          height: 160px;
+          background: #28a745;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          white-space: nowrap;
+          gap: 0;
+          padding: 6px 10px;
+        ">Current Date</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function showDateChoiceModal(enteredDate, currentDate) {
+  return new Promise((resolve) => {
+    const modal = ensureDateChoiceModal();
+    const message = modal.querySelector('#dateChoiceMessage');
+    const enteredBtn = modal.querySelector('#useEnteredDateBtn');
+    const currentBtn = modal.querySelector('#useCurrentDateBtn');
+    const closeBtn = modal.querySelector('#closeDateChoiceModal');
+
+    message.innerHTML = `入力日付: <strong class="date-mismatch">${enteredDate}</strong><br>現在日付: <strong>${currentDate}</strong><br><br>どちらの日付を使用しますか？<br>Which date should be used?`;
+    enteredBtn.innerHTML = `<span class="date-btn-label">Entered</span><span class="date-btn-date date-mismatch-button">${enteredDate}</span>`;
+    currentBtn.innerHTML = `<span class="date-btn-label">Current</span><span class="date-btn-date">${currentDate}</span>`;
+
+    const cleanup = () => {
+      enteredBtn.onclick = null;
+      currentBtn.onclick = null;
+      closeBtn.onclick = null;
+      modal.style.display = 'none';
+    };
+
+    enteredBtn.onclick = () => {
+      cleanup();
+      resolve('entered');
+    };
+
+    currentBtn.onclick = () => {
+      cleanup();
+      resolve('current');
+    };
+
+    closeBtn.onclick = () => {
+      cleanup();
+      resolve('cancel');
+    };
+
+    modal.style.display = 'flex';
+  });
+}
+
+function updateUploadProgress(percent, text) {
+  const bar = document.getElementById('uploadProgressBar');
+  const textEl = document.getElementById('uploadProgressText');
+  const percentEl = document.getElementById('uploadProgressPercent');
+  const clamped = Math.round(Math.min(100, Math.max(0, percent)));
+  if (bar) bar.style.width = `${clamped}%`;
+  if (textEl) textEl.textContent = text || '';
+  if (percentEl) percentEl.textContent = `${clamped}%`;
+}
+
+document.getElementById('submit').addEventListener('click', async (event) => {
+  event.preventDefault();
+  updateCycleTime();
+
+  const hatsumono = document.getElementById("hatsumonoLabel").textContent;
+  const atomono = document.getElementById("atomonoLabel").textContent;
+  const enableInputsElement = document.getElementById('enable-inputs');
+  const isToggleChecked = enableInputsElement ? enableInputsElement.checked : false;
+
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  const scanAlertText = document.getElementById('scanAlertText');
+  const uploadingModal = document.getElementById('uploadingModal');
+
+  // Validate that no lot is missing shot count
+  let hasMissingShots = false;
+  if (typeof window.reconcileMaterialLots === 'function') {
+    window.reconcileMaterialLots();
+  }
+  if (typeof window.getAllLotRecords === 'function') {
+    const records = window.getAllLotRecords();
+    const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots))
+      ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
+      : [];
+    const recordsMissingShots = records.some(r => r.open || r.shots == null || r.shots === '');
+    const lotsMissingFromRecords = mLots.some(l => !records.some(r => r.lotNumber === l));
+    hasMissingShots = recordsMissingShots || lotsMissingFromRecords;
+  }
+
+  const shotInput = document.getElementById('shot');
+  if (hasMissingShots) {
+    // Automatically trigger the shot count popup to force user to enter missing shots
+    if (typeof window.promptFinalLots === 'function') {
+      window.promptFinalLots();
+    } else {
+      showAlert('未入力のショット数があります。「ショット数編集 (Edit Shots)」から入力してください。');
+    }
+    return;
+  } else if (!shotInput.value || parseInt(shotInput.value) < 1) {
+    showAlert('ショット数 (Shot Count) is required and must be at least 1.');
+    shotInput.focus();
+    return;
+  }
+
+  // SCNA: confirm material used (per machine, last lot) before the real submit. Cancel returns to the form.
+  if (window.SCNA && typeof window.SCNA.confirmMaterialUsage === 'function') {
+    if (document.getElementById('scnaUsageModal')) return;
+    let proceed = true;
+    try { proceed = await window.SCNA.confirmMaterialUsage(); } catch (e) { console.warn('Usage confirm failed:', e); }
+    if (!proceed) return;
+  }
+
+  uploadingModal.style.display = 'flex';
+  updateUploadProgress(0, '');
+
+  // Use the new material label photo system for validation
+  if (materialLabelPhotos.length === 0) {
+    // Check legacy system as fallback
+    const makerPic = document.getElementById('材料ラベル');
+    if (!makerPic || !makerPic.src || makerPic.src === '' || makerPic.src === 'data:,' || makerPic.style.display === 'none') {
+      console.error("材料ラベル validation failed - no photos in either system:", {
+        newSystemPhotoCount: materialLabelPhotos.length,
+        legacyExists: !!makerPic,
+        legacyHasSrc: !!(makerPic && makerPic.src),
+        legacySrc: makerPic ? makerPic.src.substring(0, 30) + '...' : 'none',
+        legacyDisplay: makerPic ? makerPic.style.display : 'N/A'
+      });
+      uploadingModal.style.display = 'none';
+      showAlert("材料ラベルの写真を撮影してください / Please capture the 材料ラベル image");
+      return;
+    }
+  }
+
+  console.log("材料ラベル validation passed:", {
+    newSystemPhotoCount: materialLabelPhotos.length
+  });
+
+  try {
+    const 品番 = document.getElementById('product-number').value;
+    const 背番号 = document.getElementById('sub-dropdown').value;
+    const 工場 = document.getElementById('selected工場').value;
+    const 設備 = document.getElementById('process').value;
+    const Process_Quantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
+    const 疵引不良 = parseInt(document.getElementById('counter-18').value, 10) || 0;
+    const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
+    const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
+    const Total_NG = 疵引不良 + 加工不良 + その他;
+    const Total_PressDB = Process_Quantity - Total_NG;
+    const rawWorker = document.getElementById('Machine Operator')?.value || '';
+    const Worker_Name = (function (val) {
+      if (!val) return '';
+      if (Array.isArray(val)) return val.filter(Boolean).map(s => String(s).trim()).join(',');
+      if (typeof val === 'string') {
+        val = val.trim();
+        if (val.startsWith('[') && val.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(val);
+            if (Array.isArray(parsed)) return parsed.filter(Boolean).map(s => String(s).trim()).join(',');
+          } catch (_) { }
+        }
+        return val.replace(/^[\["'\s]+|[\]"'\s]+$/g, '').split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean).join(',');
+      }
+      return String(val).trim();
+    })(rawWorker) || (Array.isArray(window.selectedWorkerNames) ? window.selectedWorkerNames.filter(Boolean).join(',') : '');
+    let WorkDate = document.getElementById('Lot No.').value;
+    const Time_start = document.getElementById('Start Time').value;
+    const Time_end = document.getElementById('End Time').value;
+    const 材料ロット = document.getElementById('材料ロット').value;
+    const Spare = parseInt(document.getElementById('在庫').value, 10) || 0;
+    const Comment = document.querySelector('textarea[name="Comments1"]').value;
+    const Cycle_Time = parseFloat(document.getElementById('cycleTime').value) || 0;
+    const ショット数 = parseInt(document.getElementById('shot').value, 10) || 0;
+
+    // ==================== VALIDATION SECTION ====================
+    // Validate all required fields before submission
+
+    // 1. Check required fields
+    if (!品番 || 品番.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('品番が必要です / Product Number is required');
+      document.getElementById('product-number').focus();
+      return;
+    }
+
+    if (!背番号 || 背番号.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('背番号が必要です / Sebanggo is required');
+      document.getElementById('sub-dropdown').focus();
+      return;
+    }
+
+    if (!工場 || 工場.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('工場が必要です / Factory is required');
+      document.getElementById('selected工場').focus();
+      return;
+    }
+
+    if (!設備 || 設備.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('設備が必要です / Equipment is required');
+      document.getElementById('process').focus();
+      return;
+    }
+
+    if (!Process_Quantity || Process_Quantity <= 0) {
+      uploadingModal.style.display = 'none';
+      showAlert('加工数（良品）が必要です / Process Quantity is required and must be greater than 0');
+      document.getElementById('ProcessQuantity').focus();
+      return;
+    }
+
+    if (!Worker_Name || Worker_Name.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('作業者名が必要です / Worker Name is required');
+      document.getElementById('Machine Operator').focus();
+      return;
+    }
+
+    if (!WorkDate || WorkDate.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('加工日が必要です / Work Date is required');
+      document.getElementById('Lot No.').focus();
+      return;
+    }
+
+    // Compare entered date vs current date and ask user which to use
+    const currentDate = getTodayDateString();
+    if (WorkDate !== currentDate) {
+      uploadingModal.style.display = 'none';
+      const choice = await showDateChoiceModal(WorkDate, currentDate);
+      if (choice === 'cancel') {
+        return;
+      }
+      if (choice === 'current') {
+        WorkDate = currentDate;
+        const dateInput = document.getElementById('Lot No.');
+        if (dateInput) {
+          dateInput.value = currentDate;
+          localStorage.setItem(`${uniquePrefix}${dateInput.id}`, currentDate);
+        }
+      }
+      uploadingModal.style.display = 'flex';
+    }
+
+    if (!材料ロット || 材料ロット.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('材料ロットが必要です / Material Lot is required');
+      document.getElementById('材料ロット').focus();
+      return;
+    }
+
+    // ==================== NEW: Validate Material Label Photos vs Lot Count ====================
+    // Count unique lot numbers (comma-separated values)
+    const lotNumbers = 材料ロット.split(',').map(lot => lot.trim()).filter(lot => lot !== '');
+    const uniqueLotCount = lotNumbers.length;
+    const materialPhotoCount = materialLabelPhotos.length;
+
+    console.log('Material lot validation:', {
+      材料ロット,
+      lotNumbers,
+      uniqueLotCount,
+      materialPhotoCount
+    });
+
+    // Check if material label photo count is sufficient
+    if (materialPhotoCount < uniqueLotCount) {
+      uploadingModal.style.display = 'none';
+      showAlert(
+        `材料ラベルの写真が不足しています\n\n` +
+        `ロット数: ${uniqueLotCount}個\n` +
+        `写真数: ${materialPhotoCount}枚\n\n` +
+        `各ロットの材料ラベル写真を撮影してください\n\n` +
+        `---\n\n` +
+        `Insufficient material label photos\n\n` +
+        `Lot count: ${uniqueLotCount}\n` +
+        `Photo count: ${materialPhotoCount}\n\n` +
+        `Please capture a material label photo for each lot`
+      );
+
+      // Log the validation failure
+      logTabletAction('Material label photo validation failed', 'error', {
+        lotCount: uniqueLotCount,
+        photoCount: materialPhotoCount,
+        lotNumbers: lotNumbers
+      });
+
+      return;
+    }
+
+    console.log('✅ Material label photo validation passed:', {
+      uniqueLotCount,
+      materialPhotoCount
+    });
+    // ==================== END Material Label Photos Validation ====================
+
+    // Validate cycle checks (Hatsumono/Atomono)
+    if (hatsumono !== 'TRUE') {
+      uploadingModal.style.display = 'none';
+      showAlert('初物チェックの写真がありません / First Cycle Photo is missing');
+      return;
+    }
+
+    if (atomono !== 'TRUE') {
+      uploadingModal.style.display = 'none';
+      showAlert('終物チェックの写真がありません / Last Cycle Photo is missing');
+      return;
+    }
+
+    // Validate Kensa fields if Kensa mode is active
+    if (isToggleChecked) {
+      const kensaName = document.getElementById('Kensa Name')?.value;
+      const kDate = document.getElementById('KDate')?.value;
+      const kStart = document.getElementById('KStart Time')?.value;
+      const kEnd = document.getElementById('KEnd Time')?.value;
+
+      if (!kensaName || kensaName.trim() === '') {
+        uploadingModal.style.display = 'none';
+        showAlert('検査者名が必要です / Inspector Name is required');
+        document.getElementById('Kensa Name')?.focus();
+        return;
+      }
+      if (!kDate || kDate.trim() === '') {
+        uploadingModal.style.display = 'none';
+        showAlert('検査日が必要です / Inspection Date is required');
+        document.getElementById('KDate')?.focus();
+        return;
+      }
+      if (!kStart || kStart.trim() === '') {
+        uploadingModal.style.display = 'none';
+        showAlert('検査開始時間が必要です / Inspection Start Time is required');
+        document.getElementById('KStart Time')?.focus();
+        return;
+      }
+      if (!kEnd || kEnd.trim() === '') {
+        uploadingModal.style.display = 'none';
+        showAlert('検査終了時間が必要です / Inspection End Time is required');
+        document.getElementById('KEnd Time')?.focus();
+        return;
+      }
+    }
+
+    // 2. Validate Time fields
+    if (!Time_start || Time_start.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('加工開始時間が必要です / Start Time is required');
+      document.getElementById('Start Time').focus();
+      return;
+    }
+
+    if (!Time_end || Time_end.trim() === '') {
+      uploadingModal.style.display = 'none';
+      showAlert('加工終了時間が必要です / End Time is required');
+      document.getElementById('End Time').focus();
+      return;
+    }
+
+    // 3. Validate Time_start < Time_end and Time_start ≠ Time_end
+    const startTimeDate = new Date(`2000-01-01T${Time_start}:00`);
+    const endTimeDate = new Date(`2000-01-01T${Time_end}:00`);
+
+    if (Time_start === Time_end) {
+      uploadingModal.style.display = 'none';
+      showAlert('加工開始時間と加工終了時間は同じにできません\n\nStart Time and End Time cannot be the same\n\n開始: ' + Time_start + '\n終了: ' + Time_end);
+      document.getElementById('End Time').focus();
+      return;
+    }
+
+    if (startTimeDate >= endTimeDate) {
+      uploadingModal.style.display = 'none';
+      showAlert('加工開始時間は加工終了時間より前である必要があります\n\nStart Time must be before End Time\n\n開始: ' + Time_start + '\n終了: ' + Time_end);
+      document.getElementById('End Time').focus();
+      return;
+    }
+
+    console.log('✅ All required fields validated successfully');
+    // ==================== END VALIDATION SECTION ====================
+
+    const maintenancePhotoTotal = maintenanceRecords.reduce((sum, r) => sum + (r.photos?.length || 0), 0);
+    const materialPhotoTotal = materialLabelPhotos.length;
+    const totalPhotos = maintenancePhotoTotal + materialPhotoTotal;
+    let processedPhotos = 0;
+
+    updateUploadProgress(5, 'Preparing data...');
+
+    const breakTimeData = {
+      break1: { start: document.getElementById('break1-start')?.value || '', end: document.getElementById('break1-end')?.value || '' },
+      break2: { start: document.getElementById('break2-start')?.value || '', end: document.getElementById('break2-end')?.value || '' },
+      break3: { start: document.getElementById('break3-start')?.value || '', end: document.getElementById('break3-end')?.value || '' },
+      break4: { start: document.getElementById('break4-start')?.value || '', end: document.getElementById('break4-end')?.value || '' }
+    };
+
+    const totalBreakMinutes = calculateTotalBreakTime();
+    const totalBreakHours = totalBreakMinutes / 60;
+
+    const totalTroubleMinutes = calculateTotalMachineTroubleTime();
+    const totalTroubleHours = totalTroubleMinutes / 60;
+
+    // Prepare maintenance images data for the new submitToDCP route with compression
+    const maintenanceImages = [];
+
+    if (maintenanceRecords.length > 0) {
+      console.log(`📸 Preparing ${maintenanceRecords.length} maintenance records for submission...`);
+
+      for (const record of maintenanceRecords) {
+        if (record.photos && record.photos.length > 0) {
+          for (const photo of record.photos) {
+            // Hydrate base64 from IndexedDB (new reference-only records) or use
+            // the embedded base64 (legacy records).
+            const photoBase64 = await getMaintenancePhotoBase64(photo);
+            if (photoBase64 && photo.id && photo.timestamp) {
+              // Ensure base64 data has proper data URL prefix
+              const photoDataURL = photoBase64.startsWith('data:')
+                ? photoBase64
+                : `data:image/jpeg;base64,${photoBase64}`;
+
+              // Compress maintenance photo for upload (80% quality, max 1024px)
+              const originalSize = (photoBase64.length / 1024).toFixed(2);
+              const compressedDataURL = await compressBase64Image(photoDataURL, 1024, 0.8);
+              const compressedSize = (compressedDataURL.length / 1024).toFixed(2);
+              console.log(`Maintenance photo ${photo.id}: ${originalSize} KB → ${compressedSize} KB`);
+
+              // Extract just the base64 part (remove data:image/jpeg;base64, prefix) for server upload
+              const compressedBase64Only = compressedDataURL.split(',')[1] || compressedDataURL;
+
+              maintenanceImages.push({
+                base64: compressedBase64Only, // Server expects base64 without prefix
+                id: photo.id,
+                timestamp: photo.timestamp,
+                maintenanceRecordId: record.id
+              });
+              processedPhotos++;
+              updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
+            }
+          }
+        }
+      }
+
+      console.log(`📊 Prepared ${maintenanceImages.length} maintenance images for upload (compressed)`);
+    }
+
+    // Prepare maintenance data structure (without photos - they'll be added by server)
+    const maintenanceDataForSubmission = {
+      records: maintenanceRecords.map(record => ({
+        id: record.id,
+        startTime: record.startTime,
+        endTime: record.endTime,
+        comment: record.comment,
+        timestamp: record.timestamp
+        // photos will be populated by the server after upload
+      })),
+      totalMinutes: totalTroubleMinutes,
+      totalHours: totalTroubleHours
+    };
+
+    console.log("📊 Maintenance data prepared for submission:", {
+      recordCount: maintenanceDataForSubmission.records.length,
+      totalImages: maintenanceImages.length,
+      totalMinutes: totalTroubleMinutes
+    });
+
+    let totalWorkHours = 0;
+    if (Time_start && Time_end) {
+      const startWork = new Date(`2000-01-01T${Time_start}:00`);
+      const endWork = new Date(`2000-01-01T${Time_end}:00`);
+      if (endWork > startWork) {
+        const workDiffMs = endWork - startWork;
+        const workHours = workDiffMs / (1000 * 60 * 60);
+        totalWorkHours = Math.max(0, workHours - totalBreakHours - totalTroubleHours);
+      }
+    }
+    console.log('Time Calculations:', {
+      totalBreakMinutes, totalBreakHours: totalBreakHours.toFixed(2),
+      totalMaintenanceMinutes: totalTroubleMinutes, totalMaintenanceHours: totalTroubleHours.toFixed(2),
+      workTimeWithoutBreakAndMaintenance: totalWorkHours.toFixed(2),
+      startTime: Time_start, endTime: Time_end, maintenanceRecordsCount: maintenanceRecords.length
+    });
+
+    if (!背番号) {
+      uploadingModal.style.display = 'none';
+      scanAlertText.innerText = '背番号が必要です。 / Sebanggo is required.';
+      scanAlertModal.style.display = 'block';
+      if (alertSound) { alertSound.muted = false; alertSound.volume = 1; alertSound.play().catch(console.error); }
+      document.body.classList.add('flash-red');
+      document.getElementById('closeScanModalButton').onclick = function () {
+        scanAlertModal.style.display = 'none'; alertSound.pause(); alertSound.currentTime = 0;
+        alertSound.muted = true; document.body.classList.remove('flash-red');
+      };
+      return;
+    }
+
+    const uploadedImages = await collectImagesForUpload();
+
+    // Process all material label photos from the new system with compression
+    const materialLabelImages = [];
+
+    console.log(`📸 Processing ${materialLabelPhotos.length} material label photos for submission`);
+    console.log('Material photos array:', materialLabelPhotos.map((p, i) => ({ index: i, id: p.id, timestamp: p.timestamp })));
+
+    // Read blobs from IndexedDB and convert to base64 for server upload
+    // Build a lookup map so we only call getAll() once
+    let idbRecordMap = {};
+    try {
+      const idbRecords = await materialLabelDB.getAll();
+      idbRecords.forEach(r => { idbRecordMap[r.id] = r; });
+    } catch (idbErr) {
+      console.error('⚠️ Could not read IndexedDB records for material label upload:', idbErr);
+    }
+
+    for (let i = 0; i < materialLabelPhotos.length; i++) {
+      const photo = materialLabelPhotos[i];
+      const record = idbRecordMap[photo.id];
+      if (!record || !record.blob) {
+        console.warn(`⚠️ Skipping material label photo ${i} - no blob in IndexedDB`);
+        continue;
+      }
+
+      const base64Only = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onloadend = () => res(reader.result.split(',')[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(record.blob);
+      });
+
+      console.log(`✅ Material label ${i + 1}/${materialLabelPhotos.length}: ${(base64Only.length / 1024).toFixed(1)} KB`);
+
+      materialLabelImages.push({
+        base64: base64Only,
+        id: photo.id,
+        timestamp: photo.timestamp,
+        lotNumber: photo.lotNumber || '',
+        description: photo.photoType === 'defect'
+          ? `疵引き写真 (${photo.lotNumber || ''})`
+          : `材料ラベル ${i + 1}/${materialLabelPhotos.length}`
+      });
+      processedPhotos++;
+      updateUploadProgress(5 + (processedPhotos / Math.max(1, totalPhotos)) * 65, `Processing photo ${processedPhotos}/${totalPhotos}...`);
+    }
+
+    console.log(`📊 Total material label images prepared for upload: ${materialLabelImages.length}`);
+
+    // Fallback to legacy method if no photos in new system
+    if (materialLabelImages.length === 0) {
+      const makerPic = document.getElementById('材料ラベル');
+
+      // Only process if the image element exists and has content
+      if (makerPic && makerPic.src && makerPic.src !== '' && makerPic.src !== 'data:,' && makerPic.style.display !== 'none') {
+        try {
+          console.log("No photos in new system - Processing legacy material label image");
+          const response = await fetch(makerPic.src);
+          const blob = await response.blob();
+          const base64Data = await blobToBase64(blob);
+
+          // Add material label as a separate entry with timestamp for uniqueness
+          materialLabelImages.push({
+            base64: base64Data,
+            id: 'material-label-legacy-' + new Date().getTime(),
+            timestamp: new Date().getTime(),
+            description: '材料ラベル (Legacy)'
+          });
+
+          console.log(`Legacy material label image processed: ${(base64Data.length / 1024).toFixed(2)} KB`);
+        } catch (error) {
+          console.error("Error processing legacy material label image:", error);
+        }
+      } else {
+        console.warn("Material label image not available in either system");
+      }
+    }
+
+    // Prepare data for the new submitToDCP route
+    const dcpSubmissionData = {
+      品番, 背番号, 設備, Total: Total_PressDB, 工場, Worker_Name, Process_Quantity, Date: WorkDate,
+      Time_start, Time_end, 材料ロット, 疵引不良, 加工不良, その他, Total_NG, Spare, Comment,
+      Cycle_Time, ショット数, Break_Time_Data: breakTimeData,
+      Total_Break_Minutes: totalBreakMinutes, Total_Break_Hours: parseFloat(totalBreakHours.toFixed(2)),
+      Maintenance_Data: maintenanceDataForSubmission,
+      Total_Trouble_Minutes: totalTroubleMinutes, Total_Trouble_Hours: parseFloat(totalTroubleHours.toFixed(2)),
+      Total_Work_Hours: parseFloat(totalWorkHours.toFixed(2)),
+
+      // Stop / call-leader events (pressDB only). Tracks each time the leader was
+      // called during processing: who arrived, when, and how long the wait was.
+      StopCall: (typeof window.getStopCallData === 'function'
+        ? window.getStopCallData()
+        : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] }),
+
+      // Include image data
+      images: uploadedImages, // Cycle check images (existing logic)
+      maintenanceImages: maintenanceImages, // Maintenance images
+      materialLabelImages: materialLabelImages, // NEW: Special handling for material label
+
+      // Include toggle state and counter data for kensaDB
+      isToggleChecked: isToggleChecked
+    };
+
+    // Per-lot production tracking (pressDB only, additive): shots / meters /
+    // pieces per material lot. ショット数 is overwritten with the auto-summed
+    // total of all lots. The server spreads formData into pressDB only.
+    try {
+      const _lp = (typeof window.buildLotProductionPayload === 'function') ? window.buildLotProductionPayload() : null;
+      if (_lp) {
+        dcpSubmissionData.Lot_Details = _lp.Lot_Details;
+        dcpSubmissionData.Total_Meters = _lp.Total_Meters;
+        dcpSubmissionData.Total_Pieces = _lp.Total_Pieces;
+        if (_lp.totalShots > 0) dcpSubmissionData.ショット数 = _lp.totalShots;
+      }
+    } catch (e) { console.warn('Lot production payload build failed:', e); }
+
+    // Add counter + inspection data if toggle is checked (for kensaDB)
+    if (isToggleChecked) {
+      const counters = Array.from({ length: 12 }, (_, i) => {
+        const counter = document.getElementById(`counter-${i + 1}`);
+        return parseInt(counter?.value || 0, 10);
+      });
+      dcpSubmissionData.Counters = counters.reduce((acc, val, i) => {
+        acc[`counter-${i + 1}`] = val;
+        return acc;
+      }, {});
+
+      // Inspection-specific fields so kensaDB records the inspector/date/times
+      // (the server falls back to the production values if these are blank)
+      dcpSubmissionData.Inspection_Name = document.getElementById('Kensa Name')?.value || '';
+      dcpSubmissionData.Inspection_Date = document.getElementById('KDate')?.value || '';
+      dcpSubmissionData.Inspection_Time_start = document.getElementById('KStart Time')?.value || '';
+      dcpSubmissionData.Inspection_Time_end = document.getElementById('KEnd Time')?.value || '';
+    }
+
+    console.log("🚀 Submitting to new DCP route:", {
+      品番, 背番号, 工場, 設備, Worker_Name,
+      cycleCheckImages: uploadedImages.length,
+      maintenanceImages: maintenanceImages.length,
+      materialLabelImages: materialLabelImages.length, // ✅ Added logging for material labels
+      maintenanceRecords: maintenanceDataForSubmission.records.length,
+      isToggleChecked
+    });
+
+    console.log('📋 Material label images being sent:', materialLabelImages.map(img => ({
+      id: img.id,
+      size: (img.base64.length / 1024).toFixed(2) + ' KB',
+      description: img.description
+    })));
+
+    updateUploadProgress(75, 'Submitting...');
+
+    // Submit to the new combined route
+    const dcpResponse = await fetch(`${serverURL}/submitToDCP`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dcpSubmissionData)
+    });
+
+    if (!dcpResponse.ok) {
+      const errorData = await dcpResponse.json();
+      throw new Error(errorData.message || 'Failed to submit DCP data');
+    }
+
+    const dcpResult = await dcpResponse.json();
+    console.log("✅ DCP submission successful:", dcpResult);
+    updateUploadProgress(100, '');
+
+    // Log submit button action ONLY after successful submission
+    await logTabletAction('Submit button pressed', 'Completed', {
+      shotCount: shotInput.value,
+      品番,
+      背番号,
+      工場,
+      設備,
+      processQuantity: Process_Quantity,
+      totalNG: Total_NG
+    }).catch(err => console.error("Submit log failed:", err));
+
+    // Clear session ONLY after successful submission
+    clearSessionID();
+
+    // Clear stop-call events so they are not re-submitted after the reload
+    if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
+
+    setTimeout(() => {
+      uploadingModal.style.display = 'none'; scanAlertText.innerText = 'Form submitted successfully / 保存しました';
+      scanAlertModal.style.display = 'block'; document.body.classList.add('flash-green');
+
+      // Auto-close after 5 seconds to prevent duplicate submissions
+      const autoCloseTimer = setTimeout(() => {
+        scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
+        resetAllSteps();
+      }, 5000);
+
+      // Allow manual close by clicking the × button
+      document.getElementById('closeScanModalButton').onclick = function () {
+        clearTimeout(autoCloseTimer); // Cancel auto-close if user clicks manually
+        scanAlertModal.style.display = 'none'; document.body.classList.remove('flash-green');
+        resetAllSteps();
+      };
+    }, 3000);
+
+  } catch (error) {
+    console.error('Error during submission:', error);
+    uploadingModal.style.display = 'none'; scanAlertText.innerText = 'An error occurred. Please try again.';
+    scanAlertModal.style.display = 'block';
+    if (alertSound) { alertSound.muted = false; alertSound.volume = 1; alertSound.play().catch(console.error); }
+    document.body.classList.add('flash-red');
+    document.getElementById('closeScanModalButton').onclick = function () {
+      scanAlertModal.style.display = 'none'; alertSound.pause(); alertSound.currentTime = 0;
+      alertSound.muted = true; document.body.classList.remove('flash-red');
+    };
+  }
+});
+
+// Image Collection with Base64 + Metadata (with compression for upload)
+async function collectImagesForUpload() {
+  const selectedSebanggo = document.getElementById("sub-dropdown").value;
+  const currentDate = document.getElementById("Lot No.").value;
+  const selectedWorker = document.getElementById("Machine Operator").value;
+  const selectedFactory = document.getElementById("selected工場").value;
+  const selectedMachine = document.getElementById("process").value;
+
+  const imageMappings = [{
+    imgId: 'hatsumonoPic',
+    label: '初物チェック'
+  }, {
+    imgId: 'atomonoPic',
+    label: '終物チェック'
+  }];
+
+  const imagesToUpload = [];
+
+  // Debug logging for image element existence
+  console.log("Checking image elements:");
+  for (const { imgId, label } of imageMappings) {
+    const photoPreview = document.getElementById(imgId);
+    console.log(`Image element '${imgId}' (${label}): ${photoPreview ? 'Found' : 'Not found'}, ` +
+      `Has src: ${photoPreview && photoPreview.src ? 'Yes' : 'No'}, ` +
+      `Display: ${photoPreview ? photoPreview.style.display : 'N/A'}`);
+  }
+
+  // Read the stored cycle-check blobs from IndexedDB once (the source of truth now).
+  const cycleRecords = {};
+  try {
+    (await cycleCheckDB.getAll()).forEach(r => { cycleRecords[r.id] = r; });
+  } catch (idbErr) {
+    console.error('⚠️ Could not read IndexedDB records for cycle-check upload:', idbErr);
+  }
+
+  // Process regular cycle check images (hatsumono and atomono)
+  let imageIndex = 0; // Counter to ensure unique timestamps
+  for (const { imgId, label } of imageMappings) {
+    const record = cycleRecords[imgId];
+    const photoPreview = document.getElementById(imgId);
+
+    try {
+      let base64Only = null;
+
+      if (record && record.blob) {
+        // Preferred path: upload the stored blob directly (same as material labels).
+        base64Only = await blobToBase64(record.blob);
+        console.log(`Processing ${label} image from IndexedDB (${(record.blob.size / 1024).toFixed(1)} KB)`);
+      } else if (photoPreview && photoPreview.src && photoPreview.src !== '' &&
+        photoPreview.src !== 'data:,' && photoPreview.style.display !== 'none') {
+        // Fallback: compress from the live <img> (handles any pre-migration edge case).
+        const compressedDataURL = await compressBase64Image(photoPreview.src, 1024, 0.8);
+        base64Only = compressedDataURL.split(',')[1] || compressedDataURL;
+        console.log(`Processing ${label} image from <img> fallback`);
+      } else {
+        console.log(`Skipping ${label} image: not available`);
+        continue;
+      }
+
+      // Create unique ID using label, timestamp, and index to prevent overwrites
+      const uniqueId = `${imgId}-${Date.now()}-${imageIndex++}`;
+
+      imagesToUpload.push({
+        base64: base64Only, // Server expects base64 without prefix
+        label,
+        id: uniqueId, // Add unique ID for each image
+        imgId: imgId, // Keep original imgId for reference
+        factory: selectedFactory,
+        machine: selectedMachine,
+        worker: selectedWorker,
+        date: currentDate,
+        sebanggo: selectedSebanggo,
+        timestamp: Date.now() + imageIndex // Ensure unique timestamp by adding index
+      });
+
+      console.log(`✅ Added ${label} to upload queue with unique ID: ${uniqueId}`);
+    } catch (error) {
+      console.error(`Error processing ${label} image:`, error);
+    }
+  }
+
+  // NOTE: Material label photos are processed separately in materialLabelImages array
+  // and sent via dcpSubmissionData.materialLabelImages, not in the images array.
+  // This avoids duplicate processing and ensures all photos are uploaded correctly.
+  console.log('Material label photos are processed separately in materialLabelImages array');
+
+  return imagesToUpload;
+}
+
+// Blob to base64 conversion
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function toggleInputs() {
+  const enableInputsCheckbox = document.getElementById('enable-inputs');
+  if (!enableInputsCheckbox) {
+    // Element doesn't exist (e.g., in DCP Grouping.html), skip this function
+    return;
+  }
+
+  var isChecked = enableInputsCheckbox.checked;
+
+  // Log checkbox toggle action
+  logTabletAction('Kensa mode checkbox toggled', isChecked ? 'Completed' : 'Reset', { kensaEnabled: isChecked });
+
+  var inputs = document.querySelectorAll('#Kensa\\ Name, #KDate, #KStart\\ Time, #KEnd\\ Time,.plus-btn,.minus-btn, textarea[name="Comments2"], #在庫');
+
+  inputs.forEach(function (input) {
+    input.disabled = !isChecked;
+  });
+
+  // Enable or disable only counters 1 to 12 when the checkbox is checked
+  for (let i = 1; i <= 12; i++) {
+    var plusBtn = document.querySelector(`#counter-box-${i} .plus-btn`);
+    var minusBtn = document.querySelector(`#counter-box-${i} .minus-btn`);
+    if (plusBtn) plusBtn.disabled = !isChecked;
+    if (minusBtn) minusBtn.disabled = !isChecked;
+  }
+
+  // Ensure plus and minus buttons of 18, 19, and 20 remain functional
+  [18, 19, 20].forEach(function (counterId) {
+    var plusBtn = document.querySelector(`#counter-box-${counterId} .plus-btn`);
+    var minusBtn = document.querySelector(`#counter-box-${counterId} .minus-btn`);
+    if (plusBtn) plusBtn.disabled = false;
+    if (minusBtn) minusBtn.disabled = false;
+  });
+
+  // Set hidden input value based on checkbox status
+  document.getElementById('検査STATUS').value = isChecked ? "TRUE" : "false";
+
+  // When kensa is enabled, default the inspection fields from the production
+  // values (only if still empty, so the user's own edits are preserved).
+  if (isChecked) {
+    const kensaDefaults = [
+      ['Kensa Name', 'Machine Operator'],
+      ['KDate', 'Lot No.'],
+      ['KStart Time', 'Start Time'],
+      ['KEnd Time', 'End Time']
+    ];
+    kensaDefaults.forEach(([kid, pid]) => {
+      const k = document.getElementById(kid);
+      const pv = document.getElementById(pid)?.value || '';
+      if (k && !k.value && pv) {
+        k.value = pv;
+        k.dispatchEvent(new Event('input', { bubbles: true }));
+        k.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+  }
+
+  // Move kensa into its dedicated tab (or back to Production) + navigate
+  if (typeof window.onKensaToggleClicked === 'function') {
+    window.onKensaToggleClicked(isChecked);
+  }
+}
+
+//LIVE STATUS function
+// this function sends the post command to google sheet live status
+function updateSheetStatus(selectedValue, machineName) {
+  const selectedFactory = document.getElementById('hidden工場').value;
+  fetch(googleSheetLiveStatusURL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams({
+      'current': selectedValue,
+      'machine': machineName,
+      'factory': selectedFactory
+    })
+  })
+    .then(response => response.text())
+    .then(data => {
+      console.log(data);
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+const SEND_TO_MACHINE_COOLDOWN_MS = 17000;
+let sendToMachineCooldownEndTime = 0;
+// Per-machine cooldown for the grouped "<machine> に送信" buttons, so sending to one
+// machine no longer locks its siblings. The shared clock above still gates the
+// send-to-all buttons (main / Step 3 / single-machine completed).
+const machineSendCooldownEndTime = {};
+let sendToMachineCooldownTimer = null;
+let sendToMachineProgressHideTimer = null;
+let sendToMachineProgressMessage = 'Send to machine in progress';
+
+function getSendToMachineCooldownSeconds() {
+  return Math.max(0, Math.ceil((sendToMachineCooldownEndTime - Date.now()) / 1000));
+}
+
+function isSendToMachineCooldownActive() {
+  return getSendToMachineCooldownSeconds() > 0;
+}
+
+function getMachineSendCooldownSeconds(machine) {
+  if (!machine) return 0;
+  const end = machineSendCooldownEndTime[machine] || 0;
+  return Math.max(0, Math.ceil((end - Date.now()) / 1000));
+}
+
+function beginMachineSendCooldown(machine) {
+  if (!machine) return;
+  machineSendCooldownEndTime[machine] = Date.now() + SEND_TO_MACHINE_COOLDOWN_MS;
+  updateSendToMachineCooldownUI();
+
+  if (!sendToMachineCooldownTimer) {
+    sendToMachineCooldownTimer = setInterval(() => {
+      updateSendToMachineCooldownUI();
+      if (!isAnySendCooldownActive()) {
+        clearInterval(sendToMachineCooldownTimer);
+        sendToMachineCooldownTimer = null;
+      }
+    }, 250);
+  }
+}
+window.beginMachineSendCooldown = beginMachineSendCooldown;
+window.getMachineSendCooldownSeconds = getMachineSendCooldownSeconds;
+
+// The countdown ticker must keep running while EITHER clock is active, otherwise a
+// per-machine button could be left greyed out after the shared clock expires.
+function isAnySendCooldownActive() {
+  if (isSendToMachineCooldownActive()) return true;
+  return Object.keys(machineSendCooldownEndTime)
+    .some(m => getMachineSendCooldownSeconds(m) > 0);
+}
+
+// Record a button's resting markup, so a cooldown that is already running restores
+// THIS instead of whatever transient label was showing when it snapshotted.
+function setSendButtonRestingMarkup(button, html) {
+  if (!button) return;
+  if (button.dataset.sendToMachineOriginalHtml !== undefined) {
+    button.dataset.sendToMachineOriginalHtml = html;
+  } else {
+    button.innerHTML = html;
+  }
+}
+
+function setButtonCooldownState(button, disabled, secondsRemaining) {
+  if (!button) return;
+
+  // Save the full markup, not just the text: these buttons carry an inline SVG icon
+  // that a textContent round-trip would delete.
+  if (button.dataset.sendToMachineOriginalHtml === undefined) {
+    button.dataset.sendToMachineOriginalHtml = button.innerHTML;
+  }
+
+  if (disabled) {
+    button.disabled = true;
+    button.setAttribute('aria-disabled', 'true');
+    button.title = `Send to machine in progress. Please wait ${secondsRemaining} seconds.`;
+    button.style.opacity = '0.6';
+    button.style.cursor = 'not-allowed';
+    button.style.filter = 'grayscale(20%)';
+    const _cLang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
+    const _cdText = _cLang === 'en' ? 'Sending...' : _cLang === 'pt' ? 'Enviando...' : '送信中...';
+    button.textContent = `${_cdText} ${secondsRemaining}s`;
+    return;
+  }
+
+  button.disabled = false;
+  button.removeAttribute('aria-disabled');
+  button.removeAttribute('title');
+  button.style.opacity = '1';
+  button.style.cursor = '';
+  button.style.filter = '';
+  if (button.dataset.sendToMachineOriginalHtml !== undefined) {
+    button.innerHTML = button.dataset.sendToMachineOriginalHtml;
+    delete button.dataset.sendToMachineOriginalHtml;
+  }
+}
+
+function getSendingProgressTextElement() {
+  const progressBar = document.getElementById('sendingProgressBar');
+  if (!progressBar) return null;
+  return progressBar.querySelector('.progress-text span') || progressBar.querySelector('.progress-text');
+}
+
+function showSendToMachineProgress(secondsRemaining) {
+  const progressBar = document.getElementById('sendingProgressBar');
+  if (!progressBar) return;
+
+  clearTimeout(sendToMachineProgressHideTimer);
+  progressBar.style.display = 'block';
+  progressBar.classList.remove('hide');
+  progressBar.classList.add('show');
+
+  const progressText = getSendingProgressTextElement();
+  if (progressText) {
+    if (!progressText.dataset.defaultText) {
+      progressText.dataset.defaultText = progressText.textContent.trim();
+    }
+    progressText.textContent = `${sendToMachineProgressMessage}... ${secondsRemaining}s remaining / 送信中... 残り${secondsRemaining}秒`;
+  }
+}
+
+function hideSendToMachineProgress() {
+  const progressBar = document.getElementById('sendingProgressBar');
+  if (!progressBar) return;
+
+  progressBar.classList.remove('show');
+  progressBar.classList.add('hide');
+  sendToMachineProgressHideTimer = setTimeout(() => {
+    progressBar.classList.remove('hide');
+    progressBar.style.display = 'none';
+
+    const progressText = getSendingProgressTextElement();
+    if (progressText?.dataset.defaultText) {
+      progressText.textContent = progressText.dataset.defaultText;
+      delete progressText.dataset.defaultText;
+    }
+  }, 300);
+}
+
+function updateSendToMachineCooldownUI() {
+  const secondsRemaining = getSendToMachineCooldownSeconds();
+  const isActive = secondsRemaining > 0;
+  const mainButton = document.getElementById('sendtoNC');
+  const step3Button = document.getElementById('startStep3Send');
+  const completedButton = document.getElementById('completedSendToMachine');
+
+  setButtonCooldownState(mainButton, isActive, secondsRemaining);
+  setButtonCooldownState(completedButton, isActive, secondsRemaining);
+  if (!isOZMANASMachine()) {
+    setButtonCooldownState(step3Button, isActive, secondsRemaining);
+  }
+
+  // Grouped machine buttons in the completed send panel lock INDIVIDUALLY: pressing
+  // 「OZNC23 に送信」 must leave 「OZNC26 に送信」 usable.
+  const groupedBtns = document.querySelectorAll('#completedSendPanel .machine-send-all');
+  groupedBtns.forEach(btn => {
+    const machineSeconds = getMachineSendCooldownSeconds(btn.dataset.machine);
+    setButtonCooldownState(btn, machineSeconds > 0, machineSeconds);
+  });
+
+  if (isActive) {
+    showSendToMachineProgress(secondsRemaining);
+    return;
+  }
+
+  hideSendToMachineProgress();
+}
+
+function beginSendToMachineCooldown(message = 'Send to machine in progress') {
+  sendToMachineProgressMessage = message;
+  sendToMachineCooldownEndTime = Date.now() + SEND_TO_MACHINE_COOLDOWN_MS;
+
+  clearInterval(sendToMachineCooldownTimer);
+  updateSendToMachineCooldownUI();
+  sendToMachineCooldownTimer = setInterval(() => {
+    updateSendToMachineCooldownUI();
+    if (!isAnySendCooldownActive()) {
+      clearInterval(sendToMachineCooldownTimer);
+      sendToMachineCooldownTimer = null;
+    }
+  }, 250);
+}
+
+function updateSendToMachineProgressMessage(message) {
+  sendToMachineProgressMessage = message;
+  if (isSendToMachineCooldownActive()) {
+    updateSendToMachineCooldownUI();
+  }
+}
+
+// ============================================
+// SENDING TO MACHINE FLOATING INDICATOR
+// ============================================
+let _sendingIndicatorTimer = null;
+
+/**
+ * Show floating indicator to tell the user that "sending to machine" is in progress.
+ * Auto-closes after 8 seconds. User can also manually dismiss it.
+ */
+function showSendingToMachineIndicator() {
+  const indicator = document.getElementById('sendingToMachineIndicator');
+  if (!indicator) return;
+
+  // Clear any previous auto-close timer
+  if (_sendingIndicatorTimer) {
+    clearTimeout(_sendingIndicatorTimer);
+    _sendingIndicatorTimer = null;
+  }
+
+  // Reset progress bar animation (force reflow to restart CSS animation)
+  const progressBar = document.getElementById('sendingToMachineProgressBar');
+  if (progressBar) {
+    progressBar.style.animation = 'none';
+    // Force reflow
+    void progressBar.offsetWidth;
+    progressBar.style.animation = 'sendIndicatorCountdown 17s linear forwards';
+  }
+
+  // Reset pop-in animation on the inner card (force reflow to restart)
+  const innerCard = indicator.querySelector('div');
+  if (innerCard) {
+    innerCard.style.animation = 'none';
+    void innerCard.offsetWidth;
+    innerCard.style.animation = 'sendIndicatorPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+  }
+
+  indicator.style.display = 'flex';
+
+  // Auto-close after 8 seconds
+  _sendingIndicatorTimer = setTimeout(() => {
+    closeSendingToMachineIndicator();
+  }, 17000);
+
+  console.log('📡 Sending to machine indicator shown (auto-close in 17s)');
+}
+
+/**
+ * Close the floating "sending to machine" indicator.
+ */
+function closeSendingToMachineIndicator() {
+  const indicator = document.getElementById('sendingToMachineIndicator');
+  if (indicator) {
+    indicator.style.display = 'none';
+  }
+  if (_sendingIndicatorTimer) {
+    clearTimeout(_sendingIndicatorTimer);
+    _sendingIndicatorTimer = null;
+  }
+  // Jump to Params tab (index 2) when sending to machine indicator closes
+  if (typeof window.goToTab === 'function') {
+    window.goToTab(2);
+  }
+}
+
+//this function sends request to nc cutter's pC (supports single or multiple machines)
+async function sendtoNC(selectedValue) {
+
+  //sendCommand("off"); // this is for arduino (emergency button)
+
+  // Validate grouped shot inputs if present (REMOVED - validation happens in Step 3 modal workflow)
+  // const groupedInputs = document.querySelectorAll('.grouped-shot-input');
+  // if (groupedInputs.length > 0) {
+  //   let hasEmptyInput = false;
+  //   let emptyMachines = [];
+  //   
+  //   groupedInputs.forEach(input => {
+  //     const value = parseInt(input.value, 10);
+  //     if (!value || value <= 0) {
+  //       hasEmptyInput = true;
+  //       // Extract machine name from id (e.g., "shot-OZNC04" -> "OZNC04")
+  //       const machineName = input.id.replace('shot-', '');
+  //       emptyMachines.push(machineName);
+  //     }
+  //   });
+  //   
+  //   if (hasEmptyInput) {
+  //     window.alert(`全ての機械のショット数を入力してください\nPlease enter shot count for all machines:\n${emptyMachines.join(', ')}`);
+  //     return;
+  //   }
+  // }
+
+  const ipAddress = document.getElementById('ipInfo').value;
+  console.log(ipAddress);
+  const currentSebanggo = document.getElementById('sub-dropdown').value;
+
+  //window.alert(machineName + currentSebanggo);
+  // Callers need to tell "sent" from "skipped" apart: this function is also invoked
+  // programmatically (the production lot scan), where a silent early return used to be
+  // reported to the operator as a successful send.
+  if (!currentSebanggo) {
+    window.alert(_t('alert_select_product_first'));
+    return { sent: false, reason: 'no-product' };
+  }
+
+  if (isSendToMachineCooldownActive()) {
+    updateSendToMachineCooldownUI();
+    return { sent: false, reason: 'cooldown', secondsRemaining: getSendToMachineCooldownSeconds() };
+  }
+
+  sendtoNCButtonisPressed = true;
+
+  // Save to localStorage with a unique key format
+  const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+  localStorage.setItem(key, 'true'); // Save the value with the unique key
+
+  // Also store the current sebanggo as the "previous" sebanggo to track changes
+  localStorage.setItem(`${uniquePrefix}previous-sebanggo`, currentSebanggo);
+  console.log(`Send to Machine button pressed. Set state to true for ${currentSebanggo}`);
+
+  beginSendToMachineCooldown('Send to machine in progress');
+
+  // Show floating indicator to the user
+  showSendingToMachineIndicator();
+
+  // Check if this is grouped machines (by page detection OR comma-separated IPs)
+  const hasMultipleIPs = ipAddress && ipAddress.includes(',');
+  const hasGroupedMachines = Object.keys(groupedMachineIPs).length > 1;
+
+  if ((isGroupedMachinePage && hasGroupedMachines) || hasMultipleIPs) {
+    // Ensure we have machine IPs populated
+    let machineIPMap = {};
+
+    if (hasGroupedMachines) {
+      machineIPMap = groupedMachineIPs;
+    } else if (hasMultipleIPs) {
+      // Parse comma-separated IPs and machines
+      const ips = ipAddress.split(',').map(ip => ip.trim());
+      const machines = groupedMachines.length > 0 ? groupedMachines :
+        document.getElementById('process').value.split(',').map(m => m.trim());
+
+      // Create mapping
+      machines.forEach((machine, index) => {
+        if (ips[index]) {
+          machineIPMap[machine] = ips[index];
+        }
+      });
+    }
+
+    // Send only to the machine(s) assigned in this lot-change cycle (each grouped
+    // machine has its own lot timeline). Falls back to the single chosen machine, and
+    // then to the assignment frozen by captureLotSendMachines() — the live globals are
+    // reset on the way to Step 3, so without that freeze the filter below would be
+    // skipped and the send would fan out to every machine in the group.
+    const _chosen = (window.__lotCycleMachinesDone && window.__lotCycleMachinesDone.length)
+      ? window.__lotCycleMachinesDone
+      : (window.__lotScanMachine
+        ? [window.__lotScanMachine]
+        : ((window.__lotSendMachines && window.__lotSendMachines.length)
+          ? window.__lotSendMachines
+          : null));
+    if (_chosen) {
+      const filtered = {};
+      _chosen.forEach(m => { if (machineIPMap[m]) filtered[m] = machineIPMap[m]; });
+      if (Object.keys(filtered).length) {
+        machineIPMap = filtered;
+        console.log("🎯 Restricting send to assigned machine(s):", Object.keys(filtered).join(', '));
+      }
+    }
+
+    console.log("🔵 Sending to multiple machines:", machineIPMap);
+
+    // Store machine group globally for individual send modal
+    window.currentMachineGroup = Object.entries(machineIPMap).map(([name, ip]) => ({ name, ip }));
+    console.log("💾 Stored currentMachineGroup:", window.currentMachineGroup);
+
+    // These machines are being sent to right now, so their individual buttons in the
+    // completed panel must lock too — otherwise Step 3 (or this production auto-send)
+    // could be followed straight away by a per-machine press pushing the same program.
+    Object.keys(machineIPMap).forEach(m => beginMachineSendCooldown(m));
+    updateSendToMachineCooldownUI();
+
+    updateSendToMachineProgressMessage(`Sending to ${Object.keys(machineIPMap).length} machines`);
+
+    // Send command to each machine
+    const sendPromises = Object.entries(machineIPMap).map(async ([machine, ip]) => {
+      const url = `http://${ip}:5000/request?filename=${currentSebanggo}.pce&mode=mass&machine=${machine}`;
+
+      try {
+        console.log(`📤 Sending to ${machine} (${ip}): ${url}`);
+
+        const response = await fetch(url, {
+          method: 'GET',
+          mode: 'no-cors'
+        });
+
+        console.log(`✅ Command sent successfully to ${machine}`);
+        return { machine, success: true };
+
+      } catch (error) {
+        console.error(`❌ Failed to send command to ${machine}:`, error);
+
+        // Fallback: Try opening in new tab if fetch fails
+        console.log(`Trying fallback method for ${machine}...`);
+        try {
+          const newTab = window.open(url, '_blank');
+          setTimeout(() => {
+            if (newTab) newTab.close();
+          }, 5000);
+          return { machine, success: true, fallback: true };
+        } catch (fallbackError) {
+          console.error(`Fallback also failed for ${machine}:`, fallbackError);
+          return { machine, success: false };
+        }
+      }
+    });
+
+    // Wait for all commands to complete
+    try {
+      const results = await Promise.all(sendPromises);
+      const successCount = results.filter(r => r.success).length;
+      console.log(`✅ Sent to ${successCount}/${results.length} machines successfully`);
+
+      // Check if any failed
+      const failed = results.filter(r => !r.success);
+      if (failed.length > 0) {
+        console.warn('⚠️ Failed machines:', failed.map(f => f.machine).join(', '));
+      }
+
+      // Per-machine status is now handled inline in the completedSendPanel chips.
+      // No separate modal needed.
+
+    } catch (error) {
+      console.error('Error sending to multiple machines:', error);
+    }
+
+    return { sent: true, machines: Object.keys(machineIPMap) };
+
+  } else {
+    // Single machine - original logic
+    const singleMachineName = document.getElementById('process').value || 'UNKNOWN';
+    // No per-machine cooldown here: a single-machine page has no per-machine buttons,
+    // so it would only keep the countdown ticker running for 17s with nothing to show.
+    const url = `http://${ipAddress}:5000/request?filename=${currentSebanggo}.pce&mode=mass&machine=${singleMachineName}`;
+
+    try {
+      console.log(`Sending command to mini PC: ${url}`);
+      const response = await fetch(url, {
+        method: 'GET',
+        mode: 'no-cors'
+      });
+      console.log('Command sent successfully to mini PC');
+      closeSendingToMachineIndicator();
+      hideSendToMachineProgress();
+      sendToMachineCooldownEndTime = 0;
+      updateSendToMachineCooldownUI();
+      if (typeof window.showAppToast === 'function') {
+        window.showAppToast('✅ 送信完了 / Send to machine completed');
+      }
+      return { sent: true, machines: [singleMachineName] };
+    } catch (error) {
+      console.warn('Notice from send to mini PC, trying fallback:', error);
+      try {
+        const newTab = window.open(url, '_blank');
+        if (newTab) {
+          setTimeout(() => { newTab.close(); }, 3000);
+        }
+      } catch (_) { }
+      closeSendingToMachineIndicator();
+      hideSendToMachineProgress();
+      sendToMachineCooldownEndTime = 0;
+      updateSendToMachineCooldownUI();
+      if (typeof window.showAppToast === 'function') {
+        window.showAppToast('✅ 送信完了 / Send to machine completed');
+      }
+      return { sent: true, machines: [singleMachineName] };
+    }
+  }
+}
+
+// Send to NC button - triggers 3-step modal workflow OR individual send modal
+// (Legacy trigger; redesigned scan tab uses the always-visible Step 1/2/3 cards.)
+document.getElementById('sendtoNC')?.addEventListener('click', async function () {
+  if (isSendToMachineCooldownActive()) {
+    updateSendToMachineCooldownUI();
+    return;
+  }
+
+  // Check if this is a single machine (DCP iReporter) or grouped machines (DCP Grouping)
+  const machineName = document.getElementById('process').value;
+  const isSingleMachine = !isGroupedMachinePage && !machineName.includes(',');
+
+  if (isSingleMachine) {
+    // Single machine (DCP iReporter) - send directly
+    const currentSebanggo = document.getElementById('sub-dropdown').value;
+
+    if (!currentSebanggo) {
+      showAlert('背番号を選んでください / Please select sebanggo first');
+      return;
+    }
+
+    // Log send to machine action (main button)
+    logTabletAction('Send to machine pressed (Main button)', 'in-progress', {
+      sebanggo: currentSebanggo,
+      source: 'Main Send to Machine button'
+    }).catch(error => console.error('Failed to log main send to machine action:', error));
+
+    // Send directly to machine
+    await sendtoNC(currentSebanggo);
+  } else {
+    // Grouped machines (DCP Grouping) - use 3-step modal workflow
+    // Check if 3-step workflow was completed (sendtoNCButtonisPressed === true)
+    if (sendtoNCButtonisPressed) {
+      // 3-step workflow was completed, show individual send modal
+      showIndividualSendModal();
+    } else {
+      // 3-step workflow not completed, show Step 0 modal
+      showStep0Modal();
+    }
+  }
+});
+
+// Function to handle printing
+function runPrintFunction() {
+  const ipAddress = document.getElementById('ipInfo').value;
+  const printerHostname = document.getElementById('printerHostname').value;
+
+  // Get the value of the hidden input field
+  const printerCode = document.getElementById('printerCode').value;
+  console.log("printerhostname: " + printerHostname);
+  const url = `http://${ipAddress}:5001/print?text=${printerCode}&hostname=${printerHostname}`; //no need for raspberry pi anymore
+
+  // Open a new tab with the desired URL
+  const newWindow = window.open(url, '_blank', 'width=100,height=100,left=-1000,top=-1000');
+
+  // Close the window after 5 seconds
+  setTimeout(() => {
+    if (newWindow) {
+      newWindow.close();
+    }
+  }, 5000);
+}
+
+// this updates the total quantity
+function updateTotal() {
+  // Get the value of Process Quantity
+  const processQuantity = parseInt(document.getElementById('ProcessQuantity').value, 10) || 0;
+
+  // Initialize Total_NG
+  let totalNG = 0;
+
+  // Sum values from counter-1 to counter-12
+  for (let i = 1; i <= 12; i++) {
+    const counterValue = parseInt(document.getElementById(`counter-${i}`).value, 10) || 0;
+    totalNG += counterValue;
+  }
+
+  // Add values from counter-18 to counter-20
+  for (let i = 18; i <= 20; i++) {
+    const counterValue = parseInt(document.getElementById(`counter-${i}`).value, 10) || 0;
+    totalNG += counterValue;
+  }
+
+  // Update the Total_NG field
+  const totalNGElement = document.getElementById('Total_NG');
+  if (totalNGElement) {
+    totalNGElement.value = totalNG;
+  }
+
+  // Calculate Total
+  const total = processQuantity - totalNG;
+
+  // Update the Total field
+  const totalElement = document.getElementById('total');
+  if (totalElement) {
+    totalElement.value = total;
+  }
+}
+
+// Attach updateTotal to relevant events
+document.getElementById('ProcessQuantity').addEventListener('input', updateTotal);
+
+// Attach the event listener to all relevant counter fields
+for (let i = 1; i <= 12; i++) {
+  document.getElementById(`counter-${i}`).addEventListener('input', updateTotal);
+}
+for (let i = 18; i <= 20; i++) {
+  document.getElementById(`counter-${i}`).addEventListener('input', updateTotal);
+}
+
+// Function to fetch ip address (supports single or multiple machines)
+function getIP() {
+  const ipInput = document.getElementById('ipInfo');
+  const machineName = document.getElementById('process').value;
+
+  // Check if this is grouped machines (either by page detection or comma in machine name)
+  const hasMultipleMachines = (isGroupedMachinePage && groupedMachines.length > 1) ||
+    (machineName && machineName.includes(','));
+
+  if (hasMultipleMachines) {
+    // Ensure groupedMachines array is populated
+    const machines = groupedMachines.length > 0 ? groupedMachines : machineName.split(',').map(m => m.trim());
+    console.log("🔵 Fetching IPs for grouped machines:", machines);
+
+    // Fetch IP for each machine individually
+    const ipPromises = machines.map(machine =>
+      fetch(`${ipURL}?filter=${machine}`)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`Network response was not ok for ${machine}: ${response.statusText}`);
+          }
+          return response.text();
+        })
+        .then(data => {
+          const cleanedData = data.replace(/"/g, '');
+          groupedMachineIPs[machine] = cleanedData;
+          console.log(`📍 IP for ${machine}: ${cleanedData}`);
+          return { machine, ip: cleanedData };
+        })
+        .catch(error => {
+          console.error(`Error fetching IP for ${machine}:`, error);
+          return { machine, ip: null };
+        })
+    );
+
+    // Wait for all IPs to be fetched
+    Promise.all(ipPromises).then(results => {
+      console.log("✅ All IPs fetched:", groupedMachineIPs);
+      // Store comma-separated IPs in the hidden input for reference
+      const ips = results.map(r => r.ip).filter(ip => ip).join(',');
+      ipInput.value = ips;
+
+      // Store machine group globally for individual send modal
+      window.currentMachineGroup = results
+        .filter(r => r.ip) // Only include machines with valid IPs
+        .map(r => ({ name: r.machine, ip: r.ip }));
+      console.log("💾 Stored currentMachineGroup on page load:", window.currentMachineGroup);
+    });
+
+  } else {
+    // Single machine - original logic
+    fetch(`${ipURL}?filter=${machineName}`)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok ' + response.statusText);
+        }
+        return response.text();
+      })
+      .then(data => {
+        const cleanedData = data.replace(/"/g, '');
+        ipInput.value = cleanedData;
+        console.log(`📍 IP for ${machineName}: ${cleanedData}`);
+      })
+      .catch(error => {
+        console.error('Error:', error);
+      });
+  }
+}
+
+// Add logging for Comments textarea inputs (on blur - when user finishes typing)
+document.addEventListener('DOMContentLoaded', () => {
+  // Log Comments1 (main comments) - only when focus leaves the textarea
+  const comments1 = document.querySelector('textarea[name="Comments1"]');
+  if (comments1) {
+    comments1.addEventListener('blur', function () {
+      // Only log if there's actual content
+      if (this.value.trim().length > 0) {
+        logTabletAction('Comments entered', 'in-progress', {
+          commentLength: this.value.length,
+          hasContent: true,
+          comment: this.value
+        });
+      }
+    });
+  }
+
+  // Log Comments2 (kensa section comments) - only when focus leaves the textarea
+  const comments2 = document.querySelector('textarea[name="Comments2"]');
+  if (comments2) {
+    comments2.addEventListener('blur', function () {
+      // Only log if there's actual content
+      if (this.value.trim().length > 0) {
+        logTabletAction('Kensa comments entered', 'in-progress', {
+          commentLength: this.value.length,
+          hasContent: true,
+          comment: this.value
+        });
+      }
+    });
+  }
+});
+
+// Add logging for regular shot input (single machine mode)
+document.addEventListener('DOMContentLoaded', () => {
+  const regularShotInput = document.getElementById('shot');
+  if (regularShotInput && !regularShotInput.readOnly) {
+    // Only add listener if it's not in grouped mode (readOnly is set in grouped mode)
+    regularShotInput.addEventListener('input', function () {
+      logTabletAction('Shot count set', 'in-progress', {
+        shotCount: this.value
+      });
+    });
+  }
+});
+
+// Function to create dynamic shot count inputs for grouped machines
+function createGroupedShotInputs() {
+  // Retired per lot-shot-tracking-spec.md
+  // The new lotsByMachine logic and updateShotTotalField handle this now.
+  return;
+}
+
+// Function to update total shot count
+function updateTotalShot() {
+  // Retired per lot-shot-tracking-spec.md
+  // The new lotsByMachine logic and updateShotTotalField handle this now.
+  return;
+}
+
+// Function to fetch rikeshi up or down color info
+function getRikeshi(headerValue) {
+  const factoryValue = document.getElementById('selected工場').value; // Get the factory value, corrected to selected工場
+  const rikeshiInfo = document.getElementById("rikeshitext");
+  // Assuming rikeshiInput is defined somewhere or passed as an argument. If not, it's a global variable or part of this scope.
+  // For now, let's assume it's like ipInput, directly referencing an element.
+  const rikeshiInput = document.getElementById("rikeshi"); // Assuming 'rikeshi' is the ID of a hidden input for the value itself.
+
+  fetch(`${dbURL}?rikeshi=${headerValue}&factory=${factoryValue}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Network response was not ok ' + response.statusText);
+      }
+      return response.text();
+    })
+    .then(data => {
+      const cleanedData = data.replace(/"/g, '');
+      rikeshiInput.value = cleanedData;
+      if (cleanedData == "上") {
+        rikeshiInfo.textContent = cleanedData + " - Release paper UP";
+      } else if (cleanedData == "下") {
+        rikeshiInfo.textContent = cleanedData + " - Release paper DOWN";
+      } else {
+        rikeshiInfo.textContent = cleanedData; // For other cases or empty
+      }
+
+      sendtoShowVideo(cleanedData);
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+}
+
+//this function is just to send value of showVideo which is either rikeshidown or up
+function sendtoShowVideo(rikeshivalue) {
+
+  if (rikeshivalue == "下") {
+    showVideo('rikeshidown');
+  } else if (rikeshivalue == "上") {
+    showVideo('rikeshiup');
+  }
+}
+
+// this code is to show video either up or down rikeshi
+let videoTimeout;
+let isRikeshiPlaying = false; // Flag to check if rikeshi.mp4 is already playing
+
+function showVideo(videoToShowId) {
+  const videoContainer = document.getElementById('videoContainer');
+  const videoToShow = document.getElementById(videoToShowId);
+  const allVideos = document.querySelectorAll('.video-element');
+
+  // Hide all video elements and pause them
+  allVideos.forEach(video => {
+    video.classList.add('hidden');
+    video.classList.remove('active-video');
+    video.pause();
+    video.currentTime = 0;
+  });
+
+  // Show the video container and the specific video
+  videoContainer.classList.remove('hidden');
+  videoToShow.classList.remove('hidden');
+  videoToShow.classList.add('active-video');
+
+  // Set playback speed to 1.8x
+  videoToShow.playbackRate = 1.8;
+
+  // Autoplay the video
+  videoToShow.play();
+
+  // Clear any existing timeout and set a new one
+  clearTimeout(videoTimeout);
+  videoTimeout = setTimeout(closeVideoPopup, 4000);
+}
+
+function closeVideoPopup() {
+  window.alert(_t('alert_confirm_release_paper'));
+  const videoContainer = document.getElementById('videoContainer');
+  const allVideos = document.querySelectorAll('.video-element');
+
+  // Hide the video container and all videos
+  videoContainer.classList.add('hidden');
+  allVideos.forEach(video => {
+    video.classList.add('hidden');
+    video.pause();
+    video.currentTime = 0;
+  });
+
+  // Reset the flag
+  isRikeshiPlaying = false;
+}
+
+//this function is for ARDUINO command (command value should be "on" or "off")
+async function sendCommand(command) {
+  const ipAddress = document.getElementById('ipInfo').value;
+  const url = `http://${ipAddress}:5000/control?command=${encodeURIComponent(command)}`;
+
+  // Get the existing hidden iframe or create one if it doesn't exist
+  let iframe = document.getElementById('hiddenIframe');
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = 'hiddenIframe';
+    iframe.style.display = 'none'; // Make the iframe invisible
+    document.body.appendChild(iframe);
+  }
+
+  // Set the iframe source to the URL
+  iframe.src = url;
+
+  // Remove the iframe after 2 seconds
+  setTimeout(() => {
+    iframe.src = ''; // Clear the iframe source
+  }, 1000);
+}
+
+// this function waits for 1 mins to see if send to NC button is pressed, if not it will pop up and force the user to send to machine
+var popupShown = false;
+var audio = new Audio('src/alert.mp3');
+audio.loop = true; // Set the audio to loop
+
+// Function to show the popup
+function showPopup() {
+  //sendCommand('on');
+  console.log("LED on");
+
+  if (!popupShown) {
+    // Create the popup elements
+    var popup = document.createElement('div');
+    popup.style.position = 'fixed';
+    popup.style.top = '50%';
+    popup.style.left = '50%';
+    popup.style.transform = 'translate(-50%, -50%)';
+    popup.style.padding = '20px';
+    popup.style.backgroundColor = 'white';
+    popup.style.border = '1px solid black';
+    popup.style.zIndex = '1000';
+
+    var message = document.createElement('p');
+    message.textContent = 'Please press "send to machine" button! GAGO! / "send to machine" ボタンを押してください';
+    popup.appendChild(message);
+
+    var button = document.createElement('button');
+    button.textContent = 'Send to Machine';
+    button.onclick = function () {
+      sendtoNCButtonisPressed = true;
+
+      // Save to localStorage with a unique key format
+      const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+      const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+      const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+      localStorage.setItem(key, 'true'); // Save the value with the unique key
+
+      // This prompt is a general reminder, not a lot-cycle send: drop any frozen
+      // per-machine target so it is not silently narrowed to one machine.
+      window.__lotSendMachines = [];
+      sendtoNC(); // Call the sendtoNC function
+      console.log("sendtoNC function called");
+      document.body.removeChild(popup);
+      audio.pause(); // Stop the audio
+      audio.currentTime = 0; // Reset the audio to the beginning
+    };
+    popup.appendChild(button);
+
+    document.body.appendChild(popup);
+    popupShown = true; // Set the flag to true after showing the popup
+    audio.play(); // Play the audio
+  }
+}
+
+// Function to check the value every 1 minute
+// TEMPORARILY DISABLED - Timer that shows popup if "Send to Machine" not pressed
+function checkValue() {
+  console.log("checkValue() called - Timer temporarily disabled");
+  // var interval = setInterval(function() {
+  //   console.log("selectedFactory: " + selectedFactory);
+  //   if (selectedFactory !== "小瀬") {
+  //     return; // Skip the check if selectedFactory is not "小瀬"
+  //   }
+
+  //   const selected工場 = document.getElementById('selected工場').value; // Get the current factory value
+  //   const pageName = location.pathname.split('/').pop(); // Get the current HTML file name
+  //   const key = `${uniquePrefix}sendtoNCButtonisPressed`;
+
+  //   if (localStorage.getItem(key) === null) {
+  //     return; // Skip the check if the key is not present in local storage
+  //   }
+  //   var sendtoNCButtonisPressed = localStorage.getItem(key) === 'true'; // Retrieve the value from local storage
+  //   console.log("sendtoNCButtonisPressed: " + sendtoNCButtonisPressed);
+
+  //   if (sendtoNCButtonisPressed) {
+  //     clearInterval(interval); // Stop checking if the value is true
+  //   } else {
+  //     // Get the sub-dropdown value
+  //     const subDropdownValue = document.getElementById('sub-dropdown').value;
+
+  //     // Check if sub-dropdown value is in its default state
+  //     if (!subDropdownValue || subDropdownValue === "Select 背番号") {
+  //       console.log("Sub-dropdown is in its default state. Skipping showPopup.");
+  //       return; // Do not call showPopup if the value is default
+  //     }
+  //     console.log("Sub-dropdown value is not default. Showing popup.");
+
+  //     showPopup();
+  //   }
+  // }, 30000); // 30000 milliseconds = 30 seconds
+}
+
+// Run the checkValue function when the page loads
+// TEMPORARILY DISABLED - Timer functionality
+window.onload = checkValue;
+
+// Maintenance Camera Functionality
+let maintenanceCameraStream = null;
+
+// Open camera in modal for maintenance photos
+async function openMaintenanceCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showAlert("カメラ機能はこのブラウザではサポートされていません。(Camera features are not supported in this browser.)", true);
+    return;
+  }
+
+  // Create camera modal
+  const cameraModal = document.createElement('div');
+  cameraModal.id = 'maintenanceCameraModal';
+  cameraModal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10002;
+  `;
+
+  const cameraContent = document.createElement('div');
+  cameraContent.style.cssText = `
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    max-width: 90%;
+    max-height: 90%;
+  `;
+
+  cameraContent.innerHTML = `
+    <h3 style="margin-top: 0;">機械故障写真撮影 / Maintenance Photo Capture</h3>
+    <video id="maintenanceVideoFeed" autoplay playsinline style="max-width: 100%; max-height: 400px; border: 2px solid #ddd; border-radius: 5px;"></video>
+    <br><br>
+    <button id="maintenanceCaptureBtn" style="padding: 15px 30px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px; font-size: 16px;">📷 撮影 / Capture</button>
+    <button id="maintenanceCloseCameraBtn" style="padding: 15px 30px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">閉じる / Close</button>
+    <canvas id="maintenanceCaptureCanvas" style="display: none;"></canvas>
+  `;
+
+  cameraModal.appendChild(cameraContent);
+  document.body.appendChild(cameraModal);
+
+  const videoFeed = document.getElementById('maintenanceVideoFeed');
+  const captureBtn = document.getElementById('maintenanceCaptureBtn');
+  const closeCameraBtn = document.getElementById('maintenanceCloseCameraBtn');
+  const captureCanvas = document.getElementById('maintenanceCaptureCanvas');
+
+  // Camera constraints
+  const constraints = {
+    video: {
+      facingMode: { ideal: "environment" },
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    },
+    audio: false
+  };
+
+  try {
+    maintenanceCameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (e) {
+    console.warn("Environment camera failed, trying user camera:", e);
+    constraints.video.facingMode = { ideal: "user" };
+    try {
+      maintenanceCameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      console.error("Error accessing camera: ", err);
+      showAlert("カメラにアクセスできませんでした。設定を確認してください。", true);
+      document.body.removeChild(cameraModal);
+      return;
+    }
+  }
+
+  if (maintenanceCameraStream && videoFeed) {
+    videoFeed.srcObject = maintenanceCameraStream;
+    videoFeed.onloadedmetadata = () => {
+      // TEMPORARY: Force exact same approach as working test HTML
+      captureCanvas.width = videoFeed.videoWidth;
+      captureCanvas.height = videoFeed.videoHeight;
+      console.log(`🔍 Canvas initialized: ${captureCanvas.width}x${captureCanvas.height} (exact same as test HTML)`);
+    };
+  }
+
+  // Capture button functionality
+  captureBtn.addEventListener('click', () => {
+    if (!maintenanceCameraStream || !videoFeed) {
+      console.error("Stream or video not ready for snapshot");
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    if (maintenancePhotos.length >= MAX_MAINTENANCE_PHOTOS) {
+      showAlert(`最大${MAX_MAINTENANCE_PHOTOS}枚までです。(Max ${MAX_MAINTENANCE_PHOTOS} photos allowed.)`, false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    // Validate video before capture
+    if (videoFeed.readyState !== videoFeed.HAVE_ENOUGH_DATA) {
+      console.warn("⚠️ Video feed not ready for capture");
+      showAlert("カメラの準備ができていません。しばらく待ってから再試行してください。", false);
+      return;
+    }
+
+    // Create a NEW canvas for each capture (exactly like test HTML)
+    const freshCanvas = document.createElement('canvas');
+    freshCanvas.width = videoFeed.videoWidth;
+    freshCanvas.height = videoFeed.videoHeight;
+
+    console.log(`🔍 DCP Fresh canvas created: ${freshCanvas.width}x${freshCanvas.height} (video: ${videoFeed.videoWidth}x${videoFeed.videoHeight})`);
+
+    const context = freshCanvas.getContext('2d');
+    if (!context) {
+      console.error("Failed to get 2D context from fresh canvas.");
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    context.drawImage(videoFeed, 0, 0, freshCanvas.width, freshCanvas.height);
+
+    // Use the EXACT same approach as the working test
+    const imageDataURL = freshCanvas.toDataURL('image/jpeg', 0.8);
+    console.log(`🔍 DCP Canvas capture:`, {
+      canvasSize: `${freshCanvas.width}x${freshCanvas.height}`,
+      videoSize: `${videoFeed.videoWidth}x${videoFeed.videoHeight}`,
+      dataURLLength: imageDataURL.length,
+      startsWithDataURL: imageDataURL.startsWith('data:image/jpeg;base64,')
+    });
+
+    // Validate data URL format
+    if (!imageDataURL.startsWith('data:image/jpeg;base64,')) {
+      console.error('❌ Invalid data URL format:', imageDataURL.substring(0, 100));
+      showAlert('画像キャプチャに失敗しました。再試行してください。', false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    // Extract clean base64 data WITHOUT the data URL prefix (same as test)
+    const base64Data = imageDataURL.split(',')[1];
+    console.log(`🔍 DCP Extracted clean base64 length: ${base64Data.length}`);
+    console.log(`🔍 DCP Base64 first 50 chars: ${base64Data.substring(0, 50)}`);
+    console.log(`🔍 DCP Using video dimensions: ${videoFeed.videoWidth}x${videoFeed.videoHeight}`);
+    console.log(`🔍 DCP Canvas dimensions: ${captureCanvas.width}x${captureCanvas.height}`);
+
+    // Validate base64 data
+    if (!base64Data || base64Data.length === 0) {
+      console.error('❌ Empty base64 data');
+      showAlert('画像データが無効です。再試行してください。', false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    // Client-side validation like the test
+    try {
+      const buffer = atob(base64Data);
+      console.log(`🔍 DCP Client validation: Successfully decoded ${buffer.length} bytes`);
+      console.log(`🔍 DCP Buffer first 10 bytes: [${Array.from(buffer.slice(0, 10)).map(b => b.charCodeAt(0)).join(', ')}]`);
+
+      // Check JPEG headers
+      const firstByte = buffer.charCodeAt(0);
+      const secondByte = buffer.charCodeAt(1);
+      console.log(`🔍 DCP JPEG header check: [${firstByte}, ${secondByte}] (should be [255, 216])`);
+
+      if (firstByte !== 255 || secondByte !== 216) {
+        console.warn('⚠️ DCP WARNING: Invalid JPEG header detected!');
+      } else {
+        console.log('✅ DCP Valid JPEG header confirmed');
+      }
+    } catch (error) {
+      console.error('❌ DCP ERROR: Invalid base64 data - ' + error.message);
+      showAlert('画像データが無効です。再試行してください。', false);
+      closeMaintenanceCamera(cameraModal);
+      return;
+    }
+
+    // Add photo with clean base64 data (same as test)
+    const success = addMaintenancePhoto(base64Data);
+
+    if (success) {
+      console.log('✅ Photo successfully added to maintenance photos');
+      // Close camera after successful capture
+      closeMaintenanceCamera(cameraModal);
+    } else {
+      showAlert('写真の追加に失敗しました。', false);
+    }
+  });
+
+  // Close camera button functionality
+  closeCameraBtn.addEventListener('click', () => {
+    closeMaintenanceCamera(cameraModal);
+  });
+
+  // Close on background click
+  cameraModal.addEventListener('click', (e) => {
+    if (e.target === cameraModal) {
+      closeMaintenanceCamera(cameraModal);
+    }
+  });
+}
+
+// Close maintenance camera and cleanup
+function closeMaintenanceCamera(cameraModal) {
+  if (maintenanceCameraStream) {
+    maintenanceCameraStream.getTracks().forEach(track => track.stop());
+    maintenanceCameraStream = null;
+  }
+
+  const videoFeed = document.getElementById('maintenanceVideoFeed');
+  if (videoFeed) {
+    videoFeed.srcObject = null;
+  }
+
+  if (cameraModal && cameraModal.parentNode) {
+    document.body.removeChild(cameraModal);
+  }
+}
+// === Numeric Keypad Functions for ショット数 ===
+let currentNumericInputId = null;
+
+// This function is no longer used - using direct HTML implementation instead
+function createNumericKeypadModal() {
+  // This function is intentionally left empty to avoid creating duplicate keypads
+  console.log("Using direct HTML implementation instead of createNumericKeypadModal");
+  return;
+
+  // Create header
+  const header = document.createElement('div');
+  header.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+  `;
+
+  // Original implementation removed to avoid creating duplicate keypads
+
+  // Original implementation removed to avoid creating duplicate keypads
+
+  // Original implementation removed to avoid creating duplicate keypads
+}
+
+function openNumericKeypad(inputId) {
+  // Redirect to the direct implementation
+  window.openDirectNumericKeypad(inputId);
+}
+
+function closeNumericKeypad() {
+  // Redirect to the direct implementation
+  window.closeDirectNumericKeypad();
+}
+
+function addToNumericDisplay(digit) {
+  // Redirect to the direct implementation
+  window.addToDirectNumericDisplay(digit);
+}
+
+function clearNumericDisplay() {
+  // Redirect to the direct implementation
+  window.clearDirectNumericDisplay();
+}
+
+function backspaceNumericDisplay() {
+  // Redirect to the direct implementation
+  window.backspaceDirectNumericDisplay();
+}
+
+function confirmNumericInput() {
+  // Redirect to the direct implementation
+  window.confirmDirectNumericInput();
+}
+
+// The original keydown handler is no longer needed as we're using the direct implementation
+
+// Initialize numeric keypad and set up shot input field - simplified to avoid duplicate modals
+function initNumericKeypad() {
+  // We're now only using the direct implementation
+  console.log("Numeric keypad initialization using direct implementation only");
+
+  // No need to do anything here as the shot input is already configured in the load event handler
+}
+
+// Define direct keypad functions in the global scope first
+window.openDirectNumericKeypad = function (inputId, isNewEntryMode = false) {
+  if (inputId === 'ProcessQuantity' && window.__processQuantityAutoCalculated) {
+    console.log('Process Quantity is auto-calculated. Manual entry disabled.');
+    return;
+  }
+  window.currentDirectInputId = inputId;
+  window.isNewEntryMode = isNewEntryMode; // Store the mode
+  const modal = document.getElementById('numericKeypadModalDirect');
+  const display = document.getElementById('numericDisplayDirect');
+  const currentInput = document.getElementById(inputId);
+
+  if (modal && display && currentInput) {
+    // If new entry mode, start with empty display, otherwise show current value
+    display.value = isNewEntryMode ? '' : (currentInput.value || '');
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+
+    // Update keypad title based on which input field was clicked
+    const keypadTitle = modal.querySelector('h2');
+    if (keypadTitle) {
+      if (inputId === 'shot') {
+        keypadTitle.textContent = 'ショット数を入力';
+      } else if (inputId === '材料ロット') {
+        keypadTitle.textContent = '材料ロットを入力';
+      } else if (inputId === 'ProcessQuantity') {
+        keypadTitle.textContent = '加工数 (良品) + NG:を入力';
+      }
+    }
+
+    // Show/hide the hyphen button based on input field
+    const hyphenButton = document.getElementById('hyphenButton');
+    if (hyphenButton) {
+      if (inputId === '材料ロット') {
+        hyphenButton.style.display = 'block';
+      } else {
+        hyphenButton.style.display = 'none';
+      }
+    }
+
+    // Setup keyboard event handling for the keypad
+    window.directKeypadKeydownHandler = function (event) {
+      if (modal.style.display === 'block') {
+        event.preventDefault(); // Prevent default keyboard behavior
+
+        if (event.key >= '0' && event.key <= '9') {
+          window.addToDirectNumericDisplay(event.key);
+        } else if (event.key === 'Backspace') {
+          window.backspaceDirectNumericDisplay();
+        } else if (event.key === 'Enter') {
+          window.confirmDirectNumericInput();
+        } else if (event.key === 'Escape') {
+          window.closeDirectNumericKeypad();
+        } else if (event.key === 'Delete' || event.key.toLowerCase() === 'c') {
+          window.clearDirectNumericDisplay();
+        } else if (event.key === '-' && inputId === '材料ロット') {
+          window.addToDirectNumericDisplay('-');
+        } else if (event.key === ' ') {
+          window.addToDirectNumericDisplay(' ');
+        }
+      }
+    };
+
+    // Add the keyboard event listener
+    document.addEventListener('keydown', window.directKeypadKeydownHandler);
+  }
+};
+
+window.closeDirectNumericKeypad = function () {
+  const modal = document.getElementById('numericKeypadModalDirect');
+  if (modal) {
+    modal.style.display = 'none';
+    window.currentDirectInputId = null;
+    document.body.style.overflow = 'auto';
+
+    // Remove the keyboard event handler
+    if (window.directKeypadKeydownHandler) {
+      document.removeEventListener('keydown', window.directKeypadKeydownHandler);
+      window.directKeypadKeydownHandler = null;
+    }
+  }
+};
+
+window.addToDirectNumericDisplay = function (digit) {
+  const display = document.getElementById('numericDisplayDirect');
+  if (display) {
+    display.value += digit;
+  }
+};
+
+window.clearDirectNumericDisplay = function () {
+  const display = document.getElementById('numericDisplayDirect');
+  if (display) {
+    display.value = '';
+  }
+};
+
+window.backspaceDirectNumericDisplay = function () {
+  const display = document.getElementById('numericDisplayDirect');
+  if (display) {
+    display.value = display.value.slice(0, -1);
+  }
+};
+
+window.confirmDirectNumericInput = function () {
+  if (!window.currentDirectInputId) return;
+
+  const display = document.getElementById('numericDisplayDirect');
+  const targetInput = document.getElementById(window.currentDirectInputId);
+
+  if (display && targetInput) {
+    const value = display.value;
+
+    // Different validation based on input type
+    if (window.currentDirectInputId === '材料ロット') {
+      // For material lot, allow numbers, hyphens, spaces, and blank values
+      if (value !== '' && !/^[0-9\-\s]*$/.test(value)) {
+        if (typeof showAlert === 'function') {
+          showAlert('数字、ハイフン、スペースのみを入力してください');
+        } else {
+          window.alert('数字、ハイフン、スペースのみを入力してください');
+        }
+        return;
+      }
+      // Allow blank value - no validation needed
+    } else if (window.currentDirectInputId === 'shot') {
+      // For shot count, allow numbers, spaces, and blank values
+      // If not blank, validate as a number (after removing spaces)
+      if (value !== '') {
+        const numericValue = value.replace(/\s/g, '');
+        if (numericValue !== '' && (isNaN(numericValue) || parseInt(numericValue) < 0)) {
+          if (typeof showAlert === 'function') {
+            showAlert('有効な数字を入力してください');
+          } else {
+            window.alert('有効な数字を入力してください');
+          }
+          return;
+        }
+      }
+      // Allow blank value - no validation needed
+    } else {
+      // For other inputs, allow blank values and positive numbers
+      if (value !== '' && (isNaN(value) || parseInt(value) < 0)) {
+        if (typeof showAlert === 'function') {
+          showAlert('有効な数字を入力してください');
+        } else {
+          window.alert('有効な数字を入力してください');
+        }
+        return;
+      }
+    }
+
+    // Handle new entry mode for 材料ロット
+    if (window.isNewEntryMode && window.currentDirectInputId === '材料ロット') {
+      // In new entry mode, append the new lot to existing lots with comma
+      const existingValue = targetInput.value;
+      if (existingValue && value) {
+        // Append with comma
+        targetInput.value = existingValue + ',' + value;
+      } else if (value) {
+        // No existing value, just set the new value
+        targetInput.value = value;
+      }
+      // If value is empty, don't change anything
+    } else {
+      // Normal mode - replace the value
+      targetInput.value = value;
+    }
+
+    // Get the current uniquePrefix for localStorage
+    const pageName = location.pathname.split('/').pop();
+    const currentSelectedFactory = document.getElementById('selected工場')?.value;
+    const selectedMachine = document.getElementById('process')?.value;
+    const uniquePrefix = `${pageName}_${currentSelectedFactory}_${selectedMachine}_`;
+
+    // Save to localStorage with the unique key format
+    const key = `${uniquePrefix}${targetInput.id}`;
+    localStorage.setItem(key, targetInput.value);
+
+    // Log the input action for shot count
+    if (window.currentDirectInputId === 'shot') {
+      logTabletAction('ショット数 input', 'Completed', { shotCount: targetInput.value });
+    }
+
+    // Trigger the input event to handle any event listeners
+    const event = new Event('input', { bubbles: true });
+    targetInput.dispatchEvent(event);
+
+    window.closeDirectNumericKeypad();
+  }
+};
+
+// Run initialization after page is fully loaded to ensure it runs after other DOM events
+window.addEventListener('load', function () {
+  // Update processing time lock statuses
+  updateAllProcessingTimeLockStatus();
+
+  // Create a completely different implementation of the modal as direct HTML
+  const modalHTML = `
+    <div id="numericKeypadModalDirect" style="
+      display: none;
+      position: fixed;
+      z-index: 10000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.7);
+    ">
+      <div style="
+        background-color: #fefefe;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 20px;
+        border: 1px solid #888;
+        width: 320px;
+        max-width: 90%;
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      ">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h2 style="margin: 0; font-size: 20px; font-weight: bold; color: #333;">ショット数を入力</h2>
+          <span onclick="window.closeDirectNumericKeypad()" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+        </div>
+        
+        <div style="margin-bottom: 15px;">
+          <input type="text" id="numericDisplayDirect" readonly style="
+            width: 100%;
+            padding: 12px;
+            font-size: 28px;
+            text-align: right;
+            border: 2px solid #007bff;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            background-color: #f8f9fa;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+          ">
+        </div>
+        
+        <div id="keypadContainerDirect" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+          <!-- Number buttons will be added via JavaScript -->
+        </div>
+        
+        <button onclick="window.confirmDirectNumericInput()" style="
+          width: 100%;
+          padding: 15px;
+          margin-top: 15px;
+          font-size: 20px;
+          font-weight: bold;
+          background-color: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 5px;
+          cursor: pointer;
+          transition: background-color 0.2s;
+        ">確認</button>
+      </div>
+    </div>
+  `;
+
+  // Inject the HTML directly into the body
+  const modalContainer = document.createElement('div');
+  modalContainer.innerHTML = modalHTML;
+  document.body.appendChild(modalContainer.firstElementChild);
+
+  // Add number buttons dynamically
+  const keypadContainer = document.getElementById('keypadContainerDirect');
+  if (keypadContainer) {
+    // Add number buttons 1-9
+    for (let i = 1; i <= 9; i++) {
+      const btn = document.createElement('button');
+      btn.textContent = i.toString();
+      const digit = i.toString(); // Capture the current value in a closure
+      btn.onclick = function () { window.addToDirectNumericDisplay(digit); };
+      btn.style.cssText = `
+        padding: 15px;
+        font-size: 24px;
+        background-color: #f1f1f1;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      `;
+      // Add touch feedback
+      btn.addEventListener('touchstart', function () {
+        this.style.backgroundColor = '#d0d0d0';
+      });
+      btn.addEventListener('touchend', function () {
+        this.style.backgroundColor = '#f1f1f1';
+      });
+      keypadContainer.appendChild(btn);
+    }
+
+    // Add C, 0, and backspace buttons
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'C';
+    clearBtn.onclick = function () { window.clearDirectNumericDisplay(); };
+    clearBtn.style.cssText = `
+      padding: 15px;
+      font-size: 24px;
+      background-color: #ffcccc;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    `;
+    // Add touch feedback
+    clearBtn.addEventListener('touchstart', function () {
+      this.style.backgroundColor = '#ff9999';
+    });
+    clearBtn.addEventListener('touchend', function () {
+      this.style.backgroundColor = '#ffcccc';
+    });
+
+    const zeroBtn = document.createElement('button');
+    zeroBtn.textContent = '0';
+    zeroBtn.onclick = function () { window.addToDirectNumericDisplay('0'); };
+    zeroBtn.style.cssText = `
+      padding: 15px;
+      font-size: 24px;
+      background-color: #f1f1f1;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    `;
+    // Add touch feedback
+    zeroBtn.addEventListener('touchstart', function () {
+      this.style.backgroundColor = '#d0d0d0';
+    });
+    zeroBtn.addEventListener('touchend', function () {
+      this.style.backgroundColor = '#f1f1f1';
+    });
+
+    const backBtn = document.createElement('button');
+    backBtn.innerHTML = '&#9003;';
+    backBtn.onclick = function () { window.backspaceDirectNumericDisplay(); };
+    backBtn.style.cssText = `
+      padding: 15px;
+      font-size: 24px;
+      background-color: #f1f1f1;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    `;
+    // Add touch feedback
+    backBtn.addEventListener('touchstart', function () {
+      this.style.backgroundColor = '#d0d0d0';
+    });
+    backBtn.addEventListener('touchend', function () {
+      this.style.backgroundColor = '#f1f1f1';
+    });
+
+    // Create hyphen button for material lot input
+    const hyphenBtn = document.createElement('button');
+    hyphenBtn.textContent = '-';
+    hyphenBtn.id = 'hyphenButton';
+    hyphenBtn.onclick = function () { window.addToDirectNumericDisplay('-'); };
+    hyphenBtn.style.cssText = `
+      padding: 15px;
+      font-size: 24px;
+      background-color: #e0e0ff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      display: none; // Initially hidden, shown only for material lot input
+    `;
+    // Add touch feedback
+    hyphenBtn.addEventListener('touchstart', function () {
+      this.style.backgroundColor = '#c0c0ff';
+    });
+    hyphenBtn.addEventListener('touchend', function () {
+      this.style.backgroundColor = '#e0e0ff';
+    });
+
+    // Create space button
+    const spaceBtn = document.createElement('button');
+    spaceBtn.textContent = 'Space';
+    spaceBtn.id = 'spaceButton';
+    spaceBtn.onclick = function () { window.addToDirectNumericDisplay(' '); };
+    spaceBtn.style.cssText = `
+      padding: 15px;
+      font-size: 20px;
+      background-color: #e0ffec;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    `;
+    // Add touch feedback
+    spaceBtn.addEventListener('touchstart', function () {
+      this.style.backgroundColor = '#c0ffd8';
+    });
+    spaceBtn.addEventListener('touchend', function () {
+      this.style.backgroundColor = '#e0ffec';
+    });
+
+    // Append all buttons
+    keypadContainer.appendChild(clearBtn);
+    keypadContainer.appendChild(zeroBtn);
+    keypadContainer.appendChild(backBtn);
+    keypadContainer.appendChild(hyphenBtn); // Add hyphen button to the keypad
+    keypadContainer.appendChild(spaceBtn); // Add space button to the keypad
+  }
+
+  // Functions have been moved to the global scope before the load event
+
+  // Configure the shot input with the direct keypad
+  const shotInput = document.getElementById('shot');
+  if (shotInput) {
+    shotInput.readOnly = true;
+
+    // Use a more robust event attachment
+    if (shotInput.addEventListener) {
+      shotInput.addEventListener('click', function () {
+        window.openDirectNumericKeypad('shot');
+      });
+    } else {
+      // Fallback for older browsers
+      shotInput.onclick = function () {
+        window.openDirectNumericKeypad('shot');
+      };
+    }
+
+    // Styling handled by the .tap-field CSS class (uniform tap-to-open look)
+    shotInput.classList.add('tap-field');
+
+    console.log('Shot input configured with direct keypad');
+  }
+
+  // Configure ProcessQuantity input with the direct keypad
+  const processQuantityInput = document.getElementById('ProcessQuantity');
+  if (processQuantityInput) {
+    processQuantityInput.readOnly = true;
+
+    // Use a more robust event attachment
+    if (processQuantityInput.addEventListener) {
+      processQuantityInput.addEventListener('click', function () {
+        window.openDirectNumericKeypad('ProcessQuantity');
+      });
+    } else {
+      // Fallback for older browsers
+      processQuantityInput.onclick = function () {
+        window.openDirectNumericKeypad('ProcessQuantity');
+      };
+    }
+
+    // Styling handled by the .tap-field CSS class (uniform tap-to-open look)
+    processQuantityInput.classList.add('tap-field');
+
+    console.log('ProcessQuantity input configured with direct keypad');
+  }
+
+  // Configure 在庫 (Spare) input with the direct keypad
+  const spareInput = document.getElementById('在庫');
+  if (spareInput) {
+    spareInput.readOnly = true;
+
+    // Use a more robust event attachment
+    if (spareInput.addEventListener) {
+      spareInput.addEventListener('click', function () {
+        window.openDirectNumericKeypad('在庫');
+      });
+    } else {
+      // Fallback for older browsers
+      spareInput.onclick = function () {
+        window.openDirectNumericKeypad('在庫');
+      };
+    }
+
+    // Styling handled by the .tap-field CSS class (uniform tap-to-open look)
+    spareInput.classList.add('tap-field');
+
+    console.log('Spare (在庫) input configured with direct keypad');
+
+    // Add logging when spare value changes
+    spareInput.addEventListener('input', function () {
+      logTabletAction('Spare count set', 'in-progress', {
+        spareCount: this.value
+      });
+    });
+  }
+
+  // Configure material lot input - DISABLED, now using QR scanner with override
+  // const materialLotInput = document.getElementById('材料ロット');
+  // if (materialLotInput) {
+  //   materialLotInput.readOnly = true;
+  //   
+  //   // Use a more robust event attachment
+  //   if (materialLotInput.addEventListener) {
+  //     materialLotInput.addEventListener('click', function() {
+  //       window.openDirectNumericKeypad('材料ロット');
+  //     });
+  //   } else {
+  //     // Fallback for older browsers
+  //     materialLotInput.onclick = function() {
+  //       window.openDirectNumericKeypad('材料ロット');
+  //     };
+  //   }
+  //   
+  //   // Style the input
+  //   materialLotInput.style.cssText = `
+  //     cursor: pointer;
+  //     background-color: #f0f8ff;
+  //     border: 2px solid #007bff;
+  //     border-radius: 5px;
+  //     padding: 8px 10px;
+  //     font-size: 16px;
+  //     width: 100%;
+  //     background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="%23007bff"><path d="M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4h4v4H5V6zm0 6h4v4H5v-4zm6-6h4v4h-4V6zm6 0h2v4h-2V6zm-6 6h4v4h-4v-4zm6 0h2v4h-2v-4z"/></svg>');
+  //     background-repeat: no-repeat;
+  //     background-position: right 8px center;
+  //     background-size: 16px 16px;
+  //     padding-right: 30px;
+  //   `;
+  //   
+  //   console.log('Material lot input configured with direct keypad');
+  // }
+
+  // Also run the original initialization
+  initNumericKeypad();
+});
+
+// ============================================
+// 3-STEP MODAL VERIFICATION SYSTEM
+// ============================================
+
+// Global variables for step tracking
+let step1Scanner = null;
+let step2Scanner = null;
+let step3Scanner = null;
+let currentStep = 0;
+
+// Global variable to store fetched product details
+let currentProductDetails = {
+  sebanggo: '',
+  hinban: '',
+  materialCode: '',
+  model: '',
+  kataban: ''
+};
+
+const videoManualState = {
+  projects: [],
+  selectedProjectId: null,
+  loading: false,
+  mode: 'picker',
+  controllerId: `vmc_${Math.random().toString(36).slice(2, 10)}`,
+  sessionKey: '',
+  claimed: false,
+  controlStream: null,
+  heartbeatTimer: null,
+  loadingTimer: null,
+  playerState: {
+    mode: 'idle',
+    projectId: null,
+    title: '',
+    statusText: 'Idle',
+    currentTime: 0,
+    duration: 0,
+    currentStepIndex: 0,
+    stepCount: 0,
+    canPlay: false,
+    isPlaying: false,
+    error: ''
+  },
+};
+
+function normalizeVideoManualMachineId(machineId = '') {
+  return String(machineId)
+    .split(',')
+    .map(value => value.trim().toUpperCase())
+    .filter(Boolean)
+    .join(',');
+}
+
+function getVideoManualSessionKey() {
+  return normalizeVideoManualMachineId(getMachineName());
+}
+
+function getCurrentProductModel() {
+  return currentProductDetails.model
+    || document.getElementById('model')?.value
+    || localStorage.getItem(`${uniquePrefix}cached-model`)
+    || '';
+}
+
+function formatVideoManualDuration(seconds) {
+  const safeSeconds = Number.isFinite(Number(seconds)) ? Math.max(0, Number(seconds)) : 0;
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const secs = Math.floor(safeSeconds % 60);
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
+function getSelectedVideoManualProject() {
+  return videoManualState.projects.find(project => String(project._id) === String(videoManualState.selectedProjectId)) || null;
+}
+
+function getVideoManualSelectedProjectTitle() {
+  return getSelectedVideoManualProject()?.title || videoManualState.playerState.title || 'Video Manual';
+}
+
+function setVideoManualMode(mode = 'picker') {
+  videoManualState.mode = mode;
+  const projectGrid = document.getElementById('videoManualProjectGrid');
+  const detailPanel = document.getElementById('videoManualDetailPanel');
+  const controllerPanel = document.getElementById('videoManualControllerPanel');
+  const footerAction = document.getElementById('videoManualSelectButton');
+  const footerCancel = document.getElementById('videoManualCloseFooterButton');
+  const footer = document.querySelector('#videoManualModal .video-manual-modal__footer');
+  const subtitle = document.getElementById('videoManualSubtitle');
+
+  if (projectGrid) projectGrid.style.display = mode === 'picker' ? 'grid' : 'none';
+  if (detailPanel) detailPanel.style.display = mode === 'detail' ? 'block' : 'none';
+  if (controllerPanel) controllerPanel.style.display = mode === 'controller' ? 'grid' : 'none';
+  if (footerAction) footerAction.style.display = 'none';
+  if (footer) footer.style.display = mode === 'picker' ? 'flex' : 'none';
+  if (footerCancel) footerCancel.textContent = 'Cancel';
+  if (subtitle && mode === 'controller') {
+    subtitle.textContent = `${getVideoManualSelectedProjectTitle()} · Remote`;
+  }
+}
+
+function stopVideoManualLoadingTimeout() {
+  if (videoManualState.loadingTimer) {
+    clearTimeout(videoManualState.loadingTimer);
+    videoManualState.loadingTimer = null;
+  }
+}
+
+function stopVideoManualHeartbeat() {
+  if (videoManualState.heartbeatTimer) {
+    clearInterval(videoManualState.heartbeatTimer);
+    videoManualState.heartbeatTimer = null;
+  }
+}
+
+function disconnectVideoManualControlStream() {
+  if (videoManualState.controlStream) {
+    videoManualState.controlStream.close();
+    videoManualState.controlStream = null;
+  }
+}
+
+function updateVideoManualControllerUi() {
+  const playPauseButton = document.getElementById('videoManualPlayPauseButton');
+  const prevStepButton = document.getElementById('videoManualPrevStepButton');
+  const nextStepButton = document.getElementById('videoManualNextStepButton');
+  const exitButton = document.getElementById('videoManualExitButton');
+  const seekSlider = document.getElementById('videoManualSeekSlider');
+  const seekCurrent = document.getElementById('videoManualSeekCurrent');
+  const seekDuration = document.getElementById('videoManualSeekDuration');
+  const stateLabel = document.getElementById('videoManualControllerStateLabel');
+  const stepLabel = document.getElementById('videoManualControllerStepLabel');
+  const selectedLabel = document.getElementById('videoManualSelectedLabel');
+  const helper = document.getElementById('videoManualSelectionHelper');
+  const project = getSelectedVideoManualProject();
+  const playerState = videoManualState.playerState;
+  const canControl = videoManualState.claimed && ['ready', 'paused', 'playing'].includes(playerState.mode);
+
+  if (selectedLabel) {
+    selectedLabel.textContent = videoManualState.mode === 'controller'
+      ? `Project: ${getVideoManualSelectedProjectTitle()}`
+      : (project ? `Selected: ${project.title || 'Untitled Project'}` : 'Select a video manual project');
+  }
+
+  if (helper) {
+    if (videoManualState.mode === 'picker') {
+      helper.textContent = 'Choose a deployed manual for the scanned model.';
+    } else if (playerState.mode === 'loading') {
+      helper.textContent = 'Loading on monitor...';
+    } else if (playerState.mode === 'error') {
+      helper.textContent = playerState.error || 'Monitor not responding. Please try again.';
+    } else {
+      helper.textContent = playerState.statusText || 'Ready on monitor. Waiting for play.';
+    }
+  }
+
+  if (stateLabel) {
+    stateLabel.textContent = playerState.statusText || 'Idle';
+  }
+
+  if (stepLabel) {
+    const currentStep = Math.min((playerState.currentStepIndex || 0) + 1, Math.max(playerState.stepCount || 0, 1));
+    stepLabel.textContent = playerState.stepCount
+      ? `Step ${currentStep} / ${playerState.stepCount}`
+      : 'Step information unavailable';
+  }
+
+  if (seekSlider) {
+    const duration = Number(playerState.duration) || 0;
+    const currentTime = Number(playerState.currentTime) || 0;
+    seekSlider.max = duration > 0 ? String(duration) : '0';
+    seekSlider.value = String(Math.min(currentTime, duration));
+    seekSlider.disabled = !canControl || duration <= 0;
+  }
+
+  if (seekCurrent) seekCurrent.textContent = formatVideoManualDuration(playerState.currentTime || 0);
+  if (seekDuration) seekDuration.textContent = formatVideoManualDuration(playerState.duration || 0);
+
+  if (playPauseButton) {
+    playPauseButton.disabled = !canControl;
+    playPauseButton.textContent = playerState.isPlaying ? 'Pause' : 'Play';
+  }
+  if (prevStepButton) prevStepButton.disabled = !canControl;
+  if (nextStepButton) nextStepButton.disabled = !canControl;
+  if (exitButton) exitButton.disabled = !videoManualState.claimed;
+}
+
+function connectVideoManualControlStream() {
+  const sessionKey = getVideoManualSessionKey();
+  if (!sessionKey) return;
+  if (videoManualState.controlStream && videoManualState.sessionKey === sessionKey) return;
+
+  disconnectVideoManualControlStream();
+  videoManualState.sessionKey = sessionKey;
+  videoManualState.controlStream = new EventSource(`${serverURL}/sse/machine-player/${encodeURIComponent(sessionKey)}`);
+  videoManualState.controlStream.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'player-state') {
+        videoManualState.playerState = {
+          ...videoManualState.playerState,
+          ...(data.playback || {}),
+        };
+        if (data.activeControllerId === videoManualState.controllerId) {
+          videoManualState.claimed = true;
+        } else if (data.activeControllerId && data.activeControllerId !== videoManualState.controllerId) {
+          videoManualState.claimed = false;
+        }
+        if (['ready', 'paused', 'playing', 'error', 'idle'].includes(videoManualState.playerState.mode)) {
+          stopVideoManualLoadingTimeout();
+        }
+        updateVideoManualControllerUi();
+      }
+    } catch (error) {
+      console.error('❌ Failed to parse machine player SSE message:', error);
+    }
+  };
+}
+
+async function claimVideoManualControl() {
+  const sessionKey = getVideoManualSessionKey();
+  if (!sessionKey) return false;
+
+  connectVideoManualControlStream();
+
+  const response = await fetch(`${serverURL}/api/machine-player/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      machineId: sessionKey,
+      controllerId: videoManualState.controllerId,
+      controllerLabel: `Tablet ${getSessionID() || currentProductDetails.sebanggo || sessionKey}`,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Unable to claim machine control');
+  }
+
+  videoManualState.claimed = true;
+  stopVideoManualHeartbeat();
+  videoManualState.heartbeatTimer = setInterval(() => {
+    fetch(`${serverURL}/api/machine-player/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ machineId: sessionKey, controllerId: videoManualState.controllerId }),
+    }).catch((error) => console.error('❌ Machine player heartbeat failed:', error));
+  }, 30000);
+  return true;
+}
+
+async function releaseVideoManualControl() {
+  stopVideoManualHeartbeat();
+  stopVideoManualLoadingTimeout();
+
+  if (videoManualState.claimed && videoManualState.sessionKey) {
+    try {
+      await fetch(`${serverURL}/api/machine-player/release`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machineId: videoManualState.sessionKey, controllerId: videoManualState.controllerId }),
+        keepalive: true,
+      });
+    } catch (error) {
+      console.error('❌ Failed to release machine player control:', error);
+    }
+  }
+
+  videoManualState.claimed = false;
+  disconnectVideoManualControlStream();
+}
+
+async function sendVideoManualCommand(command, payload = {}) {
+  if (!videoManualState.claimed || !videoManualState.sessionKey) {
+    throw new Error('Machine control session is not active');
+  }
+
+  const response = await fetch(`${serverURL}/api/machine-player/command`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      machineId: videoManualState.sessionKey,
+      controllerId: videoManualState.controllerId,
+      command,
+      payload,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || `Command failed: ${command}`);
+  }
+  return data;
+}
+
+function syncVideoManualLauncherState() {
+  const button = document.getElementById('videoManualLauncher');
+  if (!button) return;
+
+  const model = String(getCurrentProductModel() || '').trim();
+  const enabled = !!model;
+  button.disabled = false; // never truly disable — we handle it in click
+  button.className = `video-manual-launcher${enabled ? '' : ' is-disabled'}${button.classList.contains('is-expanded') ? ' is-expanded' : ''}`;
+  button.innerHTML = `
+    <span class="video-manual-launcher__icon">🎬</span>
+    <span class="video-manual-launcher__label">${enabled ? 'Manual' : 'Manual<small>Scan first</small>'}</span>
+  `;
+
+  // Sync PDF buttons too
+  const prevBtn = document.getElementById('pdfPrevPageBtn');
+  const nextBtn = document.getElementById('pdfNextPageBtn');
+  if (prevBtn) prevBtn.className = `video-manual-launcher pdf-page-btn${enabled ? '' : ' is-disabled'}`;
+  if (nextBtn) nextBtn.className = `video-manual-launcher pdf-page-btn${enabled ? '' : ' is-disabled'}`;
+}
+
+function renderVideoManualProjects() {
+  const grid = document.getElementById('videoManualProjectGrid');
+  const empty = document.getElementById('videoManualEmptyState');
+  const loading = document.getElementById('videoManualLoadingState');
+  const subtitle = document.getElementById('videoManualSubtitle');
+  const selectedLabel = document.getElementById('videoManualSelectedLabel');
+  const actionButton = document.getElementById('videoManualSelectButton');
+  const model = String(getCurrentProductModel() || '').trim();
+
+  if (!grid || !empty || !loading || !subtitle || !selectedLabel || !actionButton) return;
+
+  subtitle.textContent = model
+    ? `${model} · ${videoManualState.projects.length} deployed project${videoManualState.projects.length === 1 ? '' : 's'}`
+    : 'No scanned model';
+
+  loading.style.display = videoManualState.loading ? 'flex' : 'none';
+
+  if (!videoManualState.loading && videoManualState.projects.length === 0) {
+    empty.style.display = 'flex';
+    grid.innerHTML = '';
+  } else {
+    empty.style.display = 'none';
+    grid.innerHTML = videoManualState.projects.map(project => {
+      const isSelected = String(project._id) === String(videoManualState.selectedProjectId);
+      const thumb = project.thumbnailUrl
+        ? `<div class="video-manual-card__thumb"><img src="${project.thumbnailUrl}" alt="${project.title || 'Video manual thumbnail'}"></div>`
+        : `<div class="video-manual-card__thumb video-manual-card__thumb--fallback"><div class="video-manual-card__fallback-title">${project.title || 'Untitled Project'}</div></div>`;
+
+      return `
+        <button type="button" class="video-manual-card${isSelected ? ' is-selected' : ''}" data-project-id="${project._id}">
+          ${thumb}
+          <div class="video-manual-card__body">
+            <div class="video-manual-card__title">${project.title || 'Untitled Project'}</div>
+            ${project.description ? `<div class="video-manual-card__desc">${project.description}</div>` : ''}
+            <div class="video-manual-card__meta">${project.stepsCount || 0} steps${project.duration ? ` · ${formatVideoManualDuration(project.duration)}` : ''}</div>
+            <div class="video-manual-card__meta">Updated ${new Date(project.updatedAt || project.deployedAt || Date.now()).toLocaleDateString()}</div>
+          </div>
+        </button>
+      `;
+    }).join('');
+
+    grid.querySelectorAll('[data-project-id]').forEach(card => {
+      card.addEventListener('click', () => {
+        openVideoManualDetail(card.dataset.projectId);
+      });
+    });
+  }
+
+  updateVideoManualControllerUi();
+}
+
+function openVideoManualDetail(projectId) {
+  videoManualState.selectedProjectId = projectId;
+  const project = getSelectedVideoManualProject();
+  if (!project) return;
+
+  const detailPanel = document.getElementById('videoManualDetailPanel');
+  if (!detailPanel) return;
+
+  const subtitle = document.getElementById('videoManualSubtitle');
+  if (subtitle) subtitle.textContent = project.title || 'Untitled Project';
+
+  const rev = project.deployedRevision || project.revision || null;
+  const revBadge = rev != null ? `<span class="vmd-badge">Rev ${rev}</span>` : '';
+  const updatedDate = project.updatedAt || project.deployedAt
+    ? new Date(project.updatedAt || project.deployedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    : null;
+  const deployedDate = project.deployedAt
+    ? new Date(project.deployedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    : null;
+
+  const rows = [
+    { label: 'Steps', value: String(project.stepsCount || 0) },
+    project.duration ? { label: 'Duration', value: formatVideoManualDuration(project.duration) } : null,
+    rev != null ? { label: 'Revision', value: `Rev ${rev}` } : null,
+    deployedDate ? { label: 'Deployed', value: deployedDate } : null,
+    updatedDate ? { label: 'Updated', value: updatedDate } : null,
+  ].filter(Boolean);
+
+  const rowsHtml = rows.map(r =>
+    `<div class="vmd-row"><span class="vmd-row__label">${r.label}</span><span class="vmd-row__value">${r.value}</span></div>`
+  ).join('');
+
+  detailPanel.innerHTML = `
+    <div class="vmd">
+      <button type="button" class="vmd-back" id="videoManualDetailBackBtn">&#8592; Projects</button>
+      <div class="vmd-header">
+        <span class="vmd-title">${project.title || 'Untitled Project'}</span>
+        ${revBadge}
+      </div>
+      ${project.description ? `<p class="vmd-desc">${project.description}</p>` : ''}
+      <div class="vmd-table">${rowsHtml}</div>
+      <button type="button" class="vmd-play" id="videoManualDetailPlayBtn">Play on Monitor</button>
+    </div>
+  `;
+
+  document.getElementById('videoManualDetailBackBtn')?.addEventListener('click', () => {
+    const model = String(getCurrentProductModel() || '').trim();
+    const sub = document.getElementById('videoManualSubtitle');
+    if (sub) sub.textContent = model
+      ? `${model} · ${videoManualState.projects.length} deployed project${videoManualState.projects.length === 1 ? '' : 's'}`
+      : 'No scanned model';
+    setVideoManualMode('picker');
+  });
+  document.getElementById('videoManualDetailPlayBtn')?.addEventListener('click', () => {
+    handleVideoManualSelection();
+  });
+
+  setVideoManualMode('detail');
+}
+
+async function loadVideoManualProjects() {
+  const model = String(getCurrentProductModel() || '').trim();
+  videoManualState.loading = true;
+  videoManualState.projects = [];
+  videoManualState.selectedProjectId = null;
+  renderVideoManualProjects();
+
+  if (!model) {
+    videoManualState.loading = false;
+    renderVideoManualProjects();
+    return;
+  }
+
+  try {
+    const response = await fetch(`${serverURL}/api/factory/video-manuals?model=${encodeURIComponent(model)}`);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    videoManualState.projects = Array.isArray(data.projects) ? data.projects : [];
+  } catch (error) {
+    console.error('❌ Failed to load factory video manuals:', error);
+    videoManualState.projects = [];
+  } finally {
+    videoManualState.loading = false;
+    renderVideoManualProjects();
+  }
+}
+
+async function closeVideoManualPicker({ sendExit = true } = {}) {
+  const modal = document.getElementById('videoManualModal');
+  const shouldExit = sendExit && videoManualState.mode === 'controller' && !!videoManualState.playerState.projectId;
+  if (shouldExit && videoManualState.claimed) {
+    try {
+      await sendVideoManualCommand('exit');
+    } catch (error) {
+      console.error('❌ Failed to send exit command while closing modal:', error);
+    }
+  }
+  if (modal) {
+    modal.style.display = 'none';
+  }
+  setVideoManualMode('picker');
+  videoManualState.playerState = {
+    ...videoManualState.playerState,
+    mode: 'idle',
+    projectId: null,
+    title: '',
+    statusText: 'Idle',
+    currentTime: 0,
+    duration: 0,
+    currentStepIndex: 0,
+    stepCount: 0,
+    canPlay: false,
+    isPlaying: false,
+    error: ''
+  };
+  videoManualState.selectedProjectId = null;
+  updateVideoManualControllerUi();
+  await releaseVideoManualControl();
+}
+
+async function openVideoManualPicker() {
+  const model = String(getCurrentProductModel() || '').trim();
+  if (!model) {
+    showAlert('No Video Manuals found. Please call leader for assistance');
+    return;
+  }
+
+  const modal = document.getElementById('videoManualModal');
+  if (!modal) return;
+
+  try {
+    await claimVideoManualControl();
+  } catch (error) {
+    showAlert(error.message || 'Another tablet is already controlling this machine');
+    return;
+  }
+
+  modal.style.display = 'flex';
+  setVideoManualMode('picker');
+  await loadVideoManualProjects();
+  updateVideoManualControllerUi();
+
+  if (!videoManualState.projects.length) {
+    const empty = document.getElementById('videoManualEmptyState');
+    if (empty) {
+      empty.innerHTML = '<div class="video-manual-empty-state__icon">🎬</div><div class="video-manual-empty-state__title">No Video Manuals found. Please call leader for assistance</div><div class="video-manual-empty-state__body">Only explicitly deployed manuals appear here.</div>';
+    }
+  }
+}
+
+function handleVideoManualSelection() {
+  const selectedProject = getSelectedVideoManualProject();
+  if (!selectedProject) return;
+
+  videoManualState.playerState = {
+    ...videoManualState.playerState,
+    mode: 'loading',
+    projectId: selectedProject._id,
+    title: selectedProject.title || 'Video Manual',
+    statusText: 'Loading on monitor...',
+    currentTime: 0,
+    duration: selectedProject.duration || 0,
+    currentStepIndex: 0,
+    stepCount: selectedProject.stepsCount || 0,
+    canPlay: false,
+    isPlaying: false,
+    error: '',
+  };
+  setVideoManualMode('controller');
+  updateVideoManualControllerUi();
+
+  stopVideoManualLoadingTimeout();
+  videoManualState.loadingTimer = setTimeout(() => {
+    videoManualState.playerState = {
+      ...videoManualState.playerState,
+      mode: 'error',
+      statusText: 'Monitor not responding. Please try again.',
+      error: 'Monitor not responding. Please try again.',
+    };
+    updateVideoManualControllerUi();
+  }, 12000);
+
+  sendVideoManualCommand('load', {
+    projectId: selectedProject._id,
+    title: selectedProject.title || 'Video Manual',
+  }).catch((error) => {
+    stopVideoManualLoadingTimeout();
+    videoManualState.playerState = {
+      ...videoManualState.playerState,
+      mode: 'error',
+      statusText: error.message,
+      error: error.message,
+    };
+    updateVideoManualControllerUi();
+  });
+}
+
+function ensureVideoManualPickerUi() {
+  if (document.getElementById('videoManualModal')) {
+    syncVideoManualLauncherState();
+    return;
+  }
+
+  const style = document.createElement('style');
+  style.textContent = `
+    .video-manual-launcher {
+      position: fixed;
+      right: max(12px, env(safe-area-inset-right));
+      bottom: max(12px, env(safe-area-inset-bottom));
+      z-index: 9998;
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+      overflow: hidden;
+      min-height: 48px;
+      width: 48px;
+      padding: 0;
+      border: none;
+      border-radius: 24px;
+      background: #0f766e;
+      color: white;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+                  border-radius 0.3s ease,
+                  box-shadow 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      white-space: nowrap;
+    }
+    .pdf-page-btn {
+      width: 48px;
+      height: 48px;
+      padding: 0;
+      border-radius: 24px !important;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .pdf-page-btn.is-interacting {
+      width: 64px;
+      height: 64px;
+      border-radius: 32px !important;
+    }
+    .pdf-page-btn.is-interacting .video-manual-launcher__icon {
+      font-size: 28px;
+      width: 64px;
+      height: 64px;
+    }
+    .video-manual-launcher__icon {
+      flex-shrink: 0;
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .video-manual-launcher__label {
+      padding-right: 14px;
+      opacity: 0;
+      transition: opacity 0.15s ease 0.1s;
+      pointer-events: none;
+    }
+    .video-manual-launcher.is-expanded {
+      width: 130px;
+      border-radius: 12px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    }
+    .video-manual-launcher.is-expanded .video-manual-launcher__label {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .video-manual-launcher.is-disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+    .video-manual-launcher small {
+      display: block;
+      font-size: 10px;
+      font-weight: 500;
+      opacity: 0.75;
+    }
+    .video-manual-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 10001;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 12px;
+    }
+    .video-manual-modal__panel {
+      width: min(960px, 100%);
+      max-height: calc(100vh - 24px);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: #ffffff;
+      border-radius: 16px;
+      border: 1px solid #e2e8f0;
+    }
+    .video-manual-modal__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 16px 20px 14px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .video-manual-modal__eyebrow {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      font-weight: 700;
+      color: #0f766e;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .video-manual-modal__title {
+      font-size: clamp(20px, 2.5vw, 28px);
+      line-height: 1.1;
+      font-weight: 800;
+      color: #0f172a;
+      margin: 0;
+    }
+    .video-manual-modal__subtitle {
+      margin-top: 4px;
+      font-size: 13px;
+      color: #64748b;
+      font-weight: 600;
+    }
+    .video-manual-modal__close {
+      border: 1px solid #e2e8f0;
+      background: white;
+      color: #334155;
+      border-radius: 8px;
+      min-height: 38px;
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .video-manual-modal__body {
+      position: relative;
+      padding: 16px 20px;
+      overflow: auto;
+      flex: 1;
+      min-height: 260px;
+    }
+    .video-manual-project-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .video-manual-detail-panel {
+      display: none;
+    }
+    .vmd {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-width: 560px;
+      margin: 0 auto;
+    }
+    .vmd-back {
+      align-self: flex-start;
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: #64748b;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .vmd-back:hover { color: #0f766e; }
+    .vmd-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .vmd-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: #0f172a;
+      line-height: 1.1;
+    }
+    .vmd-badge {
+      font-size: 12px;
+      font-weight: 700;
+      color: #0f766e;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 6px;
+      padding: 3px 8px;
+      white-space: nowrap;
+    }
+    .vmd-table {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .vmd-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .vmd-row:last-child { border-bottom: none; }
+    .vmd-row__label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+    .vmd-row__value {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .vmd-desc {
+      font-size: 14px;
+      color: #475569;
+      line-height: 1.6;
+      margin: 0 0 12px;
+      padding: 14px 16px;
+      background: #f8fafc;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+    }
+    .vmd-play {
+      width: 100%;
+      min-height: 52px;
+      border: none;
+      border-radius: 10px;
+      background: #0f766e;
+      color: white;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .video-manual-controller-panel {
+      display: none;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .video-manual-controller-shell {
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid #e2e8f0;
+    }
+    .video-manual-controller-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 14px;
+    }
+    .video-manual-controller-status {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .video-manual-controller-status span {
+      display: block;
+      min-height: 52px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #0f172a;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .video-manual-controller-timeline {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .video-manual-controller-timeline input[type="range"] {
+      width: 100%;
+      accent-color: #0f766e;
+      height: 28px;
+    }
+    .video-manual-controller-time-row {
+      display: flex;
+      justify-content: space-between;
+      color: #94a3b8;
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .video-manual-controller-buttons {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .video-manual-controller-button {
+      border: 1px solid #e2e8f0;
+      min-height: 52px;
+      border-radius: 10px;
+      padding: 12px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      background: #f8fafc;
+      color: #1e293b;
+      touch-action: manipulation;
+    }
+    .video-manual-controller-button--play {
+      background: #0f766e;
+      color: white;
+      border-color: #0f766e;
+    }
+    .video-manual-controller-button#videoManualPlayPauseButton {
+      grid-column: span 2;
+    }
+    .video-manual-controller-button--exit {
+      background: #fff5f5;
+      color: #dc2626;
+      border-color: #fecaca;
+    }
+    .video-manual-controller-button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .video-manual-card {
+      padding: 0;
+      border: 1px solid #e2e8f0;
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      text-align: left;
+      cursor: pointer;
+      min-height: 100%;
+      transition: border-color 0.15s ease;
+      touch-action: manipulation;
+    }
+    .video-manual-card:hover,
+    .video-manual-card:focus {
+      border-color: #0f766e;
+    }
+    .video-manual-card.__thumb {
+      height: 108px;
+      background: #f1f5f9;
+      overflow: hidden;
+    }
+    .video-manual-card__thumb {
+      height: 108px;
+      background: #f1f5f9;
+      overflow: hidden;
+    }
+    .video-manual-card__thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .video-manual-card__thumb--fallback {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f1f5f9;
+      height: 108px;
+      padding: 12px;
+    }
+    .video-manual-card__fallback-title {
+      font-size: 20px;
+      font-weight: 800;
+      line-height: 1.1;
+      color: #1e293b;
+      word-break: break-word;
+    }
+    .video-manual-card__body {
+      padding: 12px 14px 14px;
+    }
+    .video-manual-card__title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 6px;
+      line-height: 1.2;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .video-manual-card__meta {
+      font-size: 12px;
+      line-height: 1.3;
+      color: #64748b;
+      margin-top: 3px;
+    }
+    .video-manual-card__desc {
+      font-size: 11px;
+      line-height: 1.35;
+      color: #475569;
+      margin-bottom: 6px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .video-manual-loading,
+    .video-manual-empty-state {
+      min-height: 220px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      text-align: center;
+      color: #334155;
+      gap: 10px;
+    }
+    .video-manual-empty-state__icon {
+      font-size: 36px;
+    }
+    .video-manual-empty-state__title {
+      font-size: 18px;
+      font-weight: 700;
+      max-width: 480px;
+    }
+    .video-manual-empty-state__body {
+      font-size: 13px;
+      color: #64748b;
+    }
+    .video-manual-modal__footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 20px;
+      border-top: 1px solid #e2e8f0;
+    }
+    .video-manual-modal__selection {
+      font-weight: 700;
+      font-size: 14px;
+      color: #0f172a;
+    }
+    .video-manual-modal__helper {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #64748b;
+    }
+    .video-manual-modal__actions {
+      display: flex;
+      gap: 10px;
+    }
+    .video-manual-modal__button {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      min-height: 40px;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+      background: white;
+      color: #334155;
+    }
+    .video-manual-modal__button--ghost {
+      background: white;
+      color: #334155;
+    }
+    .video-manual-modal__button--primary {
+      background: #0f766e;
+      color: white;
+      border-color: #0f766e;
+    }
+    .video-manual-modal__button--primary:disabled {
+      background: #94a3b8;
+      border-color: #94a3b8;
+      cursor: not-allowed;
+    }
+    @media (max-width: 900px) {
+      .video-manual-modal {
+        padding: 8px;
+      }
+      .video-manual-modal__panel {
+        width: 100%;
+        max-height: calc(100vh - 16px);
+        border-radius: 14px;
+      }
+      .video-manual-modal__header,
+      .video-manual-modal__body,
+      .video-manual-modal__footer {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+      .video-manual-project-grid {
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      }
+      .video-manual-controller-status {
+        grid-template-columns: 1fr;
+      }
+      .video-manual-controller-buttons {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .video-manual-controller-button#videoManualPlayPauseButton {
+        grid-column: span 2;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+
+  const launcher = document.createElement('button');
+  launcher.id = 'videoManualLauncher';
+  launcher.type = 'button';
+  launcher.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isExpanded = launcher.classList.contains('is-expanded');
+    if (!isExpanded) {
+      // First tap: expand
+      launcher.classList.add('is-expanded');
+      // Auto-collapse if user clicks elsewhere
+      const collapse = (ev) => {
+        if (!launcher.contains(ev.target)) {
+          launcher.classList.remove('is-expanded');
+          document.removeEventListener('click', collapse);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', collapse), 10);
+    } else {
+      // Second tap: open picker
+      launcher.classList.remove('is-expanded');
+      void openVideoManualPicker();
+    }
+  });
+  document.body.appendChild(launcher);
+
+  const pdfPrevBtn = document.createElement('button');
+  pdfPrevBtn.id = 'pdfPrevPageBtn';
+  pdfPrevBtn.type = 'button';
+  pdfPrevBtn.className = 'video-manual-launcher pdf-page-btn';
+  pdfPrevBtn.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 120px)';
+  pdfPrevBtn.innerHTML = '<span class="video-manual-launcher__icon">⬆️</span>';
+
+  const pdfNextBtn = document.createElement('button');
+  pdfNextBtn.id = 'pdfNextPageBtn';
+  pdfNextBtn.type = 'button';
+  pdfNextBtn.className = 'video-manual-launcher pdf-page-btn';
+  pdfNextBtn.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 60px)';
+  pdfNextBtn.innerHTML = '<span class="video-manual-launcher__icon">⬇️</span>';
+
+  const handlePdfBtnInteraction = (btn) => {
+    btn.classList.add('is-interacting');
+
+    // Clear any existing timeouts for THIS specific button
+    if (btn.interactionTimeout) clearTimeout(btn.interactionTimeout);
+    if (btn.failsafeTimeout) clearTimeout(btn.failsafeTimeout);
+
+    // Main shrink timeout
+    btn.interactionTimeout = setTimeout(() => {
+      btn.classList.remove('is-interacting');
+    }, 1500);
+
+    // Absolute failsafe to guarantee it shrinks back
+    btn.failsafeTimeout = setTimeout(() => {
+      btn.classList.remove('is-interacting');
+    }, 2500);
+  };
+
+  pdfPrevBtn.onclick = () => {
+    handlePdfBtnInteraction(pdfPrevBtn);
+    if (window.broadcastPdfCommand) window.broadcastPdfCommand('page_prev');
+  };
+  document.body.appendChild(pdfPrevBtn);
+
+  pdfNextBtn.onclick = () => {
+    handlePdfBtnInteraction(pdfNextBtn);
+    if (window.broadcastPdfCommand) window.broadcastPdfCommand('page_next');
+  };
+  document.body.appendChild(pdfNextBtn);
+
+  window.broadcastPdfCommand = function (action) {
+    const machineNameForSSE = getMachineName();
+    if (machineNameForSSE) {
+      fetch(`${serverURL}/api/broadcast-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          machineId: machineNameForSSE,
+          sebanggo: currentProductDetails?.sebanggo || '',
+          hinban: currentProductDetails?.hinban || '',
+          timestamp: new Date().toISOString(),
+          additionalData: {
+            action: action,
+            language: localStorage.getItem('appLanguage') || 'ja'
+          }
+        })
+      }).catch(e => console.error('Failed to broadcast PDF command:', e));
+    }
+  };
+
+  const modal = document.createElement('div');
+  modal.id = 'videoManualModal';
+  modal.className = 'video-manual-modal';
+  modal.innerHTML = `
+    <div class="video-manual-modal__panel">
+      <div class="video-manual-modal__header">
+        <div>
+          <div class="video-manual-modal__eyebrow">Factory Video Manuals</div>
+          <h2 class="video-manual-modal__title">Manual Picker</h2>
+          <div id="videoManualSubtitle" class="video-manual-modal__subtitle">Loading deployed projects…</div>
+        </div>
+        <button type="button" class="video-manual-modal__close" id="videoManualCloseButton">Close</button>
+      </div>
+      <div class="video-manual-modal__body">
+        <div id="videoManualLoadingState" class="video-manual-loading">
+          <div class="video-manual-empty-state__icon">⏳</div>
+          <div class="video-manual-empty-state__title">Loading deployed video manuals…</div>
+        </div>
+        <div id="videoManualEmptyState" class="video-manual-empty-state">
+          <div class="video-manual-empty-state__icon">🎬</div>
+          <div class="video-manual-empty-state__title">No Video Manuals found. Please call leader for assistance</div>
+          <div class="video-manual-empty-state__body">Only deployed manuals appear here.</div>
+        </div>
+        <div id="videoManualProjectGrid" class="video-manual-project-grid"></div>
+        <div id="videoManualDetailPanel" class="video-manual-detail-panel"></div>
+        <div id="videoManualControllerPanel" class="video-manual-controller-panel">
+          <div class="video-manual-controller-shell">
+            <div class="video-manual-controller-title">Monitor Remote</div>
+            <div class="video-manual-controller-status">
+              <span id="videoManualControllerStateLabel">Idle</span>
+              <span id="videoManualControllerStepLabel">Step information unavailable</span>
+            </div>
+            <div class="video-manual-controller-timeline">
+              <input type="range" id="videoManualSeekSlider" min="0" max="0" step="0.1" value="0" disabled />
+              <div class="video-manual-controller-time-row">
+                <span id="videoManualSeekCurrent">0:00</span>
+                <span id="videoManualSeekDuration">0:00</span>
+              </div>
+            </div>
+            <div class="video-manual-controller-buttons">
+              <button type="button" class="video-manual-controller-button" id="videoManualPrevStepButton">Prev Step</button>
+              <button type="button" class="video-manual-controller-button video-manual-controller-button--play" id="videoManualPlayPauseButton">Play</button>
+              <button type="button" class="video-manual-controller-button" id="videoManualNextStepButton">Next Step</button>
+              <button type="button" class="video-manual-controller-button" id="videoManualBackToPickerButton">Projects</button>
+              <button type="button" class="video-manual-controller-button video-manual-controller-button--exit" id="videoManualExitButton">Exit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="video-manual-modal__footer">
+        <div>
+          <div id="videoManualSelectedLabel" class="video-manual-modal__selection">Select a video manual project</div>
+          <div id="videoManualSelectionHelper" class="video-manual-modal__helper">Choose a deployed manual for the scanned model.</div>
+        </div>
+        <div class="video-manual-modal__actions">
+          <button type="button" class="video-manual-modal__button video-manual-modal__button--ghost" id="videoManualCloseFooterButton">Cancel</button>
+          <button type="button" class="video-manual-modal__button video-manual-modal__button--primary" id="videoManualSelectButton" disabled>Select</button>
+        </div>
+      </div>
+    </div>
+  `;
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) {
+      void closeVideoManualPicker();
+    }
+  });
+  document.body.appendChild(modal);
+
+  document.getElementById('videoManualCloseButton')?.addEventListener('click', () => { void closeVideoManualPicker(); });
+  document.getElementById('videoManualCloseFooterButton')?.addEventListener('click', () => { void closeVideoManualPicker(); });
+  document.getElementById('videoManualSelectButton')?.addEventListener('click', handleVideoManualSelection);
+  document.getElementById('videoManualBackToPickerButton')?.addEventListener('click', () => {
+    setVideoManualMode('picker');
+    updateVideoManualControllerUi();
+  });
+  document.getElementById('videoManualPlayPauseButton')?.addEventListener('click', async () => {
+    try {
+      await sendVideoManualCommand(videoManualState.playerState.isPlaying ? 'pause' : 'play');
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+  document.getElementById('videoManualPrevStepButton')?.addEventListener('click', async () => {
+    try {
+      await sendVideoManualCommand('prev-step');
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+  document.getElementById('videoManualNextStepButton')?.addEventListener('click', async () => {
+    try {
+      await sendVideoManualCommand('next-step');
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+  document.getElementById('videoManualExitButton')?.addEventListener('click', async () => {
+    try {
+      await sendVideoManualCommand('exit');
+    } catch (error) {
+      console.error('❌ Failed to send exit command:', error);
+    } finally {
+      void closeVideoManualPicker({ sendExit: false });
+    }
+  });
+  document.getElementById('videoManualSeekSlider')?.addEventListener('change', async (event) => {
+    try {
+      await sendVideoManualCommand('seek', { timelineTime: Number(event.target.value) || 0 });
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+
+  syncVideoManualLauncherState();
+}
+
+// Function to get machine name
+function getMachineName() {
+  return document.getElementById('process')?.value || 'MACHINE';
+}
+
+// OZMANAS-specific flag helper
+function isOZMANASMachine() {
+  const machineFromQuery = String(selectedMachine || '').trim().toUpperCase();
+  const machineFromProcess = String(document.getElementById('process')?.value || '').trim().toUpperCase();
+  return machineFromQuery === 'OZMANAS' || machineFromProcess === 'OZMANAS';
+}
+
+function updateSendToMachineVisibility() {
+  const sendToMachineButton = document.getElementById('sendtoNC');
+  if (!sendToMachineButton) {
+    return;
+  }
+
+  const shouldHide = isOZMANASMachine();
+  sendToMachineButton.hidden = shouldHide;
+  sendToMachineButton.style.display = shouldHide ? 'none' : '';
+}
+
+// Helper function to parse and validate material codes (case-sensitive)
+// Returns: { isValid: boolean, matchedCode: string|null, allCodes: string[] }
+function validateMaterialCode(scannedCode, expectedCodeString) {
+  if (!expectedCodeString) {
+    return { isValid: false, matchedCode: null, allCodes: [] };
+  }
+
+  // Split by comma and trim whitespace
+  const allCodes = expectedCodeString.split(',').map(code => code.trim()).filter(code => code);
+
+  // Case-sensitive exact match
+  const matchedCode = allCodes.find(code => code === scannedCode);
+
+  return {
+    isValid: !!matchedCode,
+    matchedCode: matchedCode || null,
+    allCodes: allCodes
+  };
+}
+
+// Helper function to format material codes for display
+// Example: "MA44,MA90" -> "MA44 or MA90"
+function formatMaterialCodesForDisplay(materialCodeString) {
+  if (!materialCodeString) {
+    return '';
+  }
+
+  const codes = materialCodeString.split(',').map(code => code.trim()).filter(code => code);
+
+  if (codes.length === 0) {
+    return '';
+  } else if (codes.length === 1) {
+    return codes[0];
+  } else {
+    return codes.join(' or ');
+  }
+}
+
+// Function to save current step to localStorage
+function saveCurrentStep(step) {
+  currentStep = step;
+  const key = `${uniquePrefix}currentStep`;
+  console.log('Saving step:', step, 'with key:', key);
+  localStorage.setItem(key, step);
+}
+
+// Function to get current step from localStorage
+function getCurrentStepFromStorage() {
+  const key = `${uniquePrefix}currentStep`;
+  const saved = localStorage.getItem(key);
+  console.log('Getting step from key:', key, '→ value:', saved);
+  return saved ? parseInt(saved) : 0;
+}
+
+// The scan workflow is "complete" ONLY after Step 3 (send to machine, or for
+// OZMANAS/400D the トムソンボード scan). Refreshing during Step 1/2 must restart.
+function markScanWorkflowComplete() {
+  try { localStorage.setItem(`${uniquePrefix}scanComplete`, 'true'); } catch (e) { }
+}
+function clearScanWorkflowComplete() {
+  try { localStorage.removeItem(`${uniquePrefix}scanComplete`); } catch (e) { }
+}
+window.isScanWorkflowComplete = function () {
+  return localStorage.getItem(`${uniquePrefix}scanComplete`) === 'true';
+};
+
+// Function to show Step 0 Modal (Worker Name Verification)
+window.showStep0Modal = function () {
+  clearScanWorkflowComplete();
+  if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
+
+  const modal = document.getElementById('step0Modal');
+  const confirmState = document.getElementById('step0ConfirmState');
+  const selectState = document.getElementById('step0SelectState');
+  const workerInput = document.getElementById('Machine Operator');
+  const currentWorkerLabel = document.getElementById('step0CurrentWorkerName');
+
+  ['step1Modal', 'step2Modal', 'step3Modal'].forEach(id => {
+    const m = document.getElementById(id);
+    if (m) m.style.display = 'none';
+  });
+
+  const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+  const rawValue = activeNames.length > 0 ? activeNames : (workerInput ? workerInput.value.trim() : '');
+  const workerDisplay = formatWorkerDisplayLines(rawValue);
+
+  if (workerDisplay !== '') {
+    currentWorkerLabel.textContent = workerDisplay;
+    confirmState.style.display = 'flex';
+    selectState.style.display = 'none';
+  } else {
+    confirmState.style.display = 'none';
+    selectState.style.display = 'flex';
+    if (typeof window.renderWorkerListUI === 'function') window.renderWorkerListUI();
+  }
+
+  modal.style.display = 'block';
+  saveCurrentStep(0);
+};
+
+window.proceedFromStep0 = function () {
+  const workerInput = document.getElementById("Machine Operator");
+  if (!workerInput || !workerInput.value.trim()) {
+    if (typeof showToast === 'function') showToast(_t('toast_select_worker'));
+    return;
+  }
+
+  if (typeof saveInputs === 'function') saveInputs();
+
+  document.getElementById('step0Modal').style.display = 'none';
+  if (typeof isChecklistLocked === 'function' && isChecklistLocked()) {
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    localStorage.setItem(pfx + 'activeChecklistStart', String(Date.now()));
+    if (typeof assertMachineState === 'function') assertMachineState();
+    if (typeof window.goToChecklistTab === 'function') {
+      window.goToChecklistTab();
+      return;
+    }
+  }
+  showStep1Modal();
+};
+
+window.confirmWorkerName = function () {
+  document.getElementById('step0Modal').style.display = 'none';
+  if (typeof isChecklistLocked === 'function' && isChecklistLocked()) {
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    localStorage.setItem(pfx + 'activeChecklistStart', String(Date.now()));
+    if (typeof assertMachineState === 'function') assertMachineState();
+    if (typeof window.goToChecklistTab === 'function') {
+      window.goToChecklistTab();
+      return;
+    }
+  }
+  showStep1Modal();
+};
+
+window.changeWorkerName = function () {
+  document.getElementById('step0ConfirmState').style.display = 'none';
+  document.getElementById('step0SelectState').style.display = 'flex';
+  if (typeof window.renderWorkerListUI === 'function') window.renderWorkerListUI();
+};
+
+// Function to show Step 1 Modal
+function showStep1Modal() {
+  clearScanWorkflowComplete(); // (re)starting the workflow -> not complete
+  const modal = document.getElementById('step1Modal');
+  const machineName = document.getElementById('step1MachineName');
+  const content = document.getElementById('step1Content');
+  const scanner = document.getElementById('step1Scanner');
+
+  machineName.textContent = getMachineName();
+  content.style.display = 'flex';
+  scanner.style.display = 'none';
+  modal.style.display = 'block';
+  saveCurrentStep(1);
+}
+
+// Function to show Step 2 Modal
+function showStep2Modal() {
+  const modal = document.getElementById('step2Modal');
+  const machineName = document.getElementById('step2MachineName');
+  const content = document.getElementById('step2Content');
+  const scanner = document.getElementById('step2Scanner');
+
+  // Use cached product details instead of reading from DOM
+  document.getElementById('step2Sebanggo').textContent = currentProductDetails.sebanggo;
+  document.getElementById('step2Hinban').textContent = currentProductDetails.hinban;
+  // Format material codes for display: "MA44,MA90" -> "MA44 or MA90"
+  document.getElementById('step2Material').textContent = formatMaterialCodesForDisplay(currentProductDetails.materialCode);
+
+  machineName.textContent = getMachineName();
+  content.style.display = 'flex';
+  scanner.style.display = 'none';
+  modal.style.display = 'block';
+  saveCurrentStep(2);
+}
+
+// Function to show Step 3 Modal
+function showStep3Modal() {
+  const modal = document.getElementById('step3Modal');
+  const machineName = document.getElementById('step3MachineName');
+  const title = modal?.querySelector('h2');
+  const content = document.getElementById('step3Content');
+  const instruction = content?.querySelector('p');
+  const arrow = content?.querySelector('div');
+  const actionButton = document.getElementById('startStep3Send');
+
+  let scanner = document.getElementById('step3Scanner');
+  if (!scanner && content) {
+    scanner = document.createElement('div');
+    scanner.id = 'step3Scanner';
+    scanner.style.display = 'none';
+    scanner.style.width = '100%';
+    scanner.style.maxWidth = 'min(500px, 80vw)';
+    scanner.innerHTML = '<div id="step3QrReader"></div>';
+    content.appendChild(scanner);
+  } else if (scanner && !scanner.querySelector('#step3QrReader')) {
+    scanner.innerHTML = '<div id="step3QrReader"></div>';
+  }
+
+  let errorMsg = document.getElementById('step3ErrorMsg');
+  if (!errorMsg && content) {
+    errorMsg = document.createElement('div');
+    errorMsg.id = 'step3ErrorMsg';
+    errorMsg.style.display = 'none';
+    errorMsg.style.marginTop = '12px';
+    errorMsg.innerHTML = '<p style="color: #cc0000; font-weight: 700; text-align: center;"></p>';
+    content.appendChild(errorMsg);
+  }
+
+  if (step3Scanner) {
+    step3Scanner.stop().catch(err => console.error('Error stopping step3 scanner:', err));
+    step3Scanner = null;
+  }
+
+  if (content) content.style.display = 'flex';
+  if (scanner) scanner.style.display = 'none';
+  if (errorMsg) errorMsg.style.display = 'none';
+
+  if (instruction) instruction.style.display = '';
+  if (arrow) arrow.style.display = '';
+  if (actionButton) actionButton.style.display = '';
+  const skipBtn = document.getElementById('btnSkipStep3Send');
+  if (skipBtn) skipBtn.style.display = 'none';
+
+  if (isOZMANASMachine()) {
+    if (title) {
+      title.innerHTML = 'Step <span style="color: #f39c12;">3</span>: scan <strong>トムソンボード</strong> / トムソンボードスキャン';
+    }
+    if (instruction) instruction.textContent = 'Scan トムソンボード / トムソンボードをスキャンしてください';
+    if (actionButton) {
+      actionButton.textContent = 'Scan トムソンボード';
+      actionButton.style.background = 'linear-gradient(135deg, #f39c12, #e67e22)';
+      actionButton.style.boxShadow = '0 4px 15px rgba(243, 156, 18, 0.35)';
+    }
+  } else {
+    if (title) {
+      title.innerHTML = 'Step <span style="color: #f39c12;">3</span>: send to <strong>Machine</strong> / データ送信';
+    }
+    if (instruction) instruction.textContent = 'Press this button / このボタンを押して';
+    if (actionButton) {
+      actionButton.disabled = false;
+      actionButton.style.opacity = '1';
+      actionButton.textContent = 'マシンに送信 / Send to machine';
+      actionButton.style.background = 'linear-gradient(135deg, #4CAF50, #45a049)';
+      actionButton.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.4)';
+    }
+  }
+
+  // Use cached product details instead of reading from DOM
+  document.getElementById('step3Sebanggo').textContent = currentProductDetails.sebanggo;
+  document.getElementById('step3Hinban').textContent = currentProductDetails.hinban;
+  // Format material codes for display: "MA44,MA90" -> "MA44 or MA90"
+  document.getElementById('step3Material').textContent = formatMaterialCodesForDisplay(currentProductDetails.materialCode);
+
+  machineName.textContent = getMachineName();
+  modal.style.display = 'block';
+  saveCurrentStep(3);
+}
+
+// Function to close all step modals
+function closeAllStepModals() {
+  document.getElementById('step1Modal').style.display = 'none';
+  document.getElementById('step2Modal').style.display = 'none';
+  document.getElementById('step3Modal').style.display = 'none';
+
+  // Stop any running scanners
+  if (step1Scanner) {
+    step1Scanner.stop().catch(err => console.error("Error stopping step1 scanner:", err));
+    step1Scanner = null;
+  }
+  if (step2Scanner) {
+    step2Scanner.stop().catch(err => console.error("Error stopping step2 scanner:", err));
+    step2Scanner = null;
+  }
+  if (step3Scanner) {
+    step3Scanner.stop().catch(err => console.error("Error stopping step3 scanner:", err));
+    step3Scanner = null;
+  }
+}
+
+// Function to reset all steps
+function resetAllSteps() {
+  closeAllStepModals();
+
+  // Clear sub-dropdown
+  const subDropdown = document.getElementById('sub-dropdown');
+  if (subDropdown) {
+    subDropdown.selectedIndex = 0;
+  }
+
+  // Clear material lots
+  materialLots = [];
+  saveMaterialLots();
+  renderMaterialLotTags();
+
+  // Clear per-lot production tracking (shots / meters / pieces) and chosen machine
+  if (typeof window.lotProductionReset === 'function') window.lotProductionReset();
+  window.__lotScanMachine = null;
+  window.__pendingPrevLot = null;
+  window.__lotCycleMachinesDone = [];
+  window.__lotSendMachines = [];
+
+  // Clear product details cache
+  currentProductDetails = {
+    sebanggo: '',
+    hinban: '',
+    materialCode: '',
+    model: '',
+    kataban: ''
+  };
+
+  // Clear cached product details from localStorage
+  localStorage.removeItem(`${uniquePrefix}cached-sebanggo`);
+  localStorage.removeItem(`${uniquePrefix}cached-hinban`);
+  localStorage.removeItem(`${uniquePrefix}cached-materialCode`);
+  localStorage.removeItem(`${uniquePrefix}cached-model`);
+  localStorage.removeItem(`${uniquePrefix}cached-kataban`);
+
+  // Reset step to 0 and clear from localStorage
+  saveCurrentStep(0);
+  clearScanWorkflowComplete();
+  if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
+  localStorage.removeItem(`${uniquePrefix}sub-dropdown`);
+
+  // Call resetForm() to clear all form data
+  resetForm();
+  syncVideoManualLauncherState();
+
+  // Reset params lock state unconditionally
+  window.paramsVisited = false;
+  window.paramsLocked = false;
+
+  const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+  const confirmedKey = prefix ? `${prefix}paramsConfirmed` : 'DCP_paramsConfirmed';
+  localStorage.removeItem(confirmedKey);
+
+  // Also clear the saved tab index so it doesn't remember the locked tab after a reset
+  localStorage.removeItem(`${prefix}activeTabIndex`);
+
+  // Explicitly reset Values Changed button to prevent it from staying green
+  const btn = document.getElementById('valuesChangedBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.remove('btn-primary');
+    btn.classList.add('btn-secondary');
+  }
+}
+
+// Step 1: Start Scan Button
+document.getElementById('startStep1Scan').addEventListener('click', function (event) {
+  event.preventDefault(); // Prevent form submission
+
+  const content = document.getElementById('step1Content');
+  const scanner = document.getElementById('step1Scanner');
+
+  // Stop any active alert sound and close alert modal
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  if (alertSound) {
+    alertSound.pause();
+    alertSound.currentTime = 0;
+    alertSound.muted = true;
+  }
+  if (scanAlertModal) {
+    scanAlertModal.style.display = 'none';
+  }
+  // Remove red flash effect
+  document.body.classList.remove('flash-red');
+
+  // Clear any previous error messages
+  const errorMsg = document.getElementById('step1ErrorMsg');
+  if (errorMsg) {
+    errorMsg.style.display = 'none';
+  }
+
+  content.style.display = 'none';
+  scanner.style.display = 'block';
+
+  step1Scanner = new Html5Qrcode("step1QrReader");
+
+  step1Scanner.start(
+    { facingMode: "environment" },
+    {
+      fps: 30,
+      qrbox: { width: 1000, height: 1000 },
+      aspectRatio: 1.0,
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
+    },
+    async (qrCodeMessage) => {
+      console.log("Step 1 QR Scanned:", qrCodeMessage);
+
+      const subDropdown = document.getElementById('sub-dropdown');
+      const options = [...subDropdown.options].map(option => option.value);
+
+      if (!options.includes(qrCodeMessage)) {
+        // Stop scanner
+        await step1Scanner.stop();
+        step1Scanner = null;
+
+        // Hide scanner, show button again
+        scanner.style.display = 'none';
+        content.style.display = 'flex';
+
+        // Show error message in modal
+        const errorMsg = document.getElementById('step1ErrorMsg');
+        const errorText = errorMsg.querySelector('p');
+        errorText.innerHTML = `❌ <strong>背番号が存在しません / Sebanggo does not exist</strong><br><br>Scanned: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${qrCodeMessage}</code>`;
+        errorMsg.style.display = 'block';
+
+        // Also show alert with red flash and sound
+        showAlert(`❌ 背番号が存在しません / Sebanggo does not exist\n\nScanned: ${qrCodeMessage}`);
+
+        return;
+      }
+
+      // Stop scanner
+      await step1Scanner.stop();
+      step1Scanner = null;
+
+      // Set dropdown value
+      subDropdown.value = qrCodeMessage;
+
+      // Update previous value for leader verification
+      if (typeof updatePreviousDropdownValue === 'function') {
+        updatePreviousDropdownValue(qrCodeMessage);
+      }
+
+      // Save to localStorage
+      localStorage.setItem(`${uniquePrefix}sub-dropdown`, qrCodeMessage);
+
+      // Fetch product details
+      await fetchProductDetails();
+
+      // Cache product details after fetching
+      currentProductDetails = {
+        sebanggo: qrCodeMessage,
+        hinban: document.getElementById('product-number')?.value || '',
+        materialCode: document.getElementById('material-code')?.value || '',
+        model: document.getElementById('model')?.value || '',
+        kataban: document.getElementById('kataban')?.value || ''
+      };
+
+      console.log('Cached product details:', currentProductDetails);
+
+      // Save cached product details to localStorage
+      localStorage.setItem(`${uniquePrefix}cached-sebanggo`, currentProductDetails.sebanggo);
+      localStorage.setItem(`${uniquePrefix}cached-hinban`, currentProductDetails.hinban);
+      localStorage.setItem(`${uniquePrefix}cached-materialCode`, currentProductDetails.materialCode);
+      localStorage.setItem(`${uniquePrefix}cached-model`, currentProductDetails.model);
+      localStorage.setItem(`${uniquePrefix}cached-kataban`, currentProductDetails.kataban);
+      syncVideoManualLauncherState();
+
+      // 🔴 BROADCAST SCAN TO SSE - Send to machine display page (includes logging)
+      const machineNameForSSE = getMachineName(); // Get the current machine name (e.g., "OZNC04,OZNC06" or "OZNC09")
+      const currentFactory = document.getElementById('selected工場')?.value || '';
+
+      // Generate sessionID for this scan session
+      const current設備 = document.getElementById('process')?.value || '';
+      const todayDate = new Date().toISOString().split('T')[0];
+      const newSessionID = await generateSessionID(
+        currentProductDetails.sebanggo,
+        current設備,
+        currentFactory,
+        todayDate
+      );
+
+      if (newSessionID) {
+        setSessionID(newSessionID);
+        // Fresh production entry: clear any per-lot tracking left over from a
+        // previous (possibly abandoned) session so no phantom "previous lot"
+        // shots prompt appears on the first scan.
+        materialLots = [];
+        saveMaterialLots();
+        renderMaterialLotTags();
+        if (typeof window.lotProductionReset === 'function') window.lotProductionReset();
+        window.__lotScanMachine = null;
+        window.__pendingPrevLot = null;
+        window.__lotCycleMachinesDone = [];
+        window.__lotSendMachines = [];
+        console.log('✅ New session started:', newSessionID);
+      } else {
+        console.warn('⚠️ Failed to generate sessionID');
+      }
+
+      // 🔊 GROUPED MACHINE SUPPORT
+      // If using DCP Grouping.html with grouped machines (e.g., "OZNC04,OZNC06"),
+      // server will split and send SSE to both machines
+      // If using DCP iReporter.html with solo machines (e.g., "OZNC09"),
+      // server will send SSE to only that single machine
+      if (machineNameForSSE) {
+        const isGrouped = machineNameForSSE.includes(',');
+        const machineList = machineNameForSSE.split(',').map(m => m.trim());
+        console.log(`📡 Broadcasting QR scan to ${isGrouped ? 'grouped' : 'solo'} machine(s):`, machineList);
+
+        fetch(`${serverURL}/api/broadcast-scan`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            machineId: machineNameForSSE, // Full string sent (e.g., "OZNC04,OZNC06" or "OZNC09")
+            sebanggo: currentProductDetails.sebanggo,
+            hinban: currentProductDetails.hinban,
+            timestamp: new Date().toISOString(),
+            additionalData: {
+              materialCode: currentProductDetails.materialCode,
+              factory: currentFactory,
+              工場: currentFactory,
+              Worker_Name: document.getElementById('Machine Operator')?.value || '',
+              sessionID: newSessionID,
+              language: localStorage.getItem('appLanguage') || 'ja'
+            }
+          })
+        })
+          .then(response => response.json())
+          .then(data => {
+            console.log('✅ SSE Broadcast successful:', data);
+          })
+          .catch(error => {
+            console.error('❌ SSE Broadcast failed:', error);
+            // Don't block the workflow if broadcast fails
+          });
+      }
+
+      // Apply NC button logic
+      NCPresstoFalse();
+
+      // Close Step 1, Open Step 2
+      document.getElementById('step1Modal').style.display = 'none';
+      showStep2Modal();
+    },
+    (errorMessage) => {
+      // Ignore scan errors
+    }
+  ).catch(err => {
+    console.error("Failed to start Step 1 scanner:", err);
+    showAlert('カメラを起動できませんでした / Could not start camera');
+  });
+});
+
+// Step 2: Start Scan Button
+document.getElementById('startStep2Scan').addEventListener('click', async function (event) {
+  event.preventDefault(); // Prevent form submission
+
+  console.log('🟡 [startStep2Scan] click handler fired');
+  console.log('🟡 [startStep2Scan] __lotScanMachine:', window.__lotScanMachine);
+  console.log('🟡 [startStep2Scan] __step2Processing:', window.__step2Processing);
+  console.log('🟡 [startStep2Scan] step2Modal display:', document.getElementById('step2Modal')?.style.display);
+  console.log('🟡 [startStep2Scan] step2Scanner exists:', !!step2Scanner);
+
+  // Grouped machine: pick which machine this lot is for BEFORE scanning, then
+  // re-enter this handler with the choice made. Single machine skips this.
+  if (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1 && !window.__lotScanMachine) {
+    console.log('🟡 [startStep2Scan] No machine chosen yet, opening chooser...');
+    // Hide step2Modal while the chooser is open so it doesn't show behind it
+    // (especially on the production page where step modals shouldn't be visible).
+    const _s2m = document.getElementById('step2Modal');
+    if (_s2m) _s2m.style.display = 'none';
+    if (typeof window.chooseScanMachine === 'function') {
+      window.chooseScanMachine(() => document.getElementById('startStep2Scan').click());
+      return;
+    }
+  }
+
+  const content = document.getElementById('step2Content');
+  const scanner = document.getElementById('step2Scanner');
+
+  // Stop any active alert sound and close alert modal
+  const alertSound = document.getElementById('alert-sound');
+  const scanAlertModal = document.getElementById('scanAlertModal');
+  if (alertSound) {
+    alertSound.pause();
+    alertSound.currentTime = 0;
+    alertSound.muted = true;
+  }
+  if (scanAlertModal) {
+    scanAlertModal.style.display = 'none';
+  }
+  // Remove red flash effect
+  document.body.classList.remove('flash-red');
+
+  // Clear any previous error messages
+  const errorMsg = document.getElementById('step2ErrorMsg');
+  if (errorMsg) {
+    errorMsg.style.display = 'none';
+  }
+
+  // Ensure the step2Modal itself is visible before starting the camera.
+  // In grouped-machine flows, _recordAndAdvance() hides the modal after the
+  // first machine is done; if we don't re-show it the scanner starts inside a
+  // display:none container and the camera acquires but never renders.
+  const step2Modal = document.getElementById('step2Modal');
+  if (step2Modal && step2Modal.style.display === 'none') {
+    console.log('🟡 [startStep2Scan] step2Modal was hidden — re-showing it');
+    showStep2Modal();
+  }
+
+  content.style.display = 'none';
+  scanner.style.display = 'block';
+
+  console.log('🟡 [startStep2Scan] content hidden, scanner shown');
+  console.log('🟡 [startStep2Scan] step2Modal display (after fix):', step2Modal?.style.display);
+  console.log('🟡 [startStep2Scan] scanner element display:', scanner.style.display);
+  console.log('🟡 [startStep2Scan] scanner offsetWidth:', scanner.offsetWidth, 'offsetHeight:', scanner.offsetHeight);
+
+  // Fresh scan: allow processing one successful QR (guards against the scanner
+  // firing its callback multiple times for the same code before stop() finishes,
+  // which previously double-recorded a lot and made a phantom "previous lot").
+  window.__step2Processing = false;
+
+  // Fully release any previous scanner and rebuild the reader DOM before starting
+  // a new one. Without this, re-scanning (e.g. the 2nd grouped machine) reuses a
+  // stale #step2QrReader and the camera stays locked / never activates.
+  if (step2Scanner) {
+    console.log('🟡 [startStep2Scan] Stopping previous step2Scanner...');
+    try { await step2Scanner.stop(); } catch (e) { console.log('🟡 [startStep2Scan] stop() error (ok):', e.message); }
+    try { step2Scanner.clear(); } catch (e) { }
+    step2Scanner = null;
+    console.log('🟡 [startStep2Scan] Previous scanner cleared');
+  }
+  const step2ReaderHost = document.getElementById('step2QrReader');
+  if (step2ReaderHost) step2ReaderHost.innerHTML = '';
+
+  // Let the DOM apply the cleared reader before the camera stream attaches.
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  console.log('🟡 [startStep2Scan] Creating new Html5Qrcode instance...');
+  console.log('🟡 [startStep2Scan] step2QrReader offsetWidth:', document.getElementById('step2QrReader')?.offsetWidth);
+  step2Scanner = new Html5Qrcode("step2QrReader");
+
+  step2Scanner.start(
+    { facingMode: "environment" },
+    {
+      fps: 30,
+      qrbox: { width: 800, height: 800 },
+      aspectRatio: 1.0,
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
+    },
+    async (qrCodeMessage) => {
+      // Ignore duplicate fires of the same scan while we're already handling one.
+      if (window.__step2Processing) {
+        console.log('🟡 [step2Scan] Ignoring duplicate scan (already processing)');
+        return;
+      }
+      window.__step2Processing = true;
+      console.log("Step 2 QR Scanned:", qrCodeMessage);
+      console.log('🟡 [step2Scan] __lotScanMachine:', window.__lotScanMachine);
+
+      try {
+        // Parse QR code: "Z1Z9,250805-5,500"
+        const parts = qrCodeMessage.split(',');
+
+        if (parts.length < 2) {
+          // Stop scanner
+          await step2Scanner.stop();
+          step2Scanner = null;
+
+          // Hide scanner, show button again
+          scanner.style.display = 'none';
+          content.style.display = 'flex';
+
+          // Show error in modal
+          const errorMsg = document.getElementById('step2ErrorMsg');
+          const errorText = errorMsg.querySelector('p');
+          errorText.innerHTML = `❌ <strong>QRコードの形式が正しくありません / Invalid QR code format</strong><br><br>Scanned: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${qrCodeMessage}</code><br><br>Expected format: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">MaterialCode,LotNumber,Quantity</code>`;
+          errorMsg.style.display = 'block';
+
+          // Also show alert with red flash and sound
+          showAlert(`❌ QRコードの形式が正しくありません / Invalid QR code format\n\nScanned: ${qrCodeMessage}\n\nExpected format: MaterialCode,LotNumber,Quantity`);
+
+          return;
+        }
+
+        const scannedMaterialCode = parts[0].trim();
+        const lotNumber = parts[1].trim();
+
+        // Validate Material Code using cached product details with new multi-value support
+        const expectedMaterialCodeString = currentProductDetails.materialCode || '';
+        const validation = validateMaterialCode(scannedMaterialCode, expectedMaterialCodeString);
+
+        console.log("Material Code Comparison:", {
+          scanned: scannedMaterialCode,
+          expected: expectedMaterialCodeString,
+          allValidCodes: validation.allCodes,
+          isValid: validation.isValid,
+          matchedCode: validation.matchedCode
+        });
+
+        if (!validation.isValid) {
+          // Stop scanner
+          await step2Scanner.stop();
+          step2Scanner = null;
+
+          // Hide scanner, show button again
+          scanner.style.display = 'none';
+          content.style.display = 'flex';
+
+          // Format expected codes for display
+          const expectedDisplay = formatMaterialCodesForDisplay(expectedMaterialCodeString);
+
+          // Show error in modal
+          const errorMsg = document.getElementById('step2ErrorMsg');
+          const errorText = errorMsg.querySelector('p');
+          errorText.innerHTML = `❌ <strong>材料コードが一致しません / Material code mismatch</strong><br><br>Expected: <code style="background: #e8f5e9; padding: 2px 8px; border-radius: 4px; color: #2e7d32;">${expectedDisplay}</code><br>Scanned: <code style="background: #ffebee; padding: 2px 8px; border-radius: 4px; color: #c62828;">${scannedMaterialCode}</code><br><br>Please scan the correct material lot.`;
+          errorMsg.style.display = 'block';
+
+          // Also show alert with red flash and sound
+          showAlert(`❌ 材料コードが一致しません / Material code mismatch\n\nExpected: ${expectedDisplay}\nScanned: ${scannedMaterialCode}\n\nPlease scan the correct material lot.`);
+
+          return;
+        }
+
+        // Log which specific code was matched
+        console.log(`Material code validated successfully. Matched: ${validation.matchedCode}`);
+
+        // Store the actual scanned material code (not all valid codes, just the one scanned)
+        // This could be used later if needed for tracking which specific code was used
+        const actualScannedCode = validation.matchedCode;
+
+        window.__scannedLotQRMap = window.__scannedLotQRMap || {};
+        window.__scannedLotQRMap[lotNumber] = {
+          materialSeiban: scannedMaterialCode,
+          scannedQR: qrCodeMessage
+        };
+
+        // Which machine is this lot for (chosen in the grouped chooser, else the
+        // single machine).
+        const _scanMachine = window.__lotScanMachine
+          || (typeof groupedMachines !== 'undefined' && groupedMachines[0])
+          || (document.getElementById('process') ? document.getElementById('process').value : '');
+        const _isGrouped = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1);
+        const _machineDone = (window.__lotCycleMachinesDone || []).indexOf(_scanMachine) >= 0;
+
+        // Record the lot on the chosen machine's timeline, then photo + previous-lot
+        // ショット数 + (grouped) re-prompt for the other machine before Step 3.
+        const _recordAndAdvance = () => {
+          console.log('🟢 [_recordAndAdvance] called for machine:', _scanMachine, 'lot:', lotNumber);
+          if (typeof window.recordLotScan === 'function') {
+            window.__pendingPrevLot = window.recordLotScan(lotNumber, _scanMachine, 'scanned', {
+              materialSeiban: scannedMaterialCode,
+              scannedQR: qrCodeMessage
+            });
+            console.log('🟢 [_recordAndAdvance] recordLotScan done, __pendingPrevLot:', !!window.__pendingPrevLot);
+            if (typeof window.assertMachineState === 'function') window.assertMachineState();
+          }
+          console.log('🟢 [_recordAndAdvance] Hiding step2Modal');
+          document.getElementById('step2Modal').style.display = 'none';
+          console.log('🟢 [_recordAndAdvance] __lotCycleMachinesDone:', window.__lotCycleMachinesDone);
+          const _afterPhoto = () => {
+            console.log('🟢 [_afterPhoto] called');
+            const _next = () => {
+              console.log('🟢 [_next] called — will call proceedAfterMachineDone or showStep3Modal');
+              if (typeof window.proceedAfterMachineDone === 'function') window.proceedAfterMachineDone();
+              else showStep3Modal();
+            };
+            if (typeof window.afterLotPhotoProceed === 'function') {
+              console.log('🟢 [_afterPhoto] calling afterLotPhotoProceed...');
+              window.afterLotPhotoProceed(_next);
+            }
+            else _next();
+          };
+          // Only require a material-label photo if this lot has none yet. When the
+          // SAME lot is assigned to a second grouped machine, the label was already
+          // photographed, so skip the photo gate and go straight to the chooser.
+          const _hasPhoto = (typeof materialLabelPhotos !== 'undefined')
+            && Array.isArray(materialLabelPhotos)
+            && materialLabelPhotos.some(p => p && p.lotNumber === lotNumber);
+          console.log('🟢 [_recordAndAdvance] _hasPhoto for lot', lotNumber, ':', _hasPhoto);
+          if (!_hasPhoto && typeof window.materialPhotoGate === 'function') {
+            console.log('🟢 [_recordAndAdvance] Opening materialPhotoGate...');
+            window.materialPhotoGate(_afterPhoto);
+          } else {
+            console.log('🟢 [_recordAndAdvance] Skipping photo gate (already has photo), calling _afterPhoto directly');
+            _afterPhoto();
+          }
+        };
+
+        // Add scanned lot to the material lot input (de-dups the 材料ロット list)
+        const success = addScannedLot(lotNumber);
+
+        if (!success) {
+          // Already in the 材料ロット list. For a grouped machine the SAME lot can
+          // run on another machine, so still record it on that machine's timeline
+          // and continue; otherwise it's a genuine duplicate → just go to Step 3.
+          await step2Scanner.stop();
+          step2Scanner = null;
+
+          // Check if this specific machine already has this lot on its timeline
+          const cleanMachine = (_scanMachine && _scanMachine.includes(','))
+            ? (window.__lotScanMachine || _scanMachine.split(',')[0].trim())
+            : _scanMachine;
+          let machineHasLot = false;
+          if (typeof window.getAllLotRecords === 'function') {
+            const allRecs = window.getAllLotRecords();
+            machineHasLot = allRecs.some(r => (r.machine === cleanMachine || r.machine === _scanMachine) && r.lotNumber === lotNumber);
+          }
+
+          if (!machineHasLot || (_isGrouped && !_machineDone)) {
+            console.log("Lot already listed in materialLots, but recording on machine timeline:", _scanMachine);
+            _recordAndAdvance();
+            return;
+          }
+
+          console.log("Lot already added, but material code is correct. Proceeding to Step 3.");
+          const errorMsg = document.getElementById('step2ErrorMsg');
+          const errorText = errorMsg.querySelector('p');
+          errorText.innerHTML = `⚠️ <strong>このロット番号は既に追加されています / Lot number already added</strong><br><br>Lot: <code style="background: #f8f9fa; padding: 2px 8px; border-radius: 4px;">${lotNumber}</code><br><br>Material code is correct. Proceeding to next step...`;
+          errorMsg.style.display = 'block';
+
+          setTimeout(() => {
+            document.getElementById('step2Modal').style.display = 'none';
+            showStep3Modal();
+          }, 2000); // 2 second delay to show the message
+
+          return;
+        }
+
+        // Success - stop scanner and advance
+        console.log('🟡 [step2Scan] Stopping scanner after successful scan...');
+        await step2Scanner.stop();
+        step2Scanner = null;
+        console.log('🟡 [step2Scan] Scanner stopped and nullified');
+
+        console.log("Lot added successfully:", lotNumber);
+
+        // Log material lot scan action
+        await logTabletAction('Scanned material lot (Step 2)', 'in-progress', {
+          lotNumber: lotNumber,
+          specificMachine: _scanMachine,
+          materialCode: actualScannedCode,
+          allMaterialLots: materialLots.map(l => l.lotNumber).join(', ')
+        });
+
+        _recordAndAdvance();
+
+      } catch (error) {
+        console.error("Error processing lot QR code:", error);
+
+        // Stop scanner if still running
+        if (step2Scanner) {
+          await step2Scanner.stop();
+          step2Scanner = null;
+        }
+
+        // Hide scanner, show button again
+        scanner.style.display = 'none';
+        content.style.display = 'flex';
+
+        // Show error in modal
+        const errorMsg = document.getElementById('step2ErrorMsg');
+        const errorText = errorMsg.querySelector('p');
+        errorText.innerHTML = `❌ <strong>QRコードの処理エラー / QR code processing error</strong><br><br>${error.message}`;
+        errorMsg.style.display = 'block';
+
+        // Also show alert with red flash and sound
+        showAlert(`❌ QRコードの処理エラー / QR code processing error\n\n${error.message}`);
+      } finally {
+        // Always reset the processing flag so the scanner can be used again
+        window.__step2Processing = false;
+        console.log('🟡 [step2Scan] __step2Processing reset to false (finally block)');
+      }
+    },
+    (errorMessage) => {
+      // Ignore scan errors
+    }
+  ).then(() => {
+    console.log('🟡 [startStep2Scan] ✅ Scanner started successfully');
+  }).catch(err => {
+    console.error("Failed to start Step 2 scanner:", err);
+    console.error('🔴 [startStep2Scan] Scanner start FAILED:', err.message);
+    console.error('🔴 [startStep2Scan] step2QrReader dimensions:', document.getElementById('step2QrReader')?.offsetWidth, 'x', document.getElementById('step2QrReader')?.offsetHeight);
+    console.error('🔴 [startStep2Scan] step2Modal display:', document.getElementById('step2Modal')?.style.display);
+    showAlert('カメラを起動できませんでした / Could not start camera');
+  });
+});
+
+// Step 2: Override Button (Manual Entry with Leader Verification)
+document.getElementById('overrideStep2').addEventListener('click', function (event) {
+  event.preventDefault(); // Prevent form submission
+
+  const step2Modal = document.getElementById('step2Modal');
+  const leaderVerificationModal = document.getElementById('leaderVerificationModal');
+  const leaderVerificationStatus = document.getElementById('leaderVerificationStatus');
+  const materialLotInput = document.getElementById('材料ロット');
+
+  // Stop Step 2 scanner if running
+  if (step2Scanner) {
+    step2Scanner.stop().catch(err => console.error("Error stopping step2 scanner:", err));
+    step2Scanner = null;
+  }
+
+  // Close Step 2 modal
+  step2Modal.style.display = 'none';
+
+  // Get material code from input (may contain comma-separated values)
+  const materialCodeInput = document.getElementById('material-code');
+  const materialCodeString = materialCodeInput ? materialCodeInput.value.trim() : 'N/A';
+  const materialCodeDisplay = formatMaterialCodesForDisplay(materialCodeString);
+
+  // Find and update the warning text to show material code with blinking
+  const modalContent = leaderVerificationModal.querySelector('.modal-content');
+  const warningTextElement = modalContent.querySelector('p[style*="font-size"], p[style*="color: #666"]');
+
+  if (warningTextElement) {
+    // Replace the warning text with blinking material code (formatted for multiple codes)
+    warningTextElement.innerHTML = `<span class="material-code-blink">材料: ${materialCodeDisplay} / Material Code: ${materialCodeDisplay}</span>`;
+    warningTextElement.style.fontSize = '18px';
+    warningTextElement.style.margin = '15px 0';
+  }
+
+  // Show leader verification modal
+  leaderVerificationStatus.textContent = 'リーダーのQRコードをスキャンしてください / Please scan leader QR code';
+  leaderVerificationStatus.style.color = '#2d5f4f';
+  leaderVerificationModal.style.display = 'block';
+
+  // Start leader verification scanner
+  let leaderScanner = new Html5Qrcode("leaderQrReader");
+
+  leaderScanner.start(
+    { facingMode: "environment" },
+    {
+      fps: 30,
+      qrbox: { width: 800, height: 800 },
+      aspectRatio: 1.0,
+      disableFlip: false,
+      advanced: [{
+        focusMode: "continuous",
+        focusDistance: { ideal: 0 }
+      }]
+    },
+    async (decodedText) => {
+      console.log("Leader QR Code scanned for Step 2 override:", decodedText);
+
+      try {
+        const response = await fetch(`${serverURL}/verifyLeader`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: decodedText })
+        });
+
+        const result = await response.json();
+
+        if (result.authorized) {
+          leaderVerificationStatus.textContent = `✅ 認証成功！ / Verified! Opening keypad...`;
+          leaderVerificationStatus.style.color = '#006400';
+
+          leaderScanner.stop().then(() => {
+            setTimeout(() => {
+              leaderVerificationModal.style.display = 'none';
+
+              // Open keypad for manual lot entry
+              const currentLots = materialLotInput.value ? materialLotInput.value.split(',').map(v => v.trim()).filter(v => v) : [];
+
+              // Open keypad in new entry mode
+              window.openDirectNumericKeypad('材料ロット', true);
+
+              // Monitor keypad closure and capture the entered value
+              const checkKeypadClosure = setInterval(() => {
+                const keypadModal = document.getElementById('numericKeypadModalDirect');
+                const isKeypadOpen = keypadModal && keypadModal.style.display === 'block';
+
+                if (!isKeypadOpen) {
+                  clearInterval(checkKeypadClosure);
+
+                  // Get the newly entered value
+                  const newValue = materialLotInput.value;
+                  const newLots = newValue ? newValue.split(',').map(v => v.trim()).filter(v => v && !currentLots.includes(v)) : [];
+
+                  if (newLots.length > 0) {
+                    // Add the manual lot as a blue tag (visually different)
+                    const lotNumber = newLots[0]; // Take the first new lot
+
+                    // Add to material lots array with manual flag
+                    if (window.addManualLot) {
+                      window.addManualLot(lotNumber);
+                      console.log("Manual lot added via Step 2 override:", lotNumber);
+                    }
+
+                    // Automatically proceed to Step 3 (after mandatory material-label photo).
+                    // After the photo, call afterLotPhotoProceed so the previous lot's
+                    // ショット数 is prompted — same as the scanned-lot path.
+                    setTimeout(() => {
+                      const _proceedToStep3 = () => {
+                        if (typeof window.afterLotPhotoProceed === 'function') {
+                          window.afterLotPhotoProceed(() => showStep3Modal());
+                        } else {
+                          showStep3Modal();
+                        }
+                      };
+                      if (typeof window.materialPhotoGate === 'function') {
+                        window.materialPhotoGate(_proceedToStep3);
+                      } else {
+                        _proceedToStep3();
+                      }
+                    }, 500);
+                  } else {
+                    // No lot entered, return to Step 2
+                    showStep2Modal();
+                  }
+                }
+              }, 300);
+
+            }, 1000);
+          }).catch(err => console.error("Error stopping leader scanner:", err));
+        } else {
+          leaderVerificationStatus.textContent = `❌ 権限がありません / Not authorized`;
+          leaderVerificationStatus.style.color = '#cc0000';
+
+          // Return to Step 2 after 2 seconds
+          setTimeout(() => {
+            leaderScanner.stop().then(() => {
+              leaderVerificationModal.style.display = 'none';
+              showStep2Modal();
+            }).catch(err => console.error("Error stopping scanner:", err));
+          }, 2000);
+        }
+      } catch (error) {
+        console.error("Error verifying leader:", error);
+        leaderVerificationStatus.textContent = `❌ エラーが発生しました / Error occurred`;
+        leaderVerificationStatus.style.color = '#cc0000';
+
+        // Return to Step 2 after 2 seconds
+        setTimeout(() => {
+          leaderScanner.stop().then(() => {
+            leaderVerificationModal.style.display = 'none';
+            showStep2Modal();
+          }).catch(err => console.error("Error stopping scanner:", err));
+        }, 2000);
+      }
+    },
+    (errorMessage) => {
+      // Ignore scan errors
+    }
+  ).catch(err => {
+    console.error("Failed to start leader verification scanner:", err);
+    showAlert('カメラを起動できませんでした / Could not start camera');
+    leaderVerificationModal.style.display = 'none';
+    showStep2Modal();
+  });
+
+  // Set up cancel button handler for Step 2 override flow
+  document.getElementById('closeLeaderVerificationModal').onclick = function () {
+    if (leaderScanner) {
+      leaderScanner.stop().then(() => {
+        leaderVerificationModal.style.display = 'none';
+        leaderScanner = null;
+        showStep2Modal(); // Return to Step 2 modal
+      }).catch(err => {
+        console.error("Error stopping leader scanner:", err);
+        leaderVerificationModal.style.display = 'none';
+        leaderScanner = null;
+        showStep2Modal(); // Return to Step 2 modal anyway
+      });
+    } else {
+      leaderVerificationModal.style.display = 'none';
+      showStep2Modal(); // Return to Step 2 modal
+    }
+  };
+});
+
+// Auto-fill the production 加工開始時間 (Start Time) with the current time when the
+// scan workflow finishes (Step 3 / send to machine). Only fills if still empty so a
+// manually-entered start time is never overwritten.
+function autoFillProductionStartTime() {
+  const el = document.getElementById('Start Time');
+  if (!el || el.value) return;
+  const now = new Date();
+  el.value = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  if (typeof updateProcessingTimeLockStatus === 'function') {
+    try { updateProcessingTimeLockStatus('start'); } catch (e) { }
+  }
+  console.log('Auto-filled production Start Time:', el.value);
+}
+
+// Step 3: Send to Machine Button
+document.getElementById('startStep3Send').addEventListener('click', async function (event) {
+  event.preventDefault(); // Prevent form submission
+
+  try {
+    // Get the current 背番号
+    const currentSebanggo = document.getElementById('sub-dropdown').value;
+
+    if (!currentSebanggo) {
+      showAlert('背番号を選んでください / Please select sebanggo first');
+      return;
+    }
+
+    if (isOZMANASMachine()) {
+      const content = document.getElementById('step3Content');
+      const instruction = content?.querySelector('p');
+      const arrow = content?.querySelector('div');
+      const actionButton = document.getElementById('startStep3Send');
+      const scanner = document.getElementById('step3Scanner');
+      const errorMsg = document.getElementById('step3ErrorMsg');
+
+      const restoreStep3Ui = (message = '') => {
+        if (scanner) scanner.style.display = 'none';
+        if (instruction) instruction.style.display = '';
+        if (arrow) arrow.style.display = '';
+        if (actionButton) actionButton.style.display = '';
+        if (errorMsg) {
+          const errorText = errorMsg.querySelector('p');
+          if (errorText) errorText.textContent = message;
+          errorMsg.style.display = message ? 'block' : 'none';
+        }
+      };
+
+      if (!scanner) {
+        showAlert('Step 3 scanner UI not ready');
+        return;
+      }
+
+      if (errorMsg) {
+        const errorText = errorMsg.querySelector('p');
+        if (errorText) errorText.textContent = '';
+        errorMsg.style.display = 'none';
+      }
+
+      if (instruction) instruction.style.display = 'none';
+      if (arrow) arrow.style.display = 'none';
+      if (actionButton) actionButton.style.display = 'none';
+      scanner.style.display = 'block';
+
+      // Always rebuild the reader target before creating a new scanner instance.
+      // This avoids stale DOM state from previous scanner sessions.
+      scanner.innerHTML = '<div id="step3QrReader"></div>';
+
+      // Let DOM apply visibility/layout before starting camera stream.
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      if (step3Scanner) {
+        await step3Scanner.stop().catch(() => { });
+        step3Scanner = null;
+      }
+
+      try {
+        step3Scanner = new Html5Qrcode('step3QrReader');
+      } catch (initErr) {
+        console.error('Failed to initialize Step 3 scanner:', initErr);
+        restoreStep3Ui('❌ スキャナー初期化エラー / Scanner initialization error');
+        return;
+      }
+
+      step3Scanner.start(
+        { facingMode: 'environment' },
+        {
+          fps: 30,
+          qrbox: { width: 800, height: 800 },
+          aspectRatio: 1.0,
+          disableFlip: false,
+          advanced: [{
+            focusMode: 'continuous',
+            focusDistance: { ideal: 0 }
+          }]
+        },
+        async (qrCodeMessage) => {
+          const boardCode = String(qrCodeMessage || '').trim();
+          if (!boardCode) return;
+
+          const expectedKataban = String(currentProductDetails.kataban || document.getElementById('kataban')?.value || '').trim();
+
+          if (!expectedKataban) {
+            await step3Scanner.stop();
+            step3Scanner = null;
+            restoreStep3Ui('❌ 型番データがありません / 型番 is missing in masterDB');
+            return;
+          }
+
+          if (boardCode !== expectedKataban) {
+            await step3Scanner.stop();
+            step3Scanner = null;
+
+            if (scanner) scanner.style.display = 'none';
+            if (instruction) instruction.style.display = '';
+            if (arrow) arrow.style.display = '';
+            if (actionButton) actionButton.style.display = '';
+            if (errorMsg) {
+              const errorText = errorMsg.querySelector('p');
+              if (errorText) {
+                errorText.innerHTML = `❌ 型番不一致 / 型番 mismatch<br>Expected: <strong>${expectedKataban}</strong><br>Scanned: <strong>${boardCode}</strong>`;
+              }
+              errorMsg.style.display = 'block';
+            }
+
+            showAlert(`❌ 型番不一致 / 型番 mismatch\n\nCorrect: ${expectedKataban}\nScanned: ${boardCode}`);
+            return;
+          }
+
+          await step3Scanner.stop();
+          step3Scanner = null;
+
+          await logTabletAction('Scanned トムソンボード (Step 3)', 'Completed', {
+            背番号: currentSebanggo,
+            boardCode,
+            source: 'Step 3 Modal'
+          });
+
+          // Do NOT clear cached product details here so they survive page reloads
+          // while the product is still active on the production page.
+          // Mark workflow as complete (OZMANAS: トムソンボード scan == Step 3 done)
+          saveCurrentStep(0);
+          markScanWorkflowComplete();
+          if (typeof assertMachineState === 'function') assertMachineState();
+          autoFillProductionStartTime();
+
+          // Close Step 3 modal (OZMANAS does not send command to machine at this step)
+          document.getElementById('step3Modal').style.display = 'none';
+        },
+        () => {
+          // Ignore scan frame errors
+        }
+      ).catch((scanErr) => {
+        console.error('Failed to start Step 3 scanner:', scanErr);
+        restoreStep3Ui('❌ カメラを起動できませんでした / Could not start camera');
+      });
+
+      return;
+    }
+
+    // Default behavior for non-OZMANAS machines
+    if (isSendToMachineCooldownActive()) {
+      // Nothing is sent here. The button greys out with a countdown, but say so
+      // plainly too — this is the only feedback that the press did nothing.
+      updateSendToMachineCooldownUI();
+      const _secs = getSendToMachineCooldownSeconds();
+      const _warn = `⚠️ 未送信です。あと${_secs}秒お待ちください / NOT sent — wait ${_secs}s`;
+      if (typeof window.showAppToast === 'function') window.showAppToast(_warn, 4000);
+      else if (typeof window.showToast === 'function') window.showToast(_warn, 4000);
+      return;
+    }
+
+    // Log send to machine action (Step 3)
+    logTabletAction('Send to machine pressed (Step 3)', 'in-progress', {
+      背番号: currentSebanggo,
+      source: 'Step 3 Modal'
+    }).catch(error => console.error('Failed to log Step 3 send to machine action:', error));
+
+    autoFillProductionStartTime();
+
+    const actionButton = document.getElementById('startStep3Send');
+    if (actionButton) {
+      actionButton.disabled = true;
+      actionButton.innerHTML = '<span>⏳ 送信中... / Sending to machine...</span>';
+      actionButton.style.opacity = '0.75';
+    }
+
+    // Fire-and-forget: the per-machine requests are no-cors GETs with no timeout, so
+    // awaiting them would hang this handler on an unreachable mini-PC and leave the
+    // button disabled and the tabs locked. The only outcome worth branching on is the
+    // cooldown skip, and that is already handled above, before anything is sent.
+    sendtoNC(currentSebanggo);
+
+    // Keep Step 3 button visible and show Resend button. sendtoNC starts the cooldown
+    // synchronously, which snapshots the button while the 送信中 spinner is showing —
+    // so hand the Resend markup to that snapshot, or the cooldown would restore the
+    // spinner label permanently when it expires.
+    if (actionButton) {
+      setSendButtonRestingMarkup(actionButton, '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg><span>マシンに再送信 / Resend to Machine</span>');
+      actionButton.style.background = 'linear-gradient(135deg, #2E6FF2, #1b4bb8)';
+      // Leave disabled/opacity to the cooldown while it owns the button: re-enabling
+      // here made it briefly clickable again while it read 送信中.
+      if (!isSendToMachineCooldownActive()) {
+        actionButton.disabled = false;
+        actionButton.style.opacity = '1';
+      }
+    }
+
+    // Mark workflow as complete and unlock navigation tabs
+    sendtoNCButtonisPressed = true;
+    try {
+      localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'true');
+    } catch (_) { }
+    markScanWorkflowComplete();
+    saveCurrentStep(0);
+    if (typeof assertMachineState === 'function') assertMachineState();
+    if (typeof updateTabLock === 'function') updateTabLock();
+    if (typeof window.updateTabLock === 'function') window.updateTabLock();
+
+    const skipBtn = document.getElementById('btnSkipStep3Send');
+    if (skipBtn) skipBtn.style.display = 'none';
+
+    // Close Step 3 modal so Scan Completed card (with individual machine buttons) is shown immediately
+    const s3Modal = document.getElementById('step3Modal');
+    if (s3Modal) s3Modal.style.display = 'none';
+    if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
+
+    // Lot cycle done: clear chosen machine
+    window.__lotScanMachine = null;
+    window.__lotCycleMachinesDone = [];
+
+  } catch (error) {
+    console.error("Error in Step 3 handler:", error);
+    showAlert('エラー / Error');
+  }
+});
+
+// Step 3: Skip Send with Leader Authorization
+const btnSkipStep3Send = document.getElementById('btnSkipStep3Send');
+if (btnSkipStep3Send) {
+  btnSkipStep3Send.addEventListener('click', function (e) {
+    e.preventDefault();
+    if (typeof window.verifyLeaderUI === 'function') {
+      window.verifyLeaderUI(
+        (leaderInfo) => {
+          const leaderName = leaderInfo?.leaderName || leaderInfo?.username || 'Leader';
+          console.log(`✅ [Step 3 Skip] Authorized by ${leaderName}`);
+
+          const currentSebanggo = document.getElementById('sub-dropdown')?.value || '';
+          if (typeof logTabletAction === 'function') {
+            logTabletAction('Send to machine skipped (Step 3)', 'Completed', {
+              背番号: currentSebanggo,
+              authorizedBy: leaderName,
+              source: 'Step 3 Modal Skip Button'
+            }).catch(() => { });
+          }
+
+          // Mark workflow as complete and unlock navigation tabs
+          sendtoNCButtonisPressed = true;
+          try {
+            localStorage.setItem(`${uniquePrefix}sendtoNCButtonisPressed`, 'true');
+          } catch (_) { }
+          markScanWorkflowComplete();
+          saveCurrentStep(0);
+          if (typeof assertMachineState === 'function') assertMachineState();
+          if (typeof updateTabLock === 'function') updateTabLock();
+          if (typeof window.updateTabLock === 'function') window.updateTabLock();
+
+          // Close Step 3 modal so Scan Completed card is shown
+          const s3Modal = document.getElementById('step3Modal');
+          if (s3Modal) s3Modal.style.display = 'none';
+          if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
+
+          // Hide skip button
+          btnSkipStep3Send.style.display = 'none';
+
+          if (typeof showToast === 'function') {
+            showToast(`✅ ${leaderName} の承認によりスキップしました / Skipped with leader approval`);
+          } else if (typeof showAlert === 'function') {
+            showAlert(`✅ ${leaderName} の承認によりスキップしました / Skipped with leader approval`);
+          }
+        },
+        'リーダー承認 (送信スキップ) / Leader Skip Approval',
+        'マシンへのデータ送信をスキップして作業を続行するにはリーダーQRをスキャンしてください<br>Scan leader QR to skip send to machine and proceed'
+      );
+    } else {
+      console.warn("verifyLeaderUI not available");
+    }
+  });
+}
+
+// Reset buttons
+// Shared confirmation for destructive reset / new-scan actions: these clear
+// ALL scanned data on the current form, so guard against accidental taps.
+// (Called only from user-initiated buttons — programmatic resets after a
+//  successful submit skip this on purpose.)
+function confirmReset(msg) {
+  return confirm(msg || _t('confirm_reset_all'));
+}
+// The 3-step Reset buttons fire before any data is committed, so they don't
+// need a confirmation.
+document.getElementById('resetStep1').addEventListener('click', function (event) {
+  event.preventDefault(); // Prevent form submission
+  resetAllSteps();
+});
+document.getElementById('resetStep2').addEventListener('click', function (event) {
+  event.preventDefault(); // Prevent form submission
+  resetAllSteps();
+});
+document.getElementById('resetStep3').addEventListener('click', function (event) {
+  event.preventDefault(); // Prevent form submission
+  resetAllSteps();
+});
+
+// ============================================
+// Individual Machine Send Modal (after 3-step workflow)
+// ============================================
+
+function showIndividualSendModal() {
+  const modal = document.getElementById('individualSendModal');
+  const machineList = document.getElementById('individualSendContainer')
+    || document.getElementById('individualMachineList');
+
+  if (!modal || !machineList) return;
+
+  // Clear previous content
+  machineList.innerHTML = '';
+
+  // Get the machine config from global variables
+  const machines = window.currentMachineGroup || [];
+  // Get the 背番号 (sebanggo) value for the filename
+  const sebanggo = document.getElementById('sub-dropdown').value;
+  const ncFilename = sebanggo ? `${sebanggo}.pce` : 'program.pce';
+
+  if (machines.length === 0) {
+    machineList.innerHTML = '<p style="text-align: center; color: #999;">No machines configured</p>';
+    modal.style.display = 'flex';
+    return;
+  }
+
+  // Create a card for each machine
+  machines.forEach((machine, index) => {
+    const card = document.createElement('div');
+    card.style.cssText = 'border: 1px solid var(--border, #E4E7EC); border-radius: 12px; padding: 16px; background: var(--bg-inset, #F9FAFB);';
+
+    const machineName = document.createElement('div');
+    machineName.style.cssText = 'font-size: 1.05rem; font-weight: 700; color: var(--text-main, #101828); margin-bottom: 12px;';
+    machineName.textContent = `${machine.name} (${machine.ip})`;
+
+    const statusIndicator = document.createElement('div');
+    statusIndicator.id = `sendStatus-${index}`;
+    statusIndicator.style.cssText = 'display: none; margin-bottom: 10px; padding: 10px; background: var(--brand-soft, #E7F7EF); border: 1px solid var(--brand, #12B76A); border-radius: 8px; color: var(--brand, #0E9F6E); font-weight: 700; text-align: center;';
+    statusIndicator.innerHTML = '✓ Sent / 送信完了';
+
+    const sendButton = document.createElement('button');
+    sendButton.type = 'button';
+    sendButton.id = `sendBtn-${index}`;
+    sendButton.style.cssText = 'background: var(--blue, #2E6FF2); color: #fff; border: none; padding: 14px 24px; border-radius: 10px; cursor: pointer; font-size: 1rem; font-weight: 700; width: 100%; font-family: inherit;';
+    sendButton.innerHTML = `Send to ${machine.name}<br><span style="font-size: 0.82rem; opacity: 0.9;">送信</span>`;
+
+    sendButton.addEventListener('click', async function () {
+      await sendToIndividualMachine(machine, ncFilename, index);
+    });
+
+    card.appendChild(machineName);
+    card.appendChild(statusIndicator);
+    card.appendChild(sendButton);
+    machineList.appendChild(card);
+  });
+
+  // Show the modal
+  modal.style.display = 'flex';
+}
+
+async function sendToIndividualMachine(machine, ncFilename, index) {
+  const sendButton = document.getElementById(`sendBtn-${index}`);
+  const statusIndicator = document.getElementById(`sendStatus-${index}`);
+
+  if (!sendButton) return;
+
+  // Disable button
+  sendButton.disabled = true;
+  sendButton.style.opacity = '0.6';
+  sendButton.style.cursor = 'not-allowed';
+  sendButton.innerHTML = 'Sending... / 送信中...';
+
+  // Use the same URL format as Step 3 modal (port 5000 with /request?filename=)
+  const ncProgramUrl = `http://${machine.ip}:5000/request?filename=${ncFilename}&mode=mass&machine=${machine.id}`;
+
+  try {
+    // Try background fetch first
+    const response = await fetch(ncProgramUrl, {
+      method: 'GET',
+      mode: 'no-cors' // This prevents CORS errors but doesn't return response data
+    });
+
+    console.log(`Sent to ${machine.name} (${machine.ip}) via fetch`);
+
+    // Show success indicator
+    statusIndicator.style.display = 'block';
+    sendButton.style.display = 'none';
+
+  } catch (error) {
+    console.error(`Fetch failed for ${machine.name}, trying new tab fallback:`, error);
+
+    // Fallback: Open in new tab
+    const newTab = window.open(ncProgramUrl, '_blank', 'width=100,height=100,left=-1000,top=-1000');
+
+    if (newTab) {
+      setTimeout(() => {
+        try {
+          newTab.close();
+        } catch (e) {
+          console.log('Could not close tab automatically');
+        }
+      }, 3000);
+
+      // Show success indicator
+      statusIndicator.style.display = 'block';
+      sendButton.style.display = 'none';
+    } else {
+      // Could not send
+      sendButton.disabled = false;
+      sendButton.style.opacity = '1';
+      sendButton.style.cursor = 'pointer';
+      const _rLang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
+      const _retryLabel = _rLang === 'en' ? `Send to ${machine.name}<br><span style="font-size: 14px;">Retry</span>` : _rLang === 'pt' ? `Enviar para ${machine.name}<br><span style="font-size: 14px;">Tentar novamente</span>` : `${machine.name} に送信<br><span style="font-size: 14px;">再送信</span>`;
+      sendButton.innerHTML = _retryLabel;
+      alert(_t('alert_send_failed_popup'));
+    }
+  }
+}
+
+// Close button for individual send modal
+document.getElementById('closeIndividualSendModal')?.addEventListener('click', function () {
+  document.getElementById('individualSendModal').style.display = 'none';
+});
+
+// Close modal when clicking outside
+document.getElementById('individualSendModal')?.addEventListener('click', function (e) {
+  if (e.target === this) {
+    this.style.display = 'none';
+  }
+});
+
+// Auto-show modal on page load based on workflow state
+window.addEventListener('load', function () {
+  setTimeout(() => {
+    const subDropdown = document.getElementById('sub-dropdown');
+    const savedStep = getCurrentStepFromStorage();
+
+    // The sub-dropdown value is restored once (500ms) only if its <option> list
+    // has loaded by then. If the server option list arrives later, that restore
+    // misses and the value stays empty — which used to wipe a completed scan on
+    // refresh. Re-attempt here from the saved/cached value, injecting the option
+    // if the list still isn't populated, so the workflow state survives a reload.
+    const savedSub = localStorage.getItem(`${uniquePrefix}sub-dropdown`)
+      || localStorage.getItem(`${uniquePrefix}cached-sebanggo`);
+    if (subDropdown && savedSub && (!subDropdown.value || subDropdown.selectedIndex === 0)) {
+      if (![...subDropdown.options].some(o => o.value === savedSub)) {
+        // Keep a placeholder at index 0 so the injected value never lands at
+        // selectedIndex 0 (which the workflow guard treats as "nothing scanned").
+        if (subDropdown.options.length === 0) {
+          const ph = document.createElement('option');
+          ph.value = '';
+          ph.textContent = '---';
+          subDropdown.appendChild(ph);
+        }
+        const opt = document.createElement('option');
+        opt.value = savedSub;
+        opt.textContent = savedSub;
+        subDropdown.appendChild(opt);
+      }
+      subDropdown.value = savedSub;
+      console.log('Re-restored sub-dropdown from cache on load:', savedSub);
+      if (typeof fetchProductDetails === 'function') fetchProductDetails();
+    }
+
+    console.log('=== 3-Step Modal Auto-Load Debug ===');
+    console.log('Dropdown value:', subDropdown?.value);
+    console.log('Dropdown selectedIndex:', subDropdown?.selectedIndex);
+    console.log('Saved step from localStorage:', savedStep);
+
+    // 🔴 SSE BROADCAST ON PAGE LOAD
+    const machineNameForSSE = getMachineName();
+
+    // If sub-dropdown is empty, always start at Step 1 AND broadcast clear
+    if (!subDropdown.value || subDropdown.selectedIndex === 0) {
+      console.log('Empty dropdown detected - showing Step 1 and broadcasting clear');
+      saveCurrentStep(0);
+
+      // Broadcast clear message to pdfDisplayer(s)
+      // If grouped machine (OZNC04,OZNC06), broadcasts to both
+      // If solo machine (OZNC09), broadcasts to only that one
+      if (machineNameForSSE) {
+        const machineIds = machineNameForSSE.split(',').map(m => m.trim());
+        console.log(`🔊 Broadcasting clear action to ${machineIds.length} machine(s):`, machineIds);
+
+        fetch(`${serverURL}/api/broadcast-scan`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            machineId: machineNameForSSE, // Send full string (e.g., "OZNC04,OZNC06" or "OZNC09")
+            sebanggo: '',
+            hinban: '',
+            timestamp: new Date().toISOString(),
+            additionalData: {
+              action: 'clear',
+              language: localStorage.getItem('appLanguage') || 'ja'
+            }
+          })
+        })
+          .then(response => response.json())
+          .then(data => console.log('✅ SSE Clear broadcast on load successful:', data))
+          .catch(error => console.error('❌ SSE Clear broadcast on load failed:', error));
+      }
+
+      showStep0Modal();
+      return;
+    }
+
+    // A 背番号 is present. Only treat it as "complete" if Step 3 actually ran
+    // (send to machine, or OZMANAS トムソンボード scan) — tracked by the
+    // scanComplete flag. Otherwise the workflow was abandoned mid-way (refresh
+    // during Step 1/2) and must restart from the beginning.
+    if (window.isScanWorkflowComplete && window.isScanWorkflowComplete()) {
+      currentProductDetails = {
+        sebanggo: subDropdown.value || localStorage.getItem(`${uniquePrefix}cached-sebanggo`) || '',
+        hinban: document.getElementById('product-number')?.value || localStorage.getItem(`${uniquePrefix}cached-hinban`) || '',
+        materialCode: document.getElementById('material-code')?.value || localStorage.getItem(`${uniquePrefix}cached-materialCode`) || '',
+        model: document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || '',
+        kataban: document.getElementById('kataban')?.value || localStorage.getItem(`${uniquePrefix}cached-kataban`) || ''
+      };
+      saveCurrentStep(0);
+      // Make sure no step card is showing, then render the completed card
+      ['step1Modal', 'step2Modal', 'step3Modal'].forEach(id => {
+        const m = document.getElementById(id);
+        if (m) m.style.display = 'none';
+      });
+      if (typeof window.syncScanTabState === 'function') window.syncScanTabState();
+
+      // Restore active tab if we have a valid workflow state
+      const savedTabIndex = (typeof window.getSavedTabIndex === 'function')
+        ? window.getSavedTabIndex()
+        : parseInt(localStorage.getItem(`${uniquePrefix}activeTabIndex`) || localStorage.getItem('activeTabIndex'), 10);
+      if (savedTabIndex !== null && !isNaN(savedTabIndex) && typeof window.goToTab === 'function') {
+        // Add a small delay so goToTab runs after all UI state settles
+        setTimeout(() => window.goToTab(savedTabIndex, true), 50);
+      }
+    } else {
+      // Scanned but Step 3 not done — restart from Step 1
+      console.log('Incomplete workflow on load (step ' + savedStep + ') - restarting from Step 1');
+      showStep0Modal();
+    }
+
+    currentProductDetails.model = currentProductDetails.model || document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || '';
+    syncVideoManualLauncherState();
+  }, 2000); // Increased timeout to 2 seconds to ensure dropdown is fully restored
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  ensureVideoManualPickerUi();
+  currentProductDetails.model = document.getElementById('model')?.value || localStorage.getItem(`${uniquePrefix}cached-model`) || currentProductDetails.model || '';
+  syncVideoManualLauncherState();
+});
+
+window.addEventListener('beforeunload', () => {
+  stopVideoManualHeartbeat();
+  disconnectVideoManualControlStream();
+  if (videoManualState.claimed && videoManualState.sessionKey) {
+    fetch(`${serverURL}/api/machine-player/release`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ machineId: videoManualState.sessionKey, controllerId: videoManualState.controllerId }),
+      keepalive: true,
+    }).catch(() => { });
+  }
+});
+
+// ==========================
+// GROUPED MACHINES MANUAL SEND MODAL
+// ==========================
+
+// Function to show manual send modal (for grouped machines when auto-send fails)
+function showManualSendModal(sebanggo) {
+  if (!isGroupedMachinePage || Object.keys(groupedMachineIPs).length === 0) {
+    console.log('Not a grouped machine page or no IPs available');
+    return;
+  }
+
+  const modal = document.getElementById('manualSendModal');
+  if (!modal) {
+    console.error('Manual send modal not found in HTML');
+    return;
+  }
+
+  const container = document.getElementById('machineLinksContainer');
+  if (!container) {
+    console.error('Machine links container not found');
+    return;
+  }
+
+  // Update filename display
+  const filenameDisplay = document.getElementById('manualSendFilename');
+  if (filenameDisplay) {
+    filenameDisplay.textContent = `${sebanggo}.pce`;
+  }
+
+  // Clear previous content
+  container.innerHTML = '';
+
+  // Create a button for each machine
+  Object.entries(groupedMachineIPs).forEach(([machine, ip]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.style.cssText = `
+      background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      transition: all 0.3s;
+      box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+      width: 100%;
+      text-align: center;
+    `;
+    button.innerHTML = `
+      <div style="font-size: 18px; margin-bottom: 5px;"><strong>${machine}</strong></div>
+      <div style="font-size: 14px; opacity: 0.9;">IP: ${ip}</div>
+    `;
+    button.onmouseover = () => {
+      button.style.background = 'linear-gradient(135deg, #1976D2 0%, #1565C0 100%)';
+      button.style.transform = 'translateY(-2px)';
+      button.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.4)';
+    };
+    button.onmouseout = () => {
+      button.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
+      button.style.transform = 'translateY(0)';
+      button.style.boxShadow = '0 2px 8px rgba(33, 150, 243, 0.3)';
+    };
+    button.onclick = async () => {
+      const url = `http://${ip}:5000/request?filename=${sebanggo}.pce&mode=mass&machine=${machine}`;
+      console.log(`📤 Manual send to ${machine}: ${url}`);
+      try {
+        await fetch(url, { method: 'GET', mode: 'no-cors' });
+      } catch (error) {
+        const newTab = window.open(url, '_blank');
+        if (newTab) {
+          setTimeout(() => {
+            newTab.close();
+          }, 3000);
+        }
+      }
+
+      // Visual feedback
+      button.style.background = '#4CAF50';
+      button.innerHTML = `
+        <div style="font-size: 18px; margin-bottom: 5px;"><strong>${machine}</strong></div>
+        <div style="font-size: 14px;">✅ Sent!</div>
+      `;
+      setTimeout(() => {
+        button.style.background = 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
+        button.innerHTML = `
+          <div style="font-size: 18px; margin-bottom: 5px;"><strong>${machine}</strong></div>
+          <div style="font-size: 14px; opacity: 0.9;">IP: ${ip}</div>
+        `;
+      }, 2000);
+    };
+    container.appendChild(button);
+  });
+
+  // Show the modal
+  modal.style.display = 'flex';
+  console.log('✅ Manual send modal shown');
+}
+
+// Close manual send modal
+const closeManualSendBtn = document.getElementById('closeManualSendModal');
+if (closeManualSendBtn) {
+  closeManualSendBtn.addEventListener('click', function () {
+    const modal = document.getElementById('manualSendModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  });
+}
+
+// Close modal when clicking outside
+const manualSendModal = document.getElementById('manualSendModal');
+if (manualSendModal) {
+  manualSendModal.addEventListener('click', function (event) {
+    if (event.target === manualSendModal) {
+      manualSendModal.style.display = 'none';
+    }
+  });
+}
+
+/* ============================================================================
+   PER-LOT PRODUCTION TRACKING  (ショット数 / 使用メートル / 生産数 per lot)
+   See docs/lot-shot-tracking-spec.md. Self-contained, client-only, additive.
+   - Each material lot records the shots run on a specific machine.
+   - meters = shots × 送りピッチ ÷ 1000 (mm) ; pieces = shots × pcPerCycle.
+   - Shots attach to the PREVIOUS lot (machine counter resets when a new program
+     is sent); the final/open lot is captured when End Time is entered.
+   - Grouped machines: each machine keeps its own independent lot timeline.
+   ============================================================================ */
+(function () {
+  const PFX = (typeof uniquePrefix !== 'undefined' && uniquePrefix) ? uniquePrefix : 'dcp-';
+  const LOTS_KEY = PFX + 'lotsByMachine';
+
+  let lotsByMachine = {};
+  function refreshLots() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(LOTS_KEY) || '{}');
+      if (stored && typeof stored === 'object') lotsByMachine = stored;
+    } catch (e) { }
+  }
+  refreshLots();
+  function save() { try { localStorage.setItem(LOTS_KEY, JSON.stringify(lotsByMachine)); } catch (e) { } }
+
+  const round2 = n => Math.round(n * 100) / 100;
+  function num(v) { if (v === '' || v == null) return null; const n = parseFloat(v); return isFinite(n) ? n : null; }
+
+  function getMaster() {
+    if (window.currentMasterRecord) return window.currentMasterRecord;
+    try { return JSON.parse(localStorage.getItem(PFX + 'feedConfig') || 'null'); } catch (e) { return null; }
+  }
+
+  // Parse "OZNC(04,06,08,10):820 OZNC(03,05,07,09):1590" -> pitch for a machine.
+  function parsePitchString(str, machine) {
+    const mNum = ((String(machine).match(/(\d+)/) || [])[1] || '').padStart(2, '0');
+    const re = /([A-Za-z]+)\(([^)]+)\):(\d+)/g;
+    let m, fallback = null;
+    while ((m = re.exec(str))) {
+      const prefix = m[1];
+      const nums = m[2].split(',').map(s => s.trim().padStart(2, '0'));
+      const pitch = parseInt(m[3], 10);
+      if (mNum && String(machine).indexOf(prefix) === 0 && nums.indexOf(mNum) >= 0) return pitch;
+      fallback = pitch;
+    }
+    return fallback;
+  }
+
+  // Resolve { feedPitch (mm), pcPerCycle } for a machine: machineConfig -> string -> plain.
+  function resolveFeed(machine) {
+    const rec = getMaster() || {};
+    let feedPitch = null, pcPerCycle = null;
+    if (rec.machineConfig && rec.machineConfig[machine]) {
+      feedPitch = num(rec.machineConfig[machine].送りピッチ);
+      pcPerCycle = num(rec.machineConfig[machine].pcPerCycle);
+    }
+    if (feedPitch == null && typeof rec.送りピッチ === 'string' && /[A-Za-z]/.test(rec.送りピッチ)) {
+      feedPitch = parsePitchString(rec.送りピッチ, machine);
+    }
+    if (feedPitch == null && rec.送りピッチ != null) feedPitch = num(rec.送りピッチ);
+    if (pcPerCycle == null) pcPerCycle = num(rec.pcPerCycle);
+    return { feedPitch: feedPitch, pcPerCycle: (pcPerCycle && pcPerCycle > 0) ? pcPerCycle : null };
+  }
+
+  function openRecordFor(machine) {
+    const list = lotsByMachine[machine] || [];
+    for (let i = list.length - 1; i >= 0; i--) if (list[i].open) return list[i];
+    return null;
+  }
+  function allRecords() { refreshLots(); return Object.keys(lotsByMachine).reduce((a, k) => a.concat(lotsByMachine[k]), []); }
+  function totalShots() { return allRecords().reduce((s, r) => s + (parseInt(r.shots, 10) || 0), 0); }
+
+  function updateShotTotalField() {
+    const el = document.getElementById('shot');
+    if (el) { el.value = String(totalShots()); try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { } }
+
+    const pqEl = document.getElementById('ProcessQuantity');
+    if (pqEl) {
+      const payload = buildPayload();
+      const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
+      const missingPc = machines.some(m => resolveFeed(m).pcPerCycle == null);
+
+      if (!missingPc && payload.Total_Pieces != null && !window.__scnaManualQty) { // SCNA keeps Process Quantity manual
+        pqEl.value = String(payload.Total_Pieces);
+        pqEl.readOnly = true;
+        pqEl.style.backgroundColor = '#f3f4f6';
+        try { pqEl.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { }
+        window.__processQuantityAutoCalculated = true; // flag to block keypad
+      } else {
+        window.__processQuantityAutoCalculated = false;
+      }
+    }
+    if (typeof renderMaterialLotTags === 'function') {
+      renderMaterialLotTags();
+    }
+  }
+
+  // Add a newly scanned lot to a machine's timeline; return the previously-open
+  // record (whose shots should be collected now), or null for the first lot.
+  function recordLotScan(lotNumber, machine, source, extra) {
+    refreshLots();
+    if (machine && machine.includes(',')) {
+      machine = window.__lotScanMachine || machine.split(',')[0].trim();
+    }
+    machine = machine || 'UNKNOWN';
+    const list = lotsByMachine[machine] || (lotsByMachine[machine] = []);
+    const prevOpen = openRecordFor(machine);
+    const feed = resolveFeed(machine);
+    let now = Date.now();
+    while (list.some(r => r.ts === now)) { now++; }
+
+    const seiban = (extra && (extra.materialSeiban || extra.材料背番号))
+      || (window.__scannedLotQRMap && (window.__scannedLotQRMap[lotNumber]?.materialSeiban || window.__scannedLotQRMap[lotNumber]?.材料背番号))
+      || (typeof currentProductDetails !== 'undefined' && currentProductDetails?.materialCode)
+      || (document.getElementById('背番号')?.value)
+      || null;
+
+    const fullQR = (extra && extra.scannedQR)
+      || (window.__scannedLotQRMap && window.__scannedLotQRMap[lotNumber]?.scannedQR)
+      || null;
+
+    const rec = {
+      lotNumber: lotNumber, machine: machine, shots: null,
+      feedPitch: feed.feedPitch, pcPerCycle: feed.pcPerCycle,
+      meters: null, pieces: null, source: source || 'scanned', open: true, ts: now
+    };
+    if (seiban) {
+      rec.materialSeiban = seiban;
+    }
+    if (fullQR) {
+      rec.scannedQR = fullQR;
+    }
+    list.push(rec);
+    save();
+
+    // Auto-reset End Time if a new lot is scanned, so the user is forced to re-enter it at the real end of production.
+    const endTimeEl = document.getElementById('End Time');
+    if (endTimeEl && endTimeEl.value) {
+      endTimeEl.value = '';
+      if (typeof updateProcessingTimeLockStatus === 'function') {
+        updateProcessingTimeLockStatus('end');
+      }
+      try { endTimeEl.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) { }
+    }
+
+    // Mark this machine as handled in the current grouped lot-change cycle so the
+    // chooser can grey it out and we send to every assigned machine.
+    if (!window.__lotCycleMachinesDone) window.__lotCycleMachinesDone = [];
+    if (window.__lotCycleMachinesDone.indexOf(machine) < 0) window.__lotCycleMachinesDone.push(machine);
+    if (typeof window.assertMachineState === 'function') window.assertMachineState();
+    return prevOpen;
+  }
+
+  function reconcileMaterialLots() {
+    refreshLots();
+    const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0)
+      ? groupedMachines
+      : [(document.getElementById('process') ? document.getElementById('process').value : '') || (document.getElementById('machine-selector') ? document.getElementById('machine-selector').value : '') || 'UNKNOWN'];
+
+    // Only auto-reconcile onto the machine timeline if there is a single machine
+    if (machines.length === 1 && machines[0] && machines[0] !== 'UNKNOWN') {
+      const m = machines[0];
+      const list = lotsByMachine[m] || (lotsByMachine[m] = []);
+      const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots))
+        ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
+        : [];
+
+      let added = false;
+      mLots.forEach(lotNum => {
+        if (!list.some(r => r.lotNumber === lotNum)) {
+          recordLotScan(lotNum, m, 'auto');
+          added = true;
+        }
+      });
+      if (added) {
+        save();
+        updateShotTotalField();
+      }
+    }
+  }
+  window.reconcileMaterialLots = reconcileMaterialLots;
+
+  window.isMachineLotScanned = function (machineName) {
+    const m = String(machineName || '').trim().toUpperCase();
+    if (!m) return false;
+    try {
+      if (typeof refreshLots === 'function') refreshLots();
+    } catch (_) { }
+    if (typeof lotsByMachine !== 'undefined' && lotsByMachine && Array.isArray(lotsByMachine[m]) && lotsByMachine[m].length > 0) {
+      return true;
+    }
+    const pfx = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+    try {
+      const raw = localStorage.getItem(`${pfx}lotsByMachine`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed[m]) && parsed[m].length > 0) return true;
+      }
+    } catch (_) { }
+    return false;
+  };
+
+  function closeRecord(rec, shots) {
+    if (!rec) return;
+    refreshLots();
+    shots = parseInt(shots, 10) || 0;
+
+    const machine = rec.machine || 'UNKNOWN';
+    const list = lotsByMachine[machine] || [];
+    let target = null;
+    if (rec.ts && rec.lotNumber) target = list.find(r => r.ts === rec.ts && r.lotNumber === rec.lotNumber);
+    if (!target && rec.lotNumber) target = list.find(r => r.lotNumber === rec.lotNumber && r.open);
+    if (!target && rec.ts) target = list.find(r => r.ts === rec.ts);
+    if (!target && rec.lotNumber && list.length > 0) target = list.find(r => r.lotNumber === rec.lotNumber);
+    if (!target) {
+      Object.keys(lotsByMachine).forEach(m => {
+        if (!target) {
+          const l = lotsByMachine[m] || [];
+          if (rec.ts && rec.lotNumber) target = l.find(r => r.ts === rec.ts && r.lotNumber === rec.lotNumber);
+          if (!target && rec.lotNumber) target = l.find(r => r.lotNumber === rec.lotNumber && r.open);
+          if (!target && rec.ts) target = l.find(r => r.ts === rec.ts);
+          if (!target && rec.lotNumber) target = l.find(r => r.lotNumber === rec.lotNumber);
+        }
+      });
+    }
+
+    const applyShots = (t) => {
+      t.shots = shots;
+      t.meters = (t.feedPitch != null) ? round2(shots * t.feedPitch / 1000) : null;
+      t.pieces = (t.pcPerCycle != null) ? shots * t.pcPerCycle : null;
+      t.open = false;
+    };
+
+    if (target) applyShots(target);
+    applyShots(rec);
+
+    save();
+    updateShotTotalField();
+  }
+
+  function buildPayload() {
+    const recs = allRecords().filter(r => r.shots != null);
+    const Lot_Details = recs.map(r => {
+      const seiban = r.materialSeiban
+        || r.材料背番号
+        || (window.__scannedLotQRMap && (window.__scannedLotQRMap[r.lotNumber]?.materialSeiban || window.__scannedLotQRMap[r.lotNumber]?.材料背番号))
+        || (typeof currentProductDetails !== 'undefined' && currentProductDetails?.materialCode)
+        || (document.getElementById('背番号')?.value)
+        || null;
+
+      const fullQR = r.scannedQR
+        || (window.__scannedLotQRMap && window.__scannedLotQRMap[r.lotNumber]?.scannedQR)
+        || null;
+
+      const o = {
+        lotNumber: r.lotNumber,
+        machine: r.machine,
+        shots: r.shots,
+        feedPitch: r.feedPitch,
+        pcPerCycle: r.pcPerCycle,
+        meters: r.meters
+      };
+      if (r.pieces != null) o.pieces = r.pieces;
+      if (r.ts != null) {
+        o.timestamp = (typeof r.ts === 'number') ? new Date(r.ts).toISOString() : String(r.ts);
+      } else {
+        o.timestamp = new Date().toISOString();
+      }
+      if (seiban != null) {
+        o.materialSeiban = seiban;
+      }
+      if (fullQR != null) {
+        o.scannedQR = fullQR;
+      }
+      if (r.image != null) o.image = r.image;
+      return o;
+    });
+    const Total_Meters = round2(recs.reduce((s, r) => s + (r.meters || 0), 0));
+    const Total_Pieces = recs.filter(r => r.pieces != null).reduce((s, r) => s + r.pieces, 0);
+    return { Lot_Details: Lot_Details, Total_Meters: Total_Meters, Total_Pieces: Total_Pieces, totalShots: totalShots() };
+  }
+
+  /* ---------- Modals (self-contained, injected) ---------- */
+  function closeLP() { const e = document.getElementById('lpModal'); if (e) e.remove(); }
+  function shell() {
+    const ov = document.createElement('div');
+    ov.id = 'lpModal';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:100100;background:rgba(10,15,26,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:16px;max-width:360px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:inherit;';
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+    return card;
+  }
+
+  function promptShots(machine, lot, onSubmit, opts) {
+    opts = opts || {};
+    closeLP();
+    const card = shell();
+
+    let closeHtml = '';
+    if (opts.allowCancel) {
+      card.style.position = 'relative';
+      closeHtml = '<button id="lpClose" style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.4rem;font-weight:bold;color:#667085;cursor:pointer;padding:0;line-height:1;z-index:10;">✕</button>';
+    }
+
+    card.innerHTML = closeHtml +
+      '<div style="font-size:1.6rem;font-weight:900;color:#101828;text-align:center;margin-bottom:4px;padding-top:' + (opts.allowCancel ? '10px' : '0') + ';">' + machine + '</div>' +
+      '<div style="font-size:1.1rem;font-weight:700;color:#f39c12;text-align:center;margin-bottom:12px;">Lot: ' + lot + '</div>' +
+      '<div style="font-size:1.1rem;font-weight:800;color:#2E6FF2;text-align:center;margin-bottom:8px;">ショット数を入力<br><span style="font-size:0.85rem;color:#475467;font-weight:600;">Enter cur times value</span></div>' +
+      '<div style="text-align:center; margin-bottom:12px;"><img src="src/curTimes.jpeg" alt="cur times" style="max-height:100px; width:auto; max-width:100%; border-radius:6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor:pointer;" onclick="if(window.openPreview) window.openPreview(this.src, \'' + machine + '\');"></div>' +
+      '<input id="lpDisplay" type="text" readonly value="" inputmode="none" style="width:100%;font-size:2.5rem;font-weight:900;text-align:center;padding:12px;border:3px solid #2E6FF2;border-radius:10px;color:#101828;margin-bottom:12px;">' +
+      '<div id="lpKeys" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"></div>' +
+      '<button id="lpOk" style="margin-top:12px;width:100%;background:#2E6FF2;color:#fff;border:none;border-radius:10px;padding:14px;font-size:1.2rem;font-weight:800;cursor:pointer;">OK</button>';
+    const disp = card.querySelector('#lpDisplay');
+    const keys = card.querySelector('#lpKeys');
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C'].forEach(k => {
+      const b = document.createElement('button');
+      b.textContent = k;
+      b.style.cssText = 'padding:16px;font-size:1.3rem;font-weight:800;border:1px solid #D0D5DD;border-radius:10px;background:#F9FAFB;color:#101828;cursor:pointer;';
+      b.onclick = () => { if (k === '⌫') disp.value = disp.value.slice(0, -1); else if (k === 'C') disp.value = ''; else disp.value += k; };
+      keys.appendChild(b);
+    });
+    card.querySelector('#lpOk').onclick = () => { const v = parseInt(disp.value, 10) || 0; closeLP(); if (onSubmit) onSubmit(v); };
+
+    const closeBtn = card.querySelector('#lpClose');
+    if (closeBtn) {
+      closeBtn.onclick = () => {
+        closeLP();
+        if (opts.onCancel) opts.onCancel();
+      };
+    }
+  }
+
+  function chooseMachine(machines, onPick, opts) {
+    opts = opts || {};
+    const done = opts.done || [];
+    closeLP();
+    const card = shell();
+
+    const btns = (machines || []).map(m => {
+      const isDone = done.indexOf(m) >= 0;
+      const label = opts.formatLabel ? opts.formatLabel(m) : (m + (isDone ? ' ✓ 済' : ''));
+      const style = isDone
+        ? 'width:100%;background:#E4E7EC;color:#98A2B3;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:not-allowed;'
+        : 'width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:pointer;';
+      return '<button data-m="' + m + '" ' + (isDone ? 'disabled' : '') + ' style="' + style + '">' + label + '</button>';
+    }).join('');
+    const doneBtn = opts.allowDone
+      ? '<button id="lpDone" style="width:100%;background:#29C36A;color:#fff;border:none;border-radius:10px;padding:14px;font-size:1rem;font-weight:800;cursor:pointer;margin-top:6px;">完了して送信へ / Done → Send</button>'
+      : '';
+    card.innerHTML =
+      '<div style="font-size:1.05rem;font-weight:800;color:#101828;margin-bottom:4px;">' + (opts.title || '機械を選択 / Select machine') + '</div>' +
+      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin-bottom:14px;">' + (opts.subtitle || 'このロットを処理する機械 / Machine for this lot') + '</div>' + btns + doneBtn;
+
+    if (opts.allowCancel || window.__materialScanMode === 'production') {
+      const ov = document.getElementById('lpModal');
+      if (ov) {
+        ov.addEventListener('click', function (e) {
+          if (e.target === ov) {
+            closeLP();
+            if (opts.onCancel) opts.onCancel();
+            // Only the flow that OWNS the material scan may end it. Other callers
+            // (e.g. editing a machine's ショット数) must not cancel it as a side effect.
+            if (opts.clearsMaterialScanMode) window.__materialScanMode = null;
+          }
+        });
+      }
+
+      card.style.position = 'relative';
+      const closeBtn = document.createElement('button');
+      closeBtn.innerHTML = '✕';
+      closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.4rem;font-weight:bold;color:#667085;cursor:pointer;padding:0;line-height:1;z-index:10;';
+      closeBtn.setAttribute('aria-label', 'Close');
+      closeBtn.onclick = function (e) {
+        e.stopPropagation();
+        closeLP();
+        if (opts.onCancel) opts.onCancel();
+        if (opts.clearsMaterialScanMode) window.__materialScanMode = null;
+      };
+      card.appendChild(closeBtn);
+    }
+
+    card.querySelectorAll('[data-m]:not([disabled])').forEach(b => b.onclick = () => { const m = b.getAttribute('data-m'); closeLP(); if (onPick) onPick(m); });
+    const db = card.querySelector('#lpDone');
+    if (db) db.onclick = () => { closeLP(); if (opts.onDone) opts.onDone(); };
+  }
+
+  // Collect ショット数 for each still-open lot or lot with missing shots.
+  function promptFinalLots() {
+    if (document.getElementById('lpModal')) return; // Already showing prompt
+    if (typeof reconcileMaterialLots === 'function') reconcileMaterialLots();
+    refreshLots();
+    let open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
+
+    if (!open.length) {
+      const currentShotVal = document.getElementById('shot')?.value || '';
+      const mName = (typeof getMachineName === 'function' ? getMachineName() : '')
+        || (document.getElementById('process') ? document.getElementById('process').value : '')
+        || 'UNKNOWN';
+      const targetMachines = (mName && mName.includes(','))
+        ? mName.split(',').map(m => m.trim()).filter(Boolean)
+        : ((typeof groupedMachines !== 'undefined' && Array.isArray(groupedMachines) && groupedMachines.length > 0)
+          ? groupedMachines
+          : [mName]);
+      const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots) && materialLots.length > 0)
+        ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
+        : [];
+
+      if (allRecords().length === 0) {
+        if (mLots.length > 0) {
+          mLots.forEach(l => {
+            targetMachines.forEach(m => recordLotScan(l, m, 'auto'));
+          });
+        } else {
+          const defLot = document.getElementById('lot-number')?.value || '---';
+          targetMachines.forEach(m => recordLotScan(defLot, m, 'auto'));
+        }
+        open = allRecords().filter(r => r.open || r.shots == null || r.shots === '');
+      } else if (!currentShotVal || currentShotVal === '0') {
+        const all = allRecords();
+        if (all.length > 0) {
+          all[all.length - 1].open = true;
+          open = [all[all.length - 1]];
+        }
+      }
+    }
+
+    if (!open.length) return;
+    const targets = open.map(r => ({
+      machine: r.machine,
+      lotNumber: r.lotNumber,
+      ts: r.ts
+    }));
+    let i = 0;
+    const next = () => {
+      if (i >= targets.length) return;
+      const target = targets[i++];
+      promptShots(target.machine, target.lotNumber,
+        v => { closeRecord(target, v); next(); });
+    };
+    next();
+  }
+
+  // Failsafe: if the user refreshes the page before entering shots for a previous lot,
+  // we detect open lots that are NOT the current (last) lot, and prompt for their shots.
+  window.checkMissingShots = function () {
+    refreshLots();
+    const missing = [];
+    Object.keys(lotsByMachine).forEach(machine => {
+      const list = lotsByMachine[machine];
+      if (!list || list.length <= 1) return;
+      // All items except the last one should NOT be open.
+      for (let i = 0; i < list.length - 1; i++) {
+        if (list[i].open || list[i].shots == null || list[i].shots === '') {
+          missing.push({
+            machine: list[i].machine || machine,
+            lotNumber: list[i].lotNumber,
+            ts: list[i].ts
+          });
+        }
+      }
+    });
+
+    if (missing.length === 0) return;
+
+    let idx = 0;
+    const promptNext = () => {
+      if (idx >= missing.length) return;
+      const target = missing[idx++];
+      promptShots(target.machine, target.lotNumber, v => {
+        closeRecord(target, v);
+        promptNext();
+      });
+    };
+    promptNext();
+  };
+
+  window.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+      if (typeof window.checkMissingShots === 'function') {
+        window.checkMissingShots();
+      }
+    }, 1500);
+  });
+
+  /* ---------- Public hooks ---------- */
+  window.verifyLeaderUI = function (onVerified, customTitle, customSubtitle) {
+    const srvURL = () => (typeof serverURL !== 'undefined' && serverURL) ? serverURL : (window.serverURL || (window.location.protocol + '//' + window.location.hostname + ':3000'));
+    const modal = document.createElement('div');
+    modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:100300; justify-content:center; align-items:center;';
+    modal.innerHTML =
+      '<div style="background:#fff; padding:24px; border-radius:14px; max-width:360px; width:92%; text-align:center;">' +
+      `<h3 style="margin:0 0 6px;">${customTitle || 'リーダー認証 / Leader Verification'}</h3>` +
+      `<p style="margin:0 0 12px; font-size:0.85rem; color:#666;">${customSubtitle || 'ショット数を編集するにはリーダーQRをスキャン<br>Scan leader QR to edit shots'}</p>` +
+      '<div id="shotLeaderQr" style="width:100%; aspect-ratio:1; max-width:280px; margin:0 auto; border-radius:10px; overflow:hidden; background:#000;"></div>' +
+      '<p id="shotLeaderStatus" style="margin:12px 0; font-size:0.85rem; color:#2d5f4f; min-height:18px;">リーダーのQRコードをスキャンしてください</p>' +
+      '<button id="shotLeaderCancel" style="width:100%; padding:12px; font-size:15px; background:#f44336; color:#fff; border:none; border-radius:8px; cursor:pointer;">キャンセル / Cancel</button>' +
+      '</div>';
+    document.body.appendChild(modal);
+    const statusEl = modal.querySelector('#shotLeaderStatus');
+    let scanner = new Html5Qrcode('shotLeaderQr');
+    let processing = false;
+
+    function removeModal() { if (modal.parentElement) document.body.removeChild(modal); }
+    function closeScanner(then) {
+      if (scanner) {
+        scanner.stop()
+          .then(() => { try { scanner.clear(); } catch (e) { } scanner = null; setTimeout(() => { if (then) then(); }, 500); })
+          .catch(() => { scanner = null; setTimeout(() => { if (then) then(); }, 500); });
+      } else if (then) { then(); }
+    }
+    modal.querySelector('#shotLeaderCancel').onclick = () => closeScanner(() => { removeModal(); });
+
+    scanner.start(
+      { facingMode: 'environment' },
+      { fps: 30, qrbox: { width: 800, height: 800 }, aspectRatio: 1.0, disableFlip: false },
+      async (decodedText) => {
+        if (processing) return;
+        processing = true;
+        statusEl.style.color = '#2d5f4f';
+        statusEl.textContent = '確認中... / Verifying...';
+        try {
+          const resp = await fetch(srvURL() + '/verifyLeader', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: decodedText })
+          });
+          const result = await resp.json();
+          if (result.authorized) {
+            const leaderName = (((result.lastName || '') + ' ' + (result.firstName || '')) || result.username || decodedText).trim();
+            result.leaderName = leaderName;
+            statusEl.style.color = '#006400';
+            statusEl.innerHTML = `✅ 認証成功！ / Verified: ${leaderName}`;
+            closeScanner(() => { removeModal(); if (onVerified) onVerified(result); });
+          } else {
+            processing = false;
+            statusEl.style.color = '#cc0000';
+            statusEl.textContent = '❌ 権限がありません / Not authorized';
+          }
+        } catch (error) {
+          processing = false;
+          statusEl.style.color = '#cc0000';
+          statusEl.textContent = '❌ エラーが発生しました / Error occurred';
+        }
+      },
+      (errorMessage) => { }
+    ).catch(err => {
+      statusEl.style.color = '#cc0000';
+      statusEl.textContent = 'カメラの起動に失敗しました';
+    });
+  };
+
+  window.openShotEditModal = function () {
+    window.verifyLeaderUI(() => {
+      renderShotEditModal();
+    });
+  };
+
+  function renderShotEditModal() {
+    if (typeof reconcileMaterialLots === 'function') reconcileMaterialLots();
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;z-index:100200;background:rgba(10,15,26,.8);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(5px);';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:16px;max-width:500px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:inherit;max-height:90vh;overflow-y:auto;';
+
+    let html = '<h2 style="margin:0 0 20px;color:#101828;text-align:center;">ショット数編集 / Edit Shots</h2>';
+    const machines = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 0) ? groupedMachines : [document.getElementById('machine-selector')?.value || 'UNKNOWN'];
+
+    machines.forEach(m => {
+      html += `<div style="background:#F9FAFB;border:1px solid #E4E7EC;border-radius:12px;padding:16px;margin-bottom:16px;">`;
+      html += `<h3 style="margin:0 0 12px;color:#344054;font-size:1.1rem;">${m}</h3>`;
+
+      const records = lotsByMachine[m] || [];
+      if (records.length === 0) {
+        html += `<p style="color:#667085;margin:0;">No records</p>`;
+      } else {
+        records.forEach((rec, idx) => {
+          html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:${idx === records.length - 1 ? 'none' : '1px solid #EAECF0'};">`;
+          html += `<div style="flex:1;">`;
+          html += `<div style="font-weight:600;color:#101828;font-size:0.95rem;">Lot: ${rec.lotNumber || '---'}</div>`;
+          if (!rec.open) {
+            html += `<div style="color:#667085;font-size:0.85rem;">Time: ${new Date(rec.ts).toLocaleTimeString()}</div>`;
+          } else {
+            html += `<div style="color:#f39c12;font-size:0.85rem;font-weight:bold;">Active / 開く</div>`;
+          }
+          html += `</div>`;
+
+          const currentShots = rec.shots != null ? rec.shots : '---';
+          html += `<button type="button" style="background:#2E6FF2;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-weight:700;font-size:1rem;cursor:pointer;" onclick="editSpecificShot('${m}', ${rec.ts})">${currentShots} ✎</button>`;
+          html += `</div>`;
+        });
+      }
+      html += `</div>`;
+    });
+
+    html += '<button type="button" id="closeShotEdit" style="width:100%;padding:14px;background:#E4E7EC;color:#344054;border:none;border-radius:10px;font-size:1.1rem;font-weight:700;cursor:pointer;">閉じる / Close</button>';
+    card.innerHTML = html;
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+
+    card.querySelector('#closeShotEdit').onclick = () => {
+      document.body.removeChild(modal);
+      if (typeof updateSummary === 'function') updateSummary();
+    };
+    window.__shotEditModalRef = modal;
+  }
+
+  window.editSpecificShot = function (machine, ts) {
+    const records = lotsByMachine[machine] || [];
+    const rec = records.find(r => r.ts === ts);
+    if (!rec) return;
+
+    if (window.__shotEditModalRef) window.__shotEditModalRef.style.display = 'none';
+
+    promptShots(machine, rec.lotNumber, (newShots) => {
+      closeRecord(rec, newShots);
+
+      // Re-render modal
+      if (window.__shotEditModalRef && window.__shotEditModalRef.parentNode) {
+        window.__shotEditModalRef.parentNode.removeChild(window.__shotEditModalRef);
+      }
+      renderShotEditModal();
+      if (typeof updateSummary === 'function') updateSummary();
+    }, {
+      allowCancel: true,
+      onCancel: () => {
+        if (window.__shotEditModalRef) window.__shotEditModalRef.style.display = 'flex';
+      }
+    });
+  };
+
+  window.recordLotScan = recordLotScan;
+  window.buildLotProductionPayload = buildPayload;
+  window.getAllLotRecords = allRecords;
+  window.promptFinalLots = promptFinalLots;
+  window.lotProductionReset = function () { lotsByMachine = {}; save(); updateShotTotalField(); };
+
+  /**
+   * Remove all shot-tracking records for a given lot number (across all machines).
+   * Called when the operator deletes a lot pill/tag so ショット数 total stays accurate.
+   */
+  window.removeLotFromTracking = function (lotNumber) {
+    let changed = false;
+    Object.keys(lotsByMachine).forEach(machine => {
+      const before = (lotsByMachine[machine] || []).length;
+      lotsByMachine[machine] = (lotsByMachine[machine] || []).filter(r => r.lotNumber !== lotNumber);
+      if (lotsByMachine[machine].length !== before) changed = true;
+    });
+    if (changed) {
+      save();
+      updateShotTotalField();
+      console.log(`🗑️ [removeLotFromTracking] Removed shot records for lot: ${lotNumber}`);
+    }
+  };
+
+  window.chooseMachine = chooseMachine;
+  window.chooseScanMachine = function (onPicked) {
+    const done = window.__lotCycleMachinesDone || [];
+    chooseMachine((typeof groupedMachines !== 'undefined') ? groupedMachines : [],
+      m => { window.__lotScanMachine = m; if (onPicked) onPicked(); },
+      {
+        done: done,
+        allowDone: done.length > 0,
+        // Abandoning the machine choice abandons the material scan itself.
+        clearsMaterialScanMode: true,
+        // "Done → Send": stop adding machines and go to Step 3 (send).
+        onDone: function () {
+          window.captureLotSendMachines();
+          if (typeof showStep3Modal === 'function') showStep3Modal();
+        }
+      });
+  };
+
+  // After a machine's lot+photo+shots: if grouped machines remain unhandled this
+  // cycle, re-open the chooser (handled machines greyed) so the operator does the
+  // other machine; otherwise continue to Step 3 (send).
+  // Freeze which machines this lot cycle assigned, so Step 3 still knows where to
+  // send after __lotScanMachine / __lotCycleMachinesDone are reset on the way there.
+  window.captureLotSendMachines = function () {
+    const done = (window.__lotCycleMachinesDone || []).slice();
+    const live = done.length
+      ? done
+      : (window.__lotScanMachine ? [window.__lotScanMachine] : []);
+    // Capture only when there IS something live to capture. proceedAfterMachineDone
+    // freezes and then clears both globals, so a second call (the production Step 3
+    // override makes one) would otherwise overwrite the freeze with an empty list and
+    // send the lot to every machine in the group.
+    if (live.length) {
+      window.__lotSendMachines = live;
+    } else if (!Array.isArray(window.__lotSendMachines)) {
+      window.__lotSendMachines = [];
+    }
+    console.log('🎯 [captureLotSendMachines] Sending this cycle to:', window.__lotSendMachines);
+    return window.__lotSendMachines;
+  };
+
+  window.proceedAfterMachineDone = function () {
+    console.log('🟣 [proceedAfterMachineDone] called');
+    const grouped = (typeof groupedMachines !== 'undefined' && groupedMachines.length > 1);
+    console.log('🟣 [proceedAfterMachineDone] grouped:', grouped);
+    if (grouped && window.__materialScanMode !== 'production') {
+      const done = window.__lotCycleMachinesDone || [];
+      const remaining = groupedMachines.filter(m => done.indexOf(m) < 0);
+      console.log('🟣 [proceedAfterMachineDone] done:', done, 'remaining:', remaining);
+      if (remaining.length > 0) {
+        window.__lotScanMachine = null; // force a fresh choice
+        console.log('🟣 [proceedAfterMachineDone] Opening machine chooser for remaining machines:', remaining);
+        window.chooseScanMachine(() => {
+          console.log('🟣 [proceedAfterMachineDone] Machine chosen:', window.__lotScanMachine);
+          // Don't show step2Modal here — the startStep2Scan handler has a safety
+          // check that will re-show it right when the scanner needs it. Showing it
+          // now would flash the modal behind the chooser on the production page.
+          document.getElementById('startStep2Scan').click();
+        });
+        return;
+      }
+    }
+    console.log('🟣 [proceedAfterMachineDone] All machines done (or not grouped) → showStep3Modal');
+    window.captureLotSendMachines();
+    window.__lotScanMachine = null;
+    window.__lotCycleMachinesDone = [];
+    if (typeof showStep3Modal === 'function') showStep3Modal();
+  };
+  window.afterLotPhotoProceed = function (onDone) {
+    const prev = window.__pendingPrevLot;
+    window.__pendingPrevLot = null;
+    console.log('🟣 [afterLotPhotoProceed] called, prev:', prev ? (prev.machine + ' lot ' + prev.lotNumber + ' open=' + prev.open) : 'null');
+    if (prev && (prev.open || prev.shots == null || prev.shots === '')) {
+      console.log('🟣 [afterLotPhotoProceed] Prompting shots for previous lot...');
+      promptShots(prev.machine, prev.lotNumber,
+        v => { closeRecord(prev, v); console.log('🟣 [afterLotPhotoProceed] Shots entered, calling onDone...'); if (onDone) onDone(); });
+    } else {
+      console.log('🟣 [afterLotPhotoProceed] No previous open lot, calling onDone directly');
+      if (onDone) { onDone(); }
+    }
+  };
+
+  // Final/open lot capture when End Time is entered.
+  const endTimeEl = document.getElementById('End Time');
+  if (endTimeEl) {
+    endTimeEl.addEventListener('change', function () { if (endTimeEl.value) promptFinalLots(); });
+    endTimeEl.addEventListener('input', function () { if (endTimeEl.value) promptFinalLots(); });
+  }
+
+  // Reflect any persisted lots into the (hidden) #shot total on load.
+  updateShotTotalField();
+})();
+
+/* ============================================================
+   疵引き (MATERIAL DEFECT) PHOTO CAPTURE
+   ------------------------------------------------------------
+   Camera button under the 疵引き defect counter on the production
+   page. Flow:
+     leader QR scan (verifyLeader) → camera (webcam / native) →
+     burn-in overlay at the bottom of the photo (current lot
+     number, leader name, timestamp) → flatten → save into the
+     SAME material-label photo group (materialLabelPhotos).
+   The overlay is rasterised into the JPEG so it is permanent.
+   Self-contained: builds its own modals, no extra HTML needed.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  function srvURL() { return (typeof serverURL !== 'undefined' && serverURL) ? serverURL : ''; }
+
+  // Best-effort "current lot": the most recent OPEN lot in the per-machine
+  // tracker, else the last entry in the material-lot list.
+  function getCurrentLot(machine) {
+    try {
+      const PFX = (typeof uniquePrefix !== 'undefined' && uniquePrefix) ? uniquePrefix : 'dcp-';
+      const lbm = JSON.parse(localStorage.getItem(PFX + 'lotsByMachine') || '{}') || {};
+      if (machine) {
+        const list = lbm[machine] || [];
+        for (let i = list.length - 1; i >= 0; i--) {
+          if (list[i] && list[i].open && list[i].lotNumber) return list[i].lotNumber;
+        }
+        if (list.length > 0 && list[list.length - 1] && list[list.length - 1].lotNumber) {
+          return list[list.length - 1].lotNumber;
+        }
+      } else {
+        let best = null;
+        Object.keys(lbm).forEach(m => (lbm[m] || []).forEach(r => { if (r && r.open && r.lotNumber) best = r; }));
+        if (best) return best.lotNumber;
+      }
+    } catch (e) { }
+    try {
+      if (typeof materialLots !== 'undefined' && materialLots.length) {
+        return materialLots[materialLots.length - 1].lotNumber;
+      }
+    } catch (e) { }
+    return document.getElementById('lot-number')?.value || '';
+  }
+
+  // Draw the captured image to a canvas and burn a translucent caption bar
+  // (machine / lot / leader / timestamp) onto the bottom, then flatten to a JPEG.
+  function burnOverlay(srcImage, info) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = function () {
+        const W = img.naturalWidth || img.width;
+        const H = img.naturalHeight || img.height;
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, W, H);
+
+        const lines = [
+          (info.machine ? ('機械 / Machine: ' + info.machine) : null),
+          'ロット / Lot: ' + (info.lot || '—'),
+          'リーダー / Leader: ' + (info.leader || '—'),
+          info.time
+        ].filter(Boolean);
+        const pad = Math.max(14, Math.round(W * 0.022));
+        const fontSize = Math.max(18, Math.round(W * 0.030));
+        const lineH = Math.round(fontSize * 1.4);
+        const barH = lineH * lines.length + pad * 2;
+
+        ctx.fillStyle = 'rgba(0,0,0,0.60)';
+        ctx.fillRect(0, H - barH, W, barH);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'top';
+        ctx.font = 'bold ' + fontSize + 'px sans-serif';
+        let y = H - barH + pad;
+        lines.forEach(t => { ctx.fillText(t, pad, y); y += lineH; });
+
+        resolve(canvas.toDataURL('image/jpeg', 0.92));
+      };
+      img.onerror = function () { resolve(srcImage); };
+      img.src = srcImage.startsWith('data:') ? srcImage : 'data:image/jpeg;base64,' + srcImage;
+    });
+  }
+
+  // Native camera (mobile) via a one-shot file input with capture hint.
+  function captureViaFileInput(cb) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.setAttribute('capture', 'environment');
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.addEventListener('change', function () {
+      const file = input.files && input.files[0];
+      if (input.parentElement) document.body.removeChild(input);
+      if (!file) { cb(null); return; }
+      const reader = new FileReader();
+      reader.onload = e => {
+        checkBlurAndProceed(e.target.result,
+          () => cb(e.target.result),
+          () => captureViaFileInput(cb)
+        );
+      };
+      reader.onerror = () => cb(null);
+      reader.readAsDataURL(file);
+    });
+    input.click();
+  }
+
+  // Webcam via getUserMedia in a dedicated modal.
+  function captureViaWebcam(cb) {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:100001; justify-content:center; align-items:center;';
+    modal.innerHTML =
+      '<div style="background:#fff; padding:20px; border-radius:12px; max-width:760px; width:92%; text-align:center;">' +
+      '<h2 style="margin:0 0 12px;">疵引き写真撮影 / Defect Photo</h2>' +
+      '<video id="defectVid" autoplay playsinline style="width:100%; max-width:640px; border-radius:8px; background:#000;"></video>' +
+      '<div style="margin-top:16px; display:flex; gap:10px; justify-content:center;">' +
+      '<button id="defectCapBtn" style="padding:12px 22px; font-size:16px; background:#2196F3; color:#fff; border:none; border-radius:6px; cursor:pointer;">📸 撮影 / Capture</button>' +
+      '<button id="defectCamClose" style="padding:12px 22px; font-size:16px; background:#f44336; color:#fff; border:none; border-radius:6px; cursor:pointer;">✕ 閉じる / Close</button>' +
+      '</div></div>';
+    document.body.appendChild(modal);
+    const video = modal.querySelector('#defectVid');
+    let stream = null;
+    function cleanup() {
+      if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch (e) { } }
+      if (modal.parentElement) document.body.removeChild(modal);
+    }
+    modal.querySelector('#defectCamClose').onclick = () => { cleanup(); cb(null); };
+    modal.querySelector('#defectCapBtn').onclick = () => {
+      const c = document.createElement('canvas');
+      c.width = video.videoWidth || 1920; c.height = video.videoHeight || 1080;
+      c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+      const b64 = c.toDataURL('image/jpeg', 0.95);
+      cleanup();
+      checkBlurAndProceed(b64,
+        () => cb(b64),
+        () => captureViaWebcam(cb)
+      );
+    };
+
+    function tryGetUserMedia(retriesLeft) {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.warn('getUserMedia is not supported by this browser');
+        cleanup();
+        captureViaFileInput(cb);
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
+        .then(s => { stream = s; video.srcObject = s; })
+        .catch(err => {
+          console.error('Defect webcam error:', err);
+          if (retriesLeft > 0) {
+            console.log(`Retrying camera access... (${retriesLeft} attempts left)`);
+            setTimeout(() => tryGetUserMedia(retriesLeft - 1), 500);
+          } else {
+            cleanup();
+            captureViaFileInput(cb);
+          }
+        });
+    }
+    tryGetUserMedia(3); // Retry up to 3 times to mitigate camera lock race condition
+  }
+
+  // Leader QR verification modal (own scanner + cancel).
+  function openLeaderScan(onVerified) {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:100001; justify-content:center; align-items:center;';
+    modal.innerHTML =
+      '<div style="background:#fff; padding:24px; border-radius:14px; max-width:360px; width:92%; text-align:center;">' +
+      '<h3 style="margin:0 0 6px;">リーダー認証 / Leader Verification</h3>' +
+      '<p style="margin:0 0 12px; font-size:0.85rem; color:#666;">疵引き写真を撮影するにはリーダーQRをスキャン<br>Scan leader QR to take a defect photo</p>' +
+      '<div id="defectLeaderQr" style="width:100%; aspect-ratio:1; max-width:280px; margin:0 auto; border-radius:10px; overflow:hidden; background:#000;"></div>' +
+      '<p id="defectLeaderStatus" style="margin:12px 0; font-size:0.85rem; color:#2d5f4f; min-height:18px;">リーダーのQRコードをスキャンしてください</p>' +
+      '<button id="defectLeaderCancel" style="width:100%; padding:12px; font-size:15px; background:#f44336; color:#fff; border:none; border-radius:8px; cursor:pointer;">キャンセル / Cancel</button>' +
+      '</div>';
+    document.body.appendChild(modal);
+    const statusEl = modal.querySelector('#defectLeaderStatus');
+    let scanner = new Html5Qrcode('defectLeaderQr');
+    let processing = false;
+
+    function removeModal() { if (modal.parentElement) document.body.removeChild(modal); }
+    function closeScanner(then) {
+      if (scanner) {
+        scanner.stop()
+          .then(() => {
+            try { scanner.clear(); } catch (e) { }
+            scanner = null;
+            // Wait 500ms to ensure iOS Safari fully releases the camera hardware lock
+            setTimeout(() => { if (then) then(); }, 500);
+          })
+          .catch(() => {
+            scanner = null;
+            setTimeout(() => { if (then) then(); }, 500);
+          });
+      } else if (then) {
+        then();
+      }
+    }
+    modal.querySelector('#defectLeaderCancel').onclick = () => closeScanner(() => { removeModal(); onVerified(null); });
+
+    scanner.start(
+      { facingMode: 'environment' },
+      { fps: 30, qrbox: { width: 800, height: 800 }, aspectRatio: 1.0, disableFlip: false },
+      async (decodedText) => {
+        if (processing) return;
+        processing = true;
+        statusEl.style.color = '#2d5f4f';
+        statusEl.textContent = '確認中... / Verifying...';
+        try {
+          const resp = await fetch(srvURL() + '/verifyLeader', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: decodedText })
+          });
+          const result = await resp.json();
+          if (result.authorized) {
+            const name = ((result.firstName || '') + ' ' + (result.lastName || '')).trim();
+            statusEl.style.color = '#006400';
+            statusEl.innerHTML = `✅ ${name || 'Verified'}<br><span style="font-size:0.85em;color:#666;">下のボタンをタップ / Tap below</span>`;
+
+            // Stop the scanner in the background so it frees the camera
+            if (scanner) {
+              scanner.stop().then(() => { try { scanner.clear(); } catch (e) { } }).catch(() => { });
+              scanner = null;
+            }
+
+            // Transform the Cancel button into a "Take Photo" button to capture the user gesture
+            const btn = modal.querySelector('#defectLeaderCancel');
+            btn.textContent = '📸 写真を撮る / Take Photo';
+            btn.style.background = '#2196F3';
+            btn.onclick = () => {
+              onVerified(name); // Opens native camera synchronously from user tap
+              removeModal();
+            };
+          } else {
+            processing = false;
+            statusEl.style.color = '#cc0000';
+            statusEl.textContent = '❌ 権限がありません / Not authorized';
+          }
+        } catch (e) {
+          processing = false;
+          statusEl.style.color = '#cc0000';
+          statusEl.textContent = '❌ エラーが発生しました / Error';
+        }
+      },
+      () => { }
+    ).catch(err => {
+      console.error('Defect leader scanner error:', err);
+      statusEl.style.color = '#cc0000';
+      statusEl.textContent = '❌ カメラを起動できませんでした / Could not start camera';
+    });
+  }
+
+  // Public entry point — wired to the camera button under 疵引不良.
+  let isDefectPhotoFlowActive = false;
+  window.startDefectPhotoFlow = function () {
+    if (isDefectPhotoFlowActive) return;
+    isDefectPhotoFlowActive = true;
+
+    const mSelector = document.getElementById('machine-selector')?.value
+      || (typeof getMachineName === 'function' ? getMachineName() : '')
+      || (document.getElementById('process') ? document.getElementById('process').value : '');
+    const machines = (typeof groupedMachines !== 'undefined' && Array.isArray(groupedMachines) && groupedMachines.length > 1)
+      ? groupedMachines
+      : (mSelector && mSelector.includes(',') ? mSelector.split(',').map(m => m.trim()).filter(Boolean) : []);
+
+    const proceedWithMachine = (targetMachine) => {
+      const lot = getCurrentLot(targetMachine);
+
+      openLeaderScan(function (leaderName) {
+        if (!leaderName) {
+          isDefectPhotoFlowActive = false;
+          return; // cancelled
+        }
+
+        // The user explicitly requested the native camera app for taking photos.
+        const capture = captureViaFileInput;
+
+        capture(async function (base64) {
+          isDefectPhotoFlowActive = false;
+          if (!base64) return; // cancelled / no image
+
+          // The flattening (burnOverlay) happens asynchronously before upload
+          const stamped = await burnOverlay(base64, {
+            machine: targetMachine,
+            lot: lot,
+            leader: leaderName,
+            time: new Date().toLocaleString('ja-JP')
+          });
+
+          try {
+            // Save defect photo bound to this lot, without replacing primary label photo
+            const ok = await addMaterialLabelPhoto(stamped, lot || null, {
+              replace: false,
+              photoType: 'defect',
+              machine: targetMachine
+            });
+            if (ok) {
+              if (typeof showSuccessModal === 'function') showSuccessModal('疵引き写真を保存しました / Defect photo saved');
+              if (typeof logTabletAction === 'function') {
+                logTabletAction('Defect (疵引き) photo captured', 'in-progress', {
+                  machine: targetMachine,
+                  lotNumber: lot,
+                  leader: leaderName
+                });
+              }
+            } else if (typeof showAlert === 'function') {
+              const max = (typeof MAX_MATERIAL_PHOTOS !== 'undefined') ? MAX_MATERIAL_PHOTOS : '';
+              showAlert('最大' + max + '枚までです / Maximum photos reached');
+            }
+          } catch (e) {
+            console.error('Defect photo save error:', e);
+            if (typeof showAlert === 'function') showAlert('写真の保存に失敗しました / Failed to save photo');
+          }
+        });
+      });
+    };
+
+    if (machines && machines.length > 1 && typeof window.chooseMachine === 'function') {
+      window.chooseMachine(machines, (pickedMachine) => {
+        proceedWithMachine(pickedMachine);
+      }, {
+        title: '機械を選択 / Select machine',
+        subtitle: '疵引きが発生した機械 / Machine with defect',
+        allowCancel: true,
+        onCancel: () => {
+          isDefectPhotoFlowActive = false;
+        }
+      });
+    } else {
+      const singleM = (machines && machines[0]) || mSelector || null;
+      proceedWithMachine(singleM);
+    }
+  };
+})();
+
+// ============================================================================
+// CHECKLIST INTEGRATION MODULE (DCP INTERACTIVE)
+// ============================================================================
+(function () {
+  window.checklistState = {
+    factory: '',
+    machine: '',
+    preChecklists: [],
+    postChecklists: [],
+    queue: [],
+    queueIndex: 0,
+    answers: {},
+    answeredAt: {},
+    tickets: {},
+    fieldPhotos: {},
+    isPreComplete: false,
+    isBypassed: false,
+    isPostComplete: false,
+    isPostSkipped: false,
+    activeKeypadField: null,
+    activeTicketField: null,
+    bypassQrScanner: null,
+  };
+
+  function getJSTDateString() {
+    return new Date().toLocaleString("sv-SE", { timeZone: "Asia/Tokyo" }).split(" ")[0];
+  }
+
+  function getLocalizedText(obj, propBase) {
+    if (!obj) return '';
+    const lang = (typeof getCurrentLanguage === 'function') ? getCurrentLanguage() : 'ja';
+    if (lang === 'en' && obj[`${propBase}_en`]) return obj[`${propBase}_en`];
+    if (lang === 'ja' && obj[`${propBase}_ja`]) return obj[`${propBase}_ja`];
+    return obj[propBase] || obj[`${propBase}_ja`] || obj[`${propBase}_en`] || '';
+  }
+
+  window.goToChecklistTab = function () {
+    const hasQueue = !!(window.checklistState && Array.isArray(window.checklistState.queue) && window.checklistState.queue.length > 0);
+    const btn = document.getElementById('checklistTabBtn');
+    if (!hasQueue) {
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+
+    if (btn) btn.style.display = 'inline-flex';
+
+    if (typeof window.goToTab === 'function') {
+      window.goToTab(0);
+    }
+  };
+
+  window.initChecklistsForMachine = async function (factory, machine) {
+    if (!factory || !machine) return;
+    try {
+      const url = `${serverURL}/api/check-forms/templates?factory=${encodeURIComponent(factory)}&machine=${encodeURIComponent(machine)}`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      const templates = Array.isArray(data.templates) ? data.templates : [];
+
+      const preChecklists = templates.filter(t => (t.timing || 'pre').toLowerCase() === 'pre');
+      const postChecklists = templates.filter(t => (t.timing || 'pre').toLowerCase() === 'post');
+
+      window.checklistState.factory = factory;
+      window.checklistState.machine = machine;
+      window.checklistState.dateStr = getJSTDateString();
+      window.checklistState.preChecklists = preChecklists;
+      window.checklistState.postChecklists = postChecklists;
+
+      const scheduleOrder = { daily: 1, weekly: 2, monthly: 3 };
+      preChecklists.sort((a, b) => (scheduleOrder[a.schedule] || 99) - (scheduleOrder[b.schedule] || 99));
+      postChecklists.sort((a, b) => (scheduleOrder[a.schedule] || 99) - (scheduleOrder[b.schedule] || 99));
+
+      const btn = document.getElementById('checklistTabBtn');
+      const bar = document.querySelector('.tab-bar');
+
+      if (preChecklists.length > 0) {
+        if (btn) btn.style.display = 'inline-flex';
+
+        window.checklistState.queue = preChecklists;
+        window.checklistState.queueIndex = 0;
+        window.checklistState.isPreComplete = false;
+        window.checklistState.isBypassed = false;
+        window.checklistState.answers = {};
+        window.checklistState.answeredAt = {};
+        window.checklistState.tickets = {};
+        window.checklistState.fieldPhotos = {};
+
+        if (typeof window.loadWorkerNamesFromStorage === 'function') window.loadWorkerNamesFromStorage();
+        if (typeof window.loadChecklistDraftFromStorage === 'function') await window.loadChecklistDraftFromStorage();
+
+        if (window.checklistState.isPreComplete || window.checklistState.isBypassed) {
+          if (bar) bar.classList.remove('locked-checklist');
+        } else {
+          if (bar) bar.classList.add('locked-checklist');
+        }
+
+        window.renderCurrentChecklistTemplate();
+        if (!window.checklistState.isPreComplete && !window.checklistState.isBypassed) {
+          window.goToChecklistTab();
+        }
+
+        // MongoDB SWR Background Sync: Verify today's MongoDB status and sync to localStorage & UI
+        verifyChecklistStatusWithMongoDB(factory, machine);
+      } else {
+        window.checklistState.queue = [];
+        window.checklistState.queueIndex = 0;
+        window.checklistState.isPreComplete = true;
+        if (btn) btn.style.display = 'none';
+        if (bar) bar.classList.remove('locked-checklist');
+
+        // Switch to Scan tab (tab index 1)
+        if (typeof window.goToTab === 'function') {
+          const currentTab = typeof currentTabIndex !== 'undefined' ? currentTabIndex : 0;
+          if (currentTab === 0) {
+            window.goToTab(1);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error initializing checklists:', err);
+    }
+  };
+
+  async function verifyChecklistStatusWithMongoDB(factory, machine) {
+    if (!factory || !machine) return;
+    if (!window.checklistState || !window.checklistState.queue || window.checklistState.queue.length === 0) return;
+    try {
+      const res = await fetch(`${serverURL}/api/check-forms/today-status?factory=${encodeURIComponent(factory)}&machine=${encodeURIComponent(machine)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data) {
+        const isRecentlySubmitted = !!(window.checklistState.submittedAt && (Date.now() - window.checklistState.submittedAt < 60000));
+
+        if (!data.hasSubmittedToday) {
+          if (isRecentlySubmitted) {
+            console.log('⏳ Submission made within last 60s - skipping MongoDB empty status reset.');
+            return;
+          }
+
+          // MongoDB has NO record for today (in JST) - clear recordIds and ensure tabs are locked if not completed
+          window.checklistState.recordIds = {};
+          if (window.checklistState.isPreComplete) {
+            console.log('🧹 MongoDB has no record for today - Resetting stale local completed status.');
+            window.checklistState.isPreComplete = false;
+            window.checklistState.isPostComplete = false;
+            window.checklistState.isBypassed = false;
+
+            if (typeof window.saveChecklistDraftToStorage === 'function') {
+              await window.saveChecklistDraftToStorage();
+            }
+
+            if (typeof window.updateTabLock === 'function') {
+              window.updateTabLock();
+            } else {
+              const bar = document.querySelector('.tab-bar');
+              if (bar) bar.classList.add('locked-checklist');
+            }
+
+            if (typeof window.renderCurrentChecklistTemplate === 'function') {
+              window.renderCurrentChecklistTemplate();
+            }
+
+            const currentTab = typeof currentTabIndex !== 'undefined' ? currentTabIndex : 0;
+            if (currentTab === 0 && typeof window.goToChecklistTab === 'function') {
+              window.goToChecklistTab();
+            }
+          }
+          return;
+        }
+
+        window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...(data.recordIds || {}) };
+
+        const allPreDone = window.checklistState.queue && window.checklistState.queue.length > 0 && window.checklistState.queue.every(t => {
+          return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+        });
+
+        if (allPreDone) {
+          const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+          localStorage.removeItem(pfx + 'activeChecklistStart');
+          if (typeof assertMachineState === 'function') assertMachineState();
+        }
+
+        const prevPre = window.checklistState.isPreComplete;
+        const prevPost = window.checklistState.isPostComplete;
+        const prevTickets = window.checklistState.hasOpenTickets;
+        const prevRecordIdsCount = Object.keys(window.checklistState.recordIds || {}).length;
+        const newRecordIdsCount = Object.keys(data.recordIds || {}).length;
+
+        const hasStateChanged = prevPre !== allPreDone || prevPost !== !!data.isPostComplete || prevTickets !== !!data.hasOpenTickets || prevRecordIdsCount !== newRecordIdsCount;
+
+        if (allPreDone || !isRecentlySubmitted) {
+          window.checklistState.isPreComplete = allPreDone;
+        }
+        window.checklistState.isPostComplete = !!data.isPostComplete;
+        window.checklistState.hasOpenTickets = !!data.hasOpenTickets;
+
+        if (typeof window.saveChecklistDraftToStorage === 'function') {
+          await window.saveChecklistDraftToStorage();
+        }
+
+        if (typeof window.updateTabLock === 'function') {
+          window.updateTabLock();
+        } else {
+          const bar = document.querySelector('.tab-bar');
+          const canProceed = (window.checklistState.isPreComplete || window.checklistState.isBypassed) && !window.checklistState.hasOpenTickets;
+          if (canProceed) {
+            if (bar) bar.classList.remove('locked-checklist');
+          } else {
+            if (bar) bar.classList.add('locked-checklist');
+          }
+        }
+
+        if (hasStateChanged && typeof window.renderCurrentChecklistTemplate === 'function') {
+          window.renderCurrentChecklistTemplate();
+        }
+
+        if (!window.checklistState.isPreComplete && !window.checklistState.isBypassed && window.checklistState.queue && window.checklistState.queue.length > 0) {
+          const currentTab = typeof currentTabIndex !== 'undefined' ? currentTabIndex : 0;
+          if (currentTab === 0 && typeof window.goToChecklistTab === 'function') {
+            window.goToChecklistTab();
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('MongoDB checklist status sync background check failed:', e);
+    }
+  }
+  window.verifyChecklistStatusWithMongoDB = verifyChecklistStatusWithMongoDB;
+
+  // Heartbeat check every 30 seconds for overnight day-changes and MongoDB record updates
+  if (!window._checklistDayCheckInterval) {
+    window._checklistDayCheckInterval = setInterval(function () {
+      if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+      if (!window.checklistState.queue || window.checklistState.queue.length === 0) return;
+      const todayIso = getJSTDateString();
+      if (window.checklistState.dateStr && window.checklistState.dateStr !== todayIso) {
+        console.log(`🌅 Date changed from ${window.checklistState.dateStr} to ${todayIso} - Auto-resetting checklist for new day.`);
+        window.checklistState.dateStr = todayIso;
+        window.checklistState.isPreComplete = false;
+        window.checklistState.isPostComplete = false;
+        window.checklistState.isBypassed = false;
+        window.checklistState.answers = {};
+        window.checklistState.answeredAt = {};
+        window.checklistState.tickets = {};
+        window.checklistState.fieldPhotos = {};
+        window.checklistState.recordIds = {};
+
+        if (typeof window.clearChecklistDraftFromStorage === 'function') {
+          window.clearChecklistDraftFromStorage();
+        }
+
+        const bar = document.querySelector('.tab-bar');
+        if (bar) bar.classList.add('locked-checklist');
+
+        if (typeof window.renderCurrentChecklistTemplate === 'function') {
+          window.renderCurrentChecklistTemplate();
+        }
+
+        if (typeof window.goToChecklistTab === 'function') {
+          window.goToChecklistTab();
+        }
+      }
+
+      // SWR polling every 5s
+      verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
+    }, 5000);
+  }
+
+  window.isChecklistFieldCompleted = function (field) {
+    if (!field) return false;
+
+    if (field.type === 'name') {
+      const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+      return activeNames.length > 0;
+    }
+
+    const ansVal = window.checklistState.answers[field.id];
+    if (ansVal === undefined || ansVal === null || ansVal === '') {
+      return false;
+    }
+
+    if (typeof ansVal === 'string' && ansVal.startsWith('SKIPPED')) {
+      return true;
+    }
+
+    const isNg = ansVal === 'NG';
+    const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
+    const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+      (field.min !== null && field.min !== undefined && numVal < field.min) ||
+      (field.max !== null && field.max !== undefined && numVal > field.max)
+    );
+
+    const hasTicket = window.checklistState.tickets[field.id];
+
+    if (isNg || isOutOfRange) {
+      if (!hasTicket || !hasTicket.saved) {
+        return false;
+      }
+    }
+
+    if (field.photoRequired && !isNg && !isOutOfRange) {
+      if (!window.checklistState.fieldPhotos[field.id]) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  window.renderChecklistHeaderAndSelector = function () {
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || queue.length === 0) return;
+
+    const tpl = queue[queueIndex] || queue[0];
+    const isPreMode = !window.checklistState.isPreComplete;
+    const isPostModeActive = window.checklistState.isPostMode === true || (window.checklistState.isPreComplete && window.checklistState.hasSubmittedProductionToday);
+
+    const tierBadge = document.getElementById('checklistTierBadge');
+    const counterBadge = document.getElementById('checklistCounterBadge');
+    const selectorBtn = document.getElementById('checklistSelectorBtn');
+    const selectorTitle = document.getElementById('checklistSelectorTitle');
+    const selectorStatus = document.getElementById('checklistSelectorStatus');
+    const dropdownHint = document.getElementById('checklistSelectorDropdownHint');
+
+    if (!isPreMode && isPostModeActive) {
+      // Unified Post-Checklist Header
+      const postTemplates = queue.filter(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post' && f.type !== 'name'));
+      const allPostFields = [];
+      postTemplates.forEach(t => (t.fields || []).filter(f => f.timing === 'post' && f.type !== 'name').forEach(f => allPostFields.push(f)));
+      const completedPostCount = allPostFields.filter(f => isChecklistFieldCompleted(f)).length;
+      const isAllPostDone = allPostFields.length > 0 && completedPostCount === allPostFields.length;
+
+      if (tierBadge) {
+        tierBadge.textContent = (typeof _t === 'function') ? _t('post_production_check') : 'POST-PRODUCTION CHECK';
+        tierBadge.className = 'checklist-tier-badge post-check';
+      }
+
+      if (counterBadge) {
+        counterBadge.textContent = `${allPostFields.length} Post Steps (${completedPostCount}/${allPostFields.length} Done)`;
+        counterBadge.style.background = isAllPostDone ? '#dcfce7' : 'var(--bg-muted, #f3f4f6)';
+        counterBadge.style.color = isAllPostDone ? '#166534' : 'var(--text-muted, #6b7280)';
+      }
+
+      if (selectorTitle) {
+        selectorTitle.textContent = (typeof _t === 'function') ? _t('all_post_production_checks') : 'Unified Post-Production Checks';
+      }
+
+      if (selectorStatus) {
+        if (window.checklistState.isPostComplete || isAllPostDone) {
+          selectorStatus.textContent = '✓ Done';
+          selectorStatus.className = 'chip-status-tag done';
+        } else {
+          selectorStatus.textContent = `${completedPostCount}/${allPostFields.length}`;
+          selectorStatus.className = 'chip-status-tag prog';
+        }
+      }
+
+      if (selectorBtn) {
+        if (window.checklistState.isPostComplete || isAllPostDone) {
+          selectorBtn.classList.add('is-completed');
+        } else {
+          selectorBtn.classList.remove('is-completed');
+        }
+        selectorBtn.style.cursor = 'default';
+      }
+
+      if (dropdownHint) {
+        dropdownHint.style.display = 'none';
+      }
+      return;
+    }
+
+    // 1. Tier Badge (e.g. DAILY CHECK)
+    if (tierBadge) {
+      const scheduleName = (tpl.schedule || 'daily').toLowerCase();
+      tierBadge.textContent = (typeof _t === 'function') ? _t(`${scheduleName}_check`) : `${scheduleName.toUpperCase()} CHECK`;
+      tierBadge.className = `checklist-tier-badge ${scheduleName}`;
+    }
+
+    // 2. Count completed templates
+    let completedCount = 0;
+    queue.forEach(t => {
+      const tFields = Array.isArray(t.fields) ? t.fields : [];
+      const tTargetFields = isPreMode
+        ? tFields.filter(f => f.timing !== 'post')
+        : (tFields.some(f => f.timing === 'post') ? tFields.filter(f => f.timing === 'post' && f.type !== 'name') : tFields);
+      const isFieldsDone = tTargetFields.length > 0 && tTargetFields.every(f => isChecklistFieldCompleted(f));
+      const isRecorded = !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+      if (isRecorded || (window.checklistState.isPreComplete && isPreMode) || isFieldsDone) {
+        completedCount += 1;
+      }
+    });
+
+    // 3. Overall Counter Pill: e.g. "2 Checklists (0/2 Done)" or "1 Checklist"
+    if (counterBadge) {
+      if (queue.length > 1) {
+        counterBadge.textContent = `${queue.length} Checklists (${completedCount}/${queue.length} Done)`;
+      } else {
+        counterBadge.textContent = completedCount >= 1 ? '1 Checklist (Done)' : '1 Checklist';
+      }
+      if (completedCount === queue.length && queue.length > 0) {
+        counterBadge.style.background = '#dcfce7';
+        counterBadge.style.color = '#166534';
+      } else {
+        counterBadge.style.background = 'var(--bg-muted, #f3f4f6)';
+        counterBadge.style.color = 'var(--text-muted, #6b7280)';
+      }
+    }
+
+    // 4. Current Template Details
+    const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
+    const targetFields = isPreMode
+      ? tplFields.filter(f => f.timing !== 'post')
+      : (tplFields.some(f => f.timing === 'post') ? tplFields.filter(f => f.timing === 'post' && f.type !== 'name') : tplFields);
+    const filledFields = targetFields.filter(f => isChecklistFieldCompleted(f)).length;
+    const isFieldsDone = targetFields.length > 0 && filledFields === targetFields.length;
+    const isRecordedToday = !!(window.checklistState.recordIds && (window.checklistState.recordIds[tpl._id] || window.checklistState.recordIds[tpl.name]));
+    const isCurrentDone = isRecordedToday || (window.checklistState.isPreComplete && isPreMode) || isFieldsDone;
+
+    const localizedTplName = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
+
+    if (selectorTitle) {
+      selectorTitle.textContent = localizedTplName; // Clean title, NO sun icons!
+    }
+
+    if (selectorStatus) {
+      if (isCurrentDone) {
+        selectorStatus.textContent = '✓ Done';
+        selectorStatus.className = 'chip-status-tag done';
+      } else if (filledFields > 0) {
+        selectorStatus.textContent = `${filledFields}/${targetFields.length}`;
+        selectorStatus.className = 'chip-status-tag prog';
+      } else {
+        selectorStatus.textContent = `0/${targetFields.length}`;
+        selectorStatus.className = 'chip-status-tag prog';
+      }
+    }
+
+    if (selectorBtn) {
+      if (isCurrentDone) {
+        selectorBtn.classList.add('is-completed');
+      } else {
+        selectorBtn.classList.remove('is-completed');
+      }
+      selectorBtn.style.cursor = queue.length > 1 ? 'pointer' : 'default';
+    }
+
+    // 5. Dropdown Hint / Switch button
+    if (dropdownHint) {
+      if (queue.length > 1) {
+        dropdownHint.style.display = 'inline-flex';
+        dropdownHint.innerHTML = `<span class="checklist-dropdown-hint-text">▼ Switch (${queue.length})</span>`;
+      } else {
+        dropdownHint.style.display = 'none';
+      }
+    }
+  };
+
+  window.openChecklistSwitcherModal = function () {
+    const { queue } = window.checklistState;
+    if (!queue || queue.length <= 1) return;
+
+    window.renderChecklistSwitcherModal();
+    const modal = document.getElementById('checklistSwitcherModal');
+    if (modal) modal.style.display = 'flex';
+  };
+
+  window.closeChecklistSwitcherModal = function () {
+    const modal = document.getElementById('checklistSwitcherModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.renderChecklistSwitcherModal = function () {
+    const container = document.getElementById('checklistModalListContainer');
+    const headerTitle = document.getElementById('checklistModalHeaderTitle');
+    if (!container) return;
+
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || queue.length === 0) {
+      container.innerHTML = '<p style="color:#6b7280; font-size:0.9rem;">No checklists available.</p>';
+      return;
+    }
+
+    if (headerTitle) {
+      headerTitle.textContent = `Available Checklists (${queue.length})`;
+    }
+
+    const isPreMode = !window.checklistState.isPreComplete;
+
+    const listHtml = queue.map((tpl, idx) => {
+      const schedule = (tpl.schedule || 'daily').toLowerCase();
+      const scheduleName = (typeof _t === 'function') ? _t(`${schedule}_check`) : schedule.toUpperCase();
+      const localizedTplName = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || scheduleName);
+
+      const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
+      const targetFields = isPreMode
+        ? tplFields.filter(f => f.timing !== 'post')
+        : (tplFields.some(f => f.timing === 'post') ? tplFields.filter(f => f.timing === 'post' && f.type !== 'name') : tplFields);
+
+      const filledFields = targetFields.filter(f => isChecklistFieldCompleted(f)).length;
+      const isFieldsDone = targetFields.length > 0 && filledFields === targetFields.length;
+      const isRecordedToday = !!(window.checklistState.recordIds && (window.checklistState.recordIds[tpl._id] || window.checklistState.recordIds[tpl.name]));
+      const isDone = isRecordedToday || (window.checklistState.isPreComplete && isPreMode) || isFieldsDone;
+      const isSelected = idx === queueIndex;
+
+      let statusBadge = '';
+      if (isDone) {
+        statusBadge = `<span class="chip-status-tag done">✓ Done</span>`;
+      } else if (filledFields > 0) {
+        statusBadge = `<span class="chip-status-tag prog">${filledFields}/${targetFields.length}</span>`;
+      } else {
+        statusBadge = `<span class="chip-status-tag pending">0/${targetFields.length}</span>`;
+      }
+
+      return `
+        <div class="checklist-modal-item ${isSelected ? 'is-selected' : ''} ${isDone ? 'is-completed' : ''}" onclick="selectChecklistTemplateIndex(${idx}); closeChecklistSwitcherModal();">
+          <div style="display:flex; flex-direction:column; gap:4px; overflow:hidden;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-weight:800; font-size:0.95rem; color:${isSelected ? '#1d4ed8' : '#1f2937'};">${localizedTplName}</span>
+              ${isSelected ? '<span style="font-size:0.7rem; font-weight:800; color:#2563eb; background:#dbeafe; padding:1px 6px; border-radius:6px;">Current</span>' : ''}
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="font-size:0.75rem; font-weight:700; color:#6b7280; text-transform:uppercase;">${scheduleName}</span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+            ${statusBadge}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = listHtml;
+  };
+
+  window.selectChecklistTemplateIndex = function (index) {
+    if (!window.checklistState || !window.checklistState.queue) return;
+    if (index < 0 || index >= window.checklistState.queue.length) return;
+    window.checklistState.queueIndex = index;
+    renderCurrentChecklistTemplate();
+  };
+
+  window.renderCurrentChecklistTemplate = function () {
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || !queue[queueIndex]) return;
+
+    const tpl = queue[queueIndex];
+    const tierBadge = document.getElementById('checklistTierBadge');
+    const container = document.getElementById('checklistCardsContainer');
+    const nextBtn = document.getElementById('checklistNextBtn');
+
+    if (tierBadge) {
+      const scheduleName = (tpl.schedule || 'daily').toLowerCase();
+      tierBadge.textContent = (typeof _t === 'function') ? _t(`${scheduleName}_check`) : `${scheduleName.toUpperCase()} CHECK`;
+      tierBadge.className = `checklist-tier-badge ${scheduleName}`;
+    }
+
+    // Render single selected checklist selector and header status
+    if (typeof window.renderChecklistHeaderAndSelector === 'function') {
+      window.renderChecklistHeaderAndSelector();
+    }
+
+    const tplFields = Array.isArray(tpl.fields) ? tpl.fields : [];
+    const preFields = tplFields.filter(f => f.timing !== 'post');
+    const postFields = tplFields.filter(f => f.timing === 'post' && f.type !== 'name');
+
+    const isPreComplete = window.checklistState.isPreComplete;
+    const isPostComplete = window.checklistState.isPostComplete === true;
+    const isPostModeActive = window.checklistState.isPostMode === true || (isPreComplete && window.checklistState.hasSubmittedProductionToday);
+
+    const postTemplates = queue.filter(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post' && f.type !== 'name'));
+    const allPostFields = [];
+    postTemplates.forEach(t => {
+      (t.fields || []).filter(f => f.timing === 'post' && f.type !== 'name').forEach(f => {
+        allPostFields.push({ ...f, _template: t });
+      });
+    });
+
+    const isPreMode = !isPreComplete;
+    const targetFields = isPreMode ? preFields : (allPostFields.length > 0 ? allPostFields : tplFields);
+    const allFieldsCompleted = targetFields.every(field => isChecklistFieldCompleted(field));
+
+    const superBypassBtn = document.getElementById('superBypassBtn');
+    const resetAllBtn = document.getElementById('resetAllBtn');
+    const actionsCard = document.getElementById('checklistActionsCard');
+
+    if (actionsCard) {
+      actionsCard.style.display = 'flex';
+    }
+
+    const localizedTitle = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
+    const isCurrentRecorded = !!(window.checklistState.recordIds && (window.checklistState.recordIds[tpl._id] || window.checklistState.recordIds[tpl.name]));
+    const uncompletedTemplates = queue.filter(t => !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+    const isLastRemaining = uncompletedTemplates.length <= 1;
+
+    if (nextBtn) {
+      if (isPreComplete) {
+        if (allPostFields.length > 0 && !window.checklistState.isPostComplete && isPostModeActive) {
+          const isPostDone = allPostFields.every(field => isChecklistFieldCompleted(field));
+          const label = (typeof _t === 'function') ? _t('complete_post_production_check') : 'Complete Post-Production Check';
+          nextBtn.innerHTML = `<span>${label} (${allPostFields.length} steps)</span> ✓`;
+          nextBtn.disabled = !isPostDone;
+          nextBtn.style.opacity = isPostDone ? '1' : '0.45';
+          nextBtn.style.pointerEvents = isPostDone ? 'auto' : 'none';
+          nextBtn.style.filter = 'none';
+          nextBtn.style.background = isPostDone ? '#10b981' : '#9ca3af';
+          nextBtn.style.boxShadow = isPostDone ? '0 4px 14px rgba(16,185,129,0.3)' : 'none';
+          nextBtn.onclick = window.handleChecklistSubmitOrNext;
+        } else {
+          if (window.checklistState.hasOpenTickets) {
+            const label = (typeof _t === 'function') ? _t('please_wait_for_maintenance') : 'Please wait for maintenance team';
+            nextBtn.innerHTML = `<span>⚠️ ${label}</span>`;
+            nextBtn.disabled = true;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'not-allowed';
+            nextBtn.style.pointerEvents = 'none';
+            nextBtn.style.filter = 'none';
+            nextBtn.style.background = '#f59e0b';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(245,158,11,0.3)';
+            nextBtn.classList.remove('checklist-next-pulse');
+            nextBtn.onclick = null;
+          } else {
+            const label = (typeof _t === 'function') ? _t('proceed_with_production') : 'Proceed with Production';
+            nextBtn.innerHTML = `<span>${label}</span> →`;
+            nextBtn.disabled = false;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'pointer';
+            nextBtn.style.pointerEvents = 'auto';
+            nextBtn.style.filter = 'none';
+            nextBtn.style.background = '#10b981';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
+            nextBtn.classList.add('checklist-next-pulse');
+            nextBtn.onclick = function () {
+              if (typeof window.goToTab === 'function') window.goToTab(1);
+            };
+          }
+        }
+      } else if (isCurrentRecorded) {
+        if (uncompletedTemplates.length > 0) {
+          nextBtn.innerHTML = `<span>Switch to Next Checklist (${uncompletedTemplates.length} remaining)</span> →`;
+          nextBtn.disabled = false;
+          nextBtn.style.opacity = '1';
+          nextBtn.style.cursor = 'pointer';
+          nextBtn.style.pointerEvents = 'auto';
+          nextBtn.style.background = '#2563eb';
+          nextBtn.style.boxShadow = '0 4px 14px rgba(37,99,235,0.3)';
+          nextBtn.classList.add('checklist-next-pulse');
+          nextBtn.onclick = function () {
+            const nextIncompleteIdx = queue.findIndex((t, i) => i !== queueIndex && !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+            if (nextIncompleteIdx !== -1) {
+              window.selectChecklistTemplateIndex(nextIncompleteIdx);
+            }
+          };
+        } else {
+          if (window.checklistState.hasOpenTickets) {
+            const label = (typeof _t === 'function') ? _t('please_wait_for_maintenance') : 'Please wait for maintenance team';
+            nextBtn.innerHTML = `<span>⚠️ ${label}</span>`;
+            nextBtn.disabled = true;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'not-allowed';
+            nextBtn.style.pointerEvents = 'none';
+            nextBtn.style.background = '#f59e0b';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(245,158,11,0.3)';
+            nextBtn.classList.remove('checklist-next-pulse');
+            nextBtn.onclick = null;
+          } else {
+            nextBtn.innerHTML = `<span>Proceed to Production</span> →`;
+            nextBtn.disabled = false;
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'pointer';
+            nextBtn.style.pointerEvents = 'auto';
+            nextBtn.style.background = '#10b981';
+            nextBtn.style.boxShadow = '0 4px 14px rgba(16,185,129,0.3)';
+            nextBtn.classList.add('checklist-next-pulse');
+            nextBtn.onclick = function () {
+              if (typeof window.goToTab === 'function') window.goToTab(1);
+            };
+          }
+        }
+      } else {
+        let label = `Submit ${localizedTitle} ✓`;
+        if (postFields.length > 0 && isPreMode) {
+          label = `Submit ${localizedTitle} (Pre-Check) ✓`;
+        }
+
+        nextBtn.innerHTML = `<span>${label}</span>`;
+        nextBtn.onclick = window.handleChecklistSubmitOrNext;
+
+        if (!allFieldsCompleted) {
+          nextBtn.disabled = true;
+          nextBtn.classList.remove('checklist-next-pulse');
+          nextBtn.style.opacity = '0.45';
+          nextBtn.style.cursor = 'not-allowed';
+          nextBtn.style.filter = 'grayscale(1)';
+          nextBtn.style.pointerEvents = 'none';
+          nextBtn.style.background = '#9ca3af';
+          nextBtn.style.boxShadow = 'none';
+        } else {
+          nextBtn.disabled = false;
+          nextBtn.classList.add('checklist-next-pulse');
+          nextBtn.style.opacity = '1';
+          nextBtn.style.cursor = 'pointer';
+          nextBtn.style.filter = 'none';
+          nextBtn.style.pointerEvents = 'auto';
+          nextBtn.style.background = '';
+          nextBtn.style.boxShadow = '';
+        }
+      }
+    }
+
+    if (!container) return;
+    container.innerHTML = '';
+
+    const stepsText = (typeof _t === 'function') ? _t('steps_count') : 'steps';
+    const tapToggleText = (typeof _t === 'function') ? _t('tap_to_expand_collapse') : 'Tap to expand / collapse';
+    const tapCollapseText = (typeof _t === 'function') ? _t('tap_to_collapse_checklist') : '▲ Tap to collapse completed checklist';
+    const todayIso = typeof getJSTDateString === 'function' ? getJSTDateString() : new Date().toISOString().split('T')[0];
+
+    // Render per-template content
+    if (isCurrentRecorded) {
+      const completedSteps = preFields.length > 0 ? preFields : tplFields;
+
+      // 1. Sleek, cohesive Completed Checklist Card
+      const completedCard = document.createElement('div');
+      completedCard.className = 'checklist-completed-card';
+      completedCard.style.cssText = 'background: var(--bg-surface, #ffffff); border: 1px solid var(--border, #e2e8f0); border-radius: 16px; padding: 18px 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.03);';
+      completedCard.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div style="width: 42px; height: 42px; border-radius: 12px; background: #ecfdf5; color: #10b981; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: 800; flex-shrink: 0; border: 1px solid #a7f3d0;">✓</div>
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 1.05rem; font-weight: 800; color: #1e293b;">${localizedTitle}</span>
+                <span class="chip-status-tag done" style="font-size: 0.75rem;">✓ Completed</span>
+              </div>
+              <p style="font-size: 0.8rem; color: #64748b; margin: 4px 0 0 0;">
+                Submitted for ${todayIso} • ${completedSteps.length} verified steps (Locked / Read-only)
+              </p>
+            </div>
+          </div>
+          ${uncompletedTemplates.length > 0 ? `<button type="button" onclick="openChecklistSwitcherModal()" class="btn btn-secondary" style="font-size: 0.8rem; padding: 6px 14px; border-radius: 8px; font-weight: 700;">Switch Checklist ▾</button>` : ''}
+        </div>
+      `;
+
+      // Accordion inside completedCard
+      const accordion = document.createElement('details');
+      accordion.className = 'completed-pre-steps-accordion';
+      accordion.style.cssText = 'margin-top: 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; overflow: hidden;';
+      if (window.checklistState && window.checklistState._isAccordionOpen) {
+        accordion.open = true;
+      }
+      accordion.addEventListener('toggle', function () {
+        if (window.checklistState) {
+          window.checklistState._isAccordionOpen = accordion.open;
+        }
+      });
+
+      accordion.innerHTML = `
+        <summary style="padding: 12px 16px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; font-weight: 700; color: #334155; background: #f1f5f9; user-select: none;">
+          <span style="display: flex; align-items: center; gap: 8px;">📋 View Completed Inspection Steps (${completedSteps.length})</span>
+          <span style="font-size: 0.75rem; color: #2563eb; font-weight: 700;">${tapToggleText}</span>
+        </summary>
+        <div class="completed-pre-steps-content" id="completedPreStepsContent" style="padding: 12px; display: flex; flex-direction: column; gap: 12px; background: #ffffff;"></div>
+      `;
+      completedCard.appendChild(accordion);
+      container.appendChild(completedCard);
+
+      // Attach click-outside collapsing handler
+      if (!window._accordionClickOutsideAttached) {
+        window._accordionClickOutsideAttached = true;
+        document.addEventListener('click', function (e) {
+          const acc = document.querySelector('.completed-pre-steps-accordion');
+          if (acc && acc.open && !acc.contains(e.target)) {
+            acc.open = false;
+            if (window.checklistState) {
+              window.checklistState._isAccordionOpen = false;
+            }
+          }
+        });
+      }
+
+      const accordionContent = accordion.querySelector('#completedPreStepsContent');
+      completedSteps.forEach((field) => {
+        const globalIdx = tplFields.indexOf(field);
+        const stepNum = globalIdx !== -1 ? globalIdx : completedSteps.indexOf(field);
+        const cardEl = renderSingleFieldCard(field, stepNum, true, true);
+        if (accordionContent) accordionContent.appendChild(cardEl);
+      });
+
+      const collapseFooterBtn = document.createElement('button');
+      collapseFooterBtn.type = 'button';
+      collapseFooterBtn.style.cssText = 'width:100%; margin-top:8px; padding:10px; border-radius:10px; background:#f1f5f9; color:#475569; font-weight:700; border:1px solid #e2e8f0; cursor:pointer; font-size:0.85rem; display:flex; align-items:center; justify-content:center; gap:6px;';
+      collapseFooterBtn.innerHTML = tapCollapseText;
+      collapseFooterBtn.onclick = function () {
+        accordion.open = false;
+        if (window.checklistState) window.checklistState._isAccordionOpen = false;
+        accordion.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      };
+      if (accordionContent) accordionContent.appendChild(collapseFooterBtn);
+
+      // 2. Unified Post-production checks across ALL templates
+      if (isPostModeActive && allPostFields.length > 0 && !isPostComplete) {
+        const postHeaderTitle = (typeof _t === 'function') ? _t('post_production_checks_title') : '📋 Post-Production Checks (Unified View)';
+        const postHeader = document.createElement('div');
+        postHeader.className = 'post-steps-header';
+        postHeader.style.cssText = 'background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 14px; padding: 14px 18px; margin-top: 18px; margin-bottom: 16px; font-weight: 800; font-size: 1.05rem; color: #1e40af; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;';
+        postHeader.innerHTML = `<span>${postHeaderTitle} (${allPostFields.length} ${stepsText})</span><span style="font-size:0.8rem; font-weight:700; background:#dbeafe; padding:4px 10px; border-radius:10px; color:#1d4ed8;">All Checklists</span>`;
+        container.appendChild(postHeader);
+
+        let isPrevPostDone = true;
+        postTemplates.forEach((pt) => {
+          const ptFields = (pt.fields || []).filter(f => f.timing === 'post' && f.type !== 'name');
+          if (ptFields.length === 0) return;
+
+          const ptTitle = (typeof getLocalizedText === 'function') ? getLocalizedText(pt, 'name') : (pt.name || 'Checklist');
+          const ptSchedule = (pt.schedule || 'daily').toUpperCase();
+
+          const groupHeader = document.createElement('div');
+          groupHeader.style.cssText = 'margin-top: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;';
+          groupHeader.innerHTML = `
+            <span style="font-size: 0.95rem; font-weight: 800; color: #1e293b;">${ptTitle}</span>
+            <span class="checklist-tier-badge ${(pt.schedule || 'daily').toLowerCase()}" style="font-size:0.7rem; padding:2px 8px;">${ptSchedule}</span>
+          `;
+          container.appendChild(groupHeader);
+
+          ptFields.forEach((field) => {
+            const globalIdx = (pt.fields || []).indexOf(field);
+            const stepNum = globalIdx !== -1 ? globalIdx : ptFields.indexOf(field);
+            const cardEl = renderSingleFieldCard(field, stepNum, isPrevPostDone, false);
+            container.appendChild(cardEl);
+            if (!isChecklistFieldCompleted(field)) {
+              isPrevPostDone = false;
+            }
+          });
+        });
+      }
+    } else {
+      // Template is NOT submitted: Render pre-production steps directly for input (no accordion, NO post-production steps)
+      const titleEl = document.createElement('div');
+      titleEl.style.cssText = 'margin-bottom: 8px;';
+      const localizedDesc = getLocalizedText(tpl, 'description');
+      titleEl.innerHTML = `<h3 style="font-size:1.15rem; font-weight:800; color:#1f2733;">${localizedTitle}</h3>${localizedDesc ? `<p style="font-size:0.85rem; color:#6b7280; margin-top:2px;">${localizedDesc}</p>` : ''}`;
+      container.appendChild(titleEl);
+
+      const fieldsToRender = preFields.length > 0 ? preFields : tplFields;
+      let isPreviousCompleted = true;
+
+      fieldsToRender.forEach((field) => {
+        const globalIdx = tplFields.indexOf(field);
+        const stepNum = globalIdx !== -1 ? globalIdx : fieldsToRender.indexOf(field);
+        const cardEl = renderSingleFieldCard(field, stepNum, isPreviousCompleted, false);
+        container.appendChild(cardEl);
+        if (!isChecklistFieldCompleted(field)) {
+          isPreviousCompleted = false;
+        }
+      });
+    }
+  };
+
+  function renderSingleFieldCard(field, idx, isPreviousCompleted = true, forceLocked = false) {
+    const card = document.createElement('div');
+    card.id = `checklist-card-${field.id}`;
+
+    let cardClass = 'checklist-card';
+    let stepPill = '';
+
+    const fTitle = getLocalizedText(field, 'label');
+    const fDesc = getLocalizedText(field, 'description');
+    const ansVal = window.checklistState.answers[field.id];
+    const hasTicket = window.checklistState.tickets[field.id];
+    const isNg = ansVal === 'NG';
+    const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
+    const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+      (field.min !== null && field.min !== undefined && numVal < field.min) ||
+      (field.max !== null && field.max !== undefined && numVal > field.max)
+    );
+
+    const isCompleted = isChecklistFieldCompleted(field);
+    const isUnlocked = !forceLocked && (isPreviousCompleted || window.checklistState.isBypassed || window.checklistState.isPreComplete);
+
+    window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
+    const isCardUnlockedByOperator = !!window.checklistState.unlockedCompletedCards[field.id];
+
+    const isSkipped = typeof ansVal === 'string' && ansVal.startsWith('SKIPPED');
+    const timingLabel = field.timing === 'post' ? 'POST-PROD' : 'PRE-PROD';
+
+    let lockBtnHtml = '';
+    if (!isUnlocked || forceLocked) {
+      cardClass += ' locked-card';
+      stepPill = `<span class="checklist-step-pill locked">🔒 Step ${idx + 1} (${timingLabel})</span>`;
+    } else if (isCompleted) {
+      cardClass += ' completed-card';
+      stepPill = `<span class="checklist-step-pill done">${isSkipped ? '⏭️ Step ' + (idx + 1) + ' (Skipped)' : '✓ Step ' + (idx + 1) + ' (' + timingLabel + ')'}</span>`;
+      if (!isCardUnlockedByOperator) {
+        cardClass += ' completed-locked';
+        lockBtnHtml = `
+          <button type="button" class="checklist-card-lock-btn" onclick="unlockChecklistCard('${field.id}')" title="Locked - Tap to Edit" style="background:rgba(31,157,107,0.12); color:#1f9d6b; border:1px solid rgba(31,157,107,0.3); border-radius:8px; width:36px; height:36px; font-size:1.1rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+            🔒
+          </button>`;
+      } else {
+        lockBtnHtml = `
+          <button type="button" class="checklist-card-lock-btn" onclick="lockChecklistCard('${field.id}')" title="Unlocked - Tap to Lock" style="background:#2563eb; color:#ffffff; border:none; border-radius:8px; width:36px; height:36px; font-size:1.1rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
+            🔓
+          </button>`;
+      }
+    } else {
+      cardClass += ' active-card';
+      stepPill = `<span class="checklist-step-pill current">Step ${idx + 1} (${timingLabel})</span>`;
+    }
+
+    card.className = cardClass;
+
+    if (!isCompleted) {
+      isPreviousCompleted = false;
+    }
+
+    let mediaHtml = '';
+    if (field.imageURL) {
+      mediaHtml = `<img src="${field.imageURL}" class="checklist-card-media" alt="Reference" style="cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">`;
+    }
+
+    let controlHtml = '';
+    if (forceLocked) {
+      if (field.type === 'name') {
+        const val = window.checklistState.answers[field.id];
+        const valDisplay = Array.isArray(val)
+          ? val.filter(Boolean).map((n, i) => `${i + 1}. ${n}`).join('<br>')
+          : (val ? formatWorkerDisplayLines(val).replace(/\n/g, '<br>') : '—');
+        controlHtml = `<div style="background:#f3f4f6; padding:10px 14px; border-radius:8px; font-weight:700; color:#374151; font-size:0.95rem; border:1px solid #e5e7eb; line-height:1.5;">👤 ${valDisplay}</div>`;
+      } else if (field.type === 'checkbox' || field.type === 'toggle') {
+        const isOk = ansVal === 'OK';
+        const isNg = ansVal === 'NG';
+        controlHtml = `
+            <div class="checklist-toggle-group" style="pointer-events:none; opacity:0.85;">
+              <button type="button" class="checklist-toggle-btn ok-btn ${isOk ? 'active' : ''}" disabled>OK</button>
+              <button type="button" class="checklist-toggle-btn ng-btn ${isNg ? 'active' : ''}" disabled>NG</button>
+            </div>
+          `;
+      } else if (field.type === 'number') {
+        controlHtml = `
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="text" readonly disabled value="${ansVal !== undefined ? ansVal : ''}" 
+                style="flex:1; padding:12px; border-radius:10px; border:1px solid #e5e7eb; background:#f3f4f6; font-weight:700; font-size:1rem; cursor:not-allowed;">
+              ${field.unit ? `<span style="font-weight:700; color:#6b7280;">${field.unit}</span>` : ''}
+            </div>
+          `;
+      } else if (field.type === 'select') {
+        controlHtml = `<div style="background:#f3f4f6; padding:10px 14px; border-radius:8px; font-weight:700; color:#374151; font-size:0.95rem; border:1px solid #e5e7eb;">${ansVal || '—'}</div>`;
+      } else {
+        controlHtml = `<input type="text" disabled readonly value="${ansVal || ''}" style="width:100%; padding:12px; border-radius:10px; border:1px solid #e5e7eb; background:#f3f4f6; cursor:not-allowed;">`;
+      }
+    } else if (field.type === 'name') {
+      const activeSlots = (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+        ? window.selectedWorkerNames
+        : [''];
+      const activeNames = activeSlots.map(n => (n || '').trim()).filter(Boolean);
+      window.checklistState.answers[field.id] = activeNames.length > 0 ? activeNames : (document.getElementById('step0CurrentWorkerName')?.textContent || '');
+
+      controlHtml = `
+          <div style="width:100%; display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${activeSlots.map((name, i) => `
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <div onclick="openWorkerModal(${i})" style="flex:1; background:#f8f9fa; padding:10px 14px; border-radius:8px; font-weight:700; color:#1f2733; font-size:0.95rem; border:1px solid #e6e8ef; cursor:pointer;">
+                    👤 ${name || 'Tap to select worker...'}
+                  </div>
+                  ${activeSlots.length > 1 ? `<button type="button" class="btn btn-alert" style="padding:6px 10px; font-size:0.9rem;" onclick="removeWorkerSlot(${i})">✕</button>` : ''}
+                </div>
+              `).join('')}
+            </div>
+            <button type="button" class="btn btn-secondary" style="font-size:0.85rem; padding:8px; display:flex; align-items:center; justify-content:center; gap:6px; font-weight:700;" onclick="addWorkerSlot()">
+              <span style="font-weight:800; font-size:1.1rem;">+</span> Add Worker
+            </button>
+          </div>
+        `;
+    } else if (field.type === 'checkbox' || field.type === 'toggle') {
+      const isOk = ansVal === 'OK';
+      const isNg = ansVal === 'NG';
+      controlHtml = `
+          <div class="checklist-toggle-group">
+            <button type="button" class="checklist-toggle-btn ok-btn ${isOk ? 'active' : ''}" onclick="handleChecklistToggle('${field.id}', 'OK')">OK</button>
+            <button type="button" class="checklist-toggle-btn ng-btn ${isNg ? 'active' : ''}" onclick="handleChecklistToggle('${field.id}', 'NG')">NG</button>
+          </div>
+        `;
+    } else if (field.type === 'number') {
+      const rangeText = (field.min !== null || field.max !== null) ? `(${field.min ?? '—'} ~ ${field.max ?? '—'} ${field.unit || ''})` : '';
+      controlHtml = `
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input type="text" readonly value="${ansVal !== undefined ? ansVal : ''}" placeholder="Tap to enter number ${rangeText}" 
+              style="flex:1; padding:12px; border-radius:10px; border:1px solid #e6e8ef; background:#f8f9fa; font-weight:700; font-size:1rem; cursor:pointer;"
+              onclick="openChecklistKeypad('${field.id}', '${fTitle.replace(/'/g, "\\'")}', ${field.min ?? 'null'}, ${field.max ?? 'null'}, '${field.unit || ''}')">
+            ${field.unit ? `<span style="font-weight:700; color:#6b7280;">${field.unit}</span>` : ''}
+          </div>
+        `;
+    } else if (field.type === 'select') {
+      const options = Array.isArray(field.options) ? field.options : [];
+      controlHtml = `
+          <div style="display:flex; flex-wrap:wrap; gap:8px;">
+            ${options.map(opt => `
+              <button type="button" class="checklist-toggle-btn ${ansVal === opt ? 'active ok-btn' : ''}" style="flex:none; padding:8px 16px; font-size:0.85rem;" onclick="handleChecklistSelect('${field.id}', '${opt.replace(/'/g, "\\'")}')">${opt}</button>
+            `).join('')}
+          </div>
+        `;
+    } else {
+      controlHtml = `<input type="text" value="${ansVal || ''}" placeholder="Enter details..." style="width:100%; padding:12px; border-radius:10px; border:1px solid #e6e8ef;" oninput="handleChecklistTextInput('${field.id}', this.value)">`;
+    }
+
+    let ticketBtnHtml = '';
+    if (field.type !== 'name') {
+      const isTicketRequired = isNg || isOutOfRange;
+      const isRequiredUnsaved = isTicketRequired && (!hasTicket || !hasTicket.saved);
+      const isSaved = hasTicket && hasTicket.saved;
+      const cls = isSaved ? 'saved' : (isRequiredUnsaved ? 'required-pulse' : '');
+      const lbl = isSaved ? '✓ Ticket Saved' : (isRequiredUnsaved ? '⚠️ Ticket Required' : '➕ Ticket');
+      ticketBtnHtml = forceLocked
+        ? (isSaved ? `<span style="font-size:0.75rem; font-weight:800; color:#15803d; background:#dcfce7; padding:4px 8px; border-radius:8px;">✓ Ticket Recorded</span>` : '')
+        : `<button type="button" class="checklist-ticket-btn ${cls}" onclick="openChecklistTicketModal('${field.id}')">${lbl}</button>`;
+    }
+
+    let photoHtml = '';
+    if (field.photoRequired && !isNg && !isOutOfRange) {
+      const photoBase64 = window.checklistState.fieldPhotos[field.id];
+      let isPhotoAttentionNeeded = false;
+      if (!photoBase64) {
+        if (ansVal === 'OK') {
+          isPhotoAttentionNeeded = true;
+        } else if (field.type === 'number' && typeof ansVal === 'number' && !isOutOfRange) {
+          isPhotoAttentionNeeded = true;
+        } else if (typeof ansVal === 'string' && ansVal.trim() !== '' && ansVal !== 'NG' && !ansVal.startsWith('SKIPPED')) {
+          isPhotoAttentionNeeded = true;
+        }
+      }
+      const pulseClass = isPhotoAttentionNeeded ? 'photo-pulse-attention' : '';
+      photoHtml = forceLocked
+        ? (photoBase64 ? `<img src="${photoBase64}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; margin-top:6px; display:block; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">` : '')
+        : `
+          <div style="margin-top:8px;">
+            <input type="file" id="checklist-field-photo-${field.id}" accept="image/*" capture="environment" style="display:none;" onchange="handleChecklistFieldPhotoCaptured('${field.id}', event)">
+            <button type="button" class="btn btn-secondary ${pulseClass}" style="font-size:0.8rem; padding:6px 12px;" onclick="document.getElementById('checklist-field-photo-${field.id}').click()">
+              📷 ${photoBase64 ? '✓ Photo Taken (Retake)' : 'Take Photo *'}
+            </button>
+            ${photoBase64 ? `<img src="${photoBase64}" style="width:60px; height:60px; object-fit:cover; border-radius:8px; margin-top:6px; display:block; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, '${fTitle.replace(/'/g, "\\'")}');">` : ''}
+          </div>
+        `;
+    }
+
+    let skipBtnHtml = '';
+    if (field.type !== 'name') {
+      const isValidDataCompleted = isCompleted && !isSkipped;
+      if (!isValidDataCompleted) {
+        skipBtnHtml = `
+            <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+              <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 14px; font-weight:700; border-radius:8px; display:inline-flex; align-items:center; gap:4px; ${isSkipped ? 'border-color:#2563eb; color:#2563eb; background:rgba(37,99,235,0.06);' : ''}" onclick="handleStepSkip('${field.id}', ${field.required ? 'true' : 'false'})">
+                ⏭️ <span>${isSkipped ? 'Skipped (Tap to undo)' : (typeof _t === 'function' ? _t('skip_step') : 'Skip Step')}</span>
+              </button>
+            </div>
+          `;
+      }
+    }
+
+    card.innerHTML = `
+        <div class="checklist-card-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+              ${stepPill}
+              <div class="checklist-card-title">${fTitle} ${field.required ? '<span style="color:#e5484d;">*</span>' : ''}</div>
+            </div>
+            ${fDesc ? `<div class="checklist-card-desc">${fDesc}</div>` : ''}
+          </div>
+          <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+            ${lockBtnHtml}
+            ${ticketBtnHtml}
+          </div>
+        </div>
+        ${mediaHtml}
+        ${controlHtml}
+        ${photoHtml}
+        ${skipBtnHtml}
+      `;
+
+    return card;
+  }
+
+  window.promptPostStepWarningModal = function (fieldId) {
+    return new Promise((resolve) => {
+      // If pre-production is already complete, or no fieldId passed, proceed without warning
+      if (!window.checklistState || window.checklistState.isPreComplete || !fieldId) {
+        resolve(true);
+        return;
+      }
+
+      // Find target field in queue
+      let targetField = null;
+      if (Array.isArray(window.checklistState.queue)) {
+        for (const tpl of window.checklistState.queue) {
+          if (Array.isArray(tpl.fields)) {
+            targetField = tpl.fields.find(f => f.id === fieldId);
+            if (targetField) break;
+          }
+        }
+      }
+
+      // If field not found or timing is NOT post, proceed without warning
+      if (!targetField || targetField.timing !== 'post') {
+        resolve(true);
+        return;
+      }
+
+      window._postStepWarningResolve = resolve;
+
+      let modal = document.getElementById('postStepWarningModal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'postStepWarningModal';
+        modal.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); z-index:99999; display:flex; align-items:center; justify-content:center; padding:16px; box-sizing:border-box;';
+        modal.innerHTML = `
+          <div style="background:#ffffff; border-radius:24px; max-width:460px; width:100%; padding:24px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); text-align:center; display:flex; flex-direction:column; gap:16px;">
+            <div style="width:64px; height:64px; border-radius:50%; background:#fef3c7; border:2px solid #f59e0b; color:#d97706; display:flex; align-items:center; justify-content:center; font-size:2rem; margin:0 auto;">
+              ⚠️
+            </div>
+            <div>
+              <h3 id="postStepWarningTitle" style="font-size:1.2rem; font-weight:800; color:#1f2733; margin:0 0 6px 0;">Post-Production Step Warning</h3>
+              <p id="postStepWarningDesc" style="font-size:0.9rem; color:#4b5563; margin:0; line-height:1.4;"></p>
+            </div>
+            <div id="postStepFieldBadge" style="background:#fffbeb; border:1px solid #fde68a; border-radius:12px; padding:12px; font-weight:700; color:#b45309; font-size:0.9rem; text-align:left;">
+            </div>
+            <div style="display:flex; gap:10px; margin-top:8px;">
+              <button type="button" onclick="closePostStepWarningModal(false)" style="flex:1; padding:14px; border-radius:14px; border:1px solid #d1d5db; background:#f3f4f6; color:#374151; font-weight:700; font-size:0.95rem; cursor:pointer;">
+                Cancel / キャンセル
+              </button>
+              <button type="button" onclick="closePostStepWarningModal(true)" style="flex:1; padding:14px; border-radius:14px; border:none; background:#f59e0b; color:#ffffff; font-weight:800; font-size:0.95rem; cursor:pointer; box-shadow:0 4px 12px rgba(245,158,11,0.35);">
+                Proceed / 進行する
+              </button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+      }
+
+      const descEl = modal.querySelector('#postStepWarningDesc');
+      const badgeEl = modal.querySelector('#postStepFieldBadge');
+      const lang = typeof window.currentLang !== 'undefined' ? window.currentLang : 'en';
+
+      if (descEl) {
+        if (lang === 'ja') {
+          descEl.textContent = 'この項目は【生産後点検（Post-Production Check）】の項目です。生産開始前にこの点検を実施してもよろしいですか？';
+        } else if (lang === 'pt') {
+          descEl.textContent = 'Esta etapa é destinada para APÓS a produção (Post-Production Check). Tem certeza de que deseja realizar esta verificação agora antes da produção?';
+        } else {
+          descEl.textContent = 'This step is intended for AFTER production (Post-Production Check). Are you sure you want to perform this step before starting production?';
+        }
+      }
+
+      if (badgeEl) {
+        const localizedLabel = (typeof getLocalizedText === 'function') ? getLocalizedText(targetField, 'label') : (targetField.label || '');
+        badgeEl.textContent = `📋 STEP (POST-PROD): ${localizedLabel}`;
+      }
+
+      modal.style.display = 'flex';
+    });
+  };
+
+  window.closePostStepWarningModal = function (confirmed) {
+    const modal = document.getElementById('postStepWarningModal');
+    if (modal) modal.style.display = 'none';
+
+    const resolve = window._postStepWarningResolve;
+    window._postStepWarningResolve = null;
+    if (typeof resolve === 'function') {
+      resolve(confirmed);
+    }
+  };
+
+  window.promptTicketDeletionModal = function (fieldId) {
+    return new Promise((resolve) => {
+      const ticket = window.checklistState.tickets[fieldId];
+      if (!ticket || !ticket.saved) {
+        resolve(true);
+        return;
+      }
+
+      window._ticketDeletionResolve = resolve;
+      window._ticketDeletionFieldId = fieldId;
+
+      const modal = document.getElementById('ticketDeletionConfirmModal');
+      const reasonPreview = document.getElementById('ticketDeletionReasonPreview');
+      const thumbsPreview = document.getElementById('ticketDeletionThumbsPreview');
+
+      if (reasonPreview) {
+        reasonPreview.textContent = ticket.reason || 'Defect ticket reported';
+      }
+
+      if (thumbsPreview) {
+        thumbsPreview.innerHTML = '';
+        if (Array.isArray(ticket.images) && ticket.images.length > 0) {
+          ticket.images.forEach(imgUrl => {
+            const img = document.createElement('img');
+            img.src = imgUrl;
+            img.style.cssText = 'width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid #d1d5db; cursor:pointer;';
+            img.onclick = function () {
+              if (typeof window.openPreview === 'function') window.openPreview(this.src, 'Ticket Photo Preview');
+            };
+            thumbsPreview.appendChild(img);
+          });
+        } else {
+          thumbsPreview.innerHTML = '<span style="font-size:0.75rem; color:#9ca3af;">(No photos attached)</span>';
+        }
+      }
+
+      if (modal) modal.style.display = 'flex';
+    });
+  };
+
+  window.closeTicketDeletionConfirmModal = async function (confirmed) {
+    const modal = document.getElementById('ticketDeletionConfirmModal');
+    if (modal) modal.style.display = 'none';
+
+    const fieldId = window._ticketDeletionFieldId;
+    const resolve = window._ticketDeletionResolve;
+
+    window._ticketDeletionFieldId = null;
+    window._ticketDeletionResolve = null;
+
+    if (confirmed && fieldId) {
+      const ticket = window.checklistState.tickets[fieldId];
+      if (ticket) {
+        if (ticket.chatworkMessageId) {
+          try {
+            fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ messageIds: [ticket.chatworkMessageId] })
+            }).catch(err => console.warn('Failed to delete Chatwork message on OK change:', err));
+          } catch (e) {
+            console.warn('Error sending Chatwork ticket cancellation request:', e);
+          }
+        }
+
+        if (typeof deleteTicketPhotosFromIDB === 'function') {
+          await deleteTicketPhotosFromIDB(fieldId);
+        }
+
+        delete window.checklistState.tickets[fieldId];
+        if (typeof window.saveChecklistDraftToStorage === 'function') {
+          await window.saveChecklistDraftToStorage();
+        }
+      }
+      if (resolve) resolve(true);
+    } else {
+      if (resolve) resolve(false);
+    }
+  };
+
+  window.autoLockOtherCards = function (currentFieldId) {
+    if (!window.checklistState.unlockedCompletedCards) return;
+    if (currentFieldId) {
+      for (const fId of Object.keys(window.checklistState.unlockedCompletedCards)) {
+        if (fId !== currentFieldId) {
+          delete window.checklistState.unlockedCompletedCards[fId];
+        }
+      }
+    }
+  };
+
+  window.unlockChecklistCard = function (fieldId) {
+    window.checklistState.unlockedCompletedCards = window.checklistState.unlockedCompletedCards || {};
+    window.checklistState.unlockedCompletedCards[fieldId] = true;
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
+  };
+
+  window.lockChecklistCard = function (fieldId) {
+    if (window.checklistState.unlockedCompletedCards) {
+      delete window.checklistState.unlockedCompletedCards[fieldId];
+    }
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
+  };
+
+  window.handleChecklistToggle = async function (fieldId, val) {
+    window.autoLockOtherCards(fieldId);
+
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    const currentVal = window.checklistState.answers[fieldId];
+
+    // Tapping OK when already OK releases/deselects the OK button
+    if (val === 'OK' && currentVal === 'OK') {
+      delete window.checklistState.answers[fieldId];
+      if (window.checklistState.answeredAt) delete window.checklistState.answeredAt[fieldId];
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      renderCurrentChecklistTemplate();
+      return;
+    }
+
+    if (val === 'OK') {
+      const confirmed = await promptTicketDeletionModal(fieldId);
+      if (!confirmed) return;
+    }
+
+    window.checklistState.answers[fieldId] = val;
+    window.checklistState.answeredAt = window.checklistState.answeredAt || {};
+    window.checklistState.answeredAt[fieldId] = new Date().toISOString();
+
+    if (val === 'NG' && window.checklistState.tickets[fieldId]) {
+      window.checklistState.tickets[fieldId].ticketType = 'defect';
+      window.checklistState.tickets[fieldId].required = true;
+    }
+    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+    renderCurrentChecklistTemplate();
+    if (val === 'NG') {
+      openChecklistTicketModal(fieldId);
+    }
+  };
+
+  window.handleChecklistSelect = async function (fieldId, val) {
+    window.autoLockOtherCards(fieldId);
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    window.checklistState.answers[fieldId] = val;
+    window.checklistState.answeredAt = window.checklistState.answeredAt || {};
+    window.checklistState.answeredAt[fieldId] = new Date().toISOString();
+
+    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+    renderCurrentChecklistTemplate();
+  };
+
+  window.handleChecklistTextInput = async function (fieldId, val) {
+    window.autoLockOtherCards(fieldId);
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    window.checklistState.answers[fieldId] = val;
+    window.checklistState.answeredAt = window.checklistState.answeredAt || {};
+    window.checklistState.answeredAt[fieldId] = new Date().toISOString();
+
+    if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+  };
+
+  // Photo Annotator Drawing Engine
+  const ANNOTATOR_COLORS = ['#e5484d', '#f59e0b', '#1f9d6b', '#2563eb', '#ffffff', '#000000'];
+  const ANNOTATOR_BRUSH_SIZE = 14;
+
+  const annotatorState = {
+    open: false,
+    sourceImage: null,
+    activeColor: '#e5484d',
+    strokes: [],
+    currentStroke: null,
+    drawing: false,
+    pointerId: null,
+    resolve: null
+  };
+
+  window.openAnnotator = function (dataUrl) {
+    return new Promise((resolve) => {
+      const overlay = document.getElementById('annotator-overlay');
+      if (!overlay) return resolve(dataUrl);
+
+      annotatorState.open = true;
+      annotatorState.strokes = [];
+      annotatorState.currentStroke = null;
+      annotatorState.drawing = false;
+
+      const img = new Image();
+      img.onload = () => {
+        annotatorState.sourceImage = img;
+        annotatorState.resolve = resolve;
+        renderAnnotatorUI();
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
+  function renderAnnotatorUI() {
+    const overlay = document.getElementById('annotator-overlay');
+    if (!overlay || !annotatorState.sourceImage) return;
+
+    const img = annotatorState.sourceImage;
+    overlay.innerHTML = `
+      <div class="annotator-stage">
+        <div class="annotator-canvas-stack">
+          <canvas class="annotator-base-canvas" width="${img.width}" height="${img.height}"></canvas>
+          <canvas class="annotator-draw-canvas" width="${img.width}" height="${img.height}"></canvas>
+        </div>
+      </div>
+      <div class="annotator-toolbar">
+        <div class="annotator-colors">
+          ${ANNOTATOR_COLORS.map(c => `<button class="annotator-color-btn${c === annotatorState.activeColor ? ' active' : ''}" data-color="${c}" style="background:${c}" type="button"></button>`).join('')}
+        </div>
+        <button class="annotator-clear-btn" data-action="annotator-clear" type="button">Clear</button>
+        <button class="annotator-cancel-btn" data-action="annotator-cancel" type="button">
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+        <button class="annotator-confirm-btn" data-action="annotator-confirm" type="button">
+          <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+      </div>`;
+    overlay.classList.remove('hidden');
+
+    const stage = overlay.querySelector('.annotator-stage');
+    const stack = overlay.querySelector('.annotator-canvas-stack');
+    const sw = stage.clientWidth || window.innerWidth;
+    const sh = stage.clientHeight || (window.innerHeight - 80);
+    const ratio = img.width / img.height;
+    const w = (sw / sh > ratio) ? Math.round(sh * ratio) : sw;
+    const h = (sw / sh > ratio) ? sh : Math.round(sw / ratio);
+    stack.style.width = w + 'px';
+    stack.style.height = h + 'px';
+
+    const baseCanvas = overlay.querySelector('.annotator-base-canvas');
+    baseCanvas.getContext('2d').drawImage(img, 0, 0, img.width, img.height);
+  }
+
+  function redrawAnnotatorStrokes() {
+    const overlay = document.getElementById('annotator-overlay');
+    const canvas = overlay?.querySelector('.annotator-draw-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    annotatorState.strokes.forEach(s => paintAnnotatorStroke(ctx, s));
+  }
+
+  function paintAnnotatorStroke(ctx, stroke) {
+    if (!stroke || !stroke.points || !stroke.points.length) return;
+    ctx.save();
+    ctx.strokeStyle = stroke.color;
+    ctx.fillStyle = stroke.color;
+    ctx.lineWidth = stroke.width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (stroke.points.length === 1) {
+      ctx.beginPath();
+      ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for (let i = 1; i < stroke.points.length; i++) ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function getAnnotatorCanvasPoint(canvas, e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) * (canvas.width / r.width),
+      y: (e.clientY - r.top) * (canvas.height / r.height),
+    };
+  }
+
+  function flattenAnnotatedImage() {
+    const out = document.createElement('canvas');
+    out.width = annotatorState.sourceImage.width;
+    out.height = annotatorState.sourceImage.height;
+    const ctx = out.getContext('2d');
+    ctx.drawImage(annotatorState.sourceImage, 0, 0);
+    annotatorState.strokes.forEach(s => paintAnnotatorStroke(ctx, s));
+    return out.toDataURL('image/jpeg', 0.85);
+  }
+
+  function closeAnnotatorOverlay(result) {
+    const overlay = document.getElementById('annotator-overlay');
+    annotatorState.open = false;
+    if (overlay) {
+      overlay.classList.add('hidden');
+      overlay.innerHTML = '';
+    }
+    const res = annotatorState.resolve;
+    annotatorState.resolve = null;
+    if (res) res(result);
+  }
+
+  // Attach event listeners to annotator-overlay
+  document.addEventListener('DOMContentLoaded', function () {
+    const overlay = document.getElementById('annotator-overlay');
+    if (!overlay) return;
+
+    overlay.addEventListener('click', function (e) {
+      const colorBtn = e.target.closest('[data-color]');
+      if (colorBtn) {
+        annotatorState.activeColor = colorBtn.dataset.color;
+        overlay.querySelectorAll('.annotator-color-btn').forEach(b =>
+          b.classList.toggle('active', b.dataset.color === annotatorState.activeColor)
+        );
+        return;
+      }
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      switch (btn.dataset.action) {
+        case 'annotator-confirm': closeAnnotatorOverlay(flattenAnnotatedImage()); break;
+        case 'annotator-cancel': closeAnnotatorOverlay(null); break;
+        case 'annotator-clear':
+          annotatorState.strokes = [];
+          redrawAnnotatorStrokes();
+          break;
+      }
+    });
+
+    overlay.addEventListener('pointerdown', function (e) {
+      const canvas = e.target.closest('.annotator-draw-canvas');
+      if (!canvas) return;
+      e.preventDefault();
+      const pt = getAnnotatorCanvasPoint(canvas, e);
+      const stroke = { color: annotatorState.activeColor, width: ANNOTATOR_BRUSH_SIZE, points: [pt] };
+      annotatorState.strokes.push(stroke);
+      annotatorState.currentStroke = stroke;
+      annotatorState.drawing = true;
+      annotatorState.pointerId = e.pointerId;
+      canvas.setPointerCapture?.(e.pointerId);
+      paintAnnotatorStroke(canvas.getContext('2d'), stroke);
+    });
+
+    overlay.addEventListener('pointermove', function (e) {
+      if (!annotatorState.drawing || e.pointerId !== annotatorState.pointerId) return;
+      const canvas = overlay.querySelector('.annotator-draw-canvas');
+      if (!canvas || !annotatorState.currentStroke) return;
+      e.preventDefault();
+      const pt = getAnnotatorCanvasPoint(canvas, e);
+      const pts = annotatorState.currentStroke.points;
+      const last = pts[pts.length - 1];
+      if (last && Math.hypot(last.x - pt.x, last.y - pt.y) < 2) return;
+      pts.push(pt);
+
+      const ctx = canvas.getContext('2d');
+      ctx.save();
+      ctx.strokeStyle = annotatorState.currentStroke.color;
+      ctx.lineWidth = annotatorState.currentStroke.width;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pts[pts.length - 2].x, pts[pts.length - 2].y);
+      ctx.lineTo(pt.x, pt.y);
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    const endPointer = function () {
+      annotatorState.drawing = false;
+      annotatorState.currentStroke = null;
+      annotatorState.pointerId = null;
+    };
+    overlay.addEventListener('pointerup', endPointer);
+    overlay.addEventListener('pointercancel', endPointer);
+  });
+
+  window.handleChecklistFieldPhotoCaptured = function (fieldId, event) {
+    window.autoLockOtherCards(fieldId);
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async function (e) {
+      const rawDataUrl = e.target.result;
+      const annotatedDataUrl = await window.openAnnotator(rawDataUrl);
+      if (!annotatedDataUrl) return;
+
+      window.checklistState.fieldPhotos[fieldId] = annotatedDataUrl;
+      if (typeof window.saveChecklistDraftToStorage === 'function') await window.saveChecklistDraftToStorage();
+      renderCurrentChecklistTemplate();
+    };
+    reader.readAsDataURL(file);
+  };
+
+  window.openChecklistKeypad = async function (fieldId, label, min, max, unit) {
+    window.autoLockOtherCards(fieldId);
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    window.checklistState.activeKeypadField = { fieldId, label, min, max, unit };
+    const modal = document.getElementById('checklistKeypadModal');
+    const title = document.getElementById('checklistKeypadTitle');
+    const range = document.getElementById('checklistKeypadRange');
+    const display = document.getElementById('checklistKeypadValue');
+
+    if (title) title.textContent = label;
+    if (range) range.textContent = (min !== null || max !== null) ? `Bounds: ${min ?? '—'} ~ ${max ?? '—'} ${unit}` : '';
+    if (display) display.textContent = window.checklistState.answers[fieldId] !== undefined ? String(window.checklistState.answers[fieldId]) : '';
+    if (modal) modal.style.display = 'flex';
+  };
+
+  window.checklistKeypadPress = function (char) {
+    const display = document.getElementById('checklistKeypadValue');
+    if (!display) return;
+    let curr = display.textContent;
+    if (char === '.' && curr.includes('.')) return;
+    if (char === '-' && curr.length > 0) return;
+    display.textContent = curr + char;
+  };
+
+  window.checklistKeypadClear = function () {
+    const display = document.getElementById('checklistKeypadValue');
+    if (display) display.textContent = '';
+  };
+
+  window.checklistKeypadBackspace = function () {
+    const display = document.getElementById('checklistKeypadValue');
+    if (display) display.textContent = display.textContent.slice(0, -1);
+  };
+
+  window.checklistKeypadConfirm = async function () {
+    const display = document.getElementById('checklistKeypadValue');
+    const modal = document.getElementById('checklistKeypadModal');
+    const active = window.checklistState.activeKeypadField;
+    if (!active || !display) return;
+
+    const valStr = display.textContent.trim();
+    if (valStr !== '') {
+      const numVal = parseFloat(valStr);
+
+      let outOfRange = false;
+      if (active.min !== null && numVal < active.min) outOfRange = true;
+      if (active.max !== null && numVal > active.max) outOfRange = true;
+
+      if (!outOfRange) {
+        const confirmed = await promptTicketDeletionModal(active.fieldId);
+        if (!confirmed) return;
+      }
+
+      window.checklistState.answers[active.fieldId] = numVal;
+      window.checklistState.answeredAt = window.checklistState.answeredAt || {};
+      window.checklistState.answeredAt[active.fieldId] = new Date().toISOString();
+
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      if (modal) modal.style.display = 'none';
+      renderCurrentChecklistTemplate();
+
+      if (outOfRange) {
+        openChecklistTicketModal(active.fieldId, `Value ${numVal} is out of bounds (${active.min ?? '—'} ~ ${active.max ?? '—'})`);
+      }
+    } else {
+      delete window.checklistState.answers[active.fieldId];
+      if (window.checklistState.answeredAt) delete window.checklistState.answeredAt[active.fieldId];
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      if (modal) modal.style.display = 'none';
+      renderCurrentChecklistTemplate();
+    }
+  };
+
+  window.triggerNgFlashAnimation = function () {
+    let flash = document.getElementById('ngFlashOverlay');
+    if (!flash) {
+      flash = document.createElement('div');
+      flash.id = 'ngFlashOverlay';
+      flash.className = 'ng-flash-overlay';
+      document.body.appendChild(flash);
+    }
+
+    flash.classList.remove('active');
+    void flash.offsetWidth;
+    flash.classList.add('active');
+
+    setTimeout(() => {
+      flash.classList.remove('active');
+    }, 650);
+  };
+
+  function updateAutoReasonValue(existingReason, newAutoReason) {
+    if (!existingReason) return newAutoReason;
+    const regex = /Value\s+[\d\.\-]+\s+is out of bounds\s*\([^\)]*\)/i;
+    if (regex.test(existingReason)) {
+      return existingReason.replace(regex, newAutoReason);
+    }
+    return existingReason;
+  }
+
+  window.isDefectTicket = function (fieldId) {
+    if (!window.checklistState || !window.checklistState.queue || !fieldId) return false;
+    const queue = window.checklistState.queue;
+    let targetField = null;
+    for (const tpl of queue) {
+      if (Array.isArray(tpl.fields)) {
+        targetField = tpl.fields.find(f => f.id === fieldId);
+        if (targetField) break;
+      }
+    }
+    if (!targetField) return false;
+
+    const ansVal = window.checklistState.answers[fieldId];
+    const isNg = ansVal === 'NG';
+    const numVal = typeof ansVal === 'number' ? ansVal : parseFloat(ansVal);
+    const isOutOfRange = targetField.type === 'number' && !isNaN(numVal) && (
+      (targetField.min !== null && targetField.min !== undefined && numVal < targetField.min) ||
+      (targetField.max !== null && targetField.max !== undefined && numVal > targetField.max)
+    );
+
+    return isNg || isOutOfRange;
+  };
+
+  function updateTicketResetButtonVisibility() {
+    const fieldId = window.checklistState.activeTicketField;
+    const resetBtn = document.getElementById('checklistTicketResetBtn');
+    const photoBtn = document.getElementById('checklistTicketPhotoBtn');
+
+    if (!fieldId) {
+      if (resetBtn) resetBtn.style.display = 'none';
+      if (photoBtn) photoBtn.classList.remove('photo-pulse-attention');
+      return;
+    }
+
+    const ticket = window.checklistState.tickets[fieldId];
+    const reasonInput = document.getElementById('checklistTicketReason');
+    const reasonText = (reasonInput?.value || '').trim();
+    const hasPhotos = ticket && Array.isArray(ticket.images) && ticket.images.length > 0;
+    const isSaved = ticket && ticket.saved;
+
+    const hasData = isSaved || hasPhotos || (reasonText && reasonText.length > 0);
+    if (resetBtn) resetBtn.style.display = hasData ? 'inline-flex' : 'none';
+
+    if (photoBtn) {
+      const isTicketRequired = window.isDefectTicket(fieldId);
+      const isPhotoNeeded = isTicketRequired && !hasPhotos;
+      if (isPhotoNeeded) {
+        photoBtn.classList.add('photo-pulse-attention');
+      } else {
+        photoBtn.classList.remove('photo-pulse-attention');
+      }
+    }
+  }
+
+  window.resetCurrentChecklistTicket = async function () {
+    const fieldId = window.checklistState.activeTicketField;
+    if (!fieldId) return;
+
+    const ticket = window.checklistState.tickets[fieldId];
+    if (ticket && ticket.chatworkMessageId) {
+      try {
+        fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageIds: [ticket.chatworkMessageId] })
+        }).catch(err => console.warn('Failed to delete Chatwork message on ticket reset:', err));
+      } catch (e) {
+        console.warn('Error sending Chatwork ticket cancellation request:', e);
+      }
+    }
+
+    if (typeof deleteTicketPhotosFromIDB === 'function') {
+      await deleteTicketPhotosFromIDB(fieldId);
+    }
+
+    delete window.checklistState.tickets[fieldId];
+
+    const reasonInput = document.getElementById('checklistTicketReason');
+    if (reasonInput) reasonInput.value = '';
+
+    renderTicketThumbnails();
+    updateTicketResetButtonVisibility();
+
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      await window.saveChecklistDraftToStorage();
+    }
+
+    if (typeof showAppToast === 'function') {
+      showAppToast('🔄 Ticket data reset');
+    }
+  };
+
+  window.openChecklistTicketModal = async function (fieldId, autoReason = '') {
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    triggerNgFlashAnimation();
+    window.checklistState.activeTicketField = fieldId;
+    const modal = document.getElementById('checklistTicketModal');
+    const info = document.getElementById('checklistTicketFieldInfo');
+    const reasonInput = document.getElementById('checklistTicketReason');
+    const headerTitle = document.getElementById('checklistTicketHeaderTitle');
+    const photoLabel = document.getElementById('checklistTicketPhotoLabel');
+
+    const isTicketRequired = window.isDefectTicket(fieldId);
+
+    if (headerTitle) {
+      if (isTicketRequired) {
+        headerTitle.textContent = typeof _t === 'function' ? _t('ticket_required') : 'Abnormal Report (Ticket) Required';
+        headerTitle.style.color = '#e5484d';
+      } else {
+        headerTitle.textContent = 'Issue Report (Ticket)';
+        headerTitle.style.color = '#1f2733';
+      }
+    }
+
+    if (photoLabel) {
+      if (isTicketRequired) {
+        photoLabel.textContent = 'Attach Photos (At least 1 required) *';
+      } else {
+        photoLabel.textContent = 'Attach Photos (Optional)';
+      }
+    }
+
+    const existing = window.checklistState.tickets[fieldId] || { reason: '', images: [] };
+
+    if (autoReason && isTicketRequired) {
+      if (existing.reason) {
+        existing.reason = updateAutoReasonValue(existing.reason, autoReason);
+      } else {
+        existing.reason = autoReason;
+      }
+    }
+
+    if (info) info.textContent = `Reporting issue for item`;
+    if (reasonInput) {
+      reasonInput.value = existing.reason || '';
+      if (!reasonInput._resetBtnBound) {
+        reasonInput._resetBtnBound = true;
+        reasonInput.addEventListener('input', updateTicketResetButtonVisibility);
+      }
+    }
+
+    renderTicketThumbnails();
+    updateTicketResetButtonVisibility();
+    if (modal) modal.style.display = 'flex';
+  };
+
+  window.closeChecklistTicketModal = function () {
+    const modal = document.getElementById('checklistTicketModal');
+    if (modal) modal.style.display = 'none';
+
+    const fieldId = window.checklistState?.activeTicketField;
+    if (fieldId && window.checklistState?.tickets?.[fieldId]) {
+      const ticket = window.checklistState.tickets[fieldId];
+      if (!ticket.saved || !ticket.reason || !ticket.reason.trim()) {
+        delete window.checklistState.tickets[fieldId];
+        if (typeof renderCurrentChecklistTemplate === 'function') renderCurrentChecklistTemplate();
+      }
+    }
+  };
+
+  function renderTicketThumbnails() {
+    const fieldId = window.checklistState.activeTicketField;
+    const container = document.getElementById('checklistTicketThumbsContainer');
+    if (!container || !fieldId) return;
+
+    const ticket = window.checklistState.tickets[fieldId] || { images: [] };
+    container.innerHTML = ticket.images.map((img, i) => `
+      <div style="position:relative; width:64px; height:64px;">
+        <img src="${img}" style="width:100%; height:100%; object-fit:cover; border-radius:8px; border:1px solid #e6e8ef; cursor:pointer;" onclick="if(typeof window.openPreview === 'function') window.openPreview(this.src, 'Ticket Photo ${i + 1}');">
+        <button type="button" onclick="removeChecklistTicketImage(${i})" style="position:absolute; top:-6px; right:-6px; background:#ef4444; color:#fff; border:none; width:20px; height:20px; border-radius:50%; font-size:12px; font-weight:800; cursor:pointer;">✕</button>
+      </div>
+    `).join('');
+    updateTicketResetButtonVisibility();
+  }
+
+  window.removeChecklistTicketImage = async function (index) {
+    const fieldId = window.checklistState.activeTicketField;
+    if (!fieldId || !window.checklistState.tickets[fieldId]) return;
+    window.checklistState.tickets[fieldId].images.splice(index, 1);
+    renderTicketThumbnails();
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      await window.saveChecklistDraftToStorage();
+    }
+  };
+
+  window.handleChecklistTicketPhotoCaptured = function (event) {
+    const fieldId = window.checklistState.activeTicketField;
+    const file = event.target.files && event.target.files[0];
+    if (!file || !fieldId) return;
+
+    const reader = new FileReader();
+    reader.onload = async function (e) {
+      const ticket = window.checklistState.tickets[fieldId] || { reason: '', images: [] };
+      if (ticket.images.length >= 5) {
+        if (typeof showAlert === 'function') showAlert('Maximum 5 images allowed for ticket');
+        return;
+      }
+      const rawDataUrl = e.target.result;
+      const annotatedDataUrl = await window.openAnnotator(rawDataUrl);
+      if (!annotatedDataUrl) return; // User cancelled
+
+      ticket.images.push(annotatedDataUrl);
+      window.checklistState.tickets[fieldId] = ticket;
+      renderTicketThumbnails();
+      if (typeof window.saveChecklistDraftToStorage === 'function') {
+        await window.saveChecklistDraftToStorage();
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  window.saveChecklistTicket = async function () {
+    const fieldId = window.checklistState.activeTicketField;
+    const reasonInput = document.getElementById('checklistTicketReason');
+    if (!fieldId) return;
+
+    const reason = (reasonInput?.value || '').trim();
+    const ticket = window.checklistState.tickets[fieldId] || { images: [] };
+
+    const isTicketRequired = window.isDefectTicket(fieldId);
+
+    if (!reason) {
+      if (typeof showAlert === 'function') showAlert('Please enter ticket reason/details');
+      return;
+    }
+    if (isTicketRequired && (!ticket.images || ticket.images.length === 0)) {
+      if (typeof showAlert === 'function') showAlert('At least 1 photo is required for the ticket');
+      return;
+    }
+
+    if (!ticket.chatworkMessageId) {
+      try {
+        const fieldAns = window.checklistState.answers[fieldId];
+        const currentQueueItem = window.checklistState.queue?.[window.checklistState.queueIndex];
+        const fieldObj = (currentQueueItem?.fields || []).find(f => f.id === fieldId);
+        let userInputStr = Array.isArray(fieldAns) ? fieldAns.join(', ') : String(fieldAns ?? '');
+        let expectedStr = '';
+        if (fieldObj && fieldObj.type === 'number' && (fieldObj.min !== null || fieldObj.max !== null)) {
+          expectedStr = `${fieldObj.min ?? '—'} ~ ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
+        }
+
+        const itemLabel = fieldObj ? (fieldObj.label || fieldObj.label_ja || fieldObj.label_en || '') : '';
+        const schedule = currentQueueItem?.schedule || 'daily';
+        const isOptionalTicket = !isTicketRequired;
+        const statusStr = isOptionalTicket ? 'OPTIONAL TICKET' : 'NG';
+
+        const notifyRes = await fetch(`${serverURL}/api/check-forms/notify-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            factory: window.checklistState.factory,
+            machine: window.checklistState.machine,
+            status: statusStr,
+            reason: reason,
+            userInput: userInputStr,
+            expectedInput: expectedStr,
+            isOptional: isOptionalTicket,
+            schedule: schedule,
+            itemLabel: itemLabel
+          })
+        });
+
+        if (notifyRes.ok) {
+          const notifyData = await notifyRes.json();
+          if (notifyData && notifyData.message_id) {
+            ticket.chatworkMessageId = notifyData.message_id;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to notify ticket to Chatwork:', err);
+      }
+    } else {
+      // Message already exists in Chatwork -> update message with new input value & reason!
+      try {
+        const fieldAns = window.checklistState.answers[fieldId];
+        const currentQueueItem = window.checklistState.queue?.[window.checklistState.queueIndex];
+        const fieldObj = (currentQueueItem?.fields || []).find(f => f.id === fieldId);
+        let userInputStr = Array.isArray(fieldAns) ? fieldAns.join(', ') : String(fieldAns ?? '');
+        let expectedStr = '';
+        if (fieldObj && fieldObj.type === 'number' && (fieldObj.min !== null || fieldObj.max !== null)) {
+          expectedStr = `${fieldObj.min ?? '—'} ~ ${fieldObj.max ?? '—'} ${fieldObj.unit || ''}`;
+        }
+
+        const itemLabel = fieldObj ? (fieldObj.label || fieldObj.label_ja || fieldObj.label_en || '') : '';
+        const schedule = currentQueueItem?.schedule || 'daily';
+        const isOptionalTicket = !isTicketRequired;
+        const statusStr = isOptionalTicket ? 'OPTIONAL TICKET' : 'NG';
+
+        await fetch(`${serverURL}/api/check-forms/update-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messageId: ticket.chatworkMessageId,
+            factory: window.checklistState.factory,
+            machine: window.checklistState.machine,
+            status: statusStr,
+            reason: reason,
+            userInput: userInputStr,
+            expectedInput: expectedStr,
+            isOptional: isOptionalTicket,
+            schedule: schedule,
+            itemLabel: itemLabel
+          })
+        }).catch(err => console.warn('Failed to update Chatwork ticket message:', err));
+      } catch (err) {
+        console.error('Failed to update ticket in Chatwork:', err);
+      }
+    }
+
+    ticket.reason = reason;
+    ticket.saved = true;
+    ticket.ticketType = isTicketRequired ? 'defect' : 'optional';
+    ticket.required = isTicketRequired;
+    window.checklistState.tickets[fieldId] = ticket;
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      await window.saveChecklistDraftToStorage();
+    }
+
+    closeChecklistTicketModal();
+    renderCurrentChecklistTemplate();
+  };
+
+  window.promptWorkerConfirmation = function () {
+    return new Promise((resolve) => {
+      const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+      if (activeNames.length === 0) {
+        resolve(false);
+        return;
+      }
+
+      const modal = document.getElementById('workerConfirmationModal');
+      const nameEl = document.getElementById('workerConfirmModalName');
+      if (!modal || !nameEl) {
+        resolve(true);
+        return;
+      }
+
+      nameEl.textContent = formatWorkerDisplayLines(activeNames);
+      modal.style.display = 'flex';
+      window._workerConfirmResolve = resolve;
+    });
+  };
+
+  window.handleWorkerConfirmResponse = function (isConfirmed) {
+    const modal = document.getElementById('workerConfirmationModal');
+    if (modal) modal.style.display = 'none';
+
+    if (window._workerConfirmResolve) {
+      window._workerConfirmResolve(isConfirmed);
+      window._workerConfirmResolve = null;
+    }
+
+    if (isConfirmed) {
+      if (typeof isChecklistLocked === 'function' && isChecklistLocked()) {
+        const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+        localStorage.setItem(pfx + 'activeChecklistStart', String(Date.now()));
+        if (typeof assertMachineState === 'function') assertMachineState();
+      }
+    } else {
+      if (typeof openWorkerModal === 'function') {
+        openWorkerModal(0);
+      }
+    }
+  };
+
+  window.resetAllChecklistData = async function () {
+    const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
+    const namesText = activeNames.length > 0 ? activeNames.join(', ') : 'Operator';
+
+    const confirmMsg = `Reset all checklist progress & photos?\n\n(Worker name "${namesText}" will be preserved)`;
+    if (!confirm(confirmMsg)) return;
+
+    // Harvest Chatwork message IDs to cancel stale notifications
+    const messageIds = [];
+    if (window.checklistState.tickets) {
+      for (const fId of Object.keys(window.checklistState.tickets)) {
+        const ticket = window.checklistState.tickets[fId];
+        if (ticket && ticket.chatworkMessageId) {
+          messageIds.push(ticket.chatworkMessageId);
+        }
+      }
+    }
+
+    if (messageIds.length > 0) {
+      try {
+        fetch(`${serverURL}/api/check-forms/cancel-ng-ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageIds })
+        }).catch(err => console.warn('Error calling cancel-ng-ticket API:', err));
+      } catch (err) {
+        console.warn('Error initiating Chatwork cancellation:', err);
+      }
+    }
+
+    // Reset state object
+    window.checklistState.answers = {};
+    window.checklistState.answeredAt = {};
+    window.checklistState.tickets = {};
+    window.checklistState.fieldPhotos = {};
+    window.checklistState.queueIndex = 0;
+    window.checklistState.isPreComplete = false;
+    window.checklistState.isBypassed = false;
+    window.checklistState.unlockedCompletedCards = {};
+
+    // Clear IndexedDB and draft in storage
+    if (typeof window.clearChecklistDraftFromStorage === 'function') {
+      await window.clearChecklistDraftFromStorage();
+    }
+
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    try { localStorage.removeItem(pfx + 'activeChecklistStart'); } catch (e) { }
+
+    // Immediately release CHECK card on factory TV
+    if (typeof window.assertMachineState === 'function') {
+      window.assertMachineState();
+    }
+
+    // Lock checklist tab bar
+    const bar = document.querySelector('.tab-bar');
+    if (bar) bar.classList.add('locked-checklist');
+
+    // Re-render template cards
+    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    }
+
+    if (typeof showAppToast === 'function') {
+      showAppToast(`🔄 Checklist reset! Preserved worker: ${namesText}`);
+    }
+
+    // Prompt user confirmation with consistent UI modal matching Scan tab
+    if (activeNames.length > 0) {
+      setTimeout(() => {
+        window.promptWorkerConfirmation();
+      }, 250);
+    }
+  };
+
+  window.openSuperBypassModal = function () {
+    const modal = document.getElementById('checklistBypassModal');
+    const status = document.getElementById('checklistBypassStatus');
+    if (status) status.textContent = 'Scanning Leader QR...';
+    if (modal) modal.style.display = 'flex';
+
+    if (typeof Html5Qrcode !== 'undefined') {
+      if (window.checklistState.bypassQrScanner) {
+        try { window.checklistState.bypassQrScanner.stop(); } catch (e) { }
+      }
+      const scanner = new Html5Qrcode('checklistBypassQrReader');
+      window.checklistState.bypassQrScanner = scanner;
+
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        async function (decodedText) {
+          try {
+            const res = await fetch(`${serverURL}/api/check-forms/verify-qr?code=${encodeURIComponent(decodedText)}`);
+            if (res.ok) {
+              const userData = await res.json();
+              scanner.stop();
+              window.checklistState.bypassLeader = userData;
+              if (status) {
+                status.style.color = '#1f9d6b';
+                status.textContent = `✓ Leader Verified: ${userData.firstName || userData.username}`;
+              }
+              submitSuperBypass(userData);
+            } else {
+              if (status) {
+                status.style.color = '#ef4444';
+                status.textContent = '❌ Invalid Leader QR Code';
+              }
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        },
+        function () { }
+      ).catch(err => {
+        if (status) status.textContent = 'Could not access camera for QR scan';
+      });
+    }
+  };
+
+  window.closeSuperBypassModal = function () {
+    if (window.checklistState.bypassQrScanner) {
+      try { window.checklistState.bypassQrScanner.stop(); } catch (e) { }
+    }
+    const modal = document.getElementById('checklistBypassModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.handleStepSkip = async function (fieldId, isRequired) {
+    const isConfirmed = await promptPostStepWarningModal(fieldId);
+    if (!isConfirmed) return;
+
+    const ansVal = window.checklistState.answers[fieldId];
+    const isSkipped = typeof ansVal === 'string' && ansVal.startsWith('SKIPPED');
+
+    if (isSkipped) {
+      delete window.checklistState.answers[fieldId];
+      if (window.checklistState.answeredAt) delete window.checklistState.answeredAt[fieldId];
+      delete window.checklistState.tickets[fieldId];
+      if (typeof window.saveChecklistDraftToStorage === 'function') window.saveChecklistDraftToStorage();
+      if (typeof showAppToast === 'function') showAppToast('↩️ Skip undone');
+      renderCurrentChecklistTemplate();
+      return;
+    }
+
+    if (isRequired) {
+      openStepSkipLeaderQrModal(fieldId);
+    } else {
+      executeStepSkip(fieldId, null);
+    }
+  };
+
+  window.openStepSkipLeaderQrModal = function (fieldId) {
+    window.checklistState.pendingSkipFieldId = fieldId;
+    const modal = document.getElementById('stepSkipQrModal');
+    const status = document.getElementById('stepSkipQrStatus');
+    if (status) {
+      status.style.color = '#6b7280';
+      status.textContent = 'Scanning Leader QR Code...';
+    }
+    if (modal) modal.style.display = 'flex';
+
+    if (typeof Html5Qrcode !== 'undefined') {
+      if (window.checklistState.stepSkipQrScanner) {
+        try { window.checklistState.stepSkipQrScanner.stop(); } catch (e) { }
+      }
+      const scanner = new Html5Qrcode('stepSkipQrReader');
+      window.checklistState.stepSkipQrScanner = scanner;
+
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        async function (decodedText) {
+          try {
+            const res = await fetch(`${serverURL}/api/check-forms/verify-qr?code=${encodeURIComponent(decodedText)}`);
+            if (res.ok) {
+              const userData = await res.json();
+              scanner.stop();
+              closeStepSkipLeaderQrModal();
+              executeStepSkip(fieldId, userData);
+            } else {
+              if (status) {
+                status.style.color = '#ef4444';
+                status.textContent = '❌ Invalid Leader QR Code';
+              }
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        },
+        function () { }
+      ).catch(err => {
+        if (status) status.textContent = 'Could not access camera for QR scan';
+      });
+    }
+  };
+
+  window.closeStepSkipLeaderQrModal = function () {
+    if (window.checklistState.stepSkipQrScanner) {
+      try { window.checklistState.stepSkipQrScanner.stop(); } catch (e) { }
+    }
+    const modal = document.getElementById('stepSkipQrModal');
+    if (modal) modal.style.display = 'none';
+    window.checklistState.pendingSkipFieldId = null;
+  };
+
+  function executeStepSkip(fieldId, leaderUser) {
+    const skipText = leaderUser
+      ? `SKIPPED (Leader: ${leaderUser.firstName || leaderUser.username || 'Verified'})`
+      : 'SKIPPED';
+
+    window.checklistState.answers[fieldId] = skipText;
+    window.checklistState.answeredAt = window.checklistState.answeredAt || {};
+    window.checklistState.answeredAt[fieldId] = new Date().toISOString();
+
+    if (leaderUser) {
+      window.checklistState.tickets[fieldId] = {
+        saved: true,
+        reason: `Step skipped with Leader approval (${leaderUser.firstName || leaderUser.username})`,
+        skipped: true,
+        leader: leaderUser
+      };
+    }
+
+    if (typeof window.saveChecklistDraftToStorage === 'function') {
+      window.saveChecklistDraftToStorage();
+    }
+
+    if (typeof showAppToast === 'function') {
+      showAppToast(leaderUser ? `⏭️ Step skipped with Leader approval!` : `⏭️ Step skipped`);
+    }
+
+    renderCurrentChecklistTemplate();
+  }
+
+  async function submitSuperBypass(leaderUser) {
+    const reasonInput = document.getElementById('checklistBypassReason');
+    const reason = (reasonInput?.value || '').trim() || 'Leader emergency bypass';
+
+    try {
+      await fetch(`${serverURL}/api/check-forms/bypass`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          factory: window.checklistState.factory,
+          machine: window.checklistState.machine,
+          workerName: (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+            ? window.selectedWorkerNames.filter(Boolean).join(',')
+            : (document.getElementById('Machine Operator')?.value || ''),
+          leaderName: `${leaderUser.firstName || ''} ${leaderUser.lastName || ''}`.trim() || leaderUser.username,
+          leaderUsername: leaderUser.username,
+          reason,
+          timing: 'pre',
+          templates: window.checklistState.queue.map(t => t.name)
+        })
+      });
+
+      window.checklistState.isBypassed = true;
+      window.checklistState.isPreComplete = true;
+
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      localStorage.removeItem(pfx + 'activeChecklistStart');
+      if (typeof assertMachineState === 'function') assertMachineState();
+
+      const bar = document.querySelector('.tab-bar');
+      if (bar) bar.classList.remove('locked-checklist');
+
+      closeSuperBypassModal();
+
+      if (typeof showAppToast === 'function') {
+        showAppToast(`⚡ Checklist Super-Bypassed by ${leaderUser.firstName || leaderUser.username}`);
+      }
+
+      if (typeof window.goToTab === 'function') window.goToTab(0);
+    } catch (e) {
+      console.error('Error recording bypass:', e);
+    }
+  }
+
+  window.handleChecklistSubmitOrNext = async function () {
+    const { queue, queueIndex } = window.checklistState;
+    if (!queue || !queue[queueIndex]) return;
+
+    const tpl = queue[queueIndex];
+    const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
+
+    const isSubmittingPre = !window.checklistState.isPreComplete;
+    const targetFields = isSubmittingPre
+      ? fields.filter(f => f.timing !== 'post')
+      : queue.flatMap(t => (t.fields || []).filter(f => f.timing === 'post' && f.type !== 'name'));
+
+    let firstIncompleteCard = null;
+    targetFields.forEach((field) => {
+      if (field.type === 'name') return;
+      const ans = window.checklistState.answers[field.id];
+      const ticket = window.checklistState.tickets[field.id];
+      const card = document.getElementById(`checklist-card-${field.id}`);
+
+      const isNg = ans === 'NG';
+      const numVal = typeof ans === 'number' ? ans : parseFloat(ans);
+      const isOutOfRange = field.type === 'number' && !isNaN(numVal) && (
+        (field.min !== null && field.min !== undefined && numVal < field.min) ||
+        (field.max !== null && field.max !== undefined && numVal > field.max)
+      );
+
+      let isFieldValid = true;
+
+      if (field.required && (ans === undefined || ans === '' || ans === null)) isFieldValid = false;
+      if ((isNg || isOutOfRange) && (!ticket || !ticket.saved)) isFieldValid = false;
+      if (field.photoRequired && !isNg && !isOutOfRange && !window.checklistState.fieldPhotos[field.id]) isFieldValid = false;
+
+      if (!isFieldValid) {
+        if (card) card.classList.add('invalid-highlight');
+        if (!firstIncompleteCard) firstIncompleteCard = card;
+      } else {
+        if (card) card.classList.remove('invalid-highlight');
+      }
+    });
+
+    if (firstIncompleteCard) {
+      firstIncompleteCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (typeof showAppToast === 'function') showAppToast(_t('checklist_incomplete'));
+      return;
+    }
+
+    const overlay = document.getElementById('checklistSubmittingOverlay');
+    if (overlay) overlay.style.display = 'flex';
+
+    try {
+      let workerName = (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
+        ? window.selectedWorkerNames.filter(Boolean).join(',')
+        : (document.getElementById('Machine Operator')?.value?.trim() || '');
+      if (!workerName && window.checklistState.answers) {
+        for (const t of queue) {
+          const nameField = (t.fields || []).find(f => f.type === 'name');
+          if (nameField && window.checklistState.answers[nameField.id]) {
+            const val = window.checklistState.answers[nameField.id];
+            if (Array.isArray(val)) workerName = val.filter(Boolean).join(', ');
+            else if (typeof val === 'string' && val.trim()) workerName = val.trim();
+            if (workerName) break;
+          }
+        }
+      }
+      if (!workerName) {
+        workerName = (document.getElementById('Machine Operator')?.value || '').trim() || 'Operator';
+      }
+
+      // Pre-check submits the active template; Post-check submits all templates with post fields
+      const templatesToSubmit = isSubmittingPre
+        ? [tpl]
+        : queue.filter(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post' && f.type !== 'name'));
+
+      const payload = {
+        factory: window.checklistState.factory,
+        machine: window.checklistState.machine,
+        equipmentId: window.checklistState.equipmentId || null,
+        workerName,
+        templates: templatesToSubmit.map(t => {
+          const tFields = Array.isArray(t.fields) ? t.fields : [];
+          const fieldsToSubmit = isSubmittingPre
+            ? tFields.filter(f => f.timing !== 'post')
+            : tFields.filter(f => f.timing === 'post' && f.type !== 'name');
+
+          return {
+            templateId: t._id,
+            recordId: (window.checklistState.recordIds && window.checklistState.recordIds[t._id]) ? window.checklistState.recordIds[t._id] : null,
+            templateName: t.name,
+            schedule: t.schedule,
+            workerName,
+            equipmentId: window.checklistState.equipmentId || t.equipmentId || (Array.isArray(t.equipmentIds) ? t.equipmentIds[0] : null),
+            answers: fieldsToSubmit.map(f => {
+              const itemLabel = f.label || f.label_ja || f.label_en || (f.type === 'name' ? '作業者名' : '項目');
+              return {
+                id: f.id,
+                fieldId: f.id,
+                label: itemLabel,
+                label_ja: f.label_ja || itemLabel,
+                label_en: f.label_en || itemLabel,
+                type: f.type,
+                required: !!f.required,
+                photoRequired: !!f.photoRequired,
+                min: f.min !== undefined ? f.min : null,
+                max: f.max !== undefined ? f.max : null,
+                options: f.options || [],
+                unit: f.unit || '',
+                value: window.checklistState.answers[f.id],
+                answeredAt: (window.checklistState.answeredAt && window.checklistState.answeredAt[f.id]) || new Date().toISOString(),
+                fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
+                fieldPhotoData: window.checklistState.fieldPhotos[f.id] || null,
+                ticket: (window.checklistState.tickets[f.id] && window.checklistState.tickets[f.id].saved && (window.checklistState.tickets[f.id].reason || '').trim()) ? {
+                  reason: (window.checklistState.tickets[f.id].reason || '').trim(),
+                  imagesData: window.checklistState.tickets[f.id].images || [],
+                  chatworkMessageId: window.checklistState.tickets[f.id].chatworkMessageId || null,
+                  ticketType: (window.isDefectTicket(f.id) || window.checklistState.answers[f.id] === 'NG') ? 'defect' : (window.checklistState.tickets[f.id].ticketType || 'optional'),
+                  saved: true
+                } : null
+              };
+            }),
+            tickets: Object.keys(window.checklistState.tickets || {})
+              .filter(fId => fieldsToSubmit.some(tf => tf.id === fId))
+              .filter(fId => {
+                const tkt = window.checklistState.tickets[fId];
+                return !!(tkt && tkt.saved && (tkt.reason || '').trim());
+              })
+              .map(fId => {
+                const tkt = window.checklistState.tickets[fId];
+                const isDefect = window.isDefectTicket(fId) || window.checklistState.answers[fId] === 'NG';
+                return {
+                  fieldId: fId,
+                  reason: (tkt.reason || '').trim(),
+                  imagesData: tkt.images || [],
+                  chatworkMessageId: tkt.chatworkMessageId || null,
+                  ticketType: isDefect ? 'defect' : (tkt.ticketType || 'optional'),
+                };
+              })
+          };
+        })
+      };
+
+      console.log('🚀 Sending single checklist submission payload:', {
+        factory: payload.factory,
+        machine: payload.machine,
+        workerName: payload.workerName,
+        templateName: tpl.name,
+        templates: payload.templates
+      });
+
+      const res = await fetch(`${serverURL}/api/check-forms/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const resData = await res.json().catch(() => ({}));
+        console.log('✅ Checklist submitted successfully! Response:', resData);
+        window.checklistState.recordIds = window.checklistState.recordIds || {};
+        if (resData.recordIds) {
+          window.checklistState.recordIds = { ...window.checklistState.recordIds, ...resData.recordIds };
+        } else {
+          window.checklistState.recordIds[tpl._id] = true;
+          window.checklistState.recordIds[tpl.name] = true;
+        }
+
+        const submittedHasDefectTicket = !!(
+          resData.hasOpenTickets !== undefined
+            ? resData.hasOpenTickets
+            : (payload.templates && payload.templates.some(t =>
+              Array.isArray(t.tickets) && t.tickets.some(tk => tk.ticketType === 'defect' || window.isDefectTicket(tk.fieldId) || window.checklistState.answers[tk.fieldId] === 'NG')
+            ))
+        );
+
+        if (submittedHasDefectTicket) {
+          window.checklistState.hasOpenTickets = true;
+        } else {
+          window.checklistState.hasOpenTickets = false;
+        }
+
+        if (overlay) overlay.style.display = 'none';
+
+        // Check if all templates in queue are now submitted
+        const allTemplatesFinished = queue.every(t => {
+          return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+        });
+
+        if (isSubmittingPre) {
+          if (allTemplatesFinished) {
+            window.checklistState.isPreComplete = true;
+            window.checklistState.submittedAt = Date.now();
+            const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+            localStorage.removeItem(pfx + 'activeChecklistStart');
+            if (typeof assertMachineState === 'function') assertMachineState();
+            const hasPostFields = queue.some(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post'));
+            if (!hasPostFields) {
+              window.checklistState.isPostComplete = true;
+            }
+            if (typeof window.saveChecklistDraftToStorage === 'function') {
+              await window.saveChecklistDraftToStorage();
+            }
+
+            // Sync with backend immediately
+            if (typeof verifyChecklistStatusWithMongoDB === 'function') {
+              verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
+            }
+
+            // Check if any open defect tickets exist across all completed checks
+            if (window.checklistState.hasOpenTickets && !window.checklistState.isBypassed) {
+              if (typeof window.updateTabLock === 'function') {
+                window.updateTabLock();
+              }
+              if (typeof showAppToast === 'function') {
+                showAppToast('⚠️ Checklist submitted. Please wait for maintenance approval.');
+              }
+              if (typeof renderCurrentChecklistTemplate === 'function') {
+                renderCurrentChecklistTemplate();
+              }
+            } else {
+              window.checklistState.hasOpenTickets = false;
+              if (typeof window.updateTabLock === 'function') {
+                window.updateTabLock();
+              } else {
+                const bar = document.querySelector('.tab-bar');
+                if (bar) bar.classList.remove('locked-checklist');
+              }
+
+              if (typeof showAppToast === 'function') {
+                showAppToast('🎉 All Pre-Production Checklists Completed!');
+              }
+
+              if (typeof renderCurrentChecklistTemplate === 'function') {
+                renderCurrentChecklistTemplate();
+              }
+
+              if (typeof window.goToTab === 'function') {
+                window.goToTab(1);
+              }
+            }
+          } else {
+            // Some templates still pending: find next pending template and jump to it
+            if (typeof window.saveChecklistDraftToStorage === 'function') {
+              await window.saveChecklistDraftToStorage();
+            }
+
+            const nextIncompleteIdx = queue.findIndex(t => !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+            if (nextIncompleteIdx !== -1) {
+              window.checklistState.queueIndex = nextIncompleteIdx;
+            }
+
+            const localizedTplName = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
+            if (typeof showAppToast === 'function') {
+              showAppToast(`✓ ${localizedTplName} submitted! Moving to next checklist.`);
+            }
+
+            if (typeof renderCurrentChecklistTemplate === 'function') {
+              renderCurrentChecklistTemplate();
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        } else {
+          window.checklistState.isPostComplete = true;
+          if (typeof window.saveChecklistDraftToStorage === 'function') {
+            await window.saveChecklistDraftToStorage();
+          }
+
+          if (typeof verifyChecklistStatusWithMongoDB === 'function') {
+            verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
+          }
+
+          if (typeof renderCurrentChecklistTemplate === 'function') {
+            renderCurrentChecklistTemplate();
+          }
+
+          if (typeof showAppToast === 'function') {
+            showAppToast('🎉 All Post-Production Checks Completed!');
+          }
+        }
+      } else {
+        let errText = 'Server error during checklist submission';
+        try {
+          const errJson = await res.json();
+          errText = errJson.error || errJson.message || errText;
+        } catch (_) {
+          try { errText = await res.text(); } catch (__) { }
+        }
+        console.error('❌ Checklist submission rejected by server (HTTP ' + res.status + '):', errText);
+        if (overlay) overlay.style.display = 'none';
+        window.showChecklistSubmitErrorModal(errText);
+      }
+    } catch (e) {
+      console.error('Error submitting checklist:', e);
+      if (overlay) overlay.style.display = 'none';
+      window.showChecklistSubmitErrorModal(e.message || 'Network error: Unable to connect to server');
+    }
+  };
+
+  window.showChecklistSubmitErrorModal = function (errorMsg) {
+    const overlay = document.getElementById('checklistSubmittingOverlay');
+    if (overlay) overlay.style.display = 'none';
+    const modal = document.getElementById('checklistSubmitErrorModal');
+    const msgEl = document.getElementById('checklistSubmitErrorMessage');
+    if (msgEl) msgEl.textContent = errorMsg || 'Submission failed. Please check network connection and try again.';
+    if (modal) modal.style.display = 'flex';
+    if (typeof showAppToast === 'function') {
+      showAppToast(`❌ ${errorMsg || 'Submission failed'}`);
+    }
+  };
+
+  window.closeChecklistSubmitErrorModal = function () {
+    const modal = document.getElementById('checklistSubmitErrorModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.retryChecklistSubmission = function () {
+    window.closeChecklistSubmitErrorModal();
+    window.handleChecklistSubmitOrNext();
+  };
+
+  window.confirmDoPostChecklist = function () {
+    const modal = document.getElementById('postChecklistReminderModal');
+    if (modal) modal.style.display = 'none';
+
+    window.checklistState.queue = window.checklistState.postChecklists;
+    window.checklistState.queueIndex = 0;
+
+    const btn = document.getElementById('checklistTabBtn');
+    if (btn) btn.style.display = 'inline-flex';
+
+    renderCurrentChecklistTemplate();
+    window.goToChecklistTab();
+  };
+
+  window.confirmSkipPostChecklist = function () {
+    window.checklistState.isPostSkipped = true;
+    const modal = document.getElementById('postChecklistReminderModal');
+    if (modal) modal.style.display = 'none';
+
+    if (window.pendingDcpSubmitAction) {
+      window.pendingDcpSubmitAction();
+      window.pendingDcpSubmitAction = null;
+    }
+  };
+
+  // Auto-Escaping Modal Listener for Tablet Virtual Keyboard
+  document.addEventListener('focusin', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') && e.target.type !== 'file' && e.target.type !== 'button' && e.target.type !== 'submit') {
+      const modalOverlay = e.target.closest('.checklist-modal-overlay, .modal, .modal-overlay');
+      if (modalOverlay) {
+        modalOverlay.classList.add('keyboard-active');
+        setTimeout(() => {
+          try {
+            e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+          } catch (err) { }
+        }, 150);
+      }
+    }
+  });
+
+  document.addEventListener('focusout', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+      const modalOverlay = e.target.closest('.checklist-modal-overlay, .modal, .modal-overlay');
+      if (modalOverlay) {
+        setTimeout(() => {
+          if (!modalOverlay.contains(document.activeElement)) {
+            modalOverlay.classList.remove('keyboard-active');
+          }
+        }, 100);
+      }
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    setTimeout(function () {
+      if (typeof selectedFactory !== 'undefined' && typeof selectedMachine !== 'undefined') {
+        window.initChecklistsForMachine(selectedFactory, selectedMachine);
+      }
+    }, 500);
+  });
+})();
+
+// ============================================================================
+// CNC GATEKEEPER SSE CLIENT: DEDICATED PREEMPTIVE BREAK & DEDICATED CYCLE STOP
+// ============================================================================
+(function initCNCGatekeeperClient() {
+  let cncEventSource = null;
+  let isBreakScheduledPending = false;
+  let isCycleStopPending = false;
+  let lastHeartbeatTime = Date.now();
+
+  // Machines this tablet currently has a cycle stop scheduled on.
+  // One entry for a single pick, every grouped machine for the BOTH pick.
+  let activeCycleStopMachines = [];
+  // True when a wait was ADOPTED from the mini-PCs (tablet reload, or a stop another
+  // tablet scheduled) rather than started here. Only an adopted wait absorbs machines
+  // the poller reveals later; a wait the operator started must stay on exactly the
+  // machine they picked, or Cancel would kill a sibling's independent stop.
+  let cycleStopAdopted = false;
+  let breakWaitAdopted = false;
+  // Machines observed actually holding a scheduled cycle stop during this wait. Only
+  // these may be pruned when they stop reporting it, so a mini-PC that has not yet
+  // processed our request is never mistaken for one that has finished.
+  let cycleStopSeenScheduled = [];
+  // When the "all machines stopped" confirmation was last shown, so the poll prune and
+  // the SSE event reporting the same last machine do not toast twice.
+  let lastCycleStopDoneToastAt = 0;
+  let breakWaitSeenScheduled = [];
+  // True while our own schedule_cycle_stop requests are still going out. A poll can
+  // legitimately report "not scheduled" in that window because the mini-PC has not
+  // been told yet, and acting on it would close the overlay just opened.
+  let cycleStopScheduleInFlight = false;
+  // Likewise for cancels: a poll issued AFTER the cancel went out but before the
+  // mini-PC applied it still reports the stop as scheduled, and adopting that would
+  // pop the overlay back open and re-blink the kiosk TV.
+  let cycleStopCancelInFlight = false;
+  let breakCancelInFlight = false;
+
+  // Mini-PC IPs that ACCEPTED a break stop, i.e. answered {"scheduled": true}. The
+  // break timer waits for every one of these to reach a BREAK hold. A legacy mini-PC
+  // has no such endpoint, never lands in this list, and is never waited on.
+  let breakWaitIps = [];
+  // What the break overlay title is currently naming (the machines still running).
+  let breakWaitTitleIps = [];
+  // True while the schedule requests are still going out, so nothing starts the break
+  // from a half-built wait list.
+  let breakScheduleInFlight = false;
+
+  // The last cycle-stop intent this tablet sent to each mini-PC IP:
+  //   { at: <when the request went out>, scheduled: true (stop) | false (cancel) }
+  // A /state response whose request STARTED before that intent still describes the
+  // machine as it was beforehand. Acting on it flashes the overlay and the kiosk TV
+  // to the wrong state for a whole poll cycle, so those responses are corrected to
+  // what we asked for. Anything issued AFTER the intent is trusted as-is — the
+  // mini-PC stays the source of truth.
+  const cycleStopIntent = {};
+  // Same idea for the break stop: when it was requested on each mini-PC IP.
+  const breakIntentAt = {};
+  const CYCLE_STOP_ALL = '__BOTH__';
+
+  // Normalise a 🛑 target (a machine name, the BOTH sentinel, an array, or null)
+  // into a plain list of machine names. An empty list means "no specific machine",
+  // which keeps the legacy single-machine fallback behaviour.
+  function resolveCycleStopTargets(target) {
+    if (target === CYCLE_STOP_ALL) return getGroupedMachineList().filter(Boolean);
+    if (Array.isArray(target)) return target.filter(Boolean);
+    return target ? [target] : [];
+  }
+
+  function getGroupedMachineList() {
+    if (typeof groupedMachines !== 'undefined' && Array.isArray(groupedMachines) && groupedMachines.length > 0) {
+      return groupedMachines;
+    }
+    if (typeof groupedMachineIPs !== 'undefined' && Object.keys(groupedMachineIPs).length > 0) {
+      return Object.keys(groupedMachineIPs);
+    }
+    const procEl = document.getElementById('process');
+    if (procEl && procEl.value && procEl.value.includes(',')) {
+      return procEl.value.split(',').map(m => m.trim()).filter(Boolean);
+    }
+    return [];
+  }
+
+  function getCNCMiniPCIP(specificMachine) {
+    if (specificMachine) {
+      if (typeof groupedMachineIPs !== 'undefined' && groupedMachineIPs[specificMachine]) {
+        return groupedMachineIPs[specificMachine];
+      }
+      const mEl = document.getElementById('process');
+      const ipInput = document.getElementById('ipInfo');
+      if (mEl && ipInput && ipInput.value) {
+        const ms = mEl.value.split(',').map(m => m.trim());
+        const ips = ipInput.value.split(',').map(i => i.replace(/"/g, '').trim());
+        const idx = ms.indexOf(specificMachine);
+        if (idx >= 0 && ips[idx]) return ips[idx];
+      }
+      // Refuse to guess only where guessing could hit the WRONG machine. On a single
+      // machine page there is nothing to confuse it with, so the fallback below still
+      // applies — a stray space in #process must not disable the cycle stop.
+      if (getGroupedMachineList().length > 1) {
+        console.warn(`🛑 No mini-PC IP resolved for ${specificMachine} — not guessing.`);
+        return null;
+      }
+    }
+    if (typeof groupedMachineIPs !== 'undefined' && typeof primaryMachineName !== 'undefined' && groupedMachineIPs[primaryMachineName]) {
+      return groupedMachineIPs[primaryMachineName];
+    }
+    const ipInput = document.getElementById('ipInfo');
+    if (ipInput && ipInput.value) {
+      const first = ipInput.value.split(',')[0].replace(/"/g, '').trim();
+      if (first) return first;
+    }
+    return null;
+  }
+
+  // Resolve a mini-PC IP back to its machine name (display only, no network).
+  function getMachineNameFromIP(ip) {
+    if (!ip) return null;
+    if (typeof groupedMachineIPs !== 'undefined') {
+      const match = Object.entries(groupedMachineIPs).find(([_, mIp]) => mIp === ip);
+      if (match) return match[0];
+    }
+    const mEl = document.getElementById('process');
+    const ipInput = document.getElementById('ipInfo');
+    if (mEl && ipInput && ipInput.value) {
+      const ms = mEl.value.split(',').map(m => m.trim());
+      const ips = ipInput.value.split(',').map(i => i.replace(/"/g, '').trim());
+      const idx = ips.indexOf(ip);
+      if (idx >= 0 && ms[idx]) return ms[idx];
+    }
+    return null;
+  }
+
+  function getAllCNCMiniPCIPs() {
+    const ips = new Set();
+    if (typeof groupedMachineIPs !== 'undefined' && Object.keys(groupedMachineIPs).length > 0) {
+      Object.values(groupedMachineIPs).forEach(ip => { if (ip) ips.add(ip); });
+    }
+    const ipInput = document.getElementById('ipInfo');
+    if (ipInput && ipInput.value) {
+      ipInput.value.split(',').forEach(part => {
+        const cleaned = part.replace(/"/g, '').trim();
+        if (cleaned) ips.add(cleaned);
+      });
+    }
+    if (ips.size === 0) {
+      const single = getCNCMiniPCIP();
+      if (single) ips.add(single);
+    }
+    return Array.from(ips);
+  }
+
+  // Inject Styles for Floating Cancel Button and Modal
+  const style = document.createElement('style');
+  style.textContent = `
+    .cnc-cycle-stop-btn {
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease !important;
+    }
+    .cnc-cycle-stop-btn:active {
+      transform: scale(0.92) !important;
+    }
+    .cnc-cycle-stop-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      z-index: 100200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      animation: cncFadeIn 0.25s ease-out;
+    }
+    .cnc-cycle-stop-overlay.open {
+      display: flex;
+    }
+    @keyframes cncFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .cnc-stop-modal {
+      background: linear-gradient(145deg, #1e293b, #0f172a);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 24px;
+      padding: 40px 36px;
+      max-width: 460px;
+      width: 90%;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .cnc-stop-icon-pulse {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.15);
+      border: 2px solid rgba(239, 68, 68, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.2rem;
+      margin-bottom: 20px;
+      animation: cncPulse 1.8s ease-in-out infinite;
+    }
+    @keyframes cncPulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+      50% { transform: scale(1.08); box-shadow: 0 0 0 16px rgba(239, 68, 68, 0); }
+    }
+    .cnc-stop-modal h2 {
+      margin: 0 0 10px 0;
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #f8fafc;
+      letter-spacing: -0.02em;
+    }
+    .cnc-stop-modal .cnc-stop-sub {
+      margin: 0 0 24px 0;
+      font-size: 0.95rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+    .cnc-stop-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-top-color: #ef4444;
+      border-radius: 50%;
+      animation: cncSpin 0.9s linear infinite;
+      margin-bottom: 24px;
+    }
+    @keyframes cncSpin {
+      to { transform: rotate(360deg); }
+    }
+    .btn-cancel-cycle-stop {
+      background: rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      padding: 12px 28px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .btn-cancel-cycle-stop:hover {
+      background: rgba(255, 255, 255, 0.16);
+      color: #fff;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // The page's toast helper is exported only as window.showAppToast; a bare
+  // `showToast` is not a global, so every `typeof showToast === 'function'` check in
+  // this module was silently failing and its messages never reached the operator.
+  // Shadow it locally with one that resolves whichever the page actually provides.
+  function showToast(msg, ms) {
+    const appToast = window.showAppToast;
+    if (typeof appToast === 'function') return appToast(msg, ms);
+    // Compare identity before delegating: if this declaration ever ends up on window
+    // (Annex B block hoisting), calling it here would recurse into itself.
+    const pageToast = window.showToast;
+    if (typeof pageToast === 'function' && pageToast !== showToast) return pageToast(msg, ms);
+    console.log('[toast]', msg);
+  }
+
+  // Helper for i18n translation lookup
+  function _tr(key, fallback) {
+    if (typeof _t === 'function') {
+      const res = _t(key);
+      if (res && res !== key) return res;
+    }
+    return fallback || key;
+  }
+
+  // Create Full-Screen Waiting Overlay for 🛑 Floating Button
+  const overlay = document.createElement('div');
+  overlay.id = 'cncCycleStopOverlay';
+  overlay.className = 'cnc-cycle-stop-overlay';
+  overlay.innerHTML = `
+    <div class="cnc-stop-modal">
+      <div class="cnc-stop-icon-pulse">🛑</div>
+      <h2 data-i18n="cnc_cycle_stop_title">サイクル完了待ち</h2>
+      <p class="cnc-stop-sub" data-i18n="cnc_cycle_stop_desc">
+        現在の加工が完了し、材料送りが終わった時点で自動停止します。
+      </p>
+      <div class="cnc-stop-spinner"></div>
+      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelCycleStop" data-i18n="cnc_cycle_stop_cancel_btn">
+        停止を取り消す (運転継続)
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Create 4th Floating CANCEL Button (🛑)
+  const stopBtn = document.createElement('button');
+  stopBtn.id = 'cncCycleStopBtn';
+  stopBtn.type = 'button';
+  stopBtn.className = 'video-manual-launcher pdf-page-btn cnc-cycle-stop-btn';
+  stopBtn.style.bottom = 'calc(max(12px, env(safe-area-inset-bottom)) + 180px)';
+  stopBtn.innerHTML = '<span class="video-manual-launcher__icon">🛑</span>';
+  stopBtn.setAttribute('data-i18n-title', 'cnc_cycle_stop_tooltip');
+  document.body.appendChild(stopBtn);
+
+  // Create Full-Screen Waiting Overlay for ☕ Break Button
+  const breakWaitOverlay = document.createElement('div');
+  breakWaitOverlay.id = 'cncBreakWaitOverlay';
+  breakWaitOverlay.className = 'cnc-cycle-stop-overlay';
+  breakWaitOverlay.innerHTML = `
+    <div class="cnc-stop-modal">
+      <div class="cnc-stop-icon-pulse" style="background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3);">☕</div>
+      <h2 data-i18n="cnc_break_wait_title">休憩待ち (サイクル完了後)</h2>
+      <p class="cnc-stop-sub" data-i18n="cnc_break_wait_desc">
+        現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。
+      </p>
+      <div class="cnc-stop-spinner" style="border-top-color: #f59e0b;"></div>
+      <button type="button" class="btn-cancel-cycle-stop" id="btnCancelBreakWait" data-i18n="cnc_break_wait_cancel_btn">
+        休憩を取り消す
+      </button>
+    </div>
+  `;
+  document.body.appendChild(breakWaitOverlay);
+
+  function updateCncOverlayTranslations() {
+    const cycleTitle = overlay.querySelector('[data-i18n="cnc_cycle_stop_title"]');
+    if (cycleTitle) cycleTitle.textContent = _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
+    const cycleDesc = overlay.querySelector('[data-i18n="cnc_cycle_stop_desc"]');
+    if (cycleDesc) cycleDesc.textContent = _tr('cnc_cycle_stop_desc', '現在の加工が完了し、材料送りが終わった時点で自動停止します。');
+    const cycleBtn = overlay.querySelector('#btnCancelCycleStop');
+    if (cycleBtn) cycleBtn.textContent = _tr('cnc_cycle_stop_cancel_btn', '停止を取り消す (運転継続)');
+
+    const breakTitle = breakWaitOverlay.querySelector('[data-i18n="cnc_break_wait_title"]');
+    if (breakTitle) breakTitle.textContent = _tr('cnc_break_wait_title', '休憩待ち (サイクル完了後)');
+    const breakDesc = breakWaitOverlay.querySelector('[data-i18n="cnc_break_wait_desc"]');
+    if (breakDesc) breakDesc.textContent = _tr('cnc_break_wait_desc', '現在の加工と材料送りが完了した時点で、機械を自動停止して休憩を開始します。');
+    const breakBtn = breakWaitOverlay.querySelector('#btnCancelBreakWait');
+    if (breakBtn) breakBtn.textContent = _tr('cnc_break_wait_cancel_btn', '休憩を取り消す');
+
+    if (stopBtn) {
+      stopBtn.setAttribute('title', _tr('cnc_cycle_stop_tooltip', 'サイクル完了後に停止'));
+    }
+
+    if (isBreakScheduledPending) {
+      const startBtn = document.getElementById('breakStartButton');
+      if (startBtn) {
+        startBtn.innerHTML = `<span>${_tr('cnc_break_btn_waiting', '⏳ サイクル完了後に休憩停止します...')}</span>`;
+      }
+    }
+
+    // The resets above drop the 【machine】 prefix both waiting overlays carry — put it
+    // back, otherwise switching language mid-wait hides which machine is still running.
+    if (activeCycleStopMachines.length > 0) setCycleStopOverlayTitle(activeCycleStopMachines);
+    if (breakWaitTitleIps.length > 0) setBreakWaitOverlayTitle(breakWaitTitleIps);
+  }
+
+  function broadcastLanguagePreferenceToMachine(lang) {
+    const targetLang = lang || localStorage.getItem('appLanguage') || 'ja';
+    const machineNameForSSE = typeof getMachineName === 'function' ? getMachineName() : '';
+    if (machineNameForSSE && machineNameForSSE !== 'MACHINE') {
+      const sUrl = typeof serverURL !== 'undefined' ? serverURL : 'http://localhost:3000';
+      fetch(`${sUrl}/api/broadcast-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          machineId: machineNameForSSE,
+          action: 'language_change',
+          language: targetLang,
+          additionalData: {
+            action: 'language_change',
+            language: targetLang
+          }
+        })
+      }).catch(err => console.warn('Failed to broadcast language change:', err));
+    }
+  }
+
+  // Initial translation apply and reactive listener for language switcher
+  updateCncOverlayTranslations();
+  document.addEventListener('languageChanged', (e) => {
+    updateCncOverlayTranslations();
+    const lang = e.detail?.lang || localStorage.getItem('appLanguage') || 'ja';
+    broadcastLanguagePreferenceToMachine(lang);
+  });
+
+  // Retitle the overlay with the machine(s) still waiting to stop.
+  function setCycleStopOverlayTitle(machineList) {
+    if (!machineList || machineList.length === 0) return;
+    const cycleTitle = overlay.querySelector('[data-i18n="cnc_cycle_stop_title"]');
+    if (cycleTitle) {
+      cycleTitle.textContent = `【${machineList.join(' + ')}】 ` + _tr('cnc_cycle_stop_title', 'サイクル完了待ち');
+    }
+  }
+
+  function openCycleStopOverlay(targetMachine) {
+    const targets = resolveCycleStopTargets(targetMachine);
+    activeCycleStopMachines = targets;
+    // Remember the machine(s) on the DOM so the tablet heartbeat (DCP interactive.html)
+    // can re-assert the STOP for the SAME machine(s) only, never the whole group.
+    if (targets.length > 0) {
+      overlay.dataset.targetMachine = targets.join(',');
+    } else {
+      delete overlay.dataset.targetMachine;
+    }
+    updateCncOverlayTranslations();
+    setCycleStopOverlayTitle(targets);
+    const wasOpen = overlay.classList.contains('open');
+    overlay.classList.add('open');
+    if (!wasOpen) {
+      // Display only: tell the factory TV exactly which machine(s) are stopping.
+      // The server splits this comma list, so a single pick blinks a single machine.
+      // Passing null keeps the old behaviour (whole grouped ?machine= list).
+      const notifyTarget = targets.join(',') || null;
+      if (typeof notifyStopCall === 'function') {
+        notifyStopCall('activate', 'stop', notifyTarget);
+      } else if (typeof window.notifyStopCall === 'function') {
+        window.notifyStopCall('activate', 'stop', notifyTarget);
+      }
+    }
+  }
+
+  // skipNotify: the caller has already cleared each machine individually, so the
+  // group-wide clear below would wipe a sibling's own, unrelated stop call.
+  function closeCycleStopOverlay(skipNotify) {
+    const wasOpen = overlay.classList.contains('open');
+    const clearedMachines = activeCycleStopMachines.slice();
+    overlay.classList.remove('open');
+    isCycleStopPending = false;
+    activeCycleStopMachines = [];
+    cycleStopAdopted = false;
+    cycleStopSeenScheduled = [];
+    delete overlay.dataset.targetMachine;
+    if (wasOpen && !skipNotify) {
+      // Clear the same machine(s) we activated, so a sibling machine's own call stays up.
+      const notifyTarget = clearedMachines.join(',') || null;
+      if (typeof notifyStopCall === 'function') {
+        notifyStopCall('clear', 'stop', notifyTarget);
+      } else if (typeof window.notifyStopCall === 'function') {
+        window.notifyStopCall('clear', 'stop', notifyTarget);
+      }
+    }
+  }
+
+  // A machine dropped out of the cycle stop — it either completed cleanly or its
+  // schedule was cancelled on the mini-PC. Clear just that machine on the kiosk TV
+  // and keep waiting for the rest; close everything once nothing is left.
+  //
+  // droppedMachine may be null when the mini-PC IP could not be resolved to a name —
+  // that keeps the legacy "any completion closes the overlay" behaviour.
+  // onlyWhenOverlayOpen: set for CANCEL events, which our own cancel button echoes
+  // back after it has already closed the overlay — acting on that echo would raise a
+  // duplicate toast. Completions are never self-inflicted, so they still confirm.
+  function releaseCycleStopMachine(droppedMachine, allDoneToast, partialToast, onlyWhenOverlayOpen) {
+    if (!overlay.classList.contains('open')) {
+      if (onlyWhenOverlayOpen) return;
+      // Something else closed the overlay first (e.g. the /state poll). There is
+      // nothing to update, but the operator still gets confirmation.
+      // The poll prune and the SSE event can both report the last machine. Confirm once.
+      if (typeof showToast === 'function' && allDoneToast
+        && (Date.now() - lastCycleStopDoneToastAt) > 4000) {
+        lastCycleStopDoneToastAt = Date.now();
+        showToast(allDoneToast);
+      }
+      return;
+    }
+
+    // A machine we never scheduled dropped out — leave our overlay alone.
+    if (droppedMachine && activeCycleStopMachines.length > 0
+      && !activeCycleStopMachines.includes(droppedMachine)) {
+      return;
+    }
+
+    const remaining = droppedMachine
+      ? activeCycleStopMachines.filter(m => m !== droppedMachine)
+      : [];
+
+    if (!droppedMachine || remaining.length === 0) {
+      closeCycleStopOverlay();
+      if (typeof showToast === 'function' && allDoneToast) {
+        lastCycleStopDoneToastAt = Date.now();
+        showToast(allDoneToast);
+      }
+      return;
+    }
+
+    // Still waiting on a sibling: clear only this machine on the factory TV.
+    if (typeof notifyStopCall === 'function') {
+      notifyStopCall('clear', 'stop', droppedMachine);
+    } else if (typeof window.notifyStopCall === 'function') {
+      window.notifyStopCall('clear', 'stop', droppedMachine);
+    }
+    activeCycleStopMachines = remaining;
+    overlay.dataset.targetMachine = remaining.join(',');
+    setCycleStopOverlayTitle(remaining);
+    if (typeof showToast === 'function' && partialToast) {
+      showToast(partialToast);
+    }
+  }
+
+  // Name the machines the break is still waiting on, like the cycle stop overlay does.
+  function setBreakWaitOverlayTitle(ips) {
+    breakWaitTitleIps = (ips || []).slice();
+    const names = (ips || [])
+      .map(ip => getMachineNameFromIP(ip))
+      .filter(Boolean);
+    const breakTitle = breakWaitOverlay.querySelector('[data-i18n="cnc_break_wait_title"]');
+    if (!breakTitle) return;
+    const base = _tr('cnc_break_wait_title', '休憩待ち (サイクル完了後)');
+    breakTitle.textContent = names.length > 0 ? `【${names.join(' + ')}】 ` + base : base;
+  }
+
+  function openBreakWaitOverlay() {
+    updateCncOverlayTranslations();
+    breakWaitOverlay.classList.add('open');
+    isBreakScheduledPending = true;
+    const startBtn = document.getElementById('breakStartButton');
+    if (startBtn) {
+      startBtn.innerHTML = `<span>${_tr('cnc_break_btn_waiting', '⏳ サイクル完了後に休憩停止します...')}</span>`;
+      startBtn.style.background = '#F59E0B';
+    }
+  }
+
+  function closeBreakWaitOverlay() {
+    breakWaitOverlay.classList.remove('open');
+    isBreakScheduledPending = false;
+    breakWaitIps = [];
+    breakWaitTitleIps = [];
+    breakWaitSeenScheduled = [];
+    breakWaitAdopted = false;
+    resetBreakStartButtonUI();
+  }
+
+  // One machine dropped out of the break wait: its schedule was cancelled on the
+  // mini-PC. Stop waiting on that machine but keep waiting for its siblings —
+  // closing the whole wait here would clear isBreakScheduledPending, and the
+  // sibling's later break_stop_completed would then be ignored, leaving it stopped
+  // for a break the tablet never started.
+  function releaseBreakWaitMachine(ip) {
+    if (!isBreakScheduledPending) return;
+    // The wait list is still being built while our requests are in flight; an empty
+    // list there means "not known yet", not "single machine".
+    if (breakScheduleInFlight) return;
+    // No wait list (single machine / legacy fallback): behave as before.
+    if (breakWaitIps.length === 0) { closeBreakWaitOverlay(); return; }
+    if (breakWaitIps.indexOf(ip) < 0) return; // a machine we were not waiting on
+
+    breakWaitIps = breakWaitIps.filter(k => k !== ip);
+    if (breakWaitIps.length === 0) { closeBreakWaitOverlay(); return; }
+
+    setBreakWaitOverlayTitle(breakWaitIps);
+    // The remaining machines may already be holding.
+    tryStartBreakWhenAllStopped(true);
+  }
+
+  // Start the break only once EVERY machine we are waiting on is holding for BREAK.
+  // Machines that never accepted the schedule (legacy mini-PCs, or offline ones) are
+  // not in breakWaitIps, so they are never waited on.
+  function tryStartBreakWhenAllStopped(withToast) {
+    if (!isBreakScheduledPending || breakScheduleInFlight) return false;
+    const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
+    if (isRecentlyFinished) return false;
+
+    const waitIps = breakWaitIps.length > 0 ? breakWaitIps : Object.keys(machineStates);
+    if (waitIps.length === 0) return false;
+
+    const stillRunning = waitIps.filter(k => {
+      const st = machineStates[k];
+      return !(st && st.holding && st.hold_reason === 'BREAK');
+    });
+    if (stillRunning.length > 0) {
+      // Keep the operator informed about which machine is still finishing its cycle.
+      setBreakWaitOverlayTitle(stillRunning);
+      return false;
+    }
+
+    closeBreakWaitOverlay();
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    if (!localStorage.getItem(pfx + 'activeBreakStart') && typeof startBreak === 'function') {
+      startBreak();
+      if (withToast && typeof showToast === 'function') {
+        showToast(_tr('toast_break_started_cnc_stopped', "☕ 休憩を開始しました (機械停止中)"));
+      }
+    }
+    return true;
+  }
+
+  // Handle Cancel Button on Break Wait Overlay (Cancels for all machines)
+  document.getElementById('btnCancelBreakWait')?.addEventListener('click', () => {
+    closeBreakWaitOverlay();
+    if (typeof showToast === 'function') {
+      showToast(_tr('toast_break_request_cancelled', "休憩リクエストを取り消しました"));
+    }
+
+    const allIps = getAllCNCMiniPCIPs();
+    allIps.forEach(ip => {
+      // Clear the mirror handleBreakStartButtonClick seeded, or the next reconcile
+      // re-adopts the wait we just cancelled and re-opens the overlay.
+      delete breakIntentAt[ip];
+      if (machineStates[ip]) machineStates[ip].scheduled_break_stop = false;
+    });
+
+    // Read the reply the mini-PC already sends, so a cancel that never landed is
+    // reported rather than leaving the machine quietly scheduled to stop.
+    breakCancelInFlight = true;
+    Promise.all(allIps.map(async ip => {
+      for (const port of [5000, 8766]) {
+        try {
+          const res = await fetch(`http://${ip}:${port}/cancel_scheduled_break`, {
+            method: 'POST',
+            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined
+          });
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            if (!data || data.scheduled !== true) return true;
+          }
+        } catch (_) { }
+      }
+      console.warn(`☕ Break cancel NOT confirmed for ${getMachineNameFromIP(ip) || ip}.`);
+      return false;
+    })).then(results => {
+      breakCancelInFlight = false;
+      const unconfirmed = allIps
+        .filter((ip, i) => !results[i])
+        .map(ip => getMachineNameFromIP(ip) || ip);
+      if (unconfirmed.length > 0) {
+        showToast(`⚠️ ${unconfirmed.join(', ')} の休憩取り消しを確認できませんでした / Cancel not confirmed`);
+      }
+    });
+  });
+
+  // POST cancel_scheduled_cycle_stop to ONE mini-PC and read the reply it already
+  // sends ({"success": true, "scheduled": false}). Returns false only when the
+  // machine could not be reached or says the stop is still scheduled — those are the
+  // cases where the operator thinks the stop is off but the machine will still stop.
+  async function cancelCycleStopOnMachine(machineName, ip) {
+    const label = machineName || ip;
+    for (const port of [5000, 8766]) {
+      try {
+        const res = await fetch(`http://${ip}:${port}/cancel_scheduled_cycle_stop`, {
+          method: 'POST',
+          signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined
+        });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          // A legacy mini-PC may answer 200 with no usable body — treat that as done.
+          if (!data || data.scheduled !== true) {
+            console.log(`🛑 Cycle stop cancelled on ${label} (:${port}):`, data);
+            return true;
+          }
+        }
+      } catch (_) { }
+    }
+    console.warn(`⚠️ Cycle stop cancel NOT confirmed for ${label} — mini-PC offline or still scheduled.`);
+    return false;
+  }
+
+  // Handle Cancel Button on Overlay (User changes mind on 🛑 for the machine(s) picked)
+  document.getElementById('btnCancelCycleStop')?.addEventListener('click', async () => {
+    const targetMachines = activeCycleStopMachines.slice();
+    closeCycleStopOverlay();
+    if (typeof showToast === 'function') {
+      showToast(_tr('toast_cycle_stop_cancelled', "停止リクエストを取り消しました"));
+    }
+
+    // Cancel only on the mini-PC(s) we actually scheduled. No machine picked keeps
+    // the legacy single-IP fallback.
+    const pairs = targetMachines.length > 0
+      ? targetMachines.map(m => ({ machine: m, ip: getCNCMiniPCIP(m) }))
+      : [{ machine: null, ip: getCNCMiniPCIP(null) }];
+
+    const uniquePairs = [];
+    const seenIps = new Set();
+    pairs.forEach(pair => {
+      if (pair.ip && !seenIps.has(pair.ip)) {
+        seenIps.add(pair.ip);
+        uniquePairs.push(pair);
+      }
+    });
+    if (uniquePairs.length === 0) return;
+
+    // Stamped before the requests go out, so any /state reply already in flight is
+    // recognised as pre-cancel and cannot flash the overlay back on.
+    const cancelSentAt = Date.now();
+    uniquePairs.forEach(pair => {
+      cycleStopIntent[pair.ip] = { at: cancelSentAt, scheduled: false };
+      // Clear the mirror too: until the next poll lands, a sibling's sync would still
+      // see this machine as scheduled and re-adopt the stop we just cancelled.
+      if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
+    });
+
+    cycleStopCancelInFlight = true;
+    const results = await Promise.all(
+      uniquePairs.map(pair => cancelCycleStopOnMachine(pair.machine, pair.ip))
+    );
+    cycleStopCancelInFlight = false;
+
+    const unconfirmed = uniquePairs
+      .filter((pair, i) => !results[i])
+      .map(pair => pair.machine || pair.ip);
+
+    if (unconfirmed.length > 0) {
+      // Let the operator know the machine never acknowledged: it may still stop after
+      // its cycle. The /state poll re-opens the overlay once the mini-PC is reachable.
+      if (typeof showToast === 'function') {
+        showToast(`⚠️ ${unconfirmed.join(', ')} の停止取り消しを確認できませんでした / Cancel not confirmed`);
+      }
+      // Drop the guard for those machines so the poll is trusted again immediately —
+      // if the mini-PC still has the stop scheduled, the overlay must come back.
+      uniquePairs.forEach((pair, i) => {
+        if (!results[i]) delete cycleStopIntent[pair.ip];
+      });
+    }
+  });
+
+  // POST schedule_cycle_stop to ONE mini-PC. Returns true if that machine accepted it.
+  async function scheduleCycleStopOnMachine(machineName, ip) {
+    const label = machineName || ip;
+    for (const port of [5000, 8766]) {
+      try {
+        const res = await fetch(`http://${ip}:${port}/schedule_cycle_stop`, {
+          method: 'POST',
+          signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.scheduled) {
+            console.log(`🛑 Scheduled cycle stop response for ${label} (:${port}):`, data);
+            return true;
+          }
+        }
+      } catch (_) { }
+    }
+    console.warn(`Legacy Mini-PC for ${label} (no schedule_cycle_stop response within 2.5s) or offline.`);
+    return false;
+  }
+
+  // targetMachine: a machine name, CYCLE_STOP_ALL (both/all grouped machines),
+  // or null/undefined for the legacy single-machine fallback.
+  async function proceedWithCycleStop(targetMachine) {
+    const targets = resolveCycleStopTargets(targetMachine);
+
+    // Each picked machine gets its OWN mini-PC request — nothing is broadcast.
+    const pairs = targets.length > 0
+      ? targets.map(m => ({ machine: m, ip: getCNCMiniPCIP(m) })).filter(pair => pair.ip)
+      : [{ machine: null, ip: getCNCMiniPCIP(null) }].filter(pair => pair.ip);
+
+    const distinctIps = new Set(pairs.map(pair => pair.ip));
+    if (pairs.length > 1 && distinctIps.size !== pairs.length) {
+      console.warn('🛑 Cycle stop: machines resolved to the same mini-PC IP — check the machine/ipInfo pairing.', pairs);
+    }
+
+    isCycleStopPending = true;
+    cycleStopAdopted = false;
+    cycleStopSeenScheduled = [];
+    cycleStopScheduleInFlight = true;
+    // Wait on the machines we can actually reach: one whose IP does not resolve is
+    // never sent a schedule_cycle_stop, so it must not sit on the overlay or the TV.
+    openCycleStopOverlay(pairs.length > 0 ? pairs.map(pair => pair.machine).filter(Boolean) : targets);
+
+    // No mini-PC to talk to at all (no IP resolved). Nothing can be waiting, so do not
+    // leave the operator staring at a modal that will never close on its own.
+    if (pairs.length === 0) {
+      cycleStopScheduleInFlight = false;
+      closeCycleStopOverlay();
+      if (typeof showToast === 'function') {
+        showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
+      }
+      return;
+    }
+
+    // Same guard as the cancel path, in the other direction: a /state reply already in
+    // flight still says "not scheduled" and would close the overlay we just opened.
+    const scheduleSentAt = Date.now();
+    pairs.forEach(pair => { cycleStopIntent[pair.ip] = { at: scheduleSentAt, scheduled: true }; });
+
+    const results = await Promise.all(
+      pairs.map(pair => scheduleCycleStopOnMachine(pair.machine, pair.ip))
+    );
+    cycleStopScheduleInFlight = false;
+
+    // The operator may have cancelled while these requests were in flight. Their
+    // cancel POST was answered before our schedule landed, so the machine would stop
+    // at cycle end anyway — re-cancel on everything that ended up accepting.
+    if (!isCycleStopPending) {
+      console.log('🛑 [CNC GATEKEEPER] Cycle stop was cancelled while scheduling — undoing.');
+      const undoAt = Date.now();
+      const toUndo = pairs.filter((pair, i) => results[i]);
+      toUndo.forEach(pair => {
+        // Stamp a fresh cancel intent rather than dropping the old one: a /state reply
+        // racing this re-cancel would otherwise be trusted and flash the overlay back.
+        cycleStopIntent[pair.ip] = { at: undoAt, scheduled: false };
+        if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
+      });
+      cycleStopCancelInFlight = true;
+      Promise.all(toUndo.map(pair => cancelCycleStopOnMachine(pair.machine, pair.ip)))
+        .then(undoResults => {
+          cycleStopCancelInFlight = false;
+          const unconfirmed = toUndo
+            .filter((pair, i) => !undoResults[i])
+            .map(pair => pair.machine || pair.ip);
+          if (unconfirmed.length > 0) {
+            // Same warning the ordinary cancel gives: this machine may still stop.
+            showToast(`⚠️ ${unconfirmed.join(', ')} の停止取り消しを確認できませんでした / Cancel not confirmed`);
+          }
+        });
+      return;
+    }
+
+    // A machine that never accepted has no stop scheduled: trust its polls again and
+    // stop showing it on the kiosk TV.
+    let clearedIndividually = false;
+    pairs.forEach((pair, i) => {
+      if (results[i]) {
+        // Seed the flag the mini-PC now holds. Without it a /state response already in
+        // flight for a SIBLING can reconcile against a machineStates entry that has
+        // not caught up, and close the overlay just opened.
+        machineStates[pair.ip] = Object.assign({}, machineStates[pair.ip], { scheduled_cycle_stop: true });
+        return;
+      }
+      delete cycleStopIntent[pair.ip];
+      // 2: the intent guard may have written a scheduled flag we now know is wrong;
+      // leaving it would make the next reconcile re-adopt a stop that never happened.
+      if (machineStates[pair.ip]) machineStates[pair.ip].scheduled_cycle_stop = false;
+      if (!pair.machine) return;
+      const stillWaiting = activeCycleStopMachines.filter(m => m !== pair.machine);
+      if (stillWaiting.length !== activeCycleStopMachines.length) {
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'stop', pair.machine);
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'stop', pair.machine);
+        }
+        activeCycleStopMachines = stillWaiting;
+        clearedIndividually = true;
+      }
+    });
+
+    // Machines we could not reach at all (no IP) never made it into pairs.
+    const unreachable = targets.filter(m => !pairs.some(pair => pair.machine === m));
+    const refused = pairs.filter((pair, i) => !results[i] && pair.machine).map(pair => pair.machine);
+    const notStopping = unreachable.concat(refused);
+
+    if (!results.some(Boolean)) {
+      // Every machine was already cleared by name above; a group-wide clear here would
+      // also wipe a sibling's unrelated stop call from the factory TV.
+      closeCycleStopOverlay(clearedIndividually);
+      showToast(_tr('toast_cycle_stop_not_supported', "⚠️ マシンがサイクル停止機能に対応していません"));
+    } else if (notStopping.length > 0) {
+      // Partial failure: some machines are stopping, these are NOT. Saying nothing
+      // would leave the operator believing every machine they picked will stop.
+      showToast(`⚠️ ${notStopping.join(', ')} は停止しません / will NOT stop`);
+      if (activeCycleStopMachines.length > 0) {
+        overlay.dataset.targetMachine = activeCycleStopMachines.join(',');
+        setCycleStopOverlayTitle(activeCycleStopMachines);
+      }
+    } else if (activeCycleStopMachines.length > 0) {
+      overlay.dataset.targetMachine = activeCycleStopMachines.join(',');
+      setCycleStopOverlayTitle(activeCycleStopMachines);
+    }
+  }
+
+  // Machine picker for 🛑, on its OWN modal node.
+  //
+  // It deliberately does not reuse window.chooseMachine: that shares the single
+  // #lpModal element with the lot-scan chooser and the ショット数 prompt and removes
+  // whatever is there on entry, so opening this picker mid lot-scan would delete that
+  // modal and strand its callback. Its cancel path also clears __materialScanMode,
+  // which belongs to the lot flow, not to a cycle stop.
+  function chooseCycleStopMachine(machines, onPick) {
+    const existing = document.getElementById('cncCycleStopPickerModal');
+    if (existing) existing.remove();
+
+    const ov = document.createElement('div');
+    ov.id = 'cncCycleStopPickerModal';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:100200;background:rgba(10,15,26,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:16px;max-width:360px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:inherit;position:relative;';
+
+    const btnStyle = 'width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:pointer;';
+    const allLabel = machines.length > 2 ? '全部 / ALL' : '両方 / BOTH';
+
+    card.innerHTML =
+      '<div style="font-size:1.05rem;font-weight:800;color:#101828;margin-bottom:4px;">' +
+      _tr('cnc_cycle_stop_pick_title', '機械を選択 / Select machine') + '</div>' +
+      '<div style="font-size:.85rem;font-weight:600;color:#475467;margin-bottom:14px;">' +
+      _tr('cnc_cycle_stop_pick_sub', '停止する機械を選択 / Machine to stop') + '</div>' +
+      machines.map(m => '<button data-m="' + m + '" style="' + btnStyle + '">' + m + '</button>').join('') +
+      '<button data-m="' + CYCLE_STOP_ALL + '" style="' + btnStyle + '">' + allLabel + '</button>';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '✕';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.4rem;font-weight:bold;color:#667085;cursor:pointer;padding:0;line-height:1;z-index:10;';
+    closeBtn.onclick = (e) => { e.stopPropagation(); ov.remove(); };
+    card.appendChild(closeBtn);
+
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+
+    card.querySelectorAll('[data-m]').forEach(b => {
+      b.onclick = () => {
+        const m = b.getAttribute('data-m');
+        ov.remove();
+        if (onPick) onPick(m);
+      };
+    });
+
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+  }
+
+  // Handle Floating 🛑 Button Click -> Choose machine if grouped, otherwise direct
+  stopBtn.addEventListener('click', async () => {
+    const machines = getGroupedMachineList();
+    if (machines && machines.length > 1) {
+      chooseCycleStopMachine(machines, (pickedMachine) => {
+        proceedWithCycleStop(pickedMachine);
+      });
+    } else {
+      const singleM = (machines && machines[0])
+        || (document.getElementById('process')?.value || '').trim()
+        || null;
+      proceedWithCycleStop(singleM);
+    }
+  });
+
+  // ==========================================================================
+  // STATE RECONCILER (Per-Machine State Aggregator for Grouped/Single Setup)
+  // ==========================================================================
+  const machineStates = {};
+
+  // requestStartedAt: when the /state request that produced this state was issued.
+  // Omitted for live SSE pushes, which are generated by the mini-PC on the spot.
+  function syncGatekeeperState(state, ip, requestStartedAt) {
+    if (!state) return;
+    lastHeartbeatTime = Date.now();
+    const key = ip || state.machine_id || 'default';
+
+    // Correct a schedule flag from a response that was already in flight when we sent
+    // a stop or a cancel. The next poll, issued after ours, reports what the mini-PC
+    // actually has and the overlay follows that.
+    const intent = cycleStopIntent[key];
+    if (intent && requestStartedAt && requestStartedAt < intent.at
+      && !!state.scheduled_cycle_stop !== intent.scheduled) {
+      console.log(`⏱️ [CNC GATEKEEPER] Ignoring pre-request scheduled_cycle_stop from ${key}.`);
+      state = Object.assign({}, state, { scheduled_cycle_stop: intent.scheduled });
+    }
+
+    const breakAt = breakIntentAt[key];
+    if (breakAt && requestStartedAt && requestStartedAt < breakAt && !state.scheduled_break_stop
+      && !(state.holding && state.hold_reason === 'BREAK')) {
+      console.log(`⏱️ [CNC GATEKEEPER] Ignoring pre-request scheduled_break_stop from ${key}.`);
+      state = Object.assign({}, state, { scheduled_break_stop: true });
+    }
+
+    machineStates[key] = state;
+
+    reconcileGroupedGatekeeperStates();
+  }
+
+  function reconcileGroupedGatekeeperStates() {
+    const states = Object.values(machineStates);
+    if (states.length === 0) return;
+
+    // 1. Emergency cancel detected / Machine in hold -> Enforce Dedicated CNC Cancel Screen
+    // If ANY machine is in MANUAL_CANCEL / CANCEL, the cancel screen MUST be shown and stay open!
+    const manualCancelState = states.find(s => s && s.holding && (s.hold_reason === 'MANUAL_CANCEL' || s.hold_reason === 'CANCEL'));
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    const cancelOverlay = document.getElementById('cncCancelOverlay');
+    const isCancelAlreadyOpen = cancelOverlay && cancelOverlay.classList.contains('open');
+    const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+    const cncCancelActive = localStorage.getItem(pfx + 'activeCncCancelStart');
+
+    if (manualCancelState) {
+      if (!breakActive && !isCancelAlreadyOpen && typeof openCncCancelOverlay === 'function') {
+        console.warn(`🚨 [CNC GATEKEEPER] Machine is locked in MANUAL_CANCEL (${manualCancelState.machine_id || 'group'}) -> Asserting Dedicated Cancel Screen!`);
+        const startEpoch = cncCancelActive ? parseInt(cncCancelActive, 10) : Date.now();
+        openCncCancelOverlay(startEpoch);
+      }
+    } else {
+      // ONLY auto-dismiss if ALL known machines are UNLOCKED (no machine holding in MANUAL_CANCEL)
+      if (cncCancelActive || isCancelAlreadyOpen) {
+        console.log("🔓 [CNC GATEKEEPER] Source of truth (All Mini-PCs) is unlocked -> Auto-dismissing Cancel Screen & releasing cloud stop-call!");
+        if (typeof window.closeCncCancelOverlay === 'function') {
+          window.closeCncCancelOverlay();
+        } else if (typeof closeCncCancelOverlay === 'function') {
+          closeCncCancelOverlay();
+        }
+        if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'leader');
+        } else if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'leader');
+        }
+        const rawStopCall = localStorage.getItem(pfx + 'activeStopCallStart');
+        if (rawStopCall) {
+          const stopStartEpoch = parseInt(rawStopCall, 10);
+          if (stopStartEpoch > 0) {
+            const waitSec = Math.max(0, Math.round((Date.now() - stopStartEpoch) / 1000));
+            try {
+              const isProdActive = (typeof window.hasActiveProduct === 'function' && window.hasActiveProduct())
+                || (typeof hasActiveProduct === 'function' && hasActiveProduct());
+              if (isProdActive) {
+                const rawData = localStorage.getItem(pfx + 'stopCallData');
+                const data = rawData ? JSON.parse(rawData) : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
+                if (!Array.isArray(data.records)) data.records = [];
+                data.records.push({
+                  calledAt: new Date(stopStartEpoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  arrivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  waitSeconds: waitSec,
+                  waitMinutes: Math.round(waitSec / 60),
+                  leaderName: 'Script Unlock / Console',
+                  leaderUsername: 'system',
+                  leaderRole: 'Auto',
+                  resolvedBy: 'Script Unlocked'
+                });
+                data.count = data.records.length;
+                data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                localStorage.setItem(pfx + 'stopCallData', JSON.stringify(data));
+              } else {
+                console.log('ℹ️ [AUTO-DISMISS] Tablet has no active product scanned (free from production). Discarding stop call downtime.');
+              }
+              if (typeof logTabletAction === 'function') {
+                logTabletAction(
+                  isProdActive ? 'Stop call resolved by script unlock' : 'Stop call resolved by script unlock (pre-production / discarded)',
+                  'Completed',
+                  { waitSeconds: waitSec, productionActive: isProdActive }
+                );
+              }
+            } catch (err) {
+              console.error('Error logging auto-dismissed stop call during gatekeeper clear:', err);
+            }
+          }
+          localStorage.removeItem(pfx + 'activeStopCallStart');
+          localStorage.removeItem(pfx + 'activeStopCallMachine');
+          if (typeof window.closeStopCallOverlay === 'function') window.closeStopCallOverlay();
+          else if (typeof closeStopCallOverlay === 'function') closeStopCallOverlay();
+          if (typeof window.stopCallStopPulse === 'function') window.stopCallStopPulse(null);
+          else if (typeof stopCallStopPulse === 'function') stopCallStopPulse(null);
+        }
+        if (typeof showToast === 'function') {
+          showToast('✅ 機械ロックが解除されました / Machine lock released');
+        }
+      }
+    }
+
+    // 1.5. Auto-dismiss Stop Call / Call Leader overlay if the Mini-PC is unlocked and not in pause
+    const stopCallOverlay = document.getElementById('stopCallOverlay');
+    const isStopCallOpen = stopCallOverlay && stopCallOverlay.classList.contains('open');
+    const stopCallActive = localStorage.getItem(pfx + 'activeStopCallStart');
+
+    if (stopCallActive || isStopCallOpen) {
+      const stopCallStartEpoch = parseInt(stopCallActive || '0', 10);
+      const elapsedSinceCall = Date.now() - stopCallStartEpoch;
+      // Allow a 3-second grace window after call was placed so it doesn't race with the activation request
+      if (elapsedSinceCall > 3000) {
+        const anyInCallStop = states.some(s => s && (s.call_stop_active || s.display_state === 'PAUSED'));
+        const anyHolding = states.some(s => s && s.holding);
+        if (!anyInCallStop && !anyHolding) {
+          console.log("🔓 [CNC GATEKEEPER] Source of truth reports Mini-PC is UNLOCKED and NOT in pause -> Auto-dismissing Call Leader screen!");
+          if (stopCallStartEpoch > 0) {
+            const waitSec = Math.max(0, Math.round((Date.now() - stopCallStartEpoch) / 1000));
+            try {
+              const isProdActive = (typeof window.hasActiveProduct === 'function' && window.hasActiveProduct())
+                || (typeof hasActiveProduct === 'function' && hasActiveProduct());
+              if (isProdActive) {
+                const rawData = localStorage.getItem(pfx + 'stopCallData');
+                const data = rawData ? JSON.parse(rawData) : { count: 0, totalWaitSeconds: 0, totalWaitMinutes: 0, records: [] };
+                if (!Array.isArray(data.records)) data.records = [];
+                data.records.push({
+                  calledAt: new Date(stopCallStartEpoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  arrivedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  waitSeconds: waitSec,
+                  waitMinutes: Math.round(waitSec / 60),
+                  leaderName: 'Script Unlock / Console',
+                  leaderUsername: 'system',
+                  leaderRole: 'Auto',
+                  resolvedBy: 'Script Unlocked'
+                });
+                data.count = data.records.length;
+                data.totalWaitSeconds = data.records.reduce((s, r) => s + ((r && Number(r.waitSeconds)) || 0), 0);
+                data.totalWaitMinutes = Math.round(data.totalWaitSeconds / 60);
+                localStorage.setItem(pfx + 'stopCallData', JSON.stringify(data));
+              } else {
+                console.log('ℹ️ [AUTO-DISMISS] Tablet has no active product scanned (free from production). Discarding stop call downtime.');
+              }
+              if (typeof logTabletAction === 'function') {
+                logTabletAction(
+                  isProdActive ? 'Stop call resolved by script unlock' : 'Stop call resolved by script unlock (pre-production / discarded)',
+                  'Completed',
+                  { waitSeconds: waitSec, productionActive: isProdActive }
+                );
+              }
+            } catch (err) {
+              console.error('Error logging auto-dismissed stop call:', err);
+            }
+          }
+          localStorage.removeItem(pfx + 'activeStopCallStart');
+          localStorage.removeItem(pfx + 'activeStopCallMachine');
+          if (typeof window.closeStopCallOverlay === 'function') {
+            window.closeStopCallOverlay();
+          } else if (typeof closeStopCallOverlay === 'function') {
+            closeStopCallOverlay();
+          }
+          if (typeof window.notifyStopCall === 'function') {
+            window.notifyStopCall('clear', 'leader');
+          } else if (typeof notifyStopCall === 'function') {
+            notifyStopCall('clear', 'leader');
+          }
+          if (typeof showToast === 'function') {
+            showToast('✅ リーダー呼び出し・一時停止が解除されました / Stop call released');
+          }
+        }
+      }
+    }
+
+    // 2. Preemptive break scheduled status for Breaktime Button
+    const breakScheduled = states.some(s => s && s.scheduled_break_stop);
+    if (breakScheduled) {
+      const scheduledBreakIps = Object.keys(machineStates)
+        .filter(k => machineStates[k] && machineStates[k].scheduled_break_stop);
+      if (!isBreakScheduledPending && !breakCancelInFlight && !breakScheduleInFlight) {
+        // Tablet reload / break started from another tablet: wait on exactly the
+        // machines that report a scheduled break stop.
+        breakWaitIps = scheduledBreakIps;
+        breakWaitAdopted = true;
+        openBreakWaitOverlay();
+        setBreakWaitOverlayTitle(breakWaitIps);
+      } else if (breakWaitAdopted && !breakScheduleInFlight) {
+        // pollGatekeeperState reconciles after EACH machine, so the list built above
+        // can be missing a sibling the poll had not reached yet. Absorb it, or the
+        // break would start while that machine is still cutting.
+        const newlySeen = scheduledBreakIps.filter(k => breakWaitIps.indexOf(k) < 0);
+        if (newlySeen.length > 0) {
+          breakWaitIps = breakWaitIps.concat(newlySeen);
+          setBreakWaitOverlayTitle(breakWaitIps);
+        }
+      }
+    } else if (isBreakScheduledPending && !breakScheduled && !breakScheduleInFlight) {
+      // Never while our own schedule requests are still going out: the machines have
+      // not been told yet, so "nothing scheduled" is not yet the truth.
+      const anyHolding = states.some(s => s && s.holding && s.hold_reason === 'BREAK');
+      if (!anyHolding) {
+        closeBreakWaitOverlay();
+      }
+    }
+
+    // Remember which awaited machines really hold a scheduled break stop.
+    breakWaitIps.forEach(k => {
+      if (machineStates[k] && machineStates[k].scheduled_break_stop
+        && breakWaitSeenScheduled.indexOf(k) < 0) {
+        breakWaitSeenScheduled.push(k);
+      }
+    });
+
+    // Drop a machine whose break stop was cancelled: it is neither scheduled any more
+    // nor holding for BREAK, so waiting on it would block the break forever. Only ones
+    // we have seen scheduled qualify, so a mini-PC that has not received our request
+    // yet is never mistaken for a cancelled one. The SSE handler normally does this;
+    // polling is the fallback when the event stream is down.
+    if (isBreakScheduledPending && !breakScheduleInFlight && breakWaitIps.length > 0) {
+      breakWaitIps.filter(k => {
+        if (breakWaitSeenScheduled.indexOf(k) < 0) return false;
+        const st = machineStates[k];
+        if (!st) return false;
+        if (st.scheduled_break_stop) return false;
+        if (st.holding && st.hold_reason === 'BREAK') return false; // already satisfied
+        return true;
+      }).forEach(k => {
+        console.warn(`☕ [CNC GATEKEEPER] ${getMachineNameFromIP(k) || k} is no longer scheduled for a break stop — stopping waiting on it.`);
+        releaseBreakWaitMachine(k);
+      });
+    }
+
+    // The break timer starts only when every awaited machine has actually stopped.
+    tryStartBreakWhenAllStopped(false);
+
+    // 3. Preemptive cycle stop scheduled status for 🛑 Button
+    const cycleStopScheduled = states.some(s => s && s.scheduled_cycle_stop);
+    if (cycleStopScheduled) {
+      // Display only: name the machine(s) actually waiting to stop, so the factory TV
+      // blinks exactly those (tablet reload / stop started from another tablet).
+      const scheduledMachines = [];
+      Object.entries(machineStates).forEach(([key, s]) => {
+        if (s && s.scheduled_cycle_stop) {
+          const m = getMachineNameFromIP(key);
+          if (m && !scheduledMachines.includes(m)) scheduledMachines.push(m);
+        }
+      });
+
+      // Remember which of our machines really are holding a scheduled stop, so the
+      // prune below can tell "finished" from "has not received our request yet".
+      scheduledMachines.forEach(m => {
+        if (activeCycleStopMachines.includes(m) && !cycleStopSeenScheduled.includes(m)) {
+          cycleStopSeenScheduled.push(m);
+        }
+      });
+
+      if (!isCycleStopPending && !cycleStopCancelInFlight && !cycleStopScheduleInFlight) {
+        isCycleStopPending = true;
+        cycleStopAdopted = true;
+        cycleStopSeenScheduled = scheduledMachines.slice();
+        openCycleStopOverlay(scheduledMachines);
+      } else if (cycleStopAdopted) {
+        // The poll reconciles after EACH machine, so a sibling can show up a moment
+        // later. Without this the overlay would close on the first machine's
+        // completion while the second is still waiting to stop. Only an adopted wait
+        // does this — absorbing into an operator's own pick would let Cancel cancel a
+        // stop this tablet never asked for.
+        const newlySeen = scheduledMachines.filter(m => !activeCycleStopMachines.includes(m));
+        if (newlySeen.length > 0) {
+          activeCycleStopMachines = activeCycleStopMachines.concat(newlySeen);
+          cycleStopSeenScheduled = cycleStopSeenScheduled.concat(newlySeen);
+          overlay.dataset.targetMachine = activeCycleStopMachines.join(',');
+          setCycleStopOverlayTitle(activeCycleStopMachines);
+          if (typeof notifyStopCall === 'function') {
+            notifyStopCall('activate', 'stop', newlySeen.join(','));
+          } else if (typeof window.notifyStopCall === 'function') {
+            window.notifyStopCall('activate', 'stop', newlySeen.join(','));
+          }
+        }
+      }
+
+      // Prune machines that HAVE been seen scheduled and now report otherwise: they
+      // finished. The SSE handlers normally do this, but polling is the fallback when
+      // the event stream is down, and without it the kiosk TV keeps blinking a machine
+      // that already stopped.
+      if (isCycleStopPending) {
+        cycleStopSeenScheduled
+          .filter(m => activeCycleStopMachines.includes(m) && !scheduledMachines.includes(m))
+          .forEach(m => releaseCycleStopMachine(
+            m,
+            _tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"),
+            `✅ ${m} サイクル完了停止しました`,
+            true
+          ));
+      }
+    } else if (!cycleStopScheduleInFlight) {
+      // Never while our own requests are still going out: the machines have not been
+      // told yet, so "nothing scheduled" is not yet the truth.
+      if (isCycleStopPending) {
+        // Nothing is scheduled anywhere any more, so this is the last machine finishing.
+        // The per-machine prune above only runs while something is still scheduled, so
+        // with the SSE stream down this is the only place the operator gets told.
+        const wasWaiting = activeCycleStopMachines.length > 0;
+        closeCycleStopOverlay();
+        // Neutral wording on purpose: gatekeeper_state looks identical whether the stop
+        // completed or was cancelled elsewhere, so claiming 完了停止 here would report a
+        // machine as stopped while it is still cutting. The SSE handler, which knows
+        // which event fired, gives the precise message when the stream is up.
+        if (wasWaiting && (Date.now() - lastCycleStopDoneToastAt) > 4000) {
+          lastCycleStopDoneToastAt = Date.now();
+          showToast('サイクル停止の待機を終了しました / Cycle stop wait ended');
+        }
+      } else {
+        // Tablet Reload Protection: Clear any ghost STOP on cloud TV if no machine is in cycle stop
+        if (typeof notifyStopCall === 'function') {
+          notifyStopCall('clear', 'stop');
+        } else if (typeof window.notifyStopCall === 'function') {
+          window.notifyStopCall('clear', 'stop');
+        }
+      }
+    }
+  }
+
+  // REST State Fetcher (Polls all machines for grouped setup)
+  async function pollGatekeeperState() {
+    const allIps = getAllCNCMiniPCIPs();
+    if (allIps.length === 0) return;
+    for (const ip of allIps) {
+      // Stamped BEFORE the request so a response that raced a cancel can be spotted.
+      const startedAt = Date.now();
+      try {
+        const sig = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+        const res = await fetch(`http://${ip}:5000/state`, { cache: 'no-store', signal: sig });
+        if (res.ok) {
+          const state = await res.json();
+          if (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000)) {
+            if (state && state.hold_reason === 'BREAK') {
+              state.holding = false;
+              state.hold_reason = null;
+            }
+          }
+          syncGatekeeperState(state, ip, startedAt);
+          continue;
+        }
+      } catch (_) {
+        try {
+          const sig = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+          const res = await fetch(`http://${ip}:8766/state`, { cache: 'no-store', signal: sig });
+          if (res.ok) {
+            const state = await res.json();
+            if (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000)) {
+              if (state && state.hold_reason === 'BREAK') {
+                state.holding = false;
+                state.hold_reason = null;
+              }
+            }
+            syncGatekeeperState(state, ip, startedAt);
+          }
+        } catch (_) { }
+      }
+    }
+  }
+
+  // ==========================================================================
+  // SSE CONNECTION & EVENT HANDLERS
+  // ==========================================================================
+  let cncEventSources = [];
+
+  function attachSSEListeners(es, ip) {
+    es.addEventListener('status', (e) => {
+      try {
+        const data = JSON.parse(e.data || '{}');
+        syncGatekeeperState(data, ip);
+      } catch (err) {
+        console.error("Error parsing status event:", err);
+      }
+    });
+
+    // 0. Restart blocked while locked (Break or Emergency Cancel)
+    es.addEventListener('restart_blocked', (e) => {
+      try {
+        const data = JSON.parse(e.data || '{}');
+        console.warn('⛔ [CNC GATEKEEPER] Restart blocked:', data);
+        if (data.hold_reason === 'BREAK') {
+          if (typeof showToast === 'function') {
+            showToast(_tr('toast_on_break_press_finish', "☕ 休憩中です。タブレットで「休憩を終了」を押してください"));
+          }
+        } else {
+          if (typeof logTabletAction === 'function') {
+            logTabletAction('CNC Resume Attempt Blocked (Unauthorized restart)', 'Blocked', {
+              attemptNumber: data.repause_count,
+              warning: 'Operator attempted to restart machine while gatekeeper was locked',
+              holdReason: data.hold_reason || 'MANUAL_CANCEL'
+            });
+          }
+          if (typeof showToast === 'function') {
+            showToast(`⛔ 再開不可 / Restart blocked (Attempt #${data.repause_count}) - Leader required`);
+          }
+        }
+      } catch (err) {
+        console.error('Error logging restart_blocked:', err);
+      }
+    });
+
+    // 0.5. Safe start abort within 4-second grace window (no leader required)
+    es.addEventListener('start_aborted', (e) => {
+      try {
+        const data = JSON.parse(e.data || '{}');
+        console.log(`⚠️ [CNC GATEKEEPER] Start aborted within grace window (${ip}):`, data);
+        // The mini-PC clears scheduled_cycle_stop for THIS machine only, so release
+        // just this one — a sibling's stop is still scheduled and must keep waiting.
+        if (machineStates[ip]) machineStates[ip].scheduled_cycle_stop = false;
+        releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
+        if (typeof closeCncCancelOverlay === 'function') closeCncCancelOverlay();
+        if (typeof showToast === 'function') {
+          showToast("⚠️ 開始直後の取消 (セットやり直し可) / Start cancelled before cut - Ready to restart");
+        }
+      } catch (err) {
+        console.error("Error parsing start_aborted event:", err);
+      }
+    });
+
+    // 1. Emergency cancel detected during cutting/drag -> Trigger Dedicated CNC Cancel screen
+    es.addEventListener('cancel_detected', (e) => {
+      try {
+        const data = JSON.parse(e.data || '{}');
+        console.log(`🚨 [CNC GATEKEEPER] Cancel detected (${ip}):`, data);
+        if (machineStates[ip]) {
+          machineStates[ip].scheduled_cycle_stop = false;
+          if (data.holding) {
+            machineStates[ip].holding = true;
+            machineStates[ip].hold_reason = (data.reason === 'CANCEL') ? 'MANUAL_CANCEL' : (data.reason || 'MANUAL_CANCEL');
+          }
+        }
+        releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
+        if (data.holding === false) {
+          // Grace cancel or non-holding abort -> Do not lock or alert TV
+          return;
+        }
+        const breakActive = (typeof breakPrefix !== 'undefined') && localStorage.getItem(breakPrefix + 'activeBreakStart');
+        if (!breakActive && typeof openCncCancelOverlay === 'function') {
+          openCncCancelOverlay();
+          if (typeof notifyStopCall === 'function') {
+            notifyStopCall('activate', 'leader');
+          } else if (typeof window.notifyStopCall === 'function') {
+            window.notifyStopCall('activate', 'leader');
+          }
+          if (typeof logTabletAction === 'function') {
+            logTabletAction('CNC Cancel Button Detected (Mid-cut abort)', 'Alert', {
+              warning: 'Emergency physical cancel button pressed during machining',
+              holdReason: 'MANUAL_CANCEL'
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error parsing cancel_detected event:", err);
+      }
+    });
+
+    // 2. Preemptive Drag Phase for Break
+    es.addEventListener('break_drag_phase', (e) => {
+      console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before break...");
+      if (typeof showToast === 'function') {
+        showToast(_tr('toast_break_drag_phase', "⏳ サイクル完了。材料送り後に休憩に入ります..."));
+      }
+    });
+
+    // 3. Preemptive Drag Phase for Cycle Stop (🛑)
+    es.addEventListener('cycle_stop_drag_phase', (e) => {
+      console.log("⏳ [CNC GATEKEEPER] Current cycle finished, feeding material before stop...");
+      if (typeof showToast === 'function') {
+        showToast(_tr('toast_cycle_drag_phase', "⏳ サイクル完了。材料送り後に停止します..."));
+      }
+    });
+
+    // 4. Preemptive Break Stop Completed -> Start Break Screen!
+    es.addEventListener('break_stop_completed', (e) => {
+      console.log(`☕ [CNC GATEKEEPER] Break stop executed cleanly (${ip}).`);
+      // Record THIS machine's hold, then let the shared check decide: the break starts
+      // only when every machine we are waiting on has stopped.
+      machineStates[ip] = Object.assign({}, machineStates[ip], {
+        holding: true,
+        hold_reason: 'BREAK',
+        scheduled_break_stop: false
+      });
+      if (tryStartBreakWhenAllStopped(true)) return;
+
+      if (isBreakScheduledPending) {
+        const stillWaiting = (breakWaitIps.length > 0 ? breakWaitIps : [])
+          .filter(k => {
+            const st = machineStates[k];
+            return !(st && st.holding && st.hold_reason === 'BREAK');
+          })
+          .map(k => getMachineNameFromIP(k))
+          .filter(Boolean);
+        if (stillWaiting.length > 0 && typeof showToast === 'function') {
+          showToast(`☕ ${stillWaiting.join(', ')} のサイクル完了を待っています`);
+        }
+        return;
+      }
+
+      // We are not waiting on anything, yet this machine has stopped FOR a break —
+      // the wait was closed by a cancel, an unlock or a reload. Never leave it locked
+      // with no break running; this is what the handler did before the wait existed.
+      const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+      const isRecentlyFinished = (window.__breakFinishTimestamp && (Date.now() - window.__breakFinishTimestamp < 8000));
+      if (!localStorage.getItem(pfx + 'activeBreakStart') && !isRecentlyFinished && typeof startBreak === 'function') {
+        console.warn('☕ [CNC GATEKEEPER] Machine holding for BREAK with no break running — starting it.');
+        startBreak();
+        if (typeof showToast === 'function') {
+          showToast(_tr('toast_break_started_cnc_stopped', "☕ 休憩を開始しました (機械停止中)"));
+        }
+      }
+    });
+
+    es.addEventListener('break_stop_cancelled', (e) => {
+      console.log(`☕ [CNC GATEKEEPER] Break scheduled stop cancelled (${ip}).`);
+      if (machineStates[ip]) {
+        machineStates[ip].scheduled_break_stop = false;
+      }
+      releaseBreakWaitMachine(ip);
+    });
+
+    // 5. Preemptive Cycle Stop Completed -> Close Modal!
+    es.addEventListener('cycle_stop_completed', (e) => {
+      console.log(`🛑 [CNC GATEKEEPER] Cycle stop executed cleanly (${ip}).`);
+      if (machineStates[ip]) {
+        machineStates[ip].scheduled_cycle_stop = false;
+      }
+      // Only the machine that fired this event is done — a BOTH stop keeps
+      // waiting (and keeps blinking on the kiosk TV) for its sibling.
+      const finishedMachine = getMachineNameFromIP(ip);
+      releaseCycleStopMachine(
+        finishedMachine,
+        _tr('toast_cycle_stop_completed', "✅ サイクル完了停止しました (材料送り完了)"),
+        finishedMachine ? `✅ ${finishedMachine} サイクル完了停止しました` : null
+      );
+    });
+
+    // 5b. Cycle stop cancelled on the mini-PC (another tablet, or its own UI).
+    // Without this the overlay would keep waiting on a machine that is no longer
+    // scheduled, because a sibling still holding a stop keeps the reconciler quiet.
+    es.addEventListener('cycle_stop_cancelled', (e) => {
+      console.log(`🛑 [CNC GATEKEEPER] Cycle stop cancelled on the mini-PC (${ip}).`);
+      if (machineStates[ip]) {
+        machineStates[ip].scheduled_cycle_stop = false;
+      }
+      const cancelledMachine = getMachineNameFromIP(ip);
+      releaseCycleStopMachine(
+        cancelledMachine,
+        _tr('toast_cycle_stop_cancelled', "停止リクエストを取り消しました"),
+        cancelledMachine ? `↩️ ${cancelledMachine} の停止リクエストを取り消しました` : null,
+        true
+      );
+    });
+
+    // 6. Gatekeeper Unlocked
+    es.addEventListener('unlocked', (e) => {
+      console.log(`🔓 [CNC GATEKEEPER] Unlocked (${ip}):`, e.data);
+      // /unlock runs on ONE mini-PC, so only that machine's state changes. Wiping the
+      // group would drop a sibling's still-armed stop from the wait list and clear it
+      // on the kiosk TV.
+      machineStates[ip] = Object.assign({}, machineStates[ip], {
+        holding: false,
+        hold_reason: null,
+        scheduled_break_stop: false,
+        scheduled_cycle_stop: false,
+        call_stop_active: false
+      });
+      delete cycleStopIntent[ip];
+      delete breakIntentAt[ip];
+      releaseBreakWaitMachine(ip);
+      releaseCycleStopMachine(getMachineNameFromIP(ip), null, null, true);
+      reconcileGroupedGatekeeperStates();
+
+      const anyStillHolding = Object.values(machineStates).some(s => s && s.holding);
+      const anyStillArmed = Object.values(machineStates)
+        .some(st => st && (st.scheduled_cycle_stop || st.scheduled_break_stop));
+      if (!anyStillHolding && !anyStillArmed) {
+        closeCycleStopOverlay();
+        closeBreakWaitOverlay();
+        if (typeof window.closeCncCancelOverlay === 'function') {
+          window.closeCncCancelOverlay();
+        } else if (typeof closeCncCancelOverlay === 'function') {
+          closeCncCancelOverlay();
+        }
+        const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+        if (localStorage.getItem(pfx + 'activeStopCallStart')) {
+          localStorage.removeItem(pfx + 'activeStopCallStart');
+          localStorage.removeItem(pfx + 'activeStopCallMachine');
+          if (typeof window.closeStopCallOverlay === 'function') window.closeStopCallOverlay();
+          else if (typeof closeStopCallOverlay === 'function') closeStopCallOverlay();
+          if (typeof window.stopCallStopPulse === 'function') window.stopCallStopPulse(null);
+          else if (typeof stopCallStopPulse === 'function') stopCallStopPulse(null);
+          if (typeof window.notifyStopCall === 'function') window.notifyStopCall('clear', 'leader');
+          else if (typeof notifyStopCall === 'function') notifyStopCall('clear', 'leader');
+        }
+      }
+    });
+
+    es.onerror = () => {
+      try { es.close(); } catch (_) { }
+      const idx = cncEventSources.indexOf(es);
+      if (idx >= 0) cncEventSources.splice(idx, 1);
+      setTimeout(connectCNCGatekeeperSSE, 5000);
+    };
+  }
+
+  function connectCNCGatekeeperSSE() {
+    const allIps = getAllCNCMiniPCIPs();
+    if (allIps.length === 0) {
+      setTimeout(connectCNCGatekeeperSSE, 3000);
+      return;
+    }
+
+    cncEventSources.forEach(s => {
+      try { s.close(); } catch (_) { }
+    });
+    cncEventSources = [];
+
+    pollGatekeeperState();
+
+    allIps.forEach(ip => {
+      try {
+        console.log(`🔌 [CNC GATEKEEPER] Connecting to SSE at http://${ip}:5000/events...`);
+        const es = new EventSource(`http://${ip}:5000/events`);
+        cncEventSources.push(es);
+        attachSSEListeners(es, ip);
+      } catch (err) {
+        console.error(`Failed to establish CNC Gatekeeper SSE connection to ${ip}:`, err);
+        setTimeout(connectCNCGatekeeperSSE, 5000);
+      }
+    });
+  }
+
+  function resetBreakStartButtonUI() {
+    const startBtn = document.getElementById('breakStartButton');
+    if (startBtn) {
+      startBtn.innerHTML = `<span data-i18n="break_start_btn">${_tr('break_start_btn', '休憩を開始')}</span>`;
+      startBtn.style.background = '';
+    }
+  }
+
+  // Handle Main Break Button Click -> Dedicated /schedule_break_stop for ALL machines
+  async function handleBreakStartButtonClick(e) {
+    window.__breakFinishTimestamp = null;
+    if (e) {
+      e.preventDefault();
+      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    }
+
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    const breakActive = localStorage.getItem(pfx + 'activeBreakStart');
+    if (breakActive) {
+      if (typeof openBreakOverlay === 'function') openBreakOverlay(parseInt(breakActive, 10));
+      return;
+    }
+
+    const allIps = getAllCNCMiniPCIPs();
+    if (allIps.length === 0) {
+      if (typeof startBreak === 'function') startBreak();
+      return;
+    }
+
+    breakWaitIps = [];
+    breakWaitTitleIps = [];
+    breakWaitSeenScheduled = [];
+    breakWaitAdopted = false;
+    breakScheduleInFlight = true;
+    openBreakWaitOverlay();
+
+    // Remember WHICH mini-PCs accepted. Only those are waited on; a legacy one that
+    // has no schedule_break_stop endpoint answers nothing and is simply not waited on.
+    const acceptedIps = [];
+    await Promise.all(allIps.map(async (ip) => {
+      let scheduled = false;
+      try {
+        const res = await fetch(`http://${ip}:5000/schedule_break_stop`, {
+          method: 'POST',
+          signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.scheduled) {
+            scheduled = true;
+            console.log(`☕ Scheduled break stop response (${ip} :5000):`, data);
+          }
+        }
+      } catch (_) { }
+
+      if (!scheduled) {
+        try {
+          const res = await fetch(`http://${ip}:8766/schedule_break_stop`, {
+            method: 'POST',
+            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.scheduled) {
+              scheduled = true;
+              console.log(`☕ Scheduled break stop response (${ip} :8766):`, data);
+            }
+          }
+        } catch (_) { }
+      }
+
+      if (scheduled) {
+        acceptedIps.push(ip);
+        breakIntentAt[ip] = Date.now();
+        machineStates[ip] = Object.assign({}, machineStates[ip], { scheduled_break_stop: true });
+      } else {
+        delete breakIntentAt[ip];
+        console.warn(`☕ Legacy Mini-PC at ${ip} (no schedule_break_stop response within 2.5s) or offline — not waiting on it.`);
+      }
+    }));
+
+    breakScheduleInFlight = false;
+
+    // The operator may have pressed 休憩を取り消す while these requests were in flight.
+    // closeBreakWaitOverlay cleared the pending flag, so honour that instead of
+    // starting a break they cancelled.
+    if (!isBreakScheduledPending) {
+      console.log('☕ [CNC GATEKEEPER] Break request was cancelled while scheduling — undoing.');
+      breakWaitIps = [];
+      // Their cancel was answered before our schedule landed, so those machines would
+      // stop for a break nobody wants. Cancel again on the ones that accepted.
+      acceptedIps.forEach(ip => {
+        delete breakIntentAt[ip];
+        if (machineStates[ip]) machineStates[ip].scheduled_break_stop = false;
+        const sig1 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+        fetch(`http://${ip}:5000/cancel_scheduled_break`, { method: 'POST', signal: sig1 })
+          .catch(() => {
+            const sig2 = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(2000) : undefined;
+            fetch(`http://${ip}:8766/cancel_scheduled_break`, { method: 'POST', signal: sig2 }).catch(() => { });
+          });
+      });
+      return;
+    }
+
+    breakWaitIps = acceptedIps;
+
+    if (acceptedIps.length === 0) {
+      console.warn("No Mini-PC accepted schedule_break_stop (all legacy or offline). Starting local break immediately.");
+      closeBreakWaitOverlay();
+      if (typeof startBreak === 'function') startBreak();
+      return;
+    }
+
+    setBreakWaitOverlayTitle(acceptedIps);
+    // A machine may already have been idle and stopped while we were asking.
+    tryStartBreakWhenAllStopped(false);
+  }
+  window.handleBreakStartButtonClick = handleBreakStartButtonClick;
+
+  window.unlockCNCGatekeeper = function () {
+    window.__breakFinishTimestamp = Date.now();
+    isBreakScheduledPending = false;
+    closeBreakWaitOverlay();
+    const allIps = getAllCNCMiniPCIPs();
+    Object.keys(machineStates).forEach(k => {
+      if (machineStates[k]) {
+        machineStates[k].holding = false;
+        machineStates[k].hold_reason = null;
+        machineStates[k].scheduled_break_stop = false;
+        machineStates[k].scheduled_cycle_stop = false;
+        machineStates[k].call_stop_active = false;
+      }
+    });
+
+    const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
+    if (localStorage.getItem(pfx + 'activeStopCallStart')) {
+      localStorage.removeItem(pfx + 'activeStopCallStart');
+      localStorage.removeItem(pfx + 'activeStopCallMachine');
+    }
+    if (typeof closeStopCallOverlay === 'function') {
+      closeStopCallOverlay();
+    }
+    if (typeof stopCallStopPulse === 'function') {
+      stopCallStopPulse(null);
+    }
+    if (typeof notifyStopCall === 'function') {
+      notifyStopCall('clear', 'leader');
+    }
+
+    allIps.forEach(ip => {
+      fetch(`http://${ip}:5000/unlock`, { method: 'POST' })
+        .then(r => r.json())
+        .then(d => console.log(`✅ CNC Gatekeeper unlocked response (${ip}):`, d))
+        .catch(() => {
+          fetch(`http://${ip}:8766/unlock`, { method: 'POST' }).catch(() => { });
+        });
+      fetch(`http://${ip}:5000/request?callStop=0`).catch(() => {});
+    });
+  };
+
+  // Watchdog & Wake Listeners
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      console.log("📱 [CNC GATEKEEPER] Tablet woke up / became visible. Re-checking state...");
+      pollGatekeeperState();
+      if (!cncEventSource || cncEventSource.readyState === EventSource.CLOSED) {
+        connectCNCGatekeeperSSE();
+      }
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    pollGatekeeperState();
+  });
+
+  setInterval(pollGatekeeperState, 5000);
+
+  document.addEventListener('DOMContentLoaded', () => {
+    connectCNCGatekeeperSSE();
+    const startBtn = document.getElementById('breakStartButton');
+    if (startBtn) {
+      startBtn.addEventListener('click', handleBreakStartButtonClick, true);
+    }
+  });
+})();
