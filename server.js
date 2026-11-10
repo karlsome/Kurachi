@@ -13483,6 +13483,9 @@ app.get('/api/planner/live-production', async (req, res) => {
                 .findOne({ factory, machine: { $in: [id, id.toUpperCase()] } });
             const counter = cyc && Number.isFinite(Number(cyc.cycle)) ? Number(cyc.cycle) : null;
             if (counter === null) continue;
+            // cycleCountDB keeps the LAST count forever: a machine that has not cycled today still holds an old number
+            // (e.g. 55 from 2026-09-01). The timestamp is naive local time, so its date part must not be before the plan date.
+            if (String(cyc.timestamp || '').slice(0, 10) < date) continue;
 
             let cycles = null;
             let source = 'submitted-shots';
