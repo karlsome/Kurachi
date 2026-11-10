@@ -17392,6 +17392,100 @@ app.post('/api/masterdb/ids', async (req, res) => {
   }
 });
 
+// ─── Import マスタ管理N-2.mdb → materialMasterDB3 / bomMasterDB / processMasterDB ───
+// Two-step flow: preview (upload + diff, nothing written) → apply (writes the diff).
+const mdbImport = require('./mdbImport');
+const mdbImportJobs = new Map(); // jobId -> { status, stage, filePath, summary, result, error, ... }
+let mdbImportBusy = false;
+
+setInterval(() => {
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    for (const [id, j] of mdbImportJobs) {
+        if (j.createdAt < cutoff && j.status !== 'running') {
+            if (j.filePath) fs.unlink(j.filePath, () => {});
+            mdbImportJobs.delete(id);
+        }
+    }
+}, 10 * 60 * 1000).unref();
+
+function newMdbJob(extra = {}) {
+    const id = require('crypto').randomBytes(8).toString('hex');
+    const job = { id, status: 'running', stage: 'starting', createdAt: Date.now(), ...extra };
+    mdbImportJobs.set(id, job);
+    return job;
+}
+
+app.post('/api/masterdb/import-mdb/preview', upload.single('file'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!/\.mdb$/i.test(req.body?.originalName || req.file.originalname || '')) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(400).json({ error: 'Please upload the .mdb file (マスタ管理N-2.mdb)' });
+    }
+    if (mdbImportBusy) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(409).json({ error: 'Another MDB import is already running. Please wait.' });
+    }
+    mdbImportBusy = true;
+    const job = newMdbJob({ kind: 'preview', filePath: req.file.path, fileName: req.body?.originalName || req.file.originalname, username: req.body?.username || null });
+    res.json({ jobId: job.id });
+    try {
+        const ds = await mdbImport.readDataset(job.filePath, (s) => { job.stage = s; });
+        const db = client.db(DB_NAME);
+        const { plan, summary } = await mdbImport.buildPlan(db, ds, (s) => { job.stage = s; });
+        job.summary = summary;
+        job.status = 'done';
+        job.stage = 'preview ready';
+    } catch (e) {
+        console.error('❌ MDB import preview failed:', e);
+        job.status = 'error';
+        job.error = e.message;
+        fs.unlink(job.filePath, () => {});
+        job.filePath = null;
+    } finally {
+        mdbImportBusy = false;
+    }
+});
+
+app.post('/api/masterdb/import-mdb/apply', async (req, res) => {
+    const prev = mdbImportJobs.get(req.body?.previewJobId);
+    if (!prev || prev.kind !== 'preview' || prev.status !== 'done' || !prev.filePath || !fs.existsSync(prev.filePath)) {
+        return res.status(400).json({ error: 'Preview expired or not found. Please upload the file again.' });
+    }
+    if (mdbImportBusy) return res.status(409).json({ error: 'Another MDB import is already running. Please wait.' });
+    mdbImportBusy = true;
+    const job = newMdbJob({ kind: 'apply', username: req.body?.username || prev.username || null });
+    res.json({ jobId: job.id });
+    try {
+        const db = client.db(DB_NAME);
+        // Re-read and re-plan so the diff reflects the DB right now, not at preview time.
+        const ds = await mdbImport.readDataset(prev.filePath, (s) => { job.stage = s; });
+        const { plan, summary } = await mdbImport.buildPlan(db, ds, (s) => { job.stage = s; });
+        const result = await mdbImport.applyPlan(db, ds, plan, (s) => { job.stage = s; });
+        job.summary = summary;
+        job.result = result;
+        job.status = 'done';
+        job.stage = 'finished';
+        console.log(`✅ MDB import applied by ${job.username}:`, JSON.stringify(result));
+        try {
+            await db.collection('mdbImportLogs').insertOne({ at: new Date(), username: job.username, fileName: prev.fileName, summary, result });
+        } catch (_) { /* log is best-effort */ }
+        fs.unlink(prev.filePath, () => {});
+        prev.filePath = null;
+    } catch (e) {
+        console.error('❌ MDB import apply failed:', e);
+        job.status = 'error';
+        job.error = e.message;
+    } finally {
+        mdbImportBusy = false;
+    }
+});
+
+app.get('/api/masterdb/import-mdb/jobs/:id', (req, res) => {
+    const j = mdbImportJobs.get(req.params.id);
+    if (!j) return res.status(404).json({ error: 'Job not found' });
+    res.json({ id: j.id, kind: j.kind, status: j.status, stage: j.stage, error: j.error || null, summary: j.summary || null, result: j.result || null, fileName: j.fileName || null });
+});
+
 // Route to get unique factory values from Master DB
 app.get('/api/masterdb/factories', async (req, res) => {
     const _ck = 'masterdb:factories';
