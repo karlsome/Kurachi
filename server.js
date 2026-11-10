@@ -36107,8 +36107,29 @@ async function vmShotstackRequest(method, path, body = null) {
   return payload;
 }
 
+// Shotstack rejects `opacity` on svg assets ("Unknown property"), but the editor's SVG toolbar writes it there.
+// Move it to the clip level (where Shotstack supports it) before sending.
+function vmShotstackSanitizeEditForRender(edit) {
+  const tracks = edit?.timeline?.tracks;
+  if (!Array.isArray(tracks)) return edit;
+  const sanitized = JSON.parse(JSON.stringify(edit));
+  for (const track of sanitized.timeline.tracks) {
+    for (const clip of Array.isArray(track?.clips) ? track.clips : []) {
+      const asset = clip?.asset;
+      if (!asset || asset.type !== 'svg' || !Object.prototype.hasOwnProperty.call(asset, 'opacity')) continue;
+      const assetOpacity = Number(asset.opacity);
+      delete asset.opacity;
+      if (Number.isFinite(assetOpacity)) {
+        const clipOpacity = typeof clip.opacity === 'number' ? clip.opacity : 1;
+        clip.opacity = Math.max(0, Math.min(1, clipOpacity * assetOpacity));
+      }
+    }
+  }
+  return sanitized;
+}
+
 async function vmShotstackQueueRender(edit) {
-  const payload = await vmShotstackRequest('POST', '/render', edit);
+  const payload = await vmShotstackRequest('POST', '/render', vmShotstackSanitizeEditForRender(edit));
   const renderId = String(payload?.response?.id || '').trim();
   if (!renderId) throw new Error('Shotstack did not return a render id');
   return renderId;
