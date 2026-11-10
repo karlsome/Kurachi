@@ -350,6 +350,8 @@ function machineStateView(id, st) {
     modeSince: (mode === 'break' || mode === 'maintenance' || mode === 'check') ? (st.modeSince || 0) : 0,
     totalNG: st.totalNG || 0,
     deviceCount: st.activeDevices ? st.activeDevices.size : 0,
+    // Inspection tables (Kensa interactive): live bench snapshot posted by the tablet. Absent for every other machine.
+    ...(st.kensa ? { kensa: st.kensa } : {}),
     // SCNA only: physical CNC state reported by the machine's Python listener.
     // Absent for every machine that never reported one, so other factories are unaffected.
     ...(st.cnc ? { cnc: st.cnc } : {})
@@ -916,6 +918,33 @@ app.post("/notifyStopCall", handleStopCall);
 // re-establishes a machine's state without any DB read. Does NOT clobber state
 // the live tablet-log stream is already maintaining — it just refreshes
 // liveness in that case.
+// Kensa interactive tablet -> compact, bounded live snapshot of the bench (scanned inputs, NG, labels, quantity).
+// Everything is re-typed here so a bad payload can never bloat the SSE stream.
+function sanitizeKensaLive(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const str = (v, n = 60) => String(v == null ? '' : v).slice(0, n);
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? Math.round(n) : 0; };
+  const inputs = (Array.isArray(raw.inputs) ? raw.inputs : []).slice(0, 12).map((x) => {
+    const ng = {};
+    if (x && x.ng && typeof x.ng === 'object') {
+      Object.keys(x.ng).slice(0, 12).forEach((k) => { const n = num(x.ng[k]); if (n) ng[str(k, 16)] = n; });
+    }
+    return {
+      id: str(x && x.id, 48), kind: str(x && x.kind, 8), lots: (Array.isArray(x && x.lots) ? x.lots : []).slice(0, 6).map((l) => str(l, 40)),
+      qty: num(x && x.qty), ngTotal: num(x && x.ngTotal), ng, current: !!(x && x.current), scannedAt: num(x && x.scannedAt)
+    };
+  });
+  const labels = (Array.isArray(raw.labels) ? raw.labels : []).slice(0, 40).map((l) => ({
+    kensaId: str(l && l.kensaId, 60), status: str(l && l.status, 12), qty: num(l && l.qty), voided: !!(l && l.voided), at: num(l && l.at)
+  }));
+  return {
+    hinban: str(raw.hinban), sebango: str(raw.sebango), hinmei: str(raw.hinmei, 80), cap: num(raw.cap),
+    inputs, labels,
+    processQty: num(raw.processQty), good: num(raw.good), ngTotal: num(raw.ngTotal), spare: num(raw.spare),
+    start: str(raw.start, 8), lot: str(raw.lot, 80), resume: !!raw.resume, updatedAt: Date.now()
+  };
+}
+
 app.post("/api/machine-assert", (req, res) => {
   const factory = String(req.body?.工場 || req.body?.factory || '').trim();
   const equipmentRaw = String(req.body?.設備 || req.body?.machine || '').trim();
@@ -930,6 +959,7 @@ app.post("/api/machine-assert", (req, res) => {
   const runStartedAt = Number(req.body?.runStartedAt) || 0;
   const totalNG = Number(req.body?.totalNG) || 0;
   const pageInstanceId = String(req.body?.pageInstanceId || '');
+  const kensaSnap = req.body && 'kensa' in req.body ? sanitizeKensaLive(req.body.kensa) : undefined;
   const now = Date.now();
   const map = getMachineStateMap(factory);
   const updated = [];
@@ -970,6 +1000,7 @@ app.post("/api/machine-assert", (req, res) => {
           st.prodAccumMs = 0;
           if (!updated.includes(id)) updated.push(id);
         }
+        if (st.kensa) { st.kensa = null; if (!updated.includes(id)) updated.push(id); }
       } else if (mode === 'running') {
         let changed = false;
         if (seb && st.sebanggo !== seb) {
@@ -1076,6 +1107,13 @@ app.post("/api/machine-assert", (req, res) => {
         updated.push(id);
     }
     
+    // Kensa bench snapshot (only the inspection tablets send it): store, and broadcast when it really changed
+    if (kensaSnap !== undefined) {
+      const nextK = mode === 'idle' ? null : kensaSnap;
+      const same = JSON.stringify(nextK && { ...nextK, updatedAt: 0 }) === JSON.stringify(st.kensa && { ...st.kensa, updatedAt: 0 });
+      if (!same) { st.kensa = nextK; if (!updated.includes(id)) updated.push(id); }
+    }
+
     // Update totalNG and flag for broadcast if it changed
     const oldTotalNG = st.totalNG || 0;
     st.totalNG = totalNG;
@@ -1260,6 +1298,7 @@ setInterval(() => {
         st.sebanggo = ''; st.hinban = '';
         st.breakActive = false; st.maintActive = false;
         st.runSince = 0; st.modeSince = 0; st.prodAccumMs = 0;
+        st.kensa = null;
         if (st.activeDevices) st.activeDevices.clear();
         needsUpdate = true;
       }
@@ -14785,11 +14824,37 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       .map(({ _sessionEquipment, ...rest }) => rest)
       .sort((a, b) => a.id.localeCompare(b.id));
 
+    // Inspection tables (Kensa interactive IT1/IT2): what was submitted today, per table. SCNA only.
+    // kensaDB.Date is the tablet's own local date, so use the factory's local calendar day, not JST.
+    let kensaToday = null;
+    if (factory === 'SCNA') {
+      try {
+        const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Indiana/Indianapolis', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(nowMs));
+        const recs = await submittedDb.collection('kensaDB')
+          .find({ 工場: 'SCNA', Date: localDate, 設備: { $in: ['IT1', 'IT2'] } })
+          .project({ 設備: 1, 品番: 1, 背番号: 1, Worker_Name: 1, Total: 1, Total_NG: 1, Process_Quantity: 1, Time_start: 1, Time_end: 1, Kensa_Box_IDs: 1, createdAt: 1 })
+          .sort({ createdAt: 1 })
+          .toArray();
+        kensaToday = { date: localDate, IT1: { records: [], processed: 0, good: 0, ng: 0, labels: 0 }, IT2: { records: [], processed: 0, good: 0, ng: 0, labels: 0 } };
+        recs.forEach((r) => {
+          const t = kensaToday[String(r.設備).trim().toUpperCase()];
+          if (!t) return;
+          const processed = Number(r.Process_Quantity) || 0, good = Number(r.Total) || 0, ng = Number(r.Total_NG) || 0;
+          const labels = Array.isArray(r.Kensa_Box_IDs) ? r.Kensa_Box_IDs.length : 0;
+          t.processed += processed; t.good += good; t.ng += ng; t.labels += labels;
+          t.records.push({ hinban: r.品番 || '', sebanggo: r.背番号 || '', worker: r.Worker_Name || '', processed, good, ng, labels, start: r.Time_start || '', end: r.Time_end || '', submittedAt: r.createdAt || null });
+        });
+      } catch (kErr) {
+        console.error('digital-twin kensaToday failed:', kErr.message);
+      }
+    }
+
     res.json({
       success: true,
       factory,
       generatedAt: new Date(nowMs).toISOString(),
       productionDate,
+      ...(kensaToday ? { kensaToday } : {}),
       idleThresholdMinutes: DIGITAL_TWIN_IDLE_MS / 60000,
       hasCycleSensors: machineList.some((m) => m.hasCycleSensor),
       goal: goalRows[0]?.target || 0,

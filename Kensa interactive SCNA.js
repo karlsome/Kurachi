@@ -86,7 +86,12 @@ window.serverURL = serverURL;
   function normSku(v) { return String(v || '').trim().toUpperCase(); }
 
   // ---------- draft ----------
-  function save() { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(state)); } catch (e) { /* quota: keep working */ } }
+  var assertTimer = null;
+  function save() {
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(state)); } catch (e) { /* quota: keep working */ }
+    // every state change (scan, NG tap, print, submit...) reaches the 3D factory dashboard within a moment
+    clearTimeout(assertTimer); assertTimer = setTimeout(function () { assertMachineState(); }, 600);
+  }
   function load() {
     try {
       var raw = localStorage.getItem(DRAFT_KEY);
@@ -501,7 +506,7 @@ window.serverURL = serverURL;
     // 4. accept
     if (!b.boxes.length && !b.start) b.start = nowHM();
     if (!lotDetails || !lotDetails.length) lotDetails = lots.map(function (l) { return { lotNumber: l, pieces: lots.length === 1 ? qty : null }; });   // legacy QR: its one lot holds the whole quantity
-    b.boxes.push({ id: q.id, kind: kind, qr: q.raw, legacy: !q.id, qty: qty, used: 0, base: base, lots: lots, lotDetails: lotDetails, ng: {}, ngBase: {} });
+    b.boxes.push({ id: q.id, kind: kind, qr: q.raw, legacy: !q.id, qty: qty, used: 0, base: base, lots: lots, lotDetails: lotDetails, ng: {}, ngBase: {}, scannedAt: Date.now() });
     b.cur = b.boxes.length - 1;
     b.qtyOverride = null;
     var known = b.lotNumbers ? b.lotNumbers.split(/\s*,\s*/) : [];
@@ -1700,6 +1705,19 @@ window.serverURL = serverURL;
     if (t > Date.now() + 3600000) t -= 86400000;      // started before midnight
     return t;
   }
+  // What the 3D factory dashboard shows for this table: what was scanned, counted, labelled. Server bounds/re-types it.
+  function kensaSnapshot(b) {
+    return {
+      hinban: b.hinban, sebango: b.sebango, hinmei: b.hinmei, cap: b.cap,
+      inputs: b.boxes.map(function (x, i) {
+        var ng = {}; NG_FIELDS.forEach(function (f) { if (toInt(x.ng[f])) ng[f] = toInt(x.ng[f]); });
+        return { id: x.id || '', kind: x.kind || (x.id ? '' : 'legacy'), lots: x.lots || [], qty: x.qty || 0, ngTotal: inNg(x), ng: ng, current: i === Math.min(toInt(b.cur), b.boxes.length - 1), scannedAt: x.scannedAt || 0 };
+      }),
+      labels: (b.printed || []).map(function (l) { return { kensaId: l.kensaId, status: l.status, qty: l.qty, voided: !!l.voided, at: l.at || 0 }; }),
+      processQty: procQty(b), good: goodQty(b), ngTotal: ngTotal(b), spare: spareSum(spareAll(b)),
+      start: b.start, lot: b.lotNumbers || '', resume: !!b.resume
+    };
+  }
   function assertMachineState() {
     if (!MACHINE) return;
     try {
@@ -1709,16 +1727,17 @@ window.serverURL = serverURL;
       else if (state.activeBreakStart) { mode = 'break'; modeAt = state.activeBreakStart; }
       else if (state.activeStopCallStart) { mode = 'stopcall'; modeAt = state.activeStopCallStart; }
       else if (running) mode = 'running';
-      var seb = '', hin = '', runAt = 0, ng = 0;
+      var seb = '', hin = '', runAt = 0, ng = 0, kensaLive = null;
       if (running) {
         seb = b.sebango; hin = b.hinban;
         // moving the start forward by the breaks/maintenance keeps the TV's elapsed time equal to real working time
         runAt = (benchStartMs(b) || Date.now()) + (breakTotal() + maintTotal()) * 60000;
         ng = ngTotal(b);
+        kensaLive = kensaSnapshot(b);
       }
       postJSON('/api/machine-assert', {
         工場: FACTORY, 設備: MACHINE, 背番号: seb, 品番: hin, mode: mode, modeStartedAt: modeAt,
-        runStartedAt: mode === 'idle' ? 0 : runAt, totalNG: ng, pageInstanceId: pageInstanceId, cycleStopActive: false, worker: workerString()
+        runStartedAt: mode === 'idle' ? 0 : runAt, totalNG: ng, pageInstanceId: pageInstanceId, cycleStopActive: false, worker: workerString(), kensa: kensaLive
       }).catch(function () { });
     } catch (e) { console.warn('Kensa: machine-assert failed', e); }
   }
