@@ -10628,6 +10628,8 @@ async function openVideoManualTabletPlayer() {
   document.getElementById('vmtPlayBtn').textContent = '▶ Play';
   showVideoManualTabletMessage('Loading…');
   root.classList.add('is-open');
+  document.body.classList.add('vmt-open');
+  document.getElementById('callMenuWrapper')?.classList.remove('open');
 
   try {
     const response = await fetch(`${serverURL}/api/factory/video-manuals/projects/${encodeURIComponent(selected._id)}`);
@@ -10675,6 +10677,7 @@ function closeVideoManualTabletPlayer() {
     video.load();
   }
   if (root) root.classList.remove('is-open');
+  document.body.classList.remove('vmt-open');
 }
 
 function handleVideoManualSelection() {
@@ -10978,10 +10981,13 @@ function ensureVideoManualPickerUi() {
     .vmd-play--tablet {
       background: #1d4ed8;
     }
+    body.vmt-open #callMenuWrapper {
+      display: none !important;
+    }
     .vmt {
       position: fixed;
       inset: 0;
-      z-index: 10002;
+      z-index: 100010;
       display: none;
       flex-direction: column;
       background: #020617;
