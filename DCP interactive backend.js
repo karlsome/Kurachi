@@ -16254,10 +16254,14 @@ if (manualSendModal) {
     }
   };
 
+  function _byp(key, fallback, name) {
+    return _tr(key, fallback).replace('{name}', name || '');
+  }
+
   window.openSuperBypassModal = function () {
     const modal = document.getElementById('checklistBypassModal');
     const status = document.getElementById('checklistBypassStatus');
-    if (status) { status.style.color = '#6b7280'; status.textContent = 'Scanning Leader QR...'; }
+    if (status) { status.style.color = '#6b7280'; status.textContent = _byp('bypass_scanning_leader', 'Scanning Leader QR...'); }
     window.checklistState.bypassLeader = null;
     const reasonEl = document.getElementById('checklistBypassReason');
     const confirmBtn = document.getElementById('checklistBypassConfirmBtn');
@@ -16286,7 +16290,7 @@ if (manualSendModal) {
               if (!leaderRoles.includes(userData.role)) {
                 if (status) {
                   status.style.color = '#ef4444';
-                  status.textContent = '❌ Not a leader — Super Bypass requires a leader QR';
+                  status.textContent = _byp('bypass_not_leader', '❌ Not a leader — Super Bypass requires a leader QR');
                 }
                 return;
               }
@@ -16294,7 +16298,7 @@ if (manualSendModal) {
               window.checklistState.bypassLeader = userData;
               if (status) {
                 status.style.color = '#1f9d6b';
-                status.textContent = `✓ Leader Verified: ${userData.firstName || userData.username} — enter a reason`;
+                status.textContent = _byp('bypass_leader_verified', '✓ Leader Verified: {name} — enter a reason', userData.firstName || userData.username);
               }
               const qr = document.getElementById('checklistBypassQrReader');
               if (qr) qr.style.display = 'none';
@@ -16305,7 +16309,7 @@ if (manualSendModal) {
             } else {
               if (status) {
                 status.style.color = '#ef4444';
-                status.textContent = '❌ Invalid Leader QR Code';
+                status.textContent = _byp('bypass_invalid_qr', '❌ Invalid Leader QR Code');
               }
             }
           } catch (e) {
@@ -16314,7 +16318,7 @@ if (manualSendModal) {
         },
         function () { }
       ).catch(err => {
-        if (status) status.textContent = 'Could not access camera for QR scan';
+        if (status) status.textContent = _byp('bypass_camera_error', 'Could not access camera for QR scan');
       });
     }
   };
@@ -16325,7 +16329,7 @@ if (manualSendModal) {
     const reason = (document.getElementById('checklistBypassReason')?.value || '').trim();
     if (!leader) return;
     if (!reason) {
-      if (status) { status.style.color = '#ef4444'; status.textContent = '❌ Reason is required'; }
+      if (status) { status.style.color = '#ef4444'; status.textContent = _byp('bypass_reason_required', '❌ Reason is required'); }
       return;
     }
     submitSuperBypass(leader, reason);
@@ -16471,7 +16475,7 @@ if (manualSendModal) {
 
       if (!bypassRes.ok) {
         const err = await bypassRes.json().catch(() => ({}));
-        if (status) { status.style.color = '#ef4444'; status.textContent = `❌ ${err.error || 'Bypass failed'}`; }
+        if (status) { status.style.color = '#ef4444'; status.textContent = err.error ? `❌ ${err.error}` : _byp('bypass_failed', '❌ Bypass failed'); }
         return;
       }
       const bypassData = await bypassRes.json().catch(() => ({}));
@@ -16491,13 +16495,13 @@ if (manualSendModal) {
       closeSuperBypassModal();
 
       if (typeof showAppToast === 'function') {
-        showAppToast(`⚡ Checklist Super-Bypassed by ${leaderUser.firstName || leaderUser.username}`);
+        showAppToast(_byp('bypass_done_toast', '⚡ Checklist Super-Bypassed by {name}', leaderUser.firstName || leaderUser.username));
       }
 
       if (typeof window.goToTab === 'function') window.goToTab(0);
     } catch (e) {
       console.error('Error recording bypass:', e);
-      if (status) { status.style.color = '#ef4444'; status.textContent = '❌ Network error — bypass not recorded'; }
+      if (status) { status.style.color = '#ef4444'; status.textContent = _byp('bypass_network_error', '❌ Network error — bypass not recorded'); }
     }
   }
 
