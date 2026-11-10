@@ -13409,6 +13409,97 @@ app.get('/api/cycle-at-start', async (req, res) => {
     }
 });
 
+// ============================================
+// Live (unsubmitted) production per 背番号 for the planner goals list.
+// GET /api/planner/live-production?factory=小瀬&date=2026-11-10
+// For every machine currently running a 背番号:
+//   cycles = cycleAtStartDB (counter now - counter at start) when the session start was captured,
+//            else cycleCountDB counter - sum of today's SUBMITTED shots on that machine (pressDB Lot_Details.shots per machine,
+//            or ショット数 split evenly over the record's machines when there is no Lot_Details)
+//   pieces = cycles x pcPerCycle (masterDB machineConfig, else root); NG = live totalNG from the machine state (pair: max, not sum)
+// An ESTIMATE: it stays 0 until the tablet reports the run, and is only valid for the current production day.
+// ============================================
+app.get('/api/planner/live-production', async (req, res) => {
+    try {
+        const { factory, date } = req.query;
+        if (!factory || !date) return res.status(400).json({ success: false, error: 'factory and date are required' });
+
+        const masterDb = client.db(DB_NAME);
+        const submittedDb = client.db('submittedDB');
+        const states = factoryMachineState.get(factory) || new Map();
+        const running = [...states.entries()].filter(([, st]) => st && st.sebanggo);
+        if (!running.length) return res.json({ success: true, data: { bySerial: {}, machines: [] } });
+
+        // Submitted shots per machine today
+        const pressDocs = await submittedDb.collection('pressDB')
+            .find({ 工場: factory, Date: date })
+            .project({ 設備: 1, ショット数: 1, Lot_Details: 1 }).toArray();
+        const submittedShots = new Map();
+        const addShots = (machine, n) => {
+            const key = String(machine || '').trim().toUpperCase();
+            if (key) submittedShots.set(key, (submittedShots.get(key) || 0) + (Number(n) || 0));
+        };
+        pressDocs.forEach((d) => {
+            const ids = String(d.設備 || '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+            const lots = Array.isArray(d.Lot_Details) ? d.Lot_Details.filter((l) => l && l.machine) : [];
+            if (lots.length) lots.forEach((l) => addShots(l.machine, l.shots));
+            else if (ids.length) ids.forEach((id) => addShots(id, (Number(d.ショット数) || 0) / ids.length));
+        });
+
+        const serials = [...new Set(running.map(([, st]) => st.sebanggo))];
+        const products = await masterDb.collection('masterDB')
+            .find({ 背番号: { $in: serials } })
+            .project({ 背番号: 1, 工場: 1, pcPerCycle: 1, machineConfig: 1 }).toArray();
+        const productBySerial = new Map();
+        products.forEach((p) => {
+            const ex = productBySerial.get(p.背番号);
+            if (!ex || (p.工場 === factory && ex.工場 !== factory)) productBySerial.set(p.背番号, p);
+        });
+
+        const machines = [];
+        for (const [id, st] of running) {
+            const cyc = await masterDb.collection('cycleCountDB')
+                .findOne({ factory, machine: { $in: [id, id.toUpperCase()] } });
+            const counter = cyc && Number.isFinite(Number(cyc.cycle)) ? Number(cyc.cycle) : null;
+            if (counter === null) continue;
+
+            let cycles = null;
+            let source = 'submitted-shots';
+            const startDoc = await masterDb.collection(CYCLE_AT_START_COLLECTION)
+                .findOne({ factory, machine: id, Date: date, 背番号: st.sebanggo, endedAt: { $exists: false } }, { sort: { startedAt: -1 } });
+            if (startDoc && Number.isFinite(Number(startDoc.cycleAtStart)) && counter >= Number(startDoc.cycleAtStart)) {
+                cycles = counter - Number(startDoc.cycleAtStart);
+                source = 'cycleAtStart';
+            } else {
+                cycles = Math.max(0, counter - Math.round(submittedShots.get(id) || 0));
+            }
+
+            const product = productBySerial.get(st.sebanggo);
+            const cfg = product?.machineConfig && typeof product.machineConfig === 'object' ? product.machineConfig[id] : null;
+            const pc = Number(cfg?.pcPerCycle) || Number(product?.pcPerCycle) || 0;
+            machines.push({
+                machine: id, 背番号: st.sebanggo, cycles, pcPerCycle: pc, pieces: cycles * pc,
+                ng: Number(st.totalNG) || 0, source, counter, counterTs: cyc.timestamp || null,
+            });
+        }
+
+        const bySerial = {};
+        machines.forEach((m) => {
+            const e = bySerial[m.背番号] || (bySerial[m.背番号] = { pieces: 0, ng: 0, machines: [], sources: [] });
+            e.pieces += m.pieces;
+            e.ng = Math.max(e.ng, m.ng);
+            e.machines.push(m.machine);
+            if (!e.sources.includes(m.source)) e.sources.push(m.source);
+        });
+        Object.values(bySerial).forEach((e) => { e.good = Math.max(0, e.pieces - e.ng); });
+
+        res.json({ success: true, data: { bySerial, machines } });
+    } catch (error) {
+        console.error('Error computing live production:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Broken-down machines stay broken until someone marks them repaired (like the legacy Freya Admin), so a day without its
 // own list inherits the list of the nearest EARLIER plan that has one. Read-only, returns only that field.
 app.get('/api/production-plans/unavailable-carry', async (req, res) => {
