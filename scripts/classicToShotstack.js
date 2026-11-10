@@ -193,7 +193,7 @@ function convertShape(el, ctx) {
   const box = elementBox(el);
   const clip = baseOverlayClip(el, { ...box, width: shape.width, height: shape.height }, ctx.canvas);
   ctx.report.converted.shape += 1;
-  return expandBlink(el, { ...clip, asset: { type: 'svg', src: shape.svg, opacity: 1 } });
+  return expandBlink(el, { ...clip, asset: { type: 'svg', src: shape.svg } });
 }
 
 function convertImage(el, ctx) {
