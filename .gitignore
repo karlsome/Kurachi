@@ -87,6 +87,9 @@ public
 .out
 .storybook-out
 
+## Graphify outputs
+graphify-out/
+
 # Temporary folders
 tmp/
 temp/

@@ -8534,7 +8534,7 @@ async function loadVideoManualProjects() {
   }
 
   try {
-    const response = await fetch(`${serverURL}/api/factory/video-manuals?model=${encodeURIComponent(model)}`);
+    const response = await fetch(`${serverURL}/api/factory/video-manuals?model=${encodeURIComponent(model)}&source=shotstack-studio`);
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.error || `HTTP ${response.status}`);
@@ -8797,8 +8797,10 @@ function ensureVideoManualPickerUi() {
     }
     .video-manual-project-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 16px;
+      align-items: start;
+      align-content: start;
     }
     .video-manual-detail-panel {
       display: none;
@@ -8987,13 +8989,26 @@ function ensureVideoManualPickerUi() {
       overflow: hidden;
       text-align: left;
       cursor: pointer;
-      min-height: 100%;
-      transition: border-color 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
       touch-action: manipulation;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
     }
     .video-manual-card:hover,
     .video-manual-card:focus {
       border-color: #0f766e;
+      box-shadow: 0 6px 16px rgba(15, 118, 110, 0.18);
+      transform: translateY(-2px);
+      outline: none;
+    }
+    .video-manual-card:active {
+      transform: scale(0.98);
+    }
+    .video-manual-card.is-selected {
+      border-color: #0f766e;
+      box-shadow: 0 0 0 2px #0f766e;
     }
     .video-manual-card.__thumb {
       height: 108px;
@@ -9001,9 +9016,28 @@ function ensureVideoManualPickerUi() {
       overflow: hidden;
     }
     .video-manual-card__thumb {
-      height: 108px;
-      background: #f1f5f9;
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #0f172a;
       overflow: hidden;
+    }
+    .video-manual-card__thumb::after {
+      content: '▶';
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(15, 23, 42, 0.72);
+      color: #fff;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding-left: 2px;
+      box-sizing: border-box;
     }
     .video-manual-card__thumb img {
       width: 100%;
@@ -9016,8 +9050,8 @@ function ensureVideoManualPickerUi() {
       align-items: center;
       justify-content: center;
       background: #f1f5f9;
-      height: 108px;
       padding: 12px;
+      box-sizing: border-box;
     }
     .video-manual-card__fallback-title {
       font-size: 20px;
@@ -9143,7 +9177,8 @@ function ensureVideoManualPickerUi() {
         padding-right: 14px;
       }
       .video-manual-project-grid {
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 12px;
       }
       .video-manual-controller-status {
         grid-template-columns: 1fr;

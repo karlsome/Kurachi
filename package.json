@@ -23,6 +23,7 @@
     "googleapis": "^173.0.0",
     "heic-convert": "^2.1.0",
     "iconv-lite": "^0.7.2",
+    "mdb-reader": "^3.2.0",
     "mongodb": "^6.10.0",
     "multer": "^1.4.5-lts.2",
     "node-fetch": "^2.7.0",

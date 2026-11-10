@@ -17260,7 +17260,7 @@ app.post('/api/masterdb/paginate', async (req, res) => {
   };
 
   try {
-    const dbClient = await MongoClient.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+    const dbClient = await MongoClient.connect(uri);
     const collection = dbClient.db('Sasaki_Coating_MasterDB').collection(collectionName);
 
     // ── Build combined query ──────────────────────────────────────────────────
@@ -17352,7 +17352,7 @@ app.get('/api/masterdb/schema', async (req, res) => {
   if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
 
   try {
-    const dbClient = await MongoClient.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+    const dbClient = await MongoClient.connect(uri);
     const collection = dbClient.db('Sasaki_Coating_MasterDB').collection(collectionName);
     const sample = await collection.find(baseQuery).limit(200).toArray();
     await dbClient.close();
@@ -17381,7 +17381,7 @@ app.post('/api/masterdb/ids', async (req, res) => {
   const { collectionName, query = {} } = req.body;
   if (!collectionName) return res.status(400).json({ error: 'collectionName required' });
   try {
-    const dbClient = await MongoClient.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+    const dbClient = await MongoClient.connect(uri);
     const collection = dbClient.db('Sasaki_Coating_MasterDB').collection(collectionName);
     const docs = await collection.find(query, { projection: { _id: 1 } }).toArray();
     await dbClient.close();
@@ -17390,6 +17390,127 @@ app.post('/api/masterdb/ids', async (req, res) => {
     console.error('❌ Error in /api/masterdb/ids:', error);
     res.status(500).json({ error: 'Failed to fetch IDs', details: error.message });
   }
+});
+
+// ─── Import マスタ管理N-2.mdb → materialMasterDB3 / bomMasterDB / processMasterDB ───
+// Two-step flow:
+//   preview: upload → child process reads the MDB, diffs against Mongo, writes ONLY the
+//            changed documents to an NDJSON payload file (nothing written to Mongo).
+//   apply:   streams that payload into Mongo. The MDB is never re-read, so the memory
+//            spike of parsing the 230MB file stays confined to the short-lived child.
+const mdbImport = require('./mdbImport');
+const { fork } = require('child_process');
+const mdbImportJobs = new Map(); // jobId -> { status, stage, payloadPath, summary, result, error, ... }
+let mdbImportBusy = false;
+const MDB_IMPORT_MAX_HEAP_MB = parseInt(process.env.MDB_IMPORT_MAX_HEAP_MB || '1536', 10);
+
+function dropMdbJobFiles(j) {
+    for (const k of ['filePath', 'payloadPath']) {
+        if (j[k]) { fs.unlink(j[k], () => {}); j[k] = null; }
+    }
+}
+
+setInterval(() => {
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    for (const [id, j] of mdbImportJobs) {
+        if (j.createdAt < cutoff && j.status !== 'running') {
+            dropMdbJobFiles(j);
+            mdbImportJobs.delete(id);
+        }
+    }
+}, 10 * 60 * 1000).unref();
+
+// Remove payload/upload leftovers from a previous server run.
+fs.readdir(os.tmpdir(), (err, files) => {
+    if (err) return;
+    for (const f of files) if (f.startsWith('mdb-import-payload-')) fs.unlink(path.join(os.tmpdir(), f), () => {});
+});
+
+function newMdbJob(extra = {}) {
+    const id = require('crypto').randomBytes(8).toString('hex');
+    const job = { id, status: 'running', stage: 'starting', createdAt: Date.now(), ...extra };
+    mdbImportJobs.set(id, job);
+    return job;
+}
+
+app.post('/api/masterdb/import-mdb/preview', upload.single('file'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!/\.mdb$/i.test(req.body?.originalName || req.file.originalname || '')) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(400).json({ error: 'Please upload the .mdb file (マスタ管理N-2.mdb)' });
+    }
+    if (mdbImportBusy) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(409).json({ error: 'Another MDB import is already running. Please wait.' });
+    }
+    mdbImportBusy = true;
+    const mdbPath = req.file.path;
+    const payloadPath = path.join(os.tmpdir(), `mdb-import-payload-${Date.now()}-${Math.random().toString(36).slice(2)}.ndjson`);
+    const job = newMdbJob({ kind: 'preview', payloadPath, fileName: req.body?.originalName || req.file.originalname, username: req.body?.username || null });
+    res.json({ jobId: job.id });
+
+    let finished = false;
+    const finish = (err) => {
+        if (finished) return;
+        finished = true;
+        mdbImportBusy = false;
+        fs.unlink(mdbPath, () => {}); // the MDB itself is not needed after preview
+        if (err) {
+            console.error('❌ MDB import preview failed:', err);
+            job.status = 'error';
+            job.error = err;
+            dropMdbJobFiles(job);
+        }
+    };
+    const child = fork(path.join(__dirname, 'mdbImportWorker.js'), [mdbPath, payloadPath], {
+        execArgv: [`--max-old-space-size=${MDB_IMPORT_MAX_HEAP_MB}`],
+        env: process.env,
+    });
+    child.on('message', (m) => {
+        if (m.type === 'stage') job.stage = m.stage;
+        else if (m.type === 'done') { job.summary = m.summary; job.status = 'done'; job.stage = 'preview ready'; finish(); }
+        else if (m.type === 'error') finish(m.message);
+    });
+    child.on('error', (e) => finish(e.message));
+    child.on('exit', (code, signal) => {
+        if (!finished) finish(`Import worker stopped unexpectedly (code ${code}, signal ${signal}). The server may be out of memory — try a larger instance or raise MDB_IMPORT_MAX_HEAP_MB.`);
+    });
+});
+
+app.post('/api/masterdb/import-mdb/apply', async (req, res) => {
+    const prev = mdbImportJobs.get(req.body?.previewJobId);
+    if (!prev || prev.kind !== 'preview' || prev.status !== 'done' || !prev.payloadPath || !fs.existsSync(prev.payloadPath)) {
+        return res.status(400).json({ error: 'Preview expired or not found. Please upload the file again.' });
+    }
+    if (mdbImportBusy) return res.status(409).json({ error: 'Another MDB import is already running. Please wait.' });
+    mdbImportBusy = true;
+    const job = newMdbJob({ kind: 'apply', username: req.body?.username || prev.username || null });
+    res.json({ jobId: job.id });
+    try {
+        const db = client.db(DB_NAME);
+        const result = await mdbImport.applyPayload(db, prev.payloadPath, (s) => { job.stage = s; });
+        job.summary = prev.summary;
+        job.result = result;
+        job.status = 'done';
+        job.stage = 'finished';
+        console.log(`✅ MDB import applied by ${job.username}:`, JSON.stringify(result));
+        try {
+            await db.collection('mdbImportLogs').insertOne({ at: new Date(), username: job.username, fileName: prev.fileName, summary: prev.summary, result });
+        } catch (_) { /* log is best-effort */ }
+        dropMdbJobFiles(prev);
+    } catch (e) {
+        console.error('❌ MDB import apply failed:', e);
+        job.status = 'error';
+        job.error = e.message;
+    } finally {
+        mdbImportBusy = false;
+    }
+});
+
+app.get('/api/masterdb/import-mdb/jobs/:id', (req, res) => {
+    const j = mdbImportJobs.get(req.params.id);
+    if (!j) return res.status(404).json({ error: 'Job not found' });
+    res.json({ id: j.id, kind: j.kind, status: j.status, stage: j.stage, error: j.error || null, summary: j.summary || null, result: j.result || null, fileName: j.fileName || null });
 });
 
 // Route to get unique factory values from Master DB
@@ -19151,6 +19272,58 @@ app.get('/api/masterdb/products', async (req, res) => {
         error: 'Failed to build production planner preview',
         message: error.message,
       });
+    }
+  });
+
+  // Default break times per factory (Sasaki_Coating_MasterDB.plannerBreakDefaults)
+  const sanitizePlannerBreakDefaults = (list) => (Array.isArray(list) ? list : [])
+    .map((item, index) => ({
+      id: String(item?.id || `default-break-${index + 1}`).slice(0, 80),
+      name: String(item?.name || 'Break').trim().slice(0, 80) || 'Break',
+      start: String(item?.start || '').trim(),
+      end: String(item?.end || '').trim(),
+      equipment: item?.equipment ? String(item.equipment).trim().slice(0, 120) : null,
+      isDefault: true,
+    }))
+    .filter((item) => /^\d{1,2}:\d{2}$/.test(item.start) && /^\d{1,2}:\d{2}$/.test(item.end));
+
+  app.get('/api/planner-break-defaults', async (req, res) => {
+    try {
+      await client.connect();
+      const factory = String(req.query.factory || '').trim();
+      if (!factory) return res.status(400).json({ success: false, error: 'factory is required' });
+
+      const doc = await client.db('Sasaki_Coating_MasterDB').collection('plannerBreakDefaults').findOne({ factory });
+      res.json({
+        success: true,
+        data: doc
+          ? { factory, breaks: sanitizePlannerBreakDefaults(doc.breaks), updatedBy: doc.updatedBy || null, updatedAt: doc.updatedAt || null }
+          : null,
+      });
+    } catch (error) {
+      console.error('❌ Error loading planner break defaults:', error);
+      res.status(500).json({ success: false, error: 'Failed to load break defaults', message: error.message });
+    }
+  });
+
+  app.put('/api/planner-break-defaults', async (req, res) => {
+    try {
+      await client.connect();
+      const factory = String(req.body?.factory || '').trim();
+      const updatedBy = String(req.body?.updatedBy || 'system').trim() || 'system';
+      if (!factory) return res.status(400).json({ success: false, error: 'factory is required' });
+
+      const breaks = sanitizePlannerBreakDefaults(req.body?.breaks);
+      const now = new Date();
+      await client.db('Sasaki_Coating_MasterDB').collection('plannerBreakDefaults').updateOne(
+        { factory },
+        { $set: { factory, breaks, updatedBy, updatedAt: now }, $setOnInsert: { createdBy: updatedBy, createdAt: now } },
+        { upsert: true },
+      );
+      res.json({ success: true, data: { factory, breaks, updatedBy, updatedAt: now } });
+    } catch (error) {
+      console.error('❌ Error saving planner break defaults:', error);
+      res.status(500).json({ success: false, error: 'Failed to save break defaults', message: error.message });
     }
   });
 
@@ -29059,14 +29232,11 @@ app.post("/submitToKensaDBInteractive", async (req, res) => {
       }
     }
 
-    // photos: 初物 is required, 終物 is optional
+    // photos: no first/last piece check any more (only the optional defect photos)
     const images = (Array.isArray(formData.images) ? formData.images : []).concat(Array.isArray(formData.photos) ? formData.photos : []);
     delete formData.images;
     delete formData.photos;
-    if (!images.some(i => i && i.label === "初物チェック" && i.base64)) {
-      return res.status(400).json({ error: "初物チェック (first-piece) photo is required" });
-    }
-    const labelToField = { "初物チェック": "初物チェック画像", "終物チェック": "終物チェック画像" };
+    const labelToField = { "初物チェック": "初物チェック画像", "終物チェック": "終物チェック画像" };   // older tablets may still send these: stored if present, never required
     const safe = (v) => String(v === undefined || v === null || v === "" ? "x" : v).replace(/[\\/]+/g, "_");
     const bucket = admin.storage().bucket();
     for (const img of images) {
@@ -29084,9 +29254,6 @@ app.post("/submitToKensaDBInteractive", async (req, res) => {
       } catch (uploadError) {
         console.error(`❌ Kensa interactive: photo upload failed (${img.label}):`, uploadError.message);
       }
-    }
-    if (!formData["初物チェック画像"]) {
-      return res.status(502).json({ error: "初物チェック photo upload failed, please retry" });
     }
 
     // optional defect photos taken during the inspection (max 25): a failed one is logged and skipped, it never blocks the submit
@@ -33739,6 +33906,13 @@ function vmNormalizeFileName(fileName = '') {
     .replace(/^_+|_+$/g, '') || `asset_${Date.now()}`;
 }
 
+function vmInferAssetTypeFromMimeType(mimeType = '') {
+  const normalized = String(mimeType || '').toLowerCase();
+  if (normalized.startsWith('image/')) return 'image';
+  if (normalized.startsWith('audio/')) return 'audio';
+  return 'video';
+}
+
 // GET /api/video-manuals/next-untitled — find the next UntitledN name
 app.get('/api/video-manuals/next-untitled', async (req, res) => {
   try {
@@ -33965,17 +34139,60 @@ console.log('🎬 Video Manual API routes loaded');
 const VM_PLAYLISTS_COLLECTION = 'videoManualPlaylists';
 const VM_PROJECTS_COLLECTION  = 'videoManualProjects';
 const VM_ASSETS_COLLECTION    = 'videoManualAssets';
-const VM_UPLOAD_FOLDERS       = new Set(['videoManuals', 'videoManualDeployed']);
+const VMSS_PLAYLISTS_COLLECTION = 'videoManualShotstackPlaylists';
+const VMSS_PROJECTS_COLLECTION = 'videoManualShotstackProjects';
+const VMSS_REVISIONS_COLLECTION = 'videoManualShotstackRevisions';
+const VMSS_ASSETS_COLLECTION = 'videoManualShotstackAssets';
+const VMSS_ASSET_UPLOAD_FOLDER = 'videoManuals/shotstackAssets';
+const VMSS_ASSET_PREVIEW_FOLDER = `${VMSS_ASSET_UPLOAD_FOLDER}/previews`;
+const VMSS_ASSET_THUMBNAIL_FOLDER = `${VMSS_ASSET_UPLOAD_FOLDER}/thumbnails`;
+const VMSS_PROJECT_PREVIEW_FOLDER = `${VMSS_ASSET_UPLOAD_FOLDER}/project-previews`;
+const VMSS_PROJECT_THUMBNAIL_FOLDER = `${VMSS_ASSET_UPLOAD_FOLDER}/project-thumbnails`;
+const VM_UPLOAD_FOLDERS       = new Set([
+  'videoManuals',
+  VMSS_ASSET_UPLOAD_FOLDER,
+  VMSS_ASSET_PREVIEW_FOLDER,
+  VMSS_ASSET_THUMBNAIL_FOLDER,
+  VMSS_PROJECT_PREVIEW_FOLDER,
+  VMSS_PROJECT_THUMBNAIL_FOLDER,
+  'videoManualDeployed',
+]);
 const VM_DEPLOYED_RETENTION_DAYS = 60;
 const VM_DEPLOYED_RETENTION_MS = VM_DEPLOYED_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const VM_DEPLOYED_CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const VM_SHOTSTACK_API_BASE = 'https://api.shotstack.io/edit';
-const VM_SHOTSTACK_STAGE = String(process.env.SHOTSTACK_STAGE || 'stage').trim() === 'v1' ? 'v1' : 'stage';
+// SHOTSTACK_ENV=production -> /v1 + SHOTSTACK_PRODUCTION_API_KEY; anything else -> sandbox (/stage) + SHOTSTACK_SANDBOX_API_KEY.
+const VM_SHOTSTACK_IS_PRODUCTION = String(process.env.SHOTSTACK_ENV || '').trim().toLowerCase() === 'production';
+const VM_SHOTSTACK_STAGE = VM_SHOTSTACK_IS_PRODUCTION ? 'v1' : 'stage';
+function vmShotstackGetApiKey() {
+  const key = VM_SHOTSTACK_IS_PRODUCTION
+    ? process.env.SHOTSTACK_PRODUCTION_API_KEY
+    : (process.env.SHOTSTACK_SANDBOX_API_KEY || process.env.SHOTSTACK_API_KEY);
+  return String(key || '').trim();
+}
 const VM_SHOTSTACK_POLL_INTERVAL_MS = 5000;
 const VM_SHOTSTACK_TIMEOUT_MS = 10 * 60 * 1000;
+const VMSS_ASSET_PREVIEW_DURATION_SECONDS = 4;
+const VMSS_ASSET_THUMBNAIL_CAPTURE_SECONDS = 0.8;
+const VMSS_DERIVATIVE_MAX_ATTEMPTS = 3;
+const VMSS_DERIVATIVE_RETRY_DELAY_MS = 4000;
+const VMSS_SOURCE_SIGNED_URL_TTL_MS = 15 * 60 * 1000;
+const VMSS_PROJECT_PREVIEW_DURATION_SECONDS = 5;
+const VMSS_PROJECT_THUMBNAIL_CAPTURE_SECONDS = 1;
+const VMSS_ASSET_RECYCLE_RETENTION_DAYS = 60;
+const VMSS_ASSET_RECYCLE_RETENTION_MS = VMSS_ASSET_RECYCLE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const VMSS_PROJECT_TRASH_TTL_DAYS = 60;
+const VMSS_PROJECT_TRASH_TTL_MS = VMSS_PROJECT_TRASH_TTL_DAYS * 24 * 60 * 60 * 1000;
 
 let vmDeployedCleanupPromise = null;
 let vmDeployedCleanupLastRunAt = 0;
+let vmssAssetCleanupPromise = null;
+
+function vmIsSupportedUploadFolder(uploadFolder = '') {
+  const normalized = String(uploadFolder || '').trim().replace(/\/+$/, '');
+  return VM_UPLOAD_FOLDERS.has(normalized)
+    || normalized.startsWith(`${VMSS_ASSET_UPLOAD_FOLDER}/`);
+}
 
 // Roles that can manage (create/edit/delete) playlists and assign access
 const VM_MANAGE_ROLES = new Set(['admin', '課長', '部長', '係長']);
@@ -34030,7 +34247,1668 @@ function vmGetRequester(req) {
   return { username: 'unknown', role: 'viewer' };
 }
 
+function vmssCountTracks(project) {
+  return Array.isArray(project?.edit?.timeline?.tracks) ? project.edit.timeline.tracks.length : 0;
+}
+
+function vmssAssetUsageMatches(project, asset) {
+  if (!project || !asset) return false;
+  const assetId = String(asset.assetId || asset._id || '');
+  const storagePath = String(asset.storagePath || '');
+  const downloadUrl = String(asset.downloadUrl || asset.url || '');
+  const haystack = JSON.stringify({ edit: project.edit || null, assetSourceMap: project.assetSourceMap || null });
+  if (assetId && haystack.includes(assetId)) return true;
+  if (storagePath && haystack.includes(storagePath)) return true;
+  if (downloadUrl && haystack.includes(downloadUrl)) return true;
+  return false;
+}
+
+function vmssBuildAssetUsagePayload(asset, usageDetail = null) {
+  const usageCount = Math.max(0, Number(usageDetail?.usageCount) || 0);
+  const usageProjects = Array.isArray(usageDetail?.projects) ? usageDetail.projects : [];
+  return {
+    ...asset,
+    usageCount,
+    usageProjects,
+    isUnused: usageCount === 0,
+    canDelete: usageCount === 0,
+  };
+}
+
+async function vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs = null } = {}) {
+  const projects = await db.collection(VMSS_PROJECTS_COLLECTION)
+    .find(
+      { playlistId, deleted: { $ne: true } },
+      { projection: { _id: 1, title: 1, edit: 1, assetSourceMap: 1 } }
+    )
+    .toArray();
+
+  const assets = Array.isArray(assetDocs)
+    ? assetDocs
+    : await db.collection(VMSS_ASSETS_COLLECTION)
+      .find(
+        { playlistId, deleted: { $ne: true } },
+        { projection: { _id: 1, assetId: 1, storagePath: 1, downloadUrl: 1, url: 1 } }
+      )
+      .toArray();
+
+  const usageMap = new Map();
+  assets.forEach((asset) => {
+    const usedByProjects = [];
+    projects.forEach((project) => {
+      if (!vmssAssetUsageMatches(project, asset)) return;
+      usedByProjects.push({
+        projectId: String(project?._id || ''),
+        title: String(project?.title || 'Untitled Project'),
+      });
+    });
+
+    usageMap.set(String(asset._id), {
+      usageCount: usedByProjects.length,
+      projects: usedByProjects,
+    });
+  });
+
+  return usageMap;
+}
+
+async function vmssBuildAssetUsageMap(db, playlistId) {
+  const usageDetails = await vmssBuildAssetUsageDetailsMap(db, playlistId);
+  const usageMap = new Map();
+  usageDetails.forEach((detail, key) => {
+    usageMap.set(key, Number(detail?.usageCount) || 0);
+  });
+  return usageMap;
+}
+
+function vmssBuildDeletedAssetMetadata(username = 'unknown') {
+  const deletedAt = new Date();
+  return {
+    deleted: true,
+    deletedAt,
+    deletedBy: String(username || 'unknown'),
+    recycleExpiresAt: new Date(deletedAt.getTime() + VMSS_ASSET_RECYCLE_RETENTION_MS),
+  };
+}
+
+function vmCanPermanentlyDeleteStudioAssets(role = '') {
+  return String(role || '').trim().toLowerCase() === 'admin';
+}
+
+async function vmDeleteFirebaseStoragePathIfExists(storagePath) {
+  const normalizedPath = String(storagePath || '').trim();
+  if (!normalizedPath) return false;
+
+  try {
+    await admin.storage().bucket().file(normalizedPath).delete();
+    return true;
+  } catch (error) {
+    const missingFile = Number(error?.code) === 404 || /no such object/i.test(String(error?.message || ''));
+    if (missingFile) return false;
+    throw error;
+  }
+}
+
+// Works out what deleting a playlist removes. Firebase files are only deleted when nothing OUTSIDE the
+// playlist still references them (other Shotstack playlists, the classic editor's assets/projects, or other
+// projects' deployed videos). Files shared with another playlist are kept.
+async function vmssPlanPlaylistDeletion(db, playlistId) {
+  const projects = await db.collection(VMSS_PROJECTS_COLLECTION)
+    .find({ playlistId }, { projection: { _id: 1, title: 1, deployedVideoStoragePath: 1 } }).toArray();
+  const projectIds = projects.map((project) => project._id);
+  const revisions = projectIds.length
+    ? await db.collection(VMSS_REVISIONS_COLLECTION)
+      .find({ projectId: { $in: projectIds } }, { projection: { _id: 1, deployedVideoStoragePath: 1, 'deployedVideo.storagePath': 1 } }).toArray()
+    : [];
+  const assets = await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId }).toArray();
+
+  const candidates = new Set();
+  const addPath = (value) => { const path = String(value || '').trim(); if (path) candidates.add(path); };
+  assets.forEach((asset) => { addPath(asset.storagePath); addPath(asset.previewStoragePath); addPath(asset.thumbnailStoragePath); });
+  projects.forEach((project) => addPath(project.deployedVideoStoragePath));
+  revisions.forEach((revision) => { addPath(revision.deployedVideoStoragePath); addPath(revision.deployedVideo?.storagePath); });
+
+  // Everything outside this playlist that may still point at the same files.
+  const referencedPaths = new Set();
+  const collectPaths = (doc) => {
+    [doc?.storagePath, doc?.previewStoragePath, doc?.thumbnailStoragePath, doc?.deployedVideoStoragePath, doc?.deployedVideo?.storagePath]
+      .forEach((value) => { const path = String(value || '').trim(); if (path) referencedPaths.add(path); });
+  };
+  const pathFields = { storagePath: 1, previewStoragePath: 1, thumbnailStoragePath: 1 };
+  (await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId: { $ne: playlistId } }, { projection: pathFields }).toArray()).forEach(collectPaths);
+  (await db.collection(VM_ASSETS_COLLECTION).find({}, { projection: pathFields }).toArray()).forEach(collectPaths); // classic editor library
+  const otherProjects = await db.collection(VMSS_PROJECTS_COLLECTION)
+    .find({ playlistId: { $ne: playlistId } }, { projection: { edit: 1, assetSourceMap: 1, deployedVideoStoragePath: 1 } }).toArray();
+  otherProjects.forEach(collectPaths);
+  (await db.collection(VMSS_REVISIONS_COLLECTION)
+    .find({ projectId: { $nin: projectIds } }, { projection: { deployedVideoStoragePath: 1, 'deployedVideo.storagePath': 1 } }).toArray()).forEach(collectPaths);
+  // URLs embedded in other Shotstack projects' timelines and in classic projects' steps.
+  const blobParts = otherProjects.map((project) => JSON.stringify({ e: project.edit, m: project.assetSourceMap }));
+  const classicProjects = await db.collection(VM_PROJECTS_COLLECTION).find({}, { projection: { steps: 1 } }).toArray();
+  classicProjects.forEach((project) => blobParts.push(JSON.stringify(project.steps || [])));
+  const blob = blobParts.join('\n');
+
+  const filesToDelete = [];
+  const filesKept = [];
+  for (const path of candidates) {
+    const used = referencedPaths.has(path) || blob.includes(path) || blob.includes(encodeURIComponent(path));
+    (used ? filesKept : filesToDelete).push(path);
+  }
+
+  return { projects, projectIds, assets, filesToDelete, filesKept };
+}
+
+async function vmssPermanentlyDeleteAssetDocument(db, asset, { deletedBy = 'admin' } = {}) {
+  const storagePaths = [
+    asset?.storagePath,
+    asset?.previewStoragePath,
+    asset?.thumbnailStoragePath,
+  ].map((path) => String(path || '').trim()).filter(Boolean);
+
+  for (const storagePath of storagePaths) {
+    // Assets copied to another playlist share the same Firebase file; only delete it when nothing else uses it.
+    const stillReferenced = await db.collection(VMSS_ASSETS_COLLECTION).findOne({
+      _id: { $ne: asset._id },
+      $or: [{ storagePath }, { previewStoragePath: storagePath }, { thumbnailStoragePath: storagePath }],
+    });
+    if (stillReferenced) continue;
+    await vmDeleteFirebaseStoragePathIfExists(storagePath);
+  }
+
+  await db.collection(VMSS_ASSETS_COLLECTION).deleteOne({ _id: asset._id });
+  return {
+    assetId: String(asset?.assetId || asset?._id || ''),
+    name: String(asset?.name || ''),
+    deletedBy,
+  };
+}
+
+async function vmssCleanupExpiredRecycledAssets() {
+  if (vmssAssetCleanupPromise) return vmssAssetCleanupPromise;
+
+  vmssAssetCleanupPromise = (async () => {
+    const db = client.db(VM_DB);
+    const now = new Date();
+    const expiredAssets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({ deleted: true, recycleExpiresAt: { $lte: now } })
+      .toArray();
+
+    let deletedCount = 0;
+    for (const asset of expiredAssets) {
+      try {
+        await vmssPermanentlyDeleteAssetDocument(db, asset, { deletedBy: 'retention' });
+        deletedCount += 1;
+      } catch (error) {
+        console.warn('⚠️ vmss asset retention delete failed:', {
+          assetId: String(asset?.assetId || asset?._id || ''),
+          message: error?.message || String(error),
+        });
+      }
+    }
+
+    return {
+      scanned: expiredAssets.length,
+      deleted: deletedCount,
+    };
+  })();
+
+  try {
+    return await vmssAssetCleanupPromise;
+  } finally {
+    vmssAssetCleanupPromise = null;
+  }
+}
+
+function vmssBuildDeployedVideoMetadata(input = {}) {
+  const url = String(input.url || input.deployedVideoUrl || '').trim();
+  const inferredPath = vmExtractStoragePath(url);
+  const storagePath = String(input.storagePath || input.deployedVideoStoragePath || '').trim() || inferredPath || null;
+  if (!url && !storagePath) return null;
+
+  return {
+    url: url || null,
+    storagePath,
+    mimeType: String(input.mimeType || input.deployedVideoMimeType || '').trim() || 'video/mp4',
+    fileName: String(input.fileName || input.deployedVideoFileName || '').trim() || (storagePath ? storagePath.split('/').pop() : null),
+  };
+}
+
+async function vmssResolveReusableDeployedVideo(revision) {
+  const metadata = vmssBuildDeployedVideoMetadata(revision || {});
+  if (!metadata?.storagePath) return null;
+  if (!await vmStorageObjectExists(metadata.storagePath)) return null;
+  return metadata;
+}
+
+async function vmssApplyDeployedRevision(db, projectId, revision, username, deployedVideoMetadata) {
+  const deployedVideoUrl = String(deployedVideoMetadata.url || '').trim();
+  if (!deployedVideoUrl) {
+    throw new Error('deployedVideo.url is required');
+  }
+
+  const deployedVideoStoragePath = String(deployedVideoMetadata.storagePath || '').trim() || null;
+  const deployedVideoMimeType = String(deployedVideoMetadata.mimeType || '').trim() || 'video/mp4';
+  const deployedVideoFileName = String(deployedVideoMetadata.fileName || '').trim() || null;
+  const deployedAt = new Date();
+
+  await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+    { _id: projectId },
+    {
+      $set: {
+        deployedRevisionId: revision._id,
+        deployedRevisionNumber: revision.revisionNumber || null,
+        deployedRevisionName: revision.revisionName || null,
+        deployedAt,
+        deployedBy: username,
+        deployedVideoUrl,
+        deployedVideoStoragePath,
+        deployedVideoMimeType,
+        deployedVideoFileName,
+        updatedAt: deployedAt,
+      }
+    }
+  );
+
+  await db.collection(VMSS_REVISIONS_COLLECTION).updateOne(
+    { _id: revision._id },
+    {
+      $set: {
+        deployedAt,
+        deployedBy: username,
+        deployedVideoUrl,
+        deployedVideoStoragePath,
+        deployedVideoMimeType,
+        deployedVideoFileName,
+      }
+    }
+  );
+
+  return {
+    deployed: true,
+    projectId,
+    revisionId: revision._id,
+    revisionNumber: revision.revisionNumber || null,
+    revisionName: revision.revisionName || null,
+    deployedAt,
+    deployedBy: username,
+    deployedVideoUrl,
+    deployedVideoStoragePath,
+    deployedVideoMimeType,
+    deployedVideoFileName,
+  };
+}
+
+async function vmssPurgeProject(db, project) {
+  if (!project?._id) return;
+  const projectId = project._id;
+  await db.collection(VMSS_REVISIONS_COLLECTION).deleteMany({ projectId });
+  await db.collection(VMSS_PROJECTS_COLLECTION).deleteOne({ _id: projectId });
+}
+
+async function vmssAutoPurgeExpiredProjects(db) {
+  const cutoff = new Date(Date.now() - VMSS_PROJECT_TRASH_TTL_MS);
+  const expired = await db.collection(VMSS_PROJECTS_COLLECTION)
+    .find({ deleted: true, deletedAt: { $lte: cutoff } })
+    .toArray();
+
+  for (const project of expired) {
+    try {
+      await vmssPurgeProject(db, project);
+    } catch (error) {
+      console.error('❌ vmss auto purge project error:', error);
+    }
+  }
+}
+
 // ── Playlists ────────────────────────────────────────────────────────────────
+
+// ==================== VIDEO MANUAL SHOTSTACK API ====================
+
+app.get('/api/video-manuals-studio/playlists', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const all = await db.collection(VMSS_PLAYLISTS_COLLECTION).find({}, {
+      projection: {
+        name: 1, description: 1, model: 1, privacy: 1, access: 1,
+        createdBy: 1, createdAt: 1, updatedAt: 1,
+      }
+    }).sort({ updatedAt: -1 }).toArray();
+
+    const visible = all.filter((playlist) => vmCanView(playlist, username, role));
+    const visibleIds = visible.map((playlist) => playlist._id).filter(Boolean);
+    const projectCounts = visibleIds.length
+      ? await db.collection(VMSS_PROJECTS_COLLECTION).aggregate([
+          { $match: { playlistId: { $in: visibleIds }, deleted: { $ne: true } } },
+          { $group: { _id: '$playlistId', projectCount: { $sum: 1 } } },
+        ]).toArray()
+      : [];
+    const projectCountMap = new Map(projectCounts.map((entry) => [String(entry._id), entry.projectCount || 0]));
+
+    res.json(visible.map((playlist) => ({
+      ...playlist,
+      projectCount: projectCountMap.get(String(playlist._id)) || 0,
+    })));
+  } catch (err) {
+    console.error('❌ video-manuals-studio playlists list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/playlists', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!VM_MANAGE_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Insufficient role to create playlists' });
+    }
+
+    const { name, description = '', privacy = 'internal', access = {}, model = null } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    const now = new Date();
+    const doc = {
+      name: String(name).trim(),
+      description: String(description).trim(),
+      model: model ? String(model).trim() : null,
+      privacy,
+      access: {
+        editRoles: Array.isArray(access.editRoles) ? access.editRoles : ['admin', '課長', '部長', '係長'],
+        editUsers: Array.isArray(access.editUsers) ? access.editUsers : [],
+        viewRoles: Array.isArray(access.viewRoles) ? access.viewRoles : [],
+        viewUsers: Array.isArray(access.viewUsers) ? access.viewUsers : [],
+      },
+      createdBy: username,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const result = await client.db(VM_DB).collection(VMSS_PLAYLISTS_COLLECTION).insertOne(doc);
+    res.json({ insertedId: result.insertedId, ...doc });
+  } catch (err) {
+    console.error('❌ video-manuals-studio playlists create error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/video-manuals-studio/playlists/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const updates = {};
+    if (req.body?.name !== undefined) {
+      const name = String(req.body.name || '').trim();
+      if (!name) return res.status(400).json({ error: 'name is required' });
+      updates.name = name;
+    }
+    if (req.body?.description !== undefined) {
+      updates.description = String(req.body.description || '').trim();
+    }
+    if (req.body?.model !== undefined) {
+      const model = String(req.body.model || '').trim();
+      updates.model = model || null;
+    }
+    if (req.body?.privacy !== undefined && VM_MANAGE_ROLES.has(role)) {
+      const nextPrivacy = String(req.body.privacy || '').trim() || 'internal';
+      if (!['internal', 'private', 'public'].includes(nextPrivacy)) {
+        return res.status(400).json({ error: 'privacy must be internal, private, or public' });
+      }
+      updates.privacy = nextPrivacy;
+    }
+
+    updates.updatedAt = new Date();
+    await db.collection(VMSS_PLAYLISTS_COLLECTION).updateOne({ _id: playlistId }, { $set: updates });
+    res.json({ updated: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio playlist patch error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/playlists/:id/delete-preview', async (req, res) => {
+  try {
+    const { role } = vmGetRequester(req);
+    if (role !== 'admin') return res.status(403).json({ error: 'Only admin can delete playlists.' });
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: 'Invalid playlist id' });
+
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+
+    const plan = await vmssPlanPlaylistDeletion(db, playlistId);
+    res.json({
+      projectCount: plan.projects.length,
+      assetCount: plan.assets.length,
+      filesToDelete: plan.filesToDelete.length,
+      filesKept: plan.filesKept.length,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio playlist delete-preview error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/video-manuals-studio/playlists/:id', async (req, res) => {
+  try {
+    const { role } = vmGetRequester(req);
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only admin can delete playlists.' });
+    }
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: 'Invalid playlist id' });
+
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+
+    const plan = await vmssPlanPlaylistDeletion(db, playlistId);
+
+    // Database first; Firebase files afterwards (best effort) so a storage hiccup never leaves dangling records.
+    if (plan.projectIds.length) {
+      await db.collection(VMSS_REVISIONS_COLLECTION).deleteMany({ projectId: { $in: plan.projectIds } });
+      await db.collection(VMSS_PROJECTS_COLLECTION).deleteMany({ _id: { $in: plan.projectIds } });
+    }
+    await db.collection(VMSS_ASSETS_COLLECTION).deleteMany({ playlistId });
+    await db.collection(VMSS_PLAYLISTS_COLLECTION).deleteOne({ _id: playlistId });
+
+    let filesDeleted = 0;
+    let filesFailed = 0;
+    for (const storagePath of plan.filesToDelete) {
+      try {
+        if (await vmDeleteFirebaseStoragePathIfExists(storagePath)) filesDeleted += 1;
+      } catch (error) {
+        filesFailed += 1;
+        console.warn('⚠️ playlist delete: failed to delete storage file', storagePath, error?.message || error);
+      }
+    }
+
+    res.json({
+      deleted: true,
+      playlistDeleted: true,
+      projectsDeleted: plan.projectIds.length,
+      assetsDeleted: plan.assets.length,
+      filesDeleted,
+      filesFailed,
+      filesKept: plan.filesKept.length,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio playlist delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    const projects = await db.collection(VMSS_PROJECTS_COLLECTION).find(
+      { playlistId, deleted: { $ne: true } },
+      {
+        projection: {
+          title: 1, description: 1, order: 1, status: 1,
+          currentRevisionNumber: 1, lastRevisionId: 1,
+          createdBy: 1, createdAt: 1, updatedAt: 1,
+          lastEditedBy: 1, lastEditedAt: 1, edit: 1,
+          deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1,
+          deployedAt: 1, deployedBy: 1,
+          deployedVideoUrl: 1, deployedVideoStoragePath: 1, deployedVideoMimeType: 1, deployedVideoFileName: 1,
+          previewRevisionId: 1,
+          previewUrl: 1,
+          previewStoragePath: 1,
+          previewMimeType: 1,
+          previewThumbnailUrl: 1,
+          previewThumbnailStoragePath: 1,
+          previewThumbnailMimeType: 1,
+          previewDurationSeconds: 1,
+          previewStatus: 1,
+          previewError: 1,
+          previewUpdatedAt: 1,
+        }
+      }
+    ).sort({ order: 1, createdAt: 1 }).toArray();
+
+    res.json(projects.map((project) => ({
+      ...project,
+      tracksCount: vmssCountTracks(project),
+    })));
+  } catch (err) {
+    console.error('❌ video-manuals-studio projects list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const { title, description = '' } = req.body || {};
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+
+    const lastProject = await db.collection(VMSS_PROJECTS_COLLECTION)
+      .find({ playlistId })
+      .sort({ order: -1 })
+      .limit(1)
+      .toArray();
+    const order = lastProject.length > 0 ? (lastProject[0].order || 0) + 1 : 0;
+    const now = new Date();
+    const doc = {
+      playlistId,
+      title: String(title).trim(),
+      description: String(description).trim(),
+      order,
+      status: 'draft',
+      schemaVersion: 1,
+      edit: null,
+      assetSourceMap: {},
+      settings: { output: null },
+      currentRevisionNumber: 0,
+      lastRevisionId: null,
+      deployedRevisionId: null,
+      deployedRevisionNumber: null,
+      deployedRevisionName: null,
+      deployedAt: null,
+      deployedBy: null,
+      deployedVideoUrl: null,
+      deployedVideoStoragePath: null,
+      deployedVideoMimeType: null,
+      deployedVideoFileName: null,
+      previewRevisionId: null,
+      previewUrl: null,
+      previewStoragePath: null,
+      previewMimeType: null,
+      previewThumbnailUrl: null,
+      previewThumbnailStoragePath: null,
+      previewThumbnailMimeType: null,
+      previewDurationSeconds: VMSS_PROJECT_PREVIEW_DURATION_SECONDS,
+      previewStatus: 'idle',
+      previewError: null,
+      previewUpdatedAt: null,
+      createdBy: username,
+      createdAt: now,
+      updatedAt: now,
+      lastEditedAt: now,
+      lastEditedBy: username,
+    };
+
+    const result = await db.collection(VMSS_PROJECTS_COLLECTION).insertOne(doc);
+    res.json({ insertedId: result.insertedId, ...doc });
+  } catch (err) {
+    console.error('❌ video-manuals-studio projects create error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/projects/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: new ObjectId(req.params.id) });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this project' });
+    }
+
+    res.json(project);
+  } catch (err) {
+    console.error('❌ video-manuals-studio project get error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/video-manuals-studio/projects/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    const allowed = ['title', 'description', 'status', 'edit', 'assetSourceMap', 'settings', 'schemaVersion', 'order'];
+    const now = new Date();
+    const updates = {
+      updatedAt: now,
+      lastEditedAt: now,
+      lastEditedBy: username,
+    };
+    allowed.forEach((key) => {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    });
+
+    await db.collection(VMSS_PROJECTS_COLLECTION).updateOne({ _id: projectId }, { $set: updates });
+    const updated = await db.collection(VMSS_PROJECTS_COLLECTION).findOne(
+      { _id: projectId },
+      { projection: { currentRevisionNumber: 1, lastRevisionId: 1, updatedAt: 1, lastEditedAt: 1 } }
+    );
+
+    res.json({
+      updated: true,
+      currentRevisionNumber: updated?.currentRevisionNumber || 0,
+      lastRevisionId: updated?.lastRevisionId || null,
+      updatedAt: updated?.updatedAt || now,
+      lastEditedAt: updated?.lastEditedAt || now,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project patch error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/video-manuals-studio/projects/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only admin can delete projects.' });
+    }
+
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+      { _id: projectId },
+      { $set: { deleted: true, deletedAt: new Date(), deletedBy: username } }
+    );
+    res.json({ deleted: true, softDelete: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Duplicate a project in its own playlist, or copy it to another playlist.
+// Only the working copy is cloned (no revisions / deployment); referenced assets are shared with the target playlist.
+app.post('/api/video-manuals-studio/projects/:id/duplicate', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const source = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } });
+    if (!source) return res.status(404).json({ error: 'Project not found' });
+
+    const sourcePlaylist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: source.playlistId });
+    if (!sourcePlaylist || !vmCanView(sourcePlaylist, username, role)) {
+      return res.status(403).json({ error: 'No access to this project' });
+    }
+
+    const rawTarget = String(req.body?.targetPlaylistId || '').trim();
+    if (rawTarget && !ObjectId.isValid(rawTarget)) return res.status(400).json({ error: 'Invalid targetPlaylistId' });
+    const targetPlaylistId = rawTarget ? new ObjectId(rawTarget) : source.playlistId;
+    const sameplaylist = String(targetPlaylistId) === String(source.playlistId);
+    const targetPlaylist = sameplaylist
+      ? sourcePlaylist
+      : await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: targetPlaylistId });
+    if (!targetPlaylist) return res.status(404).json({ error: 'Target playlist not found' });
+    if (!vmCanEdit(targetPlaylist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to the target playlist' });
+    }
+
+    const baseTitle = String(source.title || 'Untitled Project');
+    const requestedTitle = String(req.body?.title || '').trim();
+    let title = requestedTitle || (sameplaylist ? `${baseTitle} (copy)` : baseTitle);
+    // Keep titles unique within the target playlist
+    const existingTitles = new Set((await db.collection(VMSS_PROJECTS_COLLECTION)
+      .find({ playlistId: targetPlaylistId, deleted: { $ne: true } }, { projection: { title: 1 } })
+      .toArray()).map((doc) => String(doc.title || '')));
+    if (existingTitles.has(title)) {
+      const stem = title.replace(/ \(copy(?: \d+)?\)$/, '');
+      let n = 1;
+      while (existingTitles.has(n === 1 ? `${stem} (copy)` : `${stem} (copy ${n})`)) n += 1;
+      title = n === 1 ? `${stem} (copy)` : `${stem} (copy ${n})`;
+    }
+
+    // Share referenced assets with the target playlist
+    let copiedAssets = 0;
+    if (!sameplaylist) {
+      const haystack = JSON.stringify({ edit: source.edit, map: source.assetSourceMap });
+      const sourceAssets = await db.collection(VMSS_ASSETS_COLLECTION)
+        .find({ playlistId: source.playlistId, deleted: { $ne: true } })
+        .toArray();
+      for (const asset of sourceAssets) {
+        const id = String(asset.assetId || asset._id);
+        const path = String(asset.storagePath || '');
+        const used = (id.length >= 8 && haystack.includes(id))
+          || (path && (haystack.includes(path) || haystack.includes(encodeURIComponent(path)) || haystack.includes(encodeURIComponent(encodeURIComponent(path)))));
+        if (!used) continue;
+        const already = await db.collection(VMSS_ASSETS_COLLECTION).findOne({
+          playlistId: targetPlaylistId,
+          deleted: { $ne: true },
+          $or: [{ assetId: asset.assetId }, ...(path ? [{ storagePath: path }] : [])],
+        });
+        if (already) continue;
+        const { _id, deleted, deletedAt, deletedBy, recycleExpiresAt, ...assetFields } = asset;
+        await db.collection(VMSS_ASSETS_COLLECTION).insertOne({
+          ...assetFields,
+          playlistId: targetPlaylistId,
+          copiedFromPlaylistId: source.playlistId,
+          copiedBy: username,
+          copiedAt: new Date(),
+        });
+        copiedAssets += 1;
+      }
+    }
+
+    const lastProject = await db.collection(VMSS_PROJECTS_COLLECTION)
+      .find({ playlistId: targetPlaylistId })
+      .sort({ order: -1 })
+      .limit(1)
+      .toArray();
+    const now = new Date();
+    const {
+      _id, playlistId, title: _title, order, createdAt, createdBy, updatedAt, lastEditedAt, lastEditedBy,
+      currentRevisionNumber, lastRevisionId, deployedRevisionId, deployedRevisionNumber, deployedRevisionName,
+      deployedAt, deployedBy, deployedVideoUrl, deployedVideoStoragePath, deployedVideoMimeType, deployedVideoFileName,
+      deleted, deletedAt, deletedBy, ...rest
+    } = source;
+    const doc = {
+      ...rest,
+      playlistId: targetPlaylistId,
+      title,
+      order: lastProject.length > 0 ? (lastProject[0].order || 0) + 1 : 0,
+      status: 'draft',
+      currentRevisionNumber: 0,
+      lastRevisionId: null,
+      deployedRevisionId: null,
+      deployedRevisionNumber: null,
+      deployedRevisionName: null,
+      deployedAt: null,
+      deployedBy: null,
+      deployedVideoUrl: null,
+      deployedVideoStoragePath: null,
+      deployedVideoMimeType: null,
+      deployedVideoFileName: null,
+      createdBy: username,
+      createdAt: now,
+      updatedAt: now,
+      lastEditedAt: now,
+      lastEditedBy: username,
+      copiedFromProjectId: source._id,
+    };
+    const result = await db.collection(VMSS_PROJECTS_COLLECTION).insertOne(doc);
+    res.json({ insertedId: result.insertedId, copiedAssets, ...doc });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project duplicate error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/projects/:id/restore', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+      { _id: projectId },
+      { $unset: { deleted: '', deletedAt: '', deletedBy: '' } }
+    );
+    res.json({ restored: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project restore error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/video-manuals-studio/projects/:id/permanent', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only admin can permanently delete projects.' });
+    }
+
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await vmssPurgeProject(db, project);
+    res.json({ deleted: true, permanent: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project permanent-delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/playlists/:id/trash', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    await vmssAutoPurgeExpiredProjects(db);
+
+    const docs = await db.collection(VMSS_PROJECTS_COLLECTION).find(
+      { playlistId, deleted: true },
+      { projection: { title: 1, deletedAt: 1, deletedBy: 1, currentRevisionNumber: 1, edit: 1 } }
+    ).sort({ deletedAt: -1 }).toArray();
+
+    const now = Date.now();
+    res.json(docs.map((doc) => {
+      const deletedAtMs = doc.deletedAt ? new Date(doc.deletedAt).getTime() : 0;
+      const daysRemaining = deletedAtMs > 0
+        ? Math.max(0, Math.ceil((deletedAtMs + VMSS_PROJECT_TRASH_TTL_MS - now) / 86400000))
+        : 0;
+      return {
+        ...doc,
+        tracksCount: vmssCountTracks(doc),
+        daysRemaining,
+      };
+    }));
+  } catch (err) {
+    console.error('❌ video-manuals-studio trash error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/projects/:id/revisions', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    const snapshot = req.body?.snapshot;
+    if (!snapshot || typeof snapshot !== 'object') {
+      return res.status(400).json({ error: 'snapshot is required' });
+    }
+
+    const now = new Date();
+    const revisionNumber = (project.currentRevisionNumber || 0) + 1;
+    const revisionName = String(req.body?.revisionName || '').trim() || `Revision ${String(revisionNumber).padStart(2, '0')}`;
+    const shouldGeneratePreview = vmShotstackEnabled();
+    const revisionDoc = {
+      projectId,
+      playlistId: project.playlistId,
+      revisionName,
+      revisionNumber,
+      snapshot,
+      createdAt: now,
+      createdBy: username,
+      previewUrl: null,
+      previewStoragePath: null,
+      previewMimeType: null,
+      previewThumbnailUrl: null,
+      previewThumbnailStoragePath: null,
+      previewThumbnailMimeType: null,
+      previewDurationSeconds: VMSS_PROJECT_PREVIEW_DURATION_SECONDS,
+      previewStatus: shouldGeneratePreview ? 'processing' : 'unavailable',
+      previewError: shouldGeneratePreview ? null : 'Shotstack is not configured on the server',
+      previewUpdatedAt: now,
+      previewRenderId: null,
+    };
+
+    const insertResult = await db.collection(VMSS_REVISIONS_COLLECTION).insertOne(revisionDoc);
+    const revisionId = insertResult.insertedId;
+    await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+      { _id: projectId },
+      {
+        $set: {
+          currentRevisionNumber: revisionNumber,
+          lastRevisionId: revisionId,
+          updatedAt: now,
+          previewRevisionId: revisionId,
+          previewUrl: null,
+          previewStoragePath: null,
+          previewMimeType: null,
+          previewThumbnailUrl: null,
+          previewThumbnailStoragePath: null,
+          previewThumbnailMimeType: null,
+          previewDurationSeconds: VMSS_PROJECT_PREVIEW_DURATION_SECONDS,
+          previewStatus: shouldGeneratePreview ? 'processing' : 'unavailable',
+          previewError: shouldGeneratePreview ? null : 'Shotstack is not configured on the server',
+          previewUpdatedAt: now,
+        }
+      }
+    );
+
+    if (shouldGeneratePreview) {
+      vmssQueueProjectRevisionPreviewProcessing({
+        projectId,
+        revisionId,
+      });
+    }
+
+    res.json({ revisionId, revisionNumber, revisionName });
+  } catch (err) {
+    console.error('❌ video-manuals-studio revision save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/projects/:id/revisions', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access' });
+    }
+
+    const docs = await db.collection(VMSS_REVISIONS_COLLECTION).find(
+      { projectId },
+      {
+        projection: {
+          projectId: 1,
+          playlistId: 1,
+          revisionName: 1,
+          revisionNumber: 1,
+          createdAt: 1,
+          createdBy: 1,
+          previewUrl: 1,
+          previewThumbnailUrl: 1,
+          previewDurationSeconds: 1,
+          previewStatus: 1,
+          previewError: 1,
+          previewUpdatedAt: 1,
+        }
+      }
+    ).sort({ revisionNumber: -1 }).toArray();
+
+    res.json(docs.map((doc) => ({
+      ...doc,
+      isDeployed: String(doc._id) === String(project.deployedRevisionId || ''),
+    })));
+  } catch (err) {
+    console.error('❌ video-manuals-studio revisions list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/revisions/:id', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const revision = await db.collection(VMSS_REVISIONS_COLLECTION).findOne({ _id: new ObjectId(req.params.id) });
+    if (!revision) return res.status(404).json({ error: 'Revision not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: revision.playlistId });
+    if (!playlist || !vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this revision' });
+    }
+
+    res.json(revision);
+  } catch (err) {
+    console.error('❌ video-manuals-studio revision get error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/projects/:id/deploy', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!VM_DEPLOY_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Insufficient role to deploy projects' });
+    }
+
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    const rawRevisionId = String(req.body?.revisionId || '').trim();
+    if (!rawRevisionId) {
+      return res.status(400).json({ error: 'revisionId is required' });
+    }
+
+    let revisionId;
+    try {
+      revisionId = new ObjectId(rawRevisionId);
+    } catch (_) {
+      return res.status(400).json({ error: 'Invalid revisionId' });
+    }
+
+    const revision = await db.collection(VMSS_REVISIONS_COLLECTION).findOne({ _id: revisionId, projectId });
+    if (!revision) {
+      return res.status(404).json({ error: 'Revision not found for this project' });
+    }
+
+    const requestedReuse = req.body?.reuseExistingDeployment === true;
+    const allowMissingReusableDeployment = req.body?.allowMissingReusableDeployment === true;
+    let deployedVideoMetadata = null;
+
+    if (req.body?.deployedVideo && typeof req.body.deployedVideo === 'object') {
+      deployedVideoMetadata = vmssBuildDeployedVideoMetadata(req.body.deployedVideo);
+    }
+
+    if (!deployedVideoMetadata && requestedReuse) {
+      deployedVideoMetadata = await vmssResolveReusableDeployedVideo(revision);
+      if (!deployedVideoMetadata) {
+        if (allowMissingReusableDeployment) {
+          return res.json({
+            reusableDeploymentAvailable: false,
+            needsRender: true,
+            revisionId: String(revision._id || ''),
+            projectId: String(projectId),
+          });
+        }
+        return res.status(409).json({
+          error: 'Reusable deployed video not available',
+          code: 'DEPLOYED_VIDEO_REUSE_MISSING',
+        });
+      }
+    }
+
+    if (!deployedVideoMetadata) {
+      return res.status(400).json({ error: 'deployedVideo is required' });
+    }
+
+    const result = await vmssApplyDeployedRevision(db, projectId, revision, username, deployedVideoMetadata);
+    res.json({
+      ...result,
+      reusedExistingVideo: requestedReuse && !req.body?.deployedVideo,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio deploy error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/projects/:id/undeploy', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!VM_DEPLOY_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Insufficient role to undeploy projects' });
+    }
+
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+      { _id: projectId },
+      {
+        $set: { updatedAt: new Date() },
+        $unset: {
+          deployedRevisionId: '',
+          deployedRevisionNumber: '',
+          deployedRevisionName: '',
+          deployedAt: '',
+          deployedBy: '',
+          deployedVideoUrl: '',
+          deployedVideoStoragePath: '',
+          deployedVideoMimeType: '',
+          deployedVideoFileName: '',
+        },
+      }
+    );
+
+    void vmCleanupExpiredDeployedVideos().catch((cleanupErr) => {
+      console.warn('[VMSS Deployments] Post-undeploy cleanup check failed:', cleanupErr.message);
+    });
+
+    res.json({ undeployed: true, projectId, undeployedBy: username });
+  } catch (err) {
+    console.error('❌ video-manuals-studio undeploy error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/projects/:id/deploy-render', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!VM_DEPLOY_ROLES.has(role)) {
+      return res.status(403).json({ error: 'Insufficient role to deploy projects' });
+    }
+    if (!vmShotstackEnabled()) {
+      return res.status(503).json({ error: 'Shotstack is not configured on the server' });
+    }
+
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this project' });
+    }
+
+    const rawRevisionId = String(req.body?.revisionId || '').trim();
+    const renderId = String(req.body?.renderId || '').trim();
+    if (!rawRevisionId) return res.status(400).json({ error: 'revisionId is required' });
+    if (!renderId) return res.status(400).json({ error: 'renderId is required' });
+
+    let revisionId;
+    try {
+      revisionId = new ObjectId(rawRevisionId);
+    } catch (_) {
+      return res.status(400).json({ error: 'Invalid revisionId' });
+    }
+
+    const revision = await db.collection(VMSS_REVISIONS_COLLECTION).findOne({ _id: revisionId, projectId });
+    if (!revision?.snapshot?.edit) {
+      return res.status(404).json({ error: 'Revision not found for this project' });
+    }
+
+    const render = await vmShotstackGetRender(renderId);
+    const status = String(render?.status || '').toLowerCase();
+    if (status !== 'done' || !render?.url) {
+      return res.status(409).json({
+        error: 'Render is not ready for deployment upload',
+        status,
+      });
+    }
+
+    const downloadResponse = await fetch(render.url, { method: 'GET' });
+    if (!downloadResponse.ok) {
+      throw new Error(`Failed to download Shotstack render (${downloadResponse.status})`);
+    }
+
+    const arrayBuffer = await downloadResponse.arrayBuffer();
+    const safeTitle = vmNormalizeFileName(`${project?.title || 'video-manual'}-rev-${revision?.revisionNumber || 'deploy'}.mp4`);
+    const upload = await vmUploadVideoBuffer(Buffer.from(arrayBuffer), {
+      fileName: safeTitle,
+      mimeType: 'video/mp4',
+      uploadFolder: 'videoManualDeployed',
+    });
+
+    const result = await vmssApplyDeployedRevision(db, projectId, revision, username, upload);
+    res.json({
+      ...result,
+      renderId,
+      uploadedAt: upload.uploadedAt,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio deploy-render error:', err);
+    res.status(Number(err?.status) || 500).json({ error: err?.message || 'Failed to deploy rendered revision' });
+  }
+});
+
+app.post('/api/video-manuals-studio/projects/:id/deploy-upload',
+  express.raw({ type: '*/*', limit: '500mb' }),
+  async (req, res) => {
+    try {
+      const { username, role } = vmGetRequester(req);
+      if (!VM_DEPLOY_ROLES.has(role)) {
+        return res.status(403).json({ error: 'Insufficient role to deploy projects' });
+      }
+
+      const db = client.db(VM_DB);
+      const projectId = new ObjectId(req.params.id);
+      const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } });
+      if (!project) return res.status(404).json({ error: 'Project not found' });
+
+      const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+      if (!playlist || !vmCanEdit(playlist, username, role)) {
+        return res.status(403).json({ error: 'No edit access to this project' });
+      }
+
+      const rawRevisionId = String(req.headers['x-revision-id'] || '').trim();
+      if (!rawRevisionId) return res.status(400).json({ error: 'x-revision-id is required' });
+
+      let revisionId;
+      try {
+        revisionId = new ObjectId(rawRevisionId);
+      } catch (_) {
+        return res.status(400).json({ error: 'Invalid revisionId' });
+      }
+
+      const revision = await db.collection(VMSS_REVISIONS_COLLECTION).findOne({ _id: revisionId, projectId });
+      if (!revision?.snapshot?.edit) {
+        return res.status(404).json({ error: 'Revision not found for this project' });
+      }
+
+      const buffer = req.body;
+      if (!Buffer.isBuffer(buffer) || !buffer.length) {
+        return res.status(400).json({ error: 'No video data received' });
+      }
+
+      const requestedFileName = String(req.headers['x-file-name'] || '').trim();
+      const mimeType = String(req.headers['content-type'] || '').trim() || 'video/mp4';
+      const safeTitle = requestedFileName
+        || vmNormalizeFileName(`${project?.title || 'video-manual'}-rev-${revision?.revisionNumber || 'deploy'}.mp4`);
+      const upload = await vmUploadVideoBuffer(buffer, {
+        fileName: safeTitle,
+        mimeType,
+        uploadFolder: 'videoManualDeployed',
+      });
+
+      const result = await vmssApplyDeployedRevision(db, projectId, revision, username, upload);
+      res.json({
+        ...result,
+        provider: 'browser-export',
+        uploadedAt: upload.uploadedAt,
+      });
+    } catch (err) {
+      console.error('❌ video-manuals-studio deploy-upload error:', err);
+      res.status(Number(err?.status) || 500).json({ error: err?.message || 'Failed to deploy uploaded revision' });
+    }
+  }
+);
+
+app.get('/api/video-manuals-studio/playlists/:id/assets', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({ playlistId, deleted: { $ne: true } })
+      .sort({ uploadedAt: -1 })
+      .toArray();
+    const usageMap = await vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs: assets });
+
+    res.json(assets.map((asset) => vmssBuildAssetUsagePayload(asset, usageMap.get(String(asset._id)))));
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets list error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/playlists/:id/assets/delete-preview', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const rawAssetIds = Array.isArray(req.body?.assetIds) ? req.body.assetIds : [];
+    const normalizedAssetIds = Array.from(new Set(rawAssetIds.map((id) => String(id || '').trim()).filter(Boolean)));
+    if (!normalizedAssetIds.length) {
+      return res.status(400).json({ error: 'assetIds is required' });
+    }
+
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({
+        playlistId,
+        deleted: { $ne: true },
+        $or: [
+          { assetId: { $in: normalizedAssetIds } },
+          { _id: { $in: normalizedAssetIds.filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id)) } },
+        ],
+      })
+      .toArray();
+
+    const foundAssetIdSet = new Set();
+    assets.forEach((asset) => {
+      foundAssetIdSet.add(String(asset.assetId || ''));
+      foundAssetIdSet.add(String(asset._id || ''));
+    });
+
+    const usageMap = await vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs: assets });
+    const previewAssets = assets.map((asset) => vmssBuildAssetUsagePayload(asset, usageMap.get(String(asset._id))));
+
+    res.json({
+      assets: previewAssets,
+      notFoundAssetIds: normalizedAssetIds.filter((assetId) => !foundAssetIdSet.has(assetId)),
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets delete-preview error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/playlists/:id/assets/soft-delete', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const rawAssetIds = Array.isArray(req.body?.assetIds) ? req.body.assetIds : [];
+    const normalizedAssetIds = Array.from(new Set(rawAssetIds.map((id) => String(id || '').trim()).filter(Boolean)));
+    if (!normalizedAssetIds.length) {
+      return res.status(400).json({ error: 'assetIds is required' });
+    }
+
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({
+        playlistId,
+        deleted: { $ne: true },
+        $or: [
+          { assetId: { $in: normalizedAssetIds } },
+          { _id: { $in: normalizedAssetIds.filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id)) } },
+        ],
+      })
+      .toArray();
+
+    if (!assets.length) {
+      return res.status(404).json({ error: 'No matching assets found for this playlist' });
+    }
+
+    const usageMap = await vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs: assets });
+    const deletedMetadata = vmssBuildDeletedAssetMetadata(username);
+
+    await db.collection(VMSS_ASSETS_COLLECTION).updateMany(
+      { _id: { $in: assets.map((asset) => asset._id) } },
+      {
+        $set: {
+          ...deletedMetadata,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    res.json({
+      deleted: true,
+      deletedCount: assets.length,
+      assets: assets.map((asset) => ({
+        ...vmssBuildAssetUsagePayload(asset, usageMap.get(String(asset._id))),
+        ...deletedMetadata,
+      })),
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets soft-delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/video-manuals-studio/playlists/:id/assets/recycle-bin', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No view access to this playlist' });
+    }
+
+    await vmssCleanupExpiredRecycledAssets();
+
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({ playlistId, deleted: true })
+      .sort({ deletedAt: -1 })
+      .toArray();
+    const usageMap = await vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs: assets });
+    const now = Date.now();
+
+    res.json(assets.map((asset) => {
+      const expiresAt = asset?.recycleExpiresAt ? new Date(asset.recycleExpiresAt).getTime() : 0;
+      const daysRemaining = expiresAt > 0 ? Math.max(0, Math.ceil((expiresAt - now) / 86400000)) : 0;
+      return {
+        ...vmssBuildAssetUsagePayload(asset, usageMap.get(String(asset._id))),
+        daysRemaining,
+      };
+    }));
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets recycle-bin error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/playlists/:id/assets/restore', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanEdit(playlist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to this playlist' });
+    }
+
+    const rawAssetIds = Array.isArray(req.body?.assetIds) ? req.body.assetIds : [];
+    const normalizedAssetIds = Array.from(new Set(rawAssetIds.map((id) => String(id || '').trim()).filter(Boolean)));
+    if (!normalizedAssetIds.length) {
+      return res.status(400).json({ error: 'assetIds is required' });
+    }
+
+    const result = await db.collection(VMSS_ASSETS_COLLECTION).updateMany(
+      {
+        playlistId,
+        deleted: true,
+        $or: [
+          { assetId: { $in: normalizedAssetIds } },
+          { _id: { $in: normalizedAssetIds.filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id)) } },
+        ],
+      },
+      {
+        $set: { updatedAt: new Date(), restoredAt: new Date(), restoredBy: String(username || 'unknown') },
+        $unset: {
+          deleted: '',
+          deletedAt: '',
+          deletedBy: '',
+          recycleExpiresAt: '',
+        },
+      }
+    );
+
+    res.json({ restored: true, restoredCount: result.modifiedCount || 0 });
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets restore error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/video-manuals-studio/playlists/:id/assets/permanent', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!vmCanPermanentlyDeleteStudioAssets(role)) {
+      return res.status(403).json({ error: 'Only admin can permanently delete playlist assets.' });
+    }
+
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) {
+      return res.status(403).json({ error: 'No access to this playlist' });
+    }
+
+    const rawAssetIds = Array.isArray(req.body?.assetIds) ? req.body.assetIds : [];
+    const normalizedAssetIds = Array.from(new Set(rawAssetIds.map((id) => String(id || '').trim()).filter(Boolean)));
+    if (!normalizedAssetIds.length) {
+      return res.status(400).json({ error: 'assetIds is required' });
+    }
+
+    const assets = await db.collection(VMSS_ASSETS_COLLECTION)
+      .find({
+        playlistId,
+        deleted: true,
+        $or: [
+          { assetId: { $in: normalizedAssetIds } },
+          { _id: { $in: normalizedAssetIds.filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id)) } },
+        ],
+      })
+      .toArray();
+
+    if (!assets.length) {
+      return res.status(404).json({ error: 'No deleted assets found for this playlist' });
+    }
+
+    const deletedAssets = [];
+    for (const asset of assets) {
+      deletedAssets.push(await vmssPermanentlyDeleteAssetDocument(db, asset, { deletedBy: username || 'admin' }));
+    }
+
+    res.json({
+      deleted: true,
+      deletedCount: deletedAssets.length,
+      assets: deletedAssets,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio assets permanent-delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/video-manuals-studio/upload-asset',
+  express.raw({ type: '*/*', limit: '500mb' }),
+  async (req, res) => {
+    try {
+      const { username, role } = vmGetRequester(req);
+      const rawPlaylistId = req.headers['x-playlist-id'];
+      if (!rawPlaylistId) {
+        return res.status(400).json({ error: 'x-playlist-id is required' });
+      }
+
+      const playlistId = new ObjectId(String(rawPlaylistId));
+      const playlist = await client.db(VM_DB).collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+      if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+      if (!vmCanEdit(playlist, username, role)) {
+        return res.status(403).json({ error: 'No edit access to this playlist' });
+      }
+
+      const rawFileName = req.headers['x-file-name'] || `asset_${Date.now()}`;
+      const mimeType = req.headers['content-type'] || 'application/octet-stream';
+      let fileName = vmNormalizeFileName(rawFileName);
+      
+      if (!fileName.includes('.')) {
+        if (mimeType.includes('mp4')) fileName += '.mp4';
+        else if (mimeType.includes('webm')) fileName += '.webm';
+        else if (mimeType.includes('quicktime') || mimeType.includes('mov')) fileName += '.mov';
+        else fileName += '.mp4';
+      }
+
+      const buffer = req.body;
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return res.status(400).json({ error: 'No file data received' });
+      }
+
+      const upload = await vmUploadBuffer(buffer, {
+        fileName,
+        mimeType,
+        uploadFolder: VMSS_ASSET_UPLOAD_FOLDER,
+        tokenPrefix: 'vmss',
+      });
+      const db = client.db(VM_DB);
+      const uploadedAt = new Date(upload.uploadedAt);
+      const assetType = vmInferAssetTypeFromMimeType(mimeType);
+      const shouldProcessVideo = assetType === 'video' && vmShotstackEnabled();
+      const assetDoc = {
+        playlistId,
+        assetId: upload.assetId,
+        name: upload.fileName,
+        type: assetType,
+        mimeType,
+        storagePath: upload.storagePath,
+        downloadUrl: upload.url,
+        size: buffer.length,
+        uploadedBy: username,
+        uploadedAt,
+        previewUrl: null,
+        previewStoragePath: null,
+        previewMimeType: null,
+        previewDurationSeconds: null,
+        thumbnailUrl: null,
+        thumbnailStoragePath: null,
+        thumbnailMimeType: null,
+        processingStatus: shouldProcessVideo ? 'processing' : 'ready',
+        processingError: null,
+        processingStartedAt: shouldProcessVideo ? uploadedAt : null,
+        processingCompletedAt: shouldProcessVideo ? null : uploadedAt,
+        shotstackRenderId: null,
+      };
+
+      const insertResult = await db.collection(VMSS_ASSETS_COLLECTION).insertOne(assetDoc);
+      res.json({
+        assetId: upload.assetId,
+        fileName: upload.fileName,
+        mimeType: upload.mimeType,
+        storagePath: upload.storagePath,
+        uploadedAt: upload.uploadedAt,
+        type: assetType,
+        url: upload.url,
+        previewUrl: null,
+        thumbnailUrl: null,
+        processingStatus: assetDoc.processingStatus,
+        processingError: null,
+        processingStartedAt: assetDoc.processingStartedAt ? assetDoc.processingStartedAt.toISOString() : null,
+        processingCompletedAt: assetDoc.processingCompletedAt ? assetDoc.processingCompletedAt.toISOString() : null,
+      });
+
+      if (shouldProcessVideo) {
+        vmssQueueAssetDerivativeProcessing({ ...assetDoc, _id: insertResult.insertedId });
+      }
+    } catch (err) {
+      console.error('❌ video-manuals-studio upload error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+console.log('🎬 Video Manual Shotstack API routes loaded');
+
+// ==================== END VIDEO MANUAL SHOTSTACK API ====================
 
 
 function vmCanManageDeployedFiles(role) {
@@ -34038,7 +35916,70 @@ function vmCanManageDeployedFiles(role) {
 }
 
 function vmShotstackEnabled() {
-  return !!String(process.env.SHOTSTACK_API_KEY || '').trim();
+  return !!vmShotstackGetApiKey();
+}
+
+function vmShotstackExtractErrorMessages(payload = {}) {
+  const rawErrors = [
+    ...(Array.isArray(payload?.errors) ? payload.errors : []),
+    ...(Array.isArray(payload?.response?.errors) ? payload.response.errors : []),
+  ];
+
+  return rawErrors
+    .map((entry) => String(entry?.detail || entry?.message || entry?.title || entry?.error || '').trim())
+    .filter(Boolean);
+}
+
+function vmShotstackSerializeValue(value, fallback = '') {
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    return normalized || fallback;
+  }
+
+  if (value == null) {
+    return fallback;
+  }
+
+  try {
+    const serialized = JSON.stringify(value);
+    if (!serialized || serialized === '{}' || serialized === '[]') {
+      return fallback;
+    }
+    return serialized;
+  } catch {
+    const normalized = String(value).trim();
+    if (!normalized || normalized === '[object Object]') {
+      return fallback;
+    }
+    return normalized;
+  }
+}
+
+function vmShotstackBuildRenderFailure(response = {}, renderId = '') {
+  const renderStatus = String(response?.status || '').trim().toLowerCase();
+  const details = [
+    ...vmShotstackExtractErrorMessages(response),
+    vmShotstackSerializeValue(response?.error),
+    vmShotstackSerializeValue(response?.message),
+  ].filter(Boolean);
+
+  const context = [
+    renderId ? `renderId=${renderId}` : '',
+    renderStatus ? `status=${renderStatus}` : '',
+  ].filter(Boolean).join(', ');
+
+  const message = details.length
+    ? details.join('; ')
+    : 'No failure details returned by Shotstack';
+
+  const error = new Error(
+    context ? `Shotstack render failed (${context}): ${message}` : `Shotstack render failed: ${message}`,
+  );
+  error.provider = 'shotstack';
+  error.renderId = renderId || undefined;
+  error.renderStatus = renderStatus || undefined;
+  error.shotstackPayload = response;
+  return error;
 }
 
 function vmClampNumber(value, fallback = 0, { min = -Infinity, max = Infinity } = {}) {
@@ -34384,7 +36325,7 @@ function vmShotstackBuildEdit(project, revision) {
 }
 
 async function vmShotstackRequest(method, path, body = null) {
-  const apiKey = String(process.env.SHOTSTACK_API_KEY || '').trim();
+  const apiKey = vmShotstackGetApiKey();
   if (!apiKey) throw new Error('Shotstack is not configured on the server');
 
   const response = await fetch(`${VM_SHOTSTACK_API_BASE}/${VM_SHOTSTACK_STAGE}${path}`, {
@@ -34397,23 +36338,65 @@ async function vmShotstackRequest(method, path, body = null) {
     body: body ? JSON.stringify(body) : undefined,
   });
 
+  const providerRequestId = String(response.headers.get('x-amzn-requestid') || '').trim();
+  const providerTraceId = String(response.headers.get('x-amzn-trace-id') || '').trim();
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const validationDetails = Array.isArray(payload?.errors)
-      ? payload.errors
-          .map((entry) => String(entry?.detail || entry?.title || '').trim())
-          .filter(Boolean)
-      : [];
+    const validationDetails = vmShotstackExtractErrorMessages(payload);
     const message = validationDetails.length
       ? validationDetails.join('; ')
-      : payload?.response?.message || payload?.message || payload?.error || `Shotstack request failed (${response.status})`;
-    throw new Error(message);
+      : payload?.response?.error
+        || payload?.response?.message
+        || payload?.message
+        || payload?.error
+        || response.statusText
+        || `Shotstack request failed (${response.status})`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.provider = 'shotstack';
+    if (providerRequestId) {
+      error.providerRequestId = providerRequestId;
+    }
+    if (providerTraceId) {
+      error.providerTraceId = providerTraceId;
+    }
+    const providerCode = typeof payload?.code === 'string' && payload.code.trim()
+      ? payload.code.trim()
+      : typeof payload?.response?.errors?.[0]?.code === 'string' && payload.response.errors[0].code.trim()
+        ? payload.response.errors[0].code.trim()
+        : '';
+    if (providerCode) {
+      error.code = providerCode;
+    }
+    error.shotstackPayload = payload;
+    throw error;
   }
   return payload;
 }
 
+// Shotstack rejects `opacity` on svg assets ("Unknown property"), but the editor's SVG toolbar writes it there.
+// Move it to the clip level (where Shotstack supports it) before sending.
+function vmShotstackSanitizeEditForRender(edit) {
+  const tracks = edit?.timeline?.tracks;
+  if (!Array.isArray(tracks)) return edit;
+  const sanitized = JSON.parse(JSON.stringify(edit));
+  for (const track of sanitized.timeline.tracks) {
+    for (const clip of Array.isArray(track?.clips) ? track.clips : []) {
+      const asset = clip?.asset;
+      if (!asset || asset.type !== 'svg' || !Object.prototype.hasOwnProperty.call(asset, 'opacity')) continue;
+      const assetOpacity = Number(asset.opacity);
+      delete asset.opacity;
+      if (Number.isFinite(assetOpacity)) {
+        const clipOpacity = typeof clip.opacity === 'number' ? clip.opacity : 1;
+        clip.opacity = Math.max(0, Math.min(1, clipOpacity * assetOpacity));
+      }
+    }
+  }
+  return sanitized;
+}
+
 async function vmShotstackQueueRender(edit) {
-  const payload = await vmShotstackRequest('POST', '/render', edit);
+  const payload = await vmShotstackRequest('POST', '/render', vmShotstackSanitizeEditForRender(edit));
   const renderId = String(payload?.response?.id || '').trim();
   if (!renderId) throw new Error('Shotstack did not return a render id');
   return renderId;
@@ -34426,34 +36409,606 @@ async function vmShotstackGetRender(renderId) {
 
 async function vmShotstackWaitForRender(renderId) {
   const startedAt = Date.now();
+  let lastStatus = '';
   while (Date.now() - startedAt < VM_SHOTSTACK_TIMEOUT_MS) {
     const response = await vmShotstackGetRender(renderId);
     const status = String(response?.status || '').toLowerCase();
+    if (status && status !== lastStatus) {
+      console.log(`🎬 Shotstack render ${renderId} status: ${status}`);
+      lastStatus = status;
+    }
     if (status === 'done' && response?.url) return response;
     if (status === 'failed') {
-      throw new Error(response?.error || 'Shotstack render failed');
+      throw vmShotstackBuildRenderFailure(response, renderId);
     }
     await new Promise((resolve) => setTimeout(resolve, VM_SHOTSTACK_POLL_INTERVAL_MS));
   }
   throw new Error('Timed out waiting for Shotstack render');
 }
 
-async function vmUploadVideoBuffer(buffer, { fileName, mimeType = 'video/mp4', uploadFolder = 'videoManualDeployed' } = {}) {
-  if (!Buffer.isBuffer(buffer) || !buffer.length) {
-    throw new Error('No video buffer provided');
+function vmBuildDerivativeFileStem(fileName = '') {
+  return vmNormalizeFileName(fileName || 'asset').replace(/\.[a-z0-9]{1,8}$/i, '') || `asset_${Date.now()}`;
+}
+
+function vmInferExtensionFromMimeType(mimeType = '', fallback = 'bin') {
+  const normalized = String(mimeType || '').toLowerCase();
+  if (normalized.includes('jpeg')) return 'jpg';
+  if (normalized.includes('png')) return 'png';
+  if (normalized.includes('gif')) return 'gif';
+  if (normalized.includes('webp')) return 'webp';
+  if (normalized.includes('mp4')) return 'mp4';
+  if (normalized.includes('quicktime')) return 'mov';
+  if (normalized.includes('webm')) return 'webm';
+  if (normalized.includes('mpeg')) return 'mp3';
+  return fallback;
+}
+
+function vmssBuildAssetDerivativeEdit(assetDoc, sourceUrlOverride = '') {
+  const sourceUrl = String(sourceUrlOverride || assetDoc?.downloadUrl || assetDoc?.url || '').trim();
+  if (!sourceUrl) throw new Error('Asset has no downloadable source URL');
+
+  const edit = {
+    timeline: {
+      background: '#000000',
+      tracks: [{
+        clips: [{
+          asset: {
+            type: 'video',
+            src: sourceUrl,
+            trim: 0,
+            volume: 0,
+            transcode: true,
+          },
+          start: 0,
+          length: VMSS_ASSET_PREVIEW_DURATION_SECONDS,
+          fit: 'crop',
+          position: 'center',
+        }],
+      }],
+      cache: true,
+    },
+    output: {
+      format: 'mp4',
+      resolution: 'preview',
+      fps: 15,
+      quality: 'low',
+      mute: true,
+      poster: {
+        capture: VMSS_ASSET_THUMBNAIL_CAPTURE_SECONDS,
+      },
+      thumbnail: {
+        capture: VMSS_ASSET_THUMBNAIL_CAPTURE_SECONDS,
+        scale: 1,
+      },
+    },
+    disk: 'local',
+    merge: [],
+  };
+
+  const callbackUrl = String(process.env.SHOTSTACK_CALLBACK_URL || '').trim();
+  if (callbackUrl) {
+    edit.callback = callbackUrl;
   }
 
-  if (!VM_UPLOAD_FOLDERS.has(uploadFolder)) {
+  return edit;
+}
+
+async function vmssResolveShotstackSourceUrl(assetDoc) {
+  const fallbackUrl = String(assetDoc?.downloadUrl || assetDoc?.url || '').trim();
+  const storagePath = String(assetDoc?.storagePath || '').trim();
+  if (!storagePath) return fallbackUrl;
+
+  try {
+    const bucket = admin.storage().bucket();
+    const fileRef = bucket.file(storagePath);
+    const expiresAt = Date.now() + VMSS_SOURCE_SIGNED_URL_TTL_MS;
+    const [signedUrl] = await fileRef.getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: expiresAt,
+    });
+    return String(signedUrl || '').trim() || fallbackUrl;
+  } catch (error) {
+    console.warn('⚠️ Failed to generate signed URL for Shotstack source, using fallback URL:', {
+      assetId: assetDoc?.assetId || null,
+      storagePath,
+      message: error?.message || String(error),
+    });
+    return fallbackUrl;
+  }
+}
+
+function vmssIsRetryableDerivativeError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  if (!message) return false;
+  return message.includes('not a valid media file')
+    || message.includes('unsupported format')
+    || message.includes('failed to download remote media')
+    || message.includes('timed out waiting for shotstack render');
+}
+
+async function vmDownloadBuffer(url) {
+  const response = await fetch(url, { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(`Failed to download remote media (${response.status})`);
+  }
+
+  return {
+    buffer: Buffer.from(await response.arrayBuffer()),
+    mimeType: String(response.headers.get('content-type') || '').trim() || 'application/octet-stream',
+  };
+}
+
+function vmssBuildAssetFilter(assetDoc) {
+  if (assetDoc?._id) return { _id: assetDoc._id };
+  return { assetId: String(assetDoc?.assetId || '') };
+}
+
+function vmssQueueAssetDerivativeProcessing(assetDoc) {
+  if (!assetDoc || assetDoc.type !== 'video' || !vmShotstackEnabled()) return;
+
+  setImmediate(() => {
+    vmssProcessUploadedVideoAsset(assetDoc).catch((error) => {
+      console.error('❌ video-manuals-studio derivative processing error:', {
+        assetId: assetDoc?.assetId || null,
+        renderId: error?.renderId || null,
+        message: error?.message || String(error),
+        shotstackPayload: error?.shotstackPayload || null,
+      });
+      if (error?.stack) {
+        console.error(error.stack);
+      }
+    });
+  });
+}
+
+function vmssDecodeNestedUrl(value, maxDepth = 3) {
+  let nextValue = String(value || '').trim();
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    try {
+      const decoded = decodeURIComponent(nextValue);
+      if (!decoded || decoded === nextValue) break;
+      nextValue = decoded;
+    } catch {
+      break;
+    }
+  }
+  return nextValue;
+}
+
+function vmssResolveProjectPreviewAssetUrl(sourceUrl, assetSourceMap = {}) {
+  const rawSource = String(sourceUrl || '').trim();
+  if (!rawSource) return '';
+
+  const mappedSource = String(assetSourceMap?.[rawSource] || '').trim();
+  if (mappedSource) return mappedSource;
+
+  let parsed = null;
+  try {
+    parsed = new URL(rawSource);
+  } catch {
+    return rawSource;
+  }
+
+  const upstreamFromProxy = parsed.searchParams.get('url');
+  if (upstreamFromProxy) {
+    const decodedUpstream = vmssDecodeNestedUrl(upstreamFromProxy);
+    const mappedUpstream = String(assetSourceMap?.[decodedUpstream] || '').trim();
+    if (mappedUpstream) return mappedUpstream;
+    return decodedUpstream;
+  }
+
+  const mappedParsedUrl = String(assetSourceMap?.[parsed.toString()] || '').trim();
+  if (mappedParsedUrl) return mappedParsedUrl;
+
+  return parsed.toString();
+}
+
+function vmssBuildProjectRevisionPreviewEdit(revision, project = null) {
+  const sourceEdit = revision?.snapshot?.edit;
+  if (!sourceEdit || typeof sourceEdit !== 'object') {
+    throw new Error('Revision snapshot is missing edit data');
+  }
+
+  const snapshotAssetSourceMap = revision?.snapshot?.assetSourceMap;
+  const projectAssetSourceMap = project?.assetSourceMap;
+  const mergedAssetSourceMap = {
+    ...(projectAssetSourceMap && typeof projectAssetSourceMap === 'object' ? projectAssetSourceMap : {}),
+    ...(snapshotAssetSourceMap && typeof snapshotAssetSourceMap === 'object' ? snapshotAssetSourceMap : {}),
+  };
+
+  const clonedEdit = JSON.parse(JSON.stringify(sourceEdit));
+  const tracks = Array.isArray(clonedEdit?.timeline?.tracks) ? clonedEdit.timeline.tracks : [];
+  const unresolvedRestrictedSources = [];
+
+  const trimmedTracks = tracks
+    .map((track) => {
+      const clips = Array.isArray(track?.clips) ? track.clips : [];
+      const trimmedClips = clips
+        .map((clip) => {
+          const nextClip = { ...clip };
+          if (nextClip?.asset?.src && typeof nextClip.asset.src === 'string') {
+            const resolvedSrc = vmssResolveProjectPreviewAssetUrl(nextClip.asset.src, mergedAssetSourceMap);
+            nextClip.asset = {
+              ...nextClip.asset,
+              src: resolvedSrc,
+            };
+
+            try {
+              const srcUrl = new URL(String(resolvedSrc || '').trim());
+              const isLocalhost = srcUrl.hostname === 'localhost'
+                || srcUrl.hostname === '127.0.0.1'
+                || srcUrl.hostname.endsWith('.local');
+              if (isLocalhost) {
+                unresolvedRestrictedSources.push({
+                  source: nextClip.asset.src,
+                  original: clip.asset.src,
+                });
+              }
+            } catch {
+              // Ignore malformed URLs here; Shotstack will validate if required.
+            }
+          }
+
+          const clipStart = vmClampNumber(clip?.start, 0, { min: 0 });
+          const rawLength = Number(clip?.length);
+          const clipLength = Number.isFinite(rawLength) && rawLength > 0
+            ? rawLength
+            : Math.max(0.1, VMSS_PROJECT_PREVIEW_DURATION_SECONDS - clipStart);
+          const clipEnd = clipStart + clipLength;
+          const effectiveEnd = Math.min(clipEnd, VMSS_PROJECT_PREVIEW_DURATION_SECONDS);
+          const effectiveLength = effectiveEnd - clipStart;
+          if (effectiveLength < 0.05) return null;
+
+          return {
+            ...nextClip,
+            start: Number(clipStart.toFixed(3)),
+            length: Number(effectiveLength.toFixed(3)),
+          };
+        })
+        .filter(Boolean);
+
+      if (!trimmedClips.length) return null;
+      return { ...track, clips: trimmedClips };
+    })
+    .filter(Boolean);
+
+  if (!trimmedTracks.length) {
+    throw new Error('Revision has no renderable clips within the first 5 seconds');
+  }
+
+  if (unresolvedRestrictedSources.length) {
+    throw new Error(
+      `Revision contains localhost/proxy asset URLs that Shotstack cannot fetch. First unresolved source: ${unresolvedRestrictedSources[0]?.original || unresolvedRestrictedSources[0]?.source || 'unknown'}`,
+    );
+  }
+
+  const output = {
+    ...(clonedEdit.output || {}),
+    format: 'mp4',
+    resolution: 'preview',
+    fps: 15,
+    quality: 'low',
+    mute: true,
+    poster: {
+      capture: VMSS_PROJECT_THUMBNAIL_CAPTURE_SECONDS,
+    },
+  };
+
+  return {
+    ...clonedEdit,
+    timeline: {
+      ...(clonedEdit.timeline || {}),
+      tracks: trimmedTracks,
+      cache: true,
+    },
+    output,
+    disk: 'local',
+    merge: Array.isArray(clonedEdit.merge) ? clonedEdit.merge : [],
+  };
+}
+
+function vmssQueueProjectRevisionPreviewProcessing({ projectId, revisionId }) {
+  if (!projectId || !revisionId || !vmShotstackEnabled()) return;
+
+  setImmediate(() => {
+    vmssProcessProjectRevisionPreview({ projectId, revisionId }).catch((error) => {
+      console.error('❌ video-manuals-studio project revision preview processing error:', {
+        projectId: String(projectId || ''),
+        revisionId: String(revisionId || ''),
+        renderId: error?.renderId || null,
+        message: error?.message || String(error),
+        shotstackPayload: error?.shotstackPayload || null,
+      });
+      if (error?.stack) {
+        console.error(error.stack);
+      }
+    });
+  });
+}
+
+async function vmssProcessProjectRevisionPreview({ projectId, revisionId }) {
+  const db = client.db(VM_DB);
+  const projectsCollection = db.collection(VMSS_PROJECTS_COLLECTION);
+  const revisionsCollection = db.collection(VMSS_REVISIONS_COLLECTION);
+  const revisionObjectId = new ObjectId(revisionId);
+  const projectObjectId = new ObjectId(projectId);
+
+  const revision = await revisionsCollection.findOne({ _id: revisionObjectId, projectId: projectObjectId });
+  if (!revision) {
+    throw new Error('Revision not found while generating preview');
+  }
+
+  const project = await projectsCollection.findOne({ _id: projectObjectId });
+  if (!project) {
+    throw new Error('Project not found while generating preview');
+  }
+
+  let renderId = null;
+  try {
+    const previewEdit = vmssBuildProjectRevisionPreviewEdit(revision, project);
+    renderId = await vmShotstackQueueRender(previewEdit);
+    await revisionsCollection.updateOne(
+      { _id: revisionObjectId },
+      {
+        $set: {
+          previewStatus: 'processing',
+          previewError: null,
+          previewRenderId: renderId,
+          previewUpdatedAt: new Date(),
+        },
+      },
+    );
+
+    const render = await vmShotstackWaitForRender(renderId);
+    const previewSourceUrl = String(render?.url || '').trim();
+    const thumbnailSourceUrl = String(render?.thumbnail || render?.poster || '').trim();
+    if (!previewSourceUrl) {
+      throw new Error('Shotstack did not return a revision preview URL');
+    }
+
+    const [previewDownload, thumbnailDownload] = await Promise.all([
+      vmDownloadBuffer(previewSourceUrl),
+      thumbnailSourceUrl ? vmDownloadBuffer(thumbnailSourceUrl) : Promise.resolve(null),
+    ]);
+
+    const fileStem = vmBuildDerivativeFileStem(`${project?.title || 'project'}-rev-${revision?.revisionNumber || 'preview'}`);
+    const previewExtension = vmInferExtensionFromMimeType(previewDownload?.mimeType, 'mp4');
+    const thumbnailExtension = vmInferExtensionFromMimeType(thumbnailDownload?.mimeType, 'jpg');
+
+    const [previewUpload, thumbnailUpload] = await Promise.all([
+      vmUploadBuffer(previewDownload.buffer, {
+        fileName: `${fileStem}_preview.${previewExtension}`,
+        mimeType: previewDownload.mimeType || 'video/mp4',
+        uploadFolder: VMSS_PROJECT_PREVIEW_FOLDER,
+        tokenPrefix: 'vmss',
+      }),
+      thumbnailDownload
+        ? vmUploadBuffer(thumbnailDownload.buffer, {
+          fileName: `${fileStem}_thumbnail.${thumbnailExtension}`,
+          mimeType: thumbnailDownload.mimeType || 'image/jpeg',
+          uploadFolder: VMSS_PROJECT_THUMBNAIL_FOLDER,
+          tokenPrefix: 'vmss',
+        })
+        : Promise.resolve(null),
+    ]);
+
+    const previewDurationSeconds = Number.isFinite(Number(render?.duration))
+      ? Number(render.duration)
+      : VMSS_PROJECT_PREVIEW_DURATION_SECONDS;
+    const previewUpdatedAt = new Date();
+
+    await revisionsCollection.updateOne(
+      { _id: revisionObjectId },
+      {
+        $set: {
+          previewUrl: previewUpload.url,
+          previewStoragePath: previewUpload.storagePath,
+          previewMimeType: previewUpload.mimeType,
+          previewThumbnailUrl: thumbnailUpload?.url || null,
+          previewThumbnailStoragePath: thumbnailUpload?.storagePath || null,
+          previewThumbnailMimeType: thumbnailUpload?.mimeType || null,
+          previewDurationSeconds,
+          previewStatus: 'ready',
+          previewError: null,
+          previewUpdatedAt,
+          previewRenderId: renderId,
+        },
+      },
+    );
+
+    await projectsCollection.updateOne(
+      { _id: projectObjectId, lastRevisionId: revisionObjectId },
+      {
+        $set: {
+          previewRevisionId: revisionObjectId,
+          previewUrl: previewUpload.url,
+          previewStoragePath: previewUpload.storagePath,
+          previewMimeType: previewUpload.mimeType,
+          previewThumbnailUrl: thumbnailUpload?.url || null,
+          previewThumbnailStoragePath: thumbnailUpload?.storagePath || null,
+          previewThumbnailMimeType: thumbnailUpload?.mimeType || null,
+          previewDurationSeconds,
+          previewStatus: 'ready',
+          previewError: null,
+          previewUpdatedAt,
+        },
+      },
+    );
+  } catch (error) {
+    const previewUpdatedAt = new Date();
+    await revisionsCollection.updateOne(
+      { _id: revisionObjectId },
+      {
+        $set: {
+          previewStatus: 'failed',
+          previewError: error?.message || 'Failed to generate project preview',
+          previewUpdatedAt,
+          ...(renderId ? { previewRenderId: renderId } : {}),
+        },
+      },
+    ).catch((updateError) => {
+      console.error('❌ video-manuals-studio revision preview failure state update error:', updateError);
+    });
+
+    await projectsCollection.updateOne(
+      { _id: projectObjectId, lastRevisionId: revisionObjectId },
+      {
+        $set: {
+          previewStatus: 'failed',
+          previewError: error?.message || 'Failed to generate project preview',
+          previewUpdatedAt,
+        },
+      },
+    ).catch((updateError) => {
+      console.error('❌ video-manuals-studio project preview failure state update error:', updateError);
+    });
+
+    throw error;
+  }
+}
+
+async function vmssProcessUploadedVideoAsset(assetDoc) {
+  const db = client.db(VM_DB);
+  const assetsCollection = db.collection(VMSS_ASSETS_COLLECTION);
+  const assetFilter = vmssBuildAssetFilter(assetDoc);
+  const assetLabel = assetDoc?.assetId || assetDoc?._id || assetDoc?.name || 'unknown-asset';
+  let renderId = null;
+  let render = null;
+
+  try {
+    let lastAttemptError = null;
+
+    for (let attempt = 1; attempt <= VMSS_DERIVATIVE_MAX_ATTEMPTS; attempt += 1) {
+      const sourceUrl = await vmssResolveShotstackSourceUrl(assetDoc);
+      const derivativeEdit = vmssBuildAssetDerivativeEdit(assetDoc, sourceUrl);
+      console.log(`Sending Derivative Edit to Shotstack (attempt ${attempt}/${VMSS_DERIVATIVE_MAX_ATTEMPTS}):`, JSON.stringify(derivativeEdit, null, 2));
+
+      try {
+        renderId = await vmShotstackQueueRender(derivativeEdit);
+        console.log(`🎬 Shotstack derivative queued for ${assetLabel}: renderId=${renderId} (attempt ${attempt})`);
+        await assetsCollection.updateOne(assetFilter, {
+          $set: {
+            shotstackRenderId: renderId,
+            processingStatus: 'processing',
+            processingStartedAt: new Date(),
+            processingError: null,
+          },
+        });
+
+        render = await vmShotstackWaitForRender(renderId);
+        console.log(`🎬 Shotstack derivative completed for ${assetLabel}: renderId=${renderId}`);
+        break;
+      } catch (attemptError) {
+        lastAttemptError = attemptError;
+        const retryable = vmssIsRetryableDerivativeError(attemptError);
+        const hasMoreAttempts = attempt < VMSS_DERIVATIVE_MAX_ATTEMPTS;
+        if (!retryable || !hasMoreAttempts) {
+          throw attemptError;
+        }
+
+        const delayMs = VMSS_DERIVATIVE_RETRY_DELAY_MS * attempt;
+        console.warn(`⚠️ Retrying Shotstack derivative for ${assetLabel} after attempt ${attempt} failed:`, {
+          renderId,
+          delayMs,
+          message: attemptError?.message || String(attemptError),
+        });
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    if (!render) {
+      throw lastAttemptError || new Error('Shotstack derivative render did not complete');
+    }
+
+    const previewSourceUrl = String(render?.url || '').trim();
+    const thumbnailSourceUrl = String(render?.thumbnail || render?.poster || '').trim();
+    if (!previewSourceUrl) {
+      throw new Error('Shotstack did not return a preview video URL');
+    }
+
+    const [previewDownload, thumbnailDownload] = await Promise.all([
+      vmDownloadBuffer(previewSourceUrl),
+      thumbnailSourceUrl ? vmDownloadBuffer(thumbnailSourceUrl) : Promise.resolve(null),
+    ]);
+
+    const fileStem = vmBuildDerivativeFileStem(assetDoc?.name || assetDoc?.fileName || assetDoc?.assetId || 'asset');
+    const previewExtension = vmInferExtensionFromMimeType(previewDownload?.mimeType, 'mp4');
+    const thumbnailExtension = vmInferExtensionFromMimeType(thumbnailDownload?.mimeType, 'jpg');
+
+    const [previewUpload, thumbnailUpload] = await Promise.all([
+      vmUploadBuffer(previewDownload.buffer, {
+        fileName: `${fileStem}_preview.${previewExtension}`,
+        mimeType: previewDownload.mimeType || 'video/mp4',
+        uploadFolder: VMSS_ASSET_PREVIEW_FOLDER,
+        tokenPrefix: 'vmss',
+      }),
+      thumbnailDownload
+        ? vmUploadBuffer(thumbnailDownload.buffer, {
+          fileName: `${fileStem}_thumbnail.${thumbnailExtension}`,
+          mimeType: thumbnailDownload.mimeType || 'image/jpeg',
+          uploadFolder: VMSS_ASSET_THUMBNAIL_FOLDER,
+          tokenPrefix: 'vmss',
+        })
+        : Promise.resolve(null),
+    ]);
+
+    await assetsCollection.updateOne(assetFilter, {
+      $set: {
+        previewUrl: previewUpload.url,
+        previewStoragePath: previewUpload.storagePath,
+        previewMimeType: previewUpload.mimeType,
+        previewDurationSeconds: Number.isFinite(Number(render?.duration)) ? Number(render.duration) : VMSS_ASSET_PREVIEW_DURATION_SECONDS,
+        thumbnailUrl: thumbnailUpload?.url || null,
+        thumbnailStoragePath: thumbnailUpload?.storagePath || null,
+        thumbnailMimeType: thumbnailUpload?.mimeType || null,
+        processingStatus: 'ready',
+        processingError: null,
+        processingCompletedAt: new Date(),
+        shotstackRenderId: renderId,
+      },
+    });
+    console.log(`✅ Video manual asset derivative ready for ${assetLabel}:`, {
+      previewUrl: previewUpload.url,
+      thumbnailUrl: thumbnailUpload?.url || null,
+    });
+  } catch (error) {
+    console.error(`❌ Shotstack derivative failed for ${assetLabel}:`, {
+      renderId,
+      message: error?.message || String(error),
+      shotstackPayload: error?.shotstackPayload || null,
+    });
+    await assetsCollection.updateOne(assetFilter, {
+      $set: {
+        processingStatus: 'failed',
+        processingError: error?.message || 'Failed to generate preview assets',
+        processingCompletedAt: new Date(),
+        ...(renderId ? { shotstackRenderId: renderId } : {}),
+      },
+    }).catch((updateError) => {
+      console.error('❌ video-manuals-studio derivative failure state update error:', updateError);
+    });
+    throw error;
+  }
+}
+
+async function vmUploadBuffer(buffer, { fileName, mimeType = 'application/octet-stream', uploadFolder = 'videoManuals', tokenPrefix = 'vm' } = {}) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) {
+    throw new Error('No buffer provided');
+  }
+
+  if (!vmIsSupportedUploadFolder(uploadFolder)) {
     throw new Error('Unsupported upload folder');
   }
 
-  const normalizedFileName = vmNormalizeFileName(fileName || `video_${Date.now()}.mp4`);
+  const normalizedFileName = vmNormalizeFileName(fileName || `asset_${Date.now()}`);
   const assetId = new ObjectId().toString();
   const uploadedAt = new Date();
   const storagePath = `${uploadFolder}/${Date.now()}_${assetId}_${normalizedFileName}`;
   const bucket = admin.storage().bucket();
   const fileRef = bucket.file(storagePath);
-  const downloadToken = `vm_${Date.now()}`;
+  const safeTokenPrefix = String(tokenPrefix || 'vm').trim().replace(/[^a-zA-Z0-9_-]+/g, '') || 'vm';
+  const downloadToken = `${safeTokenPrefix}_${Date.now()}`;
 
   await fileRef.save(buffer, {
     metadata: {
@@ -34470,6 +37025,10 @@ async function vmUploadVideoBuffer(buffer, { fileName, mimeType = 'video/mp4', u
     uploadedAt: uploadedAt.toISOString(),
     url: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`,
   };
+}
+
+async function vmUploadVideoBuffer(buffer, { fileName, mimeType = 'video/mp4', uploadFolder = 'videoManualDeployed' } = {}) {
+  return vmUploadBuffer(buffer, { fileName, mimeType, uploadFolder, tokenPrefix: 'vm' });
 }
 
 async function vmShotstackRenderToFirebase(project, revision) {
@@ -34498,6 +37057,103 @@ async function vmShotstackRenderToFirebase(project, revision) {
     shotstackStatus: render?.status || 'done',
   };
 }
+
+// POST /api/video-manuals/render
+// Queues a browser-export render on Shotstack using the sandbox/stage API key from .env.
+app.post('/api/video-manuals/render', async (req, res) => {
+  try {
+    if (!vmShotstackEnabled()) {
+      return res.status(503).json({ error: 'Shotstack is not configured on the server' });
+    }
+
+    const editJson = req.body?.editJson;
+    if (!editJson || typeof editJson !== 'object') {
+      return res.status(400).json({ error: 'editJson is required' });
+    }
+
+    const renderId = await vmShotstackQueueRender(editJson);
+    res.json({
+      renderId,
+      provider: 'shotstack',
+      stage: VM_SHOTSTACK_STAGE,
+      queued: true,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals render queue error:', err);
+    const responsePayload = { error: err?.message || 'Failed to queue render' };
+    if (err?.code) responsePayload.code = err.code;
+    if (err?.provider === 'shotstack') responsePayload.provider = 'shotstack';
+    if (err?.providerRequestId) responsePayload.providerRequestId = err.providerRequestId;
+    if (err?.providerTraceId) responsePayload.providerTraceId = err.providerTraceId;
+    if (err?.shotstackPayload) responsePayload.shotstackPayload = err.shotstackPayload;
+    res.status(Number(err?.status) || 500).json(responsePayload);
+  }
+});
+
+// GET /api/video-manuals/render-status/:id
+// Polls Shotstack for the current render state used by the VM2 export UI.
+app.get('/api/video-manuals/render-status/:id', async (req, res) => {
+  try {
+    if (!vmShotstackEnabled()) {
+      return res.status(503).json({ error: 'Shotstack is not configured on the server' });
+    }
+
+    const renderId = String(req.params.id || '').trim();
+    if (!renderId) {
+      return res.status(400).json({ error: 'render id is required' });
+    }
+
+    const result = await vmShotstackGetRender(renderId);
+    if (!result) {
+      return res.status(404).json({ error: 'Render not found' });
+    }
+
+    res.json({
+      renderId,
+      status: String(result.status || '').toLowerCase() || 'unknown',
+      progress: Number.isFinite(Number(result.progress)) ? Number(result.progress) : null,
+      downloadUrl: result.url || null,
+      message: result.error || result.message || null,
+      stage: VM_SHOTSTACK_STAGE,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals render status error:', err);
+    res.status(Number(err?.status) || 500).json({ error: err?.message || 'Failed to fetch render status' });
+  }
+});
+
+// GET /api/video-manuals/download/:id
+// Redirects the browser to the finished Shotstack output URL once rendering is complete.
+app.get('/api/video-manuals/download/:id', async (req, res) => {
+  try {
+    if (!vmShotstackEnabled()) {
+      return res.status(503).json({ error: 'Shotstack is not configured on the server' });
+    }
+
+    const renderId = String(req.params.id || '').trim();
+    if (!renderId) {
+      return res.status(400).json({ error: 'render id is required' });
+    }
+
+    const result = await vmShotstackGetRender(renderId);
+    if (!result) {
+      return res.status(404).json({ error: 'Render not found' });
+    }
+
+    const status = String(result.status || '').toLowerCase();
+    if (status !== 'done' || !result.url) {
+      return res.status(409).json({
+        error: 'Render is not ready for download',
+        status,
+      });
+    }
+
+    res.redirect(result.url);
+  } catch (err) {
+    console.error('❌ video-manuals download redirect error:', err);
+    res.status(Number(err?.status) || 500).json({ error: err?.message || 'Failed to fetch render download' });
+  }
+});
 // GET /api/video-playlists
 // Returns playlists the requester can view (summary fields only).
 app.get('/api/video-playlists', async (req, res) => {
@@ -34907,7 +37563,7 @@ function vmAddDeployedVideoReference(referenceMap, storagePath, reference) {
 async function vmBuildDeployedVideoInventory() {
   const db = client.db(VM_DB);
   const bucket = admin.storage().bucket();
-  const [projects, revisions, files] = await Promise.all([
+  const [projects, revisions, studioProjects, studioRevisions, files] = await Promise.all([
     db.collection(VM_PROJECTS_COLLECTION).find(
       { deployedVideoStoragePath: { $exists: true, $ne: null }, deleted: { $ne: true } },
       { projection: { title: 1, deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1, deployedVideoStoragePath: 1 } }
@@ -34916,32 +37572,61 @@ async function vmBuildDeployedVideoInventory() {
       { deployedVideoStoragePath: { $exists: true, $ne: null } },
       { projection: { projectId: 1, revisionNumber: 1, revisionName: 1, deployedVideoStoragePath: 1 } }
     ).toArray(),
+    db.collection(VMSS_PROJECTS_COLLECTION).find(
+      { deployedVideoStoragePath: { $exists: true, $ne: null }, deleted: { $ne: true } },
+      { projection: { title: 1, deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1, deployedVideoStoragePath: 1 } }
+    ).toArray(),
+    db.collection(VMSS_REVISIONS_COLLECTION).find(
+      { deployedVideoStoragePath: { $exists: true, $ne: null } },
+      { projection: { projectId: 1, revisionNumber: 1, revisionName: 1, deployedVideoStoragePath: 1 } }
+    ).toArray(),
     bucket.getFiles({ prefix: 'videoManualDeployed/' }),
   ]);
 
-  const projectTitleById = new Map(projects.map((project) => [String(project._id), project.title || 'Untitled Project']));
-  const missingProjectIds = Array.from(new Set(revisions
+  const allProjects = [
+    ...projects.map((project) => ({ ...project, source: 'classic' })),
+    ...studioProjects.map((project) => ({ ...project, source: 'shotstack-studio' })),
+  ];
+  const allRevisions = [
+    ...revisions.map((revision) => ({ ...revision, source: 'classic' })),
+    ...studioRevisions.map((revision) => ({ ...revision, source: 'shotstack-studio' })),
+  ];
+
+  const projectTitleById = new Map(allProjects.map((project) => [String(project._id), project.title || 'Untitled Project']));
+  const missingProjectIds = Array.from(new Set(allRevisions
     .map((revision) => String(revision.projectId || ''))
     .filter((projectId) => projectId && !projectTitleById.has(projectId))));
 
   if (missingProjectIds.length) {
-    const extraProjects = await db.collection(VM_PROJECTS_COLLECTION).find(
-      { _id: { $in: missingProjectIds.map((projectId) => new ObjectId(projectId)) } },
-      { projection: { title: 1 } }
-    ).toArray();
+    const validObjectIds = missingProjectIds.filter((projectId) => ObjectId.isValid(projectId)).map((projectId) => new ObjectId(projectId));
+    const [extraProjects, extraStudioProjects] = await Promise.all([
+      validObjectIds.length
+        ? db.collection(VM_PROJECTS_COLLECTION).find(
+          { _id: { $in: validObjectIds } },
+          { projection: { title: 1 } }
+        ).toArray()
+        : Promise.resolve([]),
+      validObjectIds.length
+        ? db.collection(VMSS_PROJECTS_COLLECTION).find(
+          { _id: { $in: validObjectIds } },
+          { projection: { title: 1 } }
+        ).toArray()
+        : Promise.resolve([]),
+    ]);
 
-    extraProjects.forEach((project) => {
+    [...extraProjects, ...extraStudioProjects].forEach((project) => {
       projectTitleById.set(String(project._id), project.title || 'Untitled Project');
     });
   }
 
   const referenceMap = new Map();
 
-  projects.forEach((project) => {
+  allProjects.forEach((project) => {
     const storagePath = String(project.deployedVideoStoragePath || '').trim();
     if (!storagePath || !project.deployedRevisionId) return;
     vmAddDeployedVideoReference(referenceMap, storagePath, {
       type: 'project',
+      source: project.source,
       projectId: String(project._id),
       projectTitle: project.title || 'Untitled Project',
       deployedRevisionId: String(project.deployedRevisionId || ''),
@@ -34950,11 +37635,12 @@ async function vmBuildDeployedVideoInventory() {
     });
   });
 
-  revisions.forEach((revision) => {
+  allRevisions.forEach((revision) => {
     const storagePath = String(revision.deployedVideoStoragePath || '').trim();
     if (!storagePath) return;
     vmAddDeployedVideoReference(referenceMap, storagePath, {
       type: 'revision',
+      source: revision.source,
       revisionId: String(revision._id),
       projectId: String(revision.projectId || ''),
       projectTitle: projectTitleById.get(String(revision.projectId || '')) || 'Untitled Project',
@@ -35007,14 +37693,25 @@ async function vmDeleteDeployedVideoStoragePath(storagePath, { deletedBy = 'syst
   }
 
   const db = client.db(VM_DB);
-  const liveProjects = await db.collection(VM_PROJECTS_COLLECTION).find(
-    {
-      deployedVideoStoragePath: normalizedPath,
-      deleted: { $ne: true },
-      deployedRevisionId: { $exists: true, $ne: null },
-    },
-    { projection: { _id: 1, title: 1 } }
-  ).toArray();
+  const [classicLiveProjects, studioLiveProjects] = await Promise.all([
+    db.collection(VM_PROJECTS_COLLECTION).find(
+      {
+        deployedVideoStoragePath: normalizedPath,
+        deleted: { $ne: true },
+        deployedRevisionId: { $exists: true, $ne: null },
+      },
+      { projection: { _id: 1, title: 1 } }
+    ).toArray(),
+    db.collection(VMSS_PROJECTS_COLLECTION).find(
+      {
+        deployedVideoStoragePath: normalizedPath,
+        deleted: { $ne: true },
+        deployedRevisionId: { $exists: true, $ne: null },
+      },
+      { projection: { _id: 1, title: 1 } }
+    ).toArray(),
+  ]);
+  const liveProjects = [...classicLiveProjects, ...studioLiveProjects];
 
   if (liveProjects.length && !allowLive) {
     const err = new Error('Cannot delete a currently deployed factory video');
@@ -35043,7 +37740,37 @@ async function vmDeleteDeployedVideoStoragePath(storagePath, { deletedBy = 'syst
         },
       }
     ),
+    db.collection(VMSS_REVISIONS_COLLECTION).updateMany(
+      { deployedVideoStoragePath: normalizedPath },
+      {
+        $unset: {
+          deployedVideoUrl: '',
+          deployedVideoStoragePath: '',
+          deployedVideoMimeType: '',
+          deployedVideoFileName: '',
+          deployedAt: '',
+          deployedBy: '',
+        },
+      }
+    ),
     db.collection(VM_PROJECTS_COLLECTION).updateMany(
+      { deployedVideoStoragePath: normalizedPath },
+      {
+        $set: { updatedAt: new Date() },
+        $unset: {
+          deployedRevisionId: '',
+          deployedRevisionNumber: '',
+          deployedRevisionName: '',
+          deployedAt: '',
+          deployedBy: '',
+          deployedVideoUrl: '',
+          deployedVideoStoragePath: '',
+          deployedVideoMimeType: '',
+          deployedVideoFileName: '',
+        },
+      }
+    ),
+    db.collection(VMSS_PROJECTS_COLLECTION).updateMany(
       { deployedVideoStoragePath: normalizedPath },
       {
         $set: { updatedAt: new Date() },
@@ -35799,58 +38526,156 @@ app.post('/api/video-projects/:id/render-shotstack', async (req, res) => {
   }
 });
 
+// Shotstack Studio projects have no explicit "steps"; a step is a video clip on the timeline (same rule as the editor's
+// step list), with the optional description the author typed for it (settings.stepDescriptions, matched by start time).
+const VMSS_STEP_DESCRIPTION_TOLERANCE_SECONDS = 0.15;
+function vmssBuildPlaybackInfo(snapshot) {
+  const tracks = Array.isArray(snapshot?.edit?.timeline?.tracks) ? snapshot.edit.timeline.tracks : [];
+  const descriptions = Array.isArray(snapshot?.settings?.stepDescriptions) ? snapshot.settings.stepDescriptions : [];
+  const numeric = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+
+  const videoClips = [];
+  let duration = 0;
+  for (const track of tracks) {
+    for (const clip of Array.isArray(track?.clips) ? track.clips : []) {
+      const start = numeric(clip?.start);
+      const length = numeric(clip?.length);
+      if (start === null || length === null) continue;
+      duration = Math.max(duration, start + length);
+      if (clip?.asset?.type === 'video') videoClips.push({ start, end: start + length });
+    }
+  }
+
+  videoClips.sort((a, b) => a.start - b.start);
+  const steps = videoClips.map((clip, index) => {
+    const match = descriptions.find((entry) => Math.abs(Number(entry?.start) - clip.start) < VMSS_STEP_DESCRIPTION_TOLERANCE_SECONDS);
+    return {
+      id: `step-${index + 1}`,
+      label: `Step ${index + 1}`,
+      description: String(match?.description || '').trim(),
+      startTime: clip.start,
+      endTime: clip.end,
+    };
+  });
+
+  const size = snapshot?.edit?.output?.size || {};
+  return {
+    steps,
+    duration,
+    width: numeric(size.width) || 1920,
+    height: numeric(size.height) || 1080,
+  };
+}
+
 // GET /api/factory/video-manuals?model=<masterdb model>
 // Returns only explicitly deployed projects for the exact model value.
 app.get('/api/factory/video-manuals', async (req, res) => {
   try {
     const model = String(req.query.model || '').trim();
+    const requestedSource = String(req.query.source || '').trim();
     if (!model) {
       return res.status(400).json({ error: 'model query parameter is required' });
     }
+    if (requestedSource && !['classic', 'shotstack-studio'].includes(requestedSource)) {
+      return res.status(400).json({ error: 'source must be either classic or shotstack-studio' });
+    }
 
     const db = client.db(VM_DB);
-    const playlists = await db.collection(VM_PLAYLISTS_COLLECTION)
-      .find({ model }, { projection: { name: 1, model: 1 } })
-      .toArray();
+    const [classicPlaylists, studioPlaylists] = await Promise.all([
+      requestedSource === 'shotstack-studio'
+        ? Promise.resolve([])
+        : db.collection(VM_PLAYLISTS_COLLECTION)
+          .find({ model }, { projection: { name: 1, model: 1 } })
+          .toArray(),
+      requestedSource === 'classic'
+        ? Promise.resolve([])
+        : db.collection(VMSS_PLAYLISTS_COLLECTION)
+          .find({ model }, { projection: { name: 1, model: 1 } })
+          .toArray(),
+    ]);
+
+    const playlists = [
+      ...classicPlaylists.map((playlist) => ({ ...playlist, source: 'classic' })),
+      ...studioPlaylists.map((playlist) => ({ ...playlist, source: 'shotstack-studio' })),
+    ];
 
     if (!playlists.length) {
       return res.json({ model, projects: [] });
     }
 
-    const playlistIds = playlists.map((playlist) => playlist._id);
-    const playlistById = new Map(playlists.map((playlist) => [String(playlist._id), playlist]));
-    const projects = await db.collection(VM_PROJECTS_COLLECTION).aggregate([
-      {
-        $match: {
-          playlistId: { $in: playlistIds },
-          deleted: { $ne: true },
-          deployedRevisionId: { $exists: true, $ne: null },
-        }
-      },
-      { $sort: { order: 1, updatedAt: -1, createdAt: 1 } },
-      {
-        $project: {
-          title: 1,
-          description: 1,
-          playlistId: 1,
-          thumbnailUrl: 1,
-          duration: 1,
-          updatedAt: 1,
-          deployedAt: 1,
-          deployedRevisionId: 1,
-          deployedRevisionNumber: 1,
-          deployedRevisionName: 1,
-          deployedVideoUrl: 1,
-          stepsCount: { $size: { $ifNull: ['$steps', []] } },
-        }
-      }
-    ]).toArray();
+    const classicPlaylistIds = classicPlaylists.map((playlist) => playlist._id);
+    const studioPlaylistIds = studioPlaylists.map((playlist) => playlist._id);
+    const playlistByKey = new Map(playlists.map((playlist) => [`${playlist.source}:${String(playlist._id)}`, playlist]));
+
+    const [classicProjects, studioProjects] = await Promise.all([
+      classicPlaylistIds.length
+        ? db.collection(VM_PROJECTS_COLLECTION).aggregate([
+          {
+            $match: {
+              playlistId: { $in: classicPlaylistIds },
+              deleted: { $ne: true },
+              deployedRevisionId: { $exists: true, $ne: null },
+            }
+          },
+          { $sort: { order: 1, updatedAt: -1, createdAt: 1 } },
+          {
+            $project: {
+              title: 1,
+              description: 1,
+              playlistId: 1,
+              thumbnailUrl: 1,
+              duration: 1,
+              updatedAt: 1,
+              deployedAt: 1,
+              deployedRevisionId: 1,
+              deployedRevisionNumber: 1,
+              deployedRevisionName: 1,
+              deployedVideoUrl: 1,
+              stepsCount: { $size: { $ifNull: ['$steps', []] } },
+            }
+          }
+        ]).toArray()
+        : Promise.resolve([]),
+      studioPlaylistIds.length
+        ? (async () => {
+          const studioDocs = await db.collection(VMSS_PROJECTS_COLLECTION)
+            .find(
+              { playlistId: { $in: studioPlaylistIds }, deleted: { $ne: true }, deployedRevisionId: { $exists: true, $ne: null } },
+              { projection: { title: 1, description: 1, playlistId: 1, order: 1, previewThumbnailUrl: 1, updatedAt: 1, deployedAt: 1, deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1, deployedVideoUrl: 1, createdAt: 1 } }
+            )
+            .sort({ order: 1, updatedAt: -1, createdAt: 1 })
+            .toArray();
+          const revisionIds = studioDocs.map((doc) => doc.deployedRevisionId).filter(Boolean).map((id) => new ObjectId(id));
+          const revisionDocs = revisionIds.length
+            ? await db.collection(VMSS_REVISIONS_COLLECTION)
+              .find({ _id: { $in: revisionIds } }, { projection: { 'snapshot.edit.timeline': 1, 'snapshot.edit.output': 1, 'snapshot.settings.stepDescriptions': 1 } })
+              .toArray()
+            : [];
+          const revisionById = new Map(revisionDocs.map((doc) => [String(doc._id), doc]));
+          return studioDocs.map(({ previewThumbnailUrl, createdAt, ...doc }) => {
+            const info = vmssBuildPlaybackInfo(revisionById.get(String(doc.deployedRevisionId))?.snapshot);
+            return {
+              ...doc,
+              thumbnailUrl: previewThumbnailUrl || null,
+              duration: info.duration || null,
+              stepsCount: info.steps.length,
+            };
+          });
+        })()
+        : Promise.resolve([]),
+    ]);
+
+    const projects = [
+      ...classicProjects.map((project) => ({ ...project, source: 'classic' })),
+      ...studioProjects.map((project) => ({ ...project, source: 'shotstack-studio' })),
+    ];
 
     res.json({
       model,
+      source: requestedSource || 'all',
       projects: projects.map((project) => ({
         ...project,
-        playlistName: playlistById.get(String(project.playlistId))?.name || '',
+        playlistName: playlistByKey.get(`${project.source}:${String(project.playlistId)}`)?.name || '',
       })),
     });
   } catch (err) {
@@ -35864,15 +38689,19 @@ app.get('/api/factory/video-manuals', async (req, res) => {
 app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
   try {
     const db = client.db(VM_DB);
-    const projects = db.collection(VM_PROJECTS_COLLECTION);
-    const revisions = db.collection(VM_REVISIONS_COLLECTION);
     const projectId = new ObjectId(req.params.id);
-    const project = await projects.findOne({ _id: projectId, deleted: { $ne: true } });
+    const [classicProject, studioProject] = await Promise.all([
+      db.collection(VM_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } }),
+      db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } }),
+    ]);
+    const isStudioProject = !classicProject && !!studioProject;
+    const project = classicProject || studioProject;
     if (!project) return res.status(404).json({ error: 'Project not found' });
     if (!project.deployedRevisionId) {
       return res.status(404).json({ error: 'No deployed revision for this project' });
     }
 
+    const revisions = db.collection(isStudioProject ? VMSS_REVISIONS_COLLECTION : VM_REVISIONS_COLLECTION);
     const revision = await revisions.findOne({ _id: new ObjectId(project.deployedRevisionId), projectId });
     if (!revision?.snapshot) {
       return res.status(404).json({ error: 'Deployed revision snapshot not found' });
@@ -35885,9 +38714,10 @@ app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
 
     res.json({
       projectId: project._id,
+      source: isStudioProject ? 'shotstack-studio' : 'classic',
       title: project.title,
       playlistId: project.playlistId,
-      thumbnailUrl: project.thumbnailUrl || null,
+      thumbnailUrl: project.thumbnailUrl || project.previewThumbnailUrl || null,
       deployedRevisionId: revision._id,
       deployedRevisionNumber: revision.revisionNumber || project.deployedRevisionNumber || null,
       deployedRevisionName: revision.revisionName || project.deployedRevisionName || null,
@@ -35896,7 +38726,7 @@ app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
       deployedVideoStoragePath,
       deployedVideoMimeType,
       deployedVideoFileName,
-      snapshot: revision.snapshot,
+      snapshot: isStudioProject ? { ...revision.snapshot, ...vmssBuildPlaybackInfo(revision.snapshot) } : revision.snapshot,
     });
   } catch (err) {
     console.error('❌ factory video-manual project get error:', err);
@@ -36003,20 +38833,23 @@ console.log('🎬 Video Manual Playlists/Projects/Assets API routes loaded');
 // Route: POST /api/upload-video-manual
 // Headers: X-File-Name: <filename>  Content-Type: video/*
 // Body: raw binary file bytes
-app.get('/api/video-manual-media', async (req, res) => {
+app.get(['/api/video-manual-media', '/api/video-manual-media/:assetName'], async (req, res) => {
   try {
     const rawUrl = String(req.query.url || '');
     if (!rawUrl) {
       return res.status(400).json({ error: 'url query parameter is required' });
     }
 
-    const assetUrl = new URL(rawUrl);
-    const allowedHosts = new Set([
-      'firebasestorage.googleapis.com',
-      'storage.googleapis.com',
-    ]);
+    const wantsDownload = String(req.query.download || '').toLowerCase() === '1'
+      || String(req.query.download || '').toLowerCase() === 'true';
+    const requestedFileName = String(req.query.fileName || req.params.assetName || '').trim();
 
-    if (!allowedHosts.has(assetUrl.hostname)) {
+    const assetUrl = new URL(rawUrl);
+    const isAllowedHost = assetUrl.hostname === 'firebasestorage.googleapis.com'
+      || assetUrl.hostname === 'storage.googleapis.com'
+      || assetUrl.hostname.endsWith('.amazonaws.com');
+
+    if (!isAllowedHost) {
       return res.status(400).json({ error: 'Unsupported media host' });
     }
 
@@ -36051,6 +38884,11 @@ app.get('/api/video-manual-media', async (req, res) => {
       if (value) res.setHeader(headerName, value);
     });
 
+    if (wantsDownload) {
+      const downloadFileName = vmNormalizeFileName(requestedFileName || 'video-manual.mp4');
+      res.setHeader('Content-Disposition', `attachment; filename="${downloadFileName}"`);
+    }
+
     if (!upstream.body) {
       return res.end();
     }
@@ -36082,7 +38920,7 @@ app.post('/api/upload-video-manual',
         return res.status(400).json({ error: 'No file data received' });
       }
 
-      if (!VM_UPLOAD_FOLDERS.has(uploadFolder)) {
+      if (!vmIsSupportedUploadFolder(uploadFolder)) {
         return res.status(400).json({ error: 'Unsupported upload folder' });
       }
 
@@ -36118,13 +38956,13 @@ app.post('/api/upload-video-manual',
 
       console.log(`✅ Video uploaded to Firebase Storage: ${storagePath}`);
 
-      // Register in the playlist asset pool if a playlistId was supplied.
-      if (rawPlaylistId && uploadFolder === 'videoManuals') {
+      // Register any playlist-scoped source asset so the Shotstack editor can reuse it.
+      if (rawPlaylistId && uploadFolder !== 'videoManualDeployed') {
         const assetDoc = {
           playlistId: new ObjectId(rawPlaylistId),
           assetId,
           name: fileName,
-          type: 'video',
+          type: vmInferAssetTypeFromMimeType(mimeType),
           mimeType,
           storagePath,
           downloadUrl: publicUrl,
@@ -36163,6 +39001,18 @@ setTimeout(() => {
     console.warn('[VM Deployments] Initial retention cleanup failed:', err.message);
   });
 }, 15000);
+
+setInterval(() => {
+  void vmssCleanupExpiredRecycledAssets().catch((err) => {
+    console.warn('[VMSS Assets] Scheduled recycle-bin cleanup failed:', err.message);
+  });
+}, 24 * 60 * 60 * 1000);
+
+setTimeout(() => {
+  void vmssCleanupExpiredRecycledAssets().catch((err) => {
+    console.warn('[VMSS Assets] Initial recycle-bin cleanup failed:', err.message);
+  });
+}, 20000);
 
 
 // ==================== CHECK FORM TABLET UI ====================
@@ -37047,27 +39897,111 @@ app.post('/api/check-forms/bypass', async (req, res) => {
   if (!factory || !machine) {
     return res.status(400).json({ error: 'factory and machine are required' });
   }
+  if (!String(leaderUsername || '').trim()) {
+    return res.status(400).json({ error: 'leaderUsername is required' });
+  }
+  if (!String(reason || '').trim()) {
+    return res.status(400).json({ error: 'reason is required' });
+  }
 
   try {
     await client.connect();
+
+    // Authoritative leader check (班長 / admin / 課長 / 部長)
+    const leaderUser = await client.db(DB_NAME).collection('users')
+      .findOne({ username: String(leaderUsername).trim() });
+    const authorizedRoles = ['班長', 'admin', '課長', '部長'];
+    if (!leaderUser || !authorizedRoles.includes(leaderUser.role)) {
+      return res.status(403).json({ error: 'User does not have leader privileges' });
+    }
+    const verifiedLeaderName = `${leaderUser.firstName || ''} ${leaderUser.lastName || ''}`.trim() || leaderUser.username;
+
     const db = client.db('submittedDB');
     const bypassCollection = db.collection('checklistBypassDB');
+    const recordsCollection = db.collection(CHECK_FORM_RECORDS_COLLECTION);
+
+    const factoryText = String(factory).trim();
+    const machineText = String(machine).trim();
+    const reasonText = String(reason).trim();
+    const timingText = String(timing || 'pre').trim();
+    const now = new Date();
 
     const doc = {
-      factory: String(factory).trim(),
-      machine: String(machine).trim(),
+      factory: factoryText,
+      machine: machineText,
       workerName: String(workerName || '').trim(),
-      leaderName: String(leaderName || '').trim(),
-      leaderUsername: String(leaderUsername || '').trim(),
-      reason: String(reason || '').trim(),
-      timing: String(timing || 'pre').trim(),
-      templates: Array.isArray(templates) ? templates : [],
-      bypassedAt: new Date().toISOString(),
-      createdAt: new Date(),
+      leaderName: verifiedLeaderName,
+      leaderUsername: String(leaderUsername).trim(),
+      leaderRole: leaderUser.role,
+      reason: reasonText,
+      timing: timingText,
+      templates: Array.isArray(templates) ? templates.map(t => (t && typeof t === 'object' ? (t.name || t.templateName || '') : String(t))) : [],
+      bypassedAt: now.toISOString(),
+      createdAt: now,
     };
-
     const result = await bypassCollection.insertOne(doc);
-    return res.json({ success: true, bypassId: result.insertedId.toHexString() });
+
+    // Write one "skipped" checklist record per template so today-status treats the checklist as done
+    // and freyaAdmin2 checklist submissions shows "skipped by <leader>" with the reason.
+    const jstDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+    const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
+    const tplList = Array.isArray(templates) ? templates.filter(t => t && typeof t === 'object') : [];
+    const recordIds = {};
+    const newRecords = [];
+
+    for (const t of tplList) {
+      const templateId = normalizeCheckFormText(t._id || t.templateId);
+      const templateName = normalizeCheckFormText(t.name || t.templateName);
+      if (!templateId || !templateName) continue;
+
+      const existing = await recordsCollection.findOne({
+        factory: factoryText,
+        templateId,
+        加工設備: machineText,
+        createdAt: { $gte: startOfDay }
+      });
+      if (existing) {
+        recordIds[templateId] = existing._id.toString();
+        recordIds[templateName] = existing._id.toString();
+        continue;
+      }
+
+      const rec = {
+        _id: new ObjectId(),
+        source: 'checkForm',
+        templateId,
+        templateName,
+        description: normalizeCheckFormText(t.description),
+        schedule: normalizeCheckFormSchedule(t.schedule),
+        startDate: normalizeCheckFormText(t.startDate),
+        factory: factoryText,
+        加工設備: machineText,
+        equipmentId: null,
+        workerName: String(workerName || '').trim(),
+        Worker_Name: String(workerName || '').split(',').map(s => s.trim()).filter(Boolean),
+        answers: [],
+        tickets: [],
+        isPreComplete: true,
+        isPostComplete: false,
+        skipped: true,
+        skippedBy: verifiedLeaderName,
+        skippedByUsername: doc.leaderUsername,
+        skipReason: reasonText,
+        skippedAt: now.toISOString(),
+        bypassId: result.insertedId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      newRecords.push(rec);
+      recordIds[templateId] = rec._id.toHexString();
+      recordIds[templateName] = rec._id.toHexString();
+    }
+
+    if (newRecords.length > 0) {
+      await recordsCollection.insertMany(newRecords);
+    }
+
+    return res.json({ success: true, bypassId: result.insertedId.toHexString(), recordIds, leaderName: verifiedLeaderName });
   } catch (error) {
     console.error('Error logging checklist bypass:', error);
     return res.status(500).json({ error: 'Failed to record checklist bypass' });

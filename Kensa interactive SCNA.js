@@ -2,7 +2,7 @@
 //
 // One page per inspection bench, same shell as SRS interactive / DCP interactive:
 //   Scan tab:     Step 0 workers (confirm / select, several allowed) -> Step 1 scan incoming boxes
-//   Inspect tab:  12 NG counters per input + 初物 photo + Kensa labels (print / draft / reprint) + submit
+//   Inspect tab:  12 NG counters per input + Kensa labels (print / draft / reprint) + submit
 //
 // Single bench (IT1 / IT2 from the URL), no LH/RH lanes, no work order. The FIRST box scan sets the 品番
 // (-> masterDB gives 背番号 and the standard 収容数); every later scan must be the same 品番.
@@ -25,7 +25,6 @@ window.serverURL = serverURL;
   var FACTORY = 'SCNA';
   var NG_FIELDS = [];                       // 'counter-1' .. 'counter-12' (same names/order as newKensa iReporter)
   for (var ci = 1; ci <= 12; ci++) NG_FIELDS.push('counter-' + ci);
-  var PHOTO_FIRST = 'hatsumonoPic', PHOTO_LAST = 'atomonoPic';   // same ids DCP uses; both 初物 and 終物 are required to submit
 
   // ---------- machine (URL is the source of truth) ----------
   var params = new URLSearchParams(location.search);
@@ -781,8 +780,6 @@ window.serverURL = serverURL;
     if (!state.workers.length) m.push({ text: T('kensa_v_operator'), tab: 'worker' });
     if (!b.boxes.length) m.push({ text: T('kensa_v_box'), tab: 'scan', id: 'startStep1Scan' });
     if (b.pendingPrint) m.push({ text: T('kensa_v_pending'), tab: TAB_INSPECT, id: 'lblList' });
-    if (!photoBlobs[PHOTO_FIRST]) m.push({ text: T('kensa_v_hatsumono'), tab: 'images', id: 'imageGallery' });
-    if (!photoBlobs[PHOTO_LAST]) m.push({ text: T('kensa_v_atomono'), tab: 'images', id: 'imageGallery' });
     if (!b.start) m.push({ text: T('kensa_v_start'), tab: TAB_INSPECT, id: 'inspStart' });
     if (!b.end) m.push({ text: T('kensa_v_end'), tab: TAB_INSPECT, id: 'inspEnd' });
     if (procQty(b) <= 0) m.push({ text: T('kensa_v_qty'), tab: TAB_INSPECT, id: 'counterGrid' });
@@ -825,7 +822,6 @@ window.serverURL = serverURL;
     h += row(T('kensa_l_good'), '<span style="color:var(--brand)">' + goodQty(b) + '</span>');
     h += row(T('kensa_l_total_spare'), '<span style="color:var(--brand)">' + (goodQty(b) + spn) + '</span>');
     h += row(T('kensa_lbl_title'), live.length ? live.map(function (e) { return esc(e.kensaId); }).join('<br>') : '0', edit(TAB_INSPECT, 'lblList'));
-    h += row(T('kensa_checks_title'), T('kensa_first_check') + ' ' + mark(!!photoBlobs[PHOTO_FIRST]) + ' | ' + T('kensa_last_check') + ' ' + mark(!!photoBlobs[PHOTO_LAST]), edit('images', 'imageGallery'));
     h += row(T('kensa_def_section'), nd + ' / ' + MAX_DEFECT, edit('images', 'imageGallery'));
     h += row(T('kensa_l_comment'), esc(b.comment || '---'), edit(TAB_INSPECT, 'inspComment'));
     $('subSummary').innerHTML = h;
@@ -887,16 +883,6 @@ window.serverURL = serverURL;
     $('moreInfoClose').onclick = function () { $('moreInfoModal').classList.remove('show'); };
     $('imgPreviewClose').onclick = function () { $('imgPreviewModal').classList.remove('open'); };
     $('imgPreviewModal').onclick = function (e) { if (e.target === this) this.classList.remove('open'); };
-    [['hatsumonoButton', 'hatsumonoFileInput', PHOTO_FIRST], ['atomonoButton', 'atomonoFileInput', PHOTO_LAST]].forEach(function (c) {
-      $(c[0]).onclick = function () { $(c[1]).click(); };
-      $(c[1]).onchange = function () {
-        var inp = this; if (!inp.files || !inp.files[0]) return;
-        compressImageFile(inp.files[0]).then(function (blob) { return setPhoto(c[2], blob); })
-          .then(function () { renderPhoto(); toast(T('kensa_t_photo_ok')); })
-          .catch(function (e) { console.warn('Kensa: photo', e); toast(T('kensa_t_photo_fail')); });
-        inp.value = '';
-      };
-    });
   }
   function paintNg(f, n) {      // one tap-counter card: hidden input + big number + red when > 0
     $(f).value = n; $(f + '-display').textContent = n;
@@ -985,11 +971,6 @@ window.serverURL = serverURL;
       img.src = url;
     });
   }
-  // Inspect tab: a check button disappears once its photo is taken (retake from the Images tab); Images tab: the gallery
-  var CHECKS = [
-    { id: PHOTO_FIRST, btn: 'hatsumonoButton', input: 'hatsumonoFileInput', tag: 'kensa_first_check' },
-    { id: PHOTO_LAST, btn: 'atomonoButton', input: 'atomonoFileInput', tag: 'kensa_last_check' }
-  ];
   // ---------- optional defect photos (max 25, kept in IndexedDB like 初物/終物, sent to Firebase Storage on submit) ----------
   var MAX_DEFECT = 25, DEFECT_PREFIX = 'defect-';
   function defectIds() { return Object.keys(photoBlobs).filter(function (k) { return k.indexOf(DEFECT_PREFIX) === 0; }).sort(); }
@@ -1006,8 +987,6 @@ window.serverURL = serverURL;
     return idb('readwrite', function (st) { return st.delete(id); }).catch(function () { }).then(renderPhoto);
   }
   function renderPhoto() {
-    CHECKS.forEach(function (c) { $(c.btn).style.display = photoBlobs[c.id] ? 'none' : ''; });
-    $('checkCard').style.display = CHECKS.every(function (c) { return photoBlobs[c.id]; }) ? 'none' : '';
     var nd = defectIds().length;
     $('defectPhotoCount').textContent = nd ? '(' + nd + '/' + MAX_DEFECT + ')' : '';
     renderGallery();
@@ -1016,27 +995,6 @@ window.serverURL = serverURL;
   function renderGallery() {
     var g = document.getElementById('imageGallery'); if (!g) return;
     g.innerHTML = '';
-    CHECKS.forEach(function (c) {
-      var u = photoBlobs[c.id] ? photoUrl(c.id) : '', tag = T(c.tag);
-      var sec = document.createElement('div'); sec.className = 'gallery-section';
-      var head = document.createElement('div'); head.className = 'gallery-section-head'; head.textContent = tag;
-      var grid = document.createElement('div'); grid.className = 'image-gallery';
-      var th = document.createElement('div');
-      if (u) {
-        th.className = 'gallery-thumb';
-        th.innerHTML = '<span class="gallery-dot" style="background:var(--brand)"></span><button type="button" class="thumb-edit-btn">✎ ' + esc(T('kensa_img_edit')) + '</button><img alt="' + esc(tag) + '"><span class="thumb-tag">' + esc(tag) + '</span>';
-        th.querySelector('img').src = u;
-        th.onclick = function () { $('imgPreviewTarget').src = u; $('imgPreviewModal').classList.add('open'); };
-        th.querySelector('.thumb-edit-btn').onclick = function (ev) { ev.stopPropagation(); $(c.input).click(); };
-      } else {
-        th.className = 'gallery-thumb empty';
-        th.innerHTML = '<span class="gallery-dot" style="background:var(--red)"></span>' +
-          '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" style="stroke:var(--red);" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
-          '<span style="color:var(--red);margin-top:6px;text-align:center;font-weight:800;font-size:.8rem">' + esc(tag) + ' ' + esc(T('kensa_img_not')) + '<br><small style="font-weight:700">' + esc(T('kensa_img_tap')) + '</small></span>';
-        th.onclick = function () { $(c.input).click(); };
-      }
-      grid.appendChild(th); sec.appendChild(head); sec.appendChild(grid); g.appendChild(sec);
-    });
     var dids = defectIds();      // optional defect photos: only shown once there is one
     if (dids.length) {
       var ds = document.createElement('div'); ds.className = 'gallery-section';
@@ -1511,16 +1469,9 @@ window.serverURL = serverURL;
         StopCall: stopCallData()
       };
       save();     // keeps Submit_UID so a retry after a lost response returns the saved record
-      // 初物 / 終物 photos, same shape as DCP's submit (base64 without prefix + metadata)
+      // defect photos (base64 without prefix + metadata)
       body.images = [];
-      var meta = [[PHOTO_FIRST, '初物チェック'], [PHOTO_LAST, '終物チェック']], idx = 0, defectQueue = [];
-      for (var i = 0; i < meta.length; i++) {
-        var blob = photoBlobs[meta[i][0]]; if (!blob) continue;
-        body.images.push({
-          base64: await blobToBase64(blob), label: meta[i][1], id: meta[i][0] + '-' + Date.now() + '-' + (idx++), imgId: meta[i][0],
-          factory: FACTORY, machine: MACHINE, worker: workerString(), date: body.Date, sebanggo: b.sebango, timestamp: Date.now() + idx
-        });
-      }
+      var idx = 0, defectQueue = [];
       defectIds().forEach(function (id) { defectQueue.push(id); });
       for (var di = 0; di < defectQueue.length; di++) {
         var dblob = photoBlobs[defectQueue[di]]; if (!dblob) continue;

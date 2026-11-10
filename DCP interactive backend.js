@@ -39,8 +39,8 @@ const googleSheetLiveStatusURL = 'https://script.google.com/macros/s/AKfycbwbL30
 // Link for Rikeshi (up/down color info) - This was missing in the original, adding it here.
 const dbURL = 'https://script.google.com/macros/s/AKfycbx0qBw0_wF5X-hA2t1yY-d5h5M7Z_a8z_V9R5D6k/exec'; // Placeholder, replace with your actual URL if different.
 
-const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
 //const serverURL = "http://192.168.0.20:3000";
 window.serverURL = serverURL;
 
@@ -10378,7 +10378,10 @@ function openVideoManualDetail(projectId) {
       </div>
       ${project.description ? `<p class="vmd-desc">${project.description}</p>` : ''}
       <div class="vmd-table">${rowsHtml}</div>
-      <button type="button" class="vmd-play" id="videoManualDetailPlayBtn">Play on Monitor</button>
+      <div class="vmd-actions">
+        <button type="button" class="vmd-play" id="videoManualDetailPlayBtn">🖥️ Play on Monitor</button>
+        <button type="button" class="vmd-play vmd-play--tablet" id="videoManualDetailPlayTabletBtn">📱 Play on Tablet</button>
+      </div>
     </div>
   `;
 
@@ -10392,6 +10395,9 @@ function openVideoManualDetail(projectId) {
   });
   document.getElementById('videoManualDetailPlayBtn')?.addEventListener('click', () => {
     handleVideoManualSelection();
+  });
+  document.getElementById('videoManualDetailPlayTabletBtn')?.addEventListener('click', () => {
+    void openVideoManualTabletPlayer();
   });
 
   setVideoManualMode('detail');
@@ -10411,7 +10417,7 @@ async function loadVideoManualProjects() {
   }
 
   try {
-    const response = await fetch(`${serverURL}/api/factory/video-manuals?model=${encodeURIComponent(model)}`);
+    const response = await fetch(`${serverURL}/api/factory/video-manuals?model=${encodeURIComponent(model)}&source=shotstack-studio`);
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.error || `HTTP ${response.status}`);
@@ -10436,6 +10442,7 @@ async function closeVideoManualPicker({ sendExit = true } = {}) {
       console.error('❌ Failed to send exit command while closing modal:', error);
     }
   }
+  closeVideoManualTabletPlayer();
   if (modal) {
     modal.style.display = 'none';
   }
@@ -10487,6 +10494,190 @@ async function openVideoManualPicker() {
       empty.innerHTML = '<div class="video-manual-empty-state__icon">🎬</div><div class="video-manual-empty-state__title">No Video Manuals found. Please call leader for assistance</div><div class="video-manual-empty-state__body">Only explicitly deployed manuals appear here.</div>';
     }
   }
+}
+
+const videoManualTabletState = { project: null, steps: [], duration: 0, requestId: 0 };
+
+function getVideoManualMediaUrl(url) {
+  if (!url || url.startsWith('blob:') || url.startsWith('data:')) return url;
+  try {
+    const parsed = new URL(url, window.location.href);
+    if (parsed.hostname === 'firebasestorage.googleapis.com' || parsed.hostname === 'storage.googleapis.com') {
+      return `${serverURL}/api/video-manual-media?url=${encodeURIComponent(parsed.toString())}`;
+    }
+    return parsed.toString();
+  } catch (_) {
+    return url;
+  }
+}
+
+function ensureVideoManualTabletPlayerUi() {
+  if (document.getElementById('videoManualTabletPlayer')) return;
+  const el = document.createElement('div');
+  el.id = 'videoManualTabletPlayer';
+  el.className = 'vmt';
+  el.innerHTML = `
+    <div class="vmt__bar">
+      <div class="vmt__title" id="vmtTitle">Video Manual</div>
+      <button type="button" class="vmt__close" id="vmtCloseBtn">✕ Close</button>
+    </div>
+    <div class="vmt__stage">
+      <video id="vmtVideo" class="vmt__video" playsinline preload="auto"></video>
+      <div id="vmtMessage" class="vmt__message">Loading…</div>
+    </div>
+    <div class="vmt__controls">
+      <div class="vmt__step" id="vmtStepLabel"></div>
+      <div class="vmt__timeline">
+        <span id="vmtCurrent">0:00</span>
+        <input type="range" id="vmtSeek" min="0" max="0" step="0.1" value="0" disabled />
+        <span id="vmtDuration">0:00</span>
+      </div>
+      <div class="vmt__buttons">
+        <button type="button" class="vmt__btn" id="vmtPrevBtn" disabled>⏮ Prev Step</button>
+        <button type="button" class="vmt__btn vmt__btn--play" id="vmtPlayBtn" disabled>▶ Play</button>
+        <button type="button" class="vmt__btn" id="vmtNextBtn" disabled>Next Step ⏭</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(el);
+
+  const video = el.querySelector('#vmtVideo');
+  const seek = el.querySelector('#vmtSeek');
+  let seeking = false;
+
+  el.querySelector('#vmtCloseBtn').addEventListener('click', closeVideoManualTabletPlayer);
+  el.querySelector('#vmtPlayBtn').addEventListener('click', () => {
+    if (video.paused) { video.play().catch(() => { }); } else { video.pause(); }
+  });
+  el.querySelector('#vmtPrevBtn').addEventListener('click', () => stepVideoManualTablet(-1));
+  el.querySelector('#vmtNextBtn').addEventListener('click', () => stepVideoManualTablet(1));
+  seek.addEventListener('input', () => { seeking = true; el.querySelector('#vmtCurrent').textContent = formatVideoManualDuration(Number(seek.value)); });
+  seek.addEventListener('change', () => { video.currentTime = Number(seek.value); seeking = false; });
+  video.addEventListener('timeupdate', () => {
+    if (!seeking) seek.value = String(video.currentTime);
+    el.querySelector('#vmtCurrent').textContent = formatVideoManualDuration(video.currentTime);
+    updateVideoManualTabletStepLabel();
+  });
+  video.addEventListener('loadedmetadata', () => {
+    videoManualTabletState.duration = Number(video.duration) || videoManualTabletState.duration || 0;
+    seek.max = String(videoManualTabletState.duration);
+    el.querySelector('#vmtDuration').textContent = formatVideoManualDuration(videoManualTabletState.duration);
+  });
+  video.addEventListener('play', () => { el.querySelector('#vmtPlayBtn').textContent = '⏸ Pause'; });
+  video.addEventListener('pause', () => { el.querySelector('#vmtPlayBtn').textContent = '▶ Play'; });
+  video.addEventListener('ended', () => { el.querySelector('#vmtPlayBtn').textContent = '↻ Replay'; });
+  video.addEventListener('error', () => showVideoManualTabletMessage('Failed to load video. Please try again or use Play on Monitor.'));
+}
+
+function showVideoManualTabletMessage(text) {
+  const msg = document.getElementById('vmtMessage');
+  if (!msg) return;
+  if (text) { msg.textContent = text; msg.classList.add('is-visible'); } else { msg.classList.remove('is-visible'); }
+}
+
+function getVideoManualTabletStepIndex(time) {
+  const steps = videoManualTabletState.steps;
+  let idx = 0;
+  for (let i = 0; i < steps.length; i++) {
+    if (time >= (steps[i].startTime || 0) - 0.05) idx = i;
+  }
+  return idx;
+}
+
+function updateVideoManualTabletStepLabel() {
+  const label = document.getElementById('vmtStepLabel');
+  const video = document.getElementById('vmtVideo');
+  const steps = videoManualTabletState.steps;
+  if (!label || !video) return;
+  label.textContent = steps.length ? `Step ${getVideoManualTabletStepIndex(video.currentTime) + 1} / ${steps.length}` : '';
+}
+
+function stepVideoManualTablet(direction) {
+  const video = document.getElementById('vmtVideo');
+  const steps = videoManualTabletState.steps;
+  if (!video || !steps.length) return;
+  const current = getVideoManualTabletStepIndex(video.currentTime);
+  let target = current + direction;
+  // "Prev" within the first second of a step restarts the previous step; otherwise restarts this step
+  if (direction < 0 && video.currentTime - (steps[current].startTime || 0) > 1) target = current;
+  target = Math.max(0, Math.min(steps.length - 1, target));
+  video.currentTime = steps[target].startTime || 0;
+  video.play().catch(() => { });
+}
+
+async function openVideoManualTabletPlayer() {
+  const selected = getSelectedVideoManualProject();
+  if (!selected) return;
+  ensureVideoManualTabletPlayerUi();
+
+  const root = document.getElementById('videoManualTabletPlayer');
+  const video = document.getElementById('vmtVideo');
+  const requestId = ++videoManualTabletState.requestId;
+
+  // The monitor should not keep playing while the tablet plays
+  if (videoManualState.claimed && videoManualState.playerState.projectId) {
+    try { await sendVideoManualCommand('exit'); } catch (e) { /* ignore */ }
+  }
+
+  document.getElementById('vmtTitle').textContent = selected.title || 'Video Manual';
+  document.getElementById('vmtStepLabel').textContent = '';
+  document.getElementById('vmtCurrent').textContent = '0:00';
+  document.getElementById('vmtDuration').textContent = '0:00';
+  document.getElementById('vmtSeek').value = '0';
+  ['vmtPrevBtn', 'vmtPlayBtn', 'vmtNextBtn', 'vmtSeek'].forEach(id => { document.getElementById(id).disabled = true; });
+  document.getElementById('vmtPlayBtn').textContent = '▶ Play';
+  showVideoManualTabletMessage('Loading…');
+  root.classList.add('is-open');
+  document.body.classList.add('vmt-open');
+  document.getElementById('callMenuWrapper')?.classList.remove('open');
+
+  try {
+    const response = await fetch(`${serverURL}/api/factory/video-manuals/projects/${encodeURIComponent(selected._id)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    if (requestId !== videoManualTabletState.requestId) return;
+
+    const snapshot = data.snapshot || {};
+    const url = data.deployedVideoUrl || null;
+    if (!url) {
+      showVideoManualTabletMessage('This manual has no playable video for the tablet. Please use Play on Monitor.');
+      return;
+    }
+    videoManualTabletState.project = data;
+    videoManualTabletState.steps = (Array.isArray(snapshot.steps) ? snapshot.steps : [])
+      .filter(st => st && Number.isFinite(st.startTime))
+      .sort((a, b) => a.startTime - b.startTime);
+    videoManualTabletState.duration = Number(selected.duration) || 0;
+
+    video.src = getVideoManualMediaUrl(url);
+    video.load();
+    showVideoManualTabletMessage('');
+    document.getElementById('vmtPlayBtn').disabled = false;
+    document.getElementById('vmtSeek').disabled = false;
+    const hasSteps = videoManualTabletState.steps.length > 1;
+    document.getElementById('vmtPrevBtn').disabled = !hasSteps;
+    document.getElementById('vmtNextBtn').disabled = !hasSteps;
+    updateVideoManualTabletStepLabel();
+    video.play().catch(() => { });
+  } catch (error) {
+    console.error('❌ Failed to load video manual for tablet:', error);
+    if (requestId === videoManualTabletState.requestId) {
+      showVideoManualTabletMessage(`Failed to load video manual: ${error.message}`);
+    }
+  }
+}
+
+function closeVideoManualTabletPlayer() {
+  videoManualTabletState.requestId += 1;
+  const root = document.getElementById('videoManualTabletPlayer');
+  const video = document.getElementById('vmtVideo');
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
+  if (root) root.classList.remove('is-open');
+  document.body.classList.remove('vmt-open');
 }
 
 function handleVideoManualSelection() {
@@ -10695,8 +10886,10 @@ function ensureVideoManualPickerUi() {
     }
     .video-manual-project-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 16px;
+      align-items: start;
+      align-content: start;
     }
     .video-manual-detail-panel {
       display: none;
@@ -10777,6 +10970,125 @@ function ensureVideoManualPickerUi() {
       border-radius: 10px;
       border: 1px solid #e2e8f0;
     }
+    .vmd-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 520px) {
+      .vmd-actions { grid-template-columns: 1fr; }
+    }
+    .vmd-play--tablet {
+      background: #1d4ed8;
+    }
+    body.vmt-open #callMenuWrapper {
+      display: none !important;
+    }
+    .vmt {
+      position: fixed;
+      inset: 0;
+      z-index: 100010;
+      display: none;
+      flex-direction: column;
+      background: #020617;
+      color: #fff;
+    }
+    .vmt.is-open { display: flex; }
+    .vmt__bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 16px;
+      background: #0f172a;
+    }
+    .vmt__title {
+      font-size: 16px;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .vmt__close {
+      min-height: 40px;
+      padding: 8px 16px;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: transparent;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .vmt__stage {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+    .vmt__video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+    .vmt__message {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+      font-size: 16px;
+      font-weight: 600;
+      color: #e2e8f0;
+      background: rgba(2, 6, 23, 0.85);
+    }
+    .vmt__message.is-visible { display: flex; }
+    .vmt__controls {
+      padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+      background: #0f172a;
+      display: grid;
+      gap: 8px;
+    }
+    .vmt__step {
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+      text-align: center;
+    }
+    .vmt__timeline {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    .vmt__timeline input[type="range"] { width: 100%; }
+    .vmt__buttons {
+      display: grid;
+      grid-template-columns: 1fr 1.4fr 1fr;
+      gap: 10px;
+    }
+    .vmt__btn {
+      min-height: 52px;
+      border: none;
+      border-radius: 10px;
+      background: #1e293b;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .vmt__btn--play { background: #1d4ed8; }
+    .vmt__btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .vmd-play {
       width: 100%;
       min-height: 52px;
@@ -10885,13 +11197,26 @@ function ensureVideoManualPickerUi() {
       overflow: hidden;
       text-align: left;
       cursor: pointer;
-      min-height: 100%;
-      transition: border-color 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
       touch-action: manipulation;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
     }
     .video-manual-card:hover,
     .video-manual-card:focus {
       border-color: #0f766e;
+      box-shadow: 0 6px 16px rgba(15, 118, 110, 0.18);
+      transform: translateY(-2px);
+      outline: none;
+    }
+    .video-manual-card:active {
+      transform: scale(0.98);
+    }
+    .video-manual-card.is-selected {
+      border-color: #0f766e;
+      box-shadow: 0 0 0 2px #0f766e;
     }
     .video-manual-card.__thumb {
       height: 108px;
@@ -10899,9 +11224,28 @@ function ensureVideoManualPickerUi() {
       overflow: hidden;
     }
     .video-manual-card__thumb {
-      height: 108px;
-      background: #f1f5f9;
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #0f172a;
       overflow: hidden;
+    }
+    .video-manual-card__thumb::after {
+      content: '▶';
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(15, 23, 42, 0.72);
+      color: #fff;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding-left: 2px;
+      box-sizing: border-box;
     }
     .video-manual-card__thumb img {
       width: 100%;
@@ -10914,8 +11258,8 @@ function ensureVideoManualPickerUi() {
       align-items: center;
       justify-content: center;
       background: #f1f5f9;
-      height: 108px;
       padding: 12px;
+      box-sizing: border-box;
     }
     .video-manual-card__fallback-title {
       font-size: 20px;
@@ -11041,7 +11385,8 @@ function ensureVideoManualPickerUi() {
         padding-right: 14px;
       }
       .video-manual-project-grid {
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 12px;
       }
       .video-manual-controller-status {
         grid-template-columns: 1fr;
@@ -16254,10 +16599,26 @@ if (manualSendModal) {
     }
   };
 
+  function _byp(key, fallback, name) {
+    let text = fallback;
+    if (typeof _t === 'function') {
+      const res = _t(key);
+      if (res && res !== key) text = res;
+    }
+    return text.replace('{name}', name || '');
+  }
+
   window.openSuperBypassModal = function () {
     const modal = document.getElementById('checklistBypassModal');
     const status = document.getElementById('checklistBypassStatus');
-    if (status) status.textContent = 'Scanning Leader QR...';
+    if (status) { status.style.color = '#6b7280'; status.textContent = _byp('bypass_scanning_leader', 'Scanning Leader QR...'); }
+    window.checklistState.bypassLeader = null;
+    const reasonEl = document.getElementById('checklistBypassReason');
+    const confirmBtn = document.getElementById('checklistBypassConfirmBtn');
+    const qrReader = document.getElementById('checklistBypassQrReader');
+    if (reasonEl) { reasonEl.value = ''; reasonEl.style.display = 'none'; }
+    if (confirmBtn) confirmBtn.style.display = 'none';
+    if (qrReader) qrReader.style.display = 'block';
     if (modal) modal.style.display = 'flex';
 
     if (typeof Html5Qrcode !== 'undefined') {
@@ -16275,17 +16636,30 @@ if (manualSendModal) {
             const res = await fetch(`${serverURL}/api/check-forms/verify-qr?code=${encodeURIComponent(decodedText)}`);
             if (res.ok) {
               const userData = await res.json();
-              scanner.stop();
+              const leaderRoles = ['班長', 'admin', '課長', '部長'];
+              if (!leaderRoles.includes(userData.role)) {
+                if (status) {
+                  status.style.color = '#ef4444';
+                  status.textContent = _byp('bypass_not_leader', '❌ Not a leader — Super Bypass requires a leader QR');
+                }
+                return;
+              }
+              try { await scanner.stop(); } catch (e) { }
               window.checklistState.bypassLeader = userData;
               if (status) {
                 status.style.color = '#1f9d6b';
-                status.textContent = `✓ Leader Verified: ${userData.firstName || userData.username}`;
+                status.textContent = _byp('bypass_leader_verified', '✓ Leader Verified: {name} — enter a reason', userData.firstName || userData.username);
               }
-              submitSuperBypass(userData);
+              const qr = document.getElementById('checklistBypassQrReader');
+              if (qr) qr.style.display = 'none';
+              const rEl = document.getElementById('checklistBypassReason');
+              const cBtn = document.getElementById('checklistBypassConfirmBtn');
+              if (rEl) { rEl.style.display = 'block'; rEl.focus(); }
+              if (cBtn) cBtn.style.display = 'block';
             } else {
               if (status) {
                 status.style.color = '#ef4444';
-                status.textContent = '❌ Invalid Leader QR Code';
+                status.textContent = _byp('bypass_invalid_qr', '❌ Invalid Leader QR Code');
               }
             }
           } catch (e) {
@@ -16294,9 +16668,21 @@ if (manualSendModal) {
         },
         function () { }
       ).catch(err => {
-        if (status) status.textContent = 'Could not access camera for QR scan';
+        if (status) status.textContent = _byp('bypass_camera_error', 'Could not access camera for QR scan');
       });
     }
+  };
+
+  window.confirmSuperBypass = function () {
+    const leader = window.checklistState.bypassLeader;
+    const status = document.getElementById('checklistBypassStatus');
+    const reason = (document.getElementById('checklistBypassReason')?.value || '').trim();
+    if (!leader) return;
+    if (!reason) {
+      if (status) { status.style.color = '#ef4444'; status.textContent = _byp('bypass_reason_required', '❌ Reason is required'); }
+      return;
+    }
+    submitSuperBypass(leader, reason);
   };
 
   window.closeSuperBypassModal = function () {
@@ -16414,12 +16800,10 @@ if (manualSendModal) {
     renderCurrentChecklistTemplate();
   }
 
-  async function submitSuperBypass(leaderUser) {
-    const reasonInput = document.getElementById('checklistBypassReason');
-    const reason = (reasonInput?.value || '').trim() || 'Leader emergency bypass';
-
+  async function submitSuperBypass(leaderUser, reason) {
+    const status = document.getElementById('checklistBypassStatus');
     try {
-      await fetch(`${serverURL}/api/check-forms/bypass`, {
+      const bypassRes = await fetch(`${serverURL}/api/check-forms/bypass`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -16432,12 +16816,24 @@ if (manualSendModal) {
           leaderUsername: leaderUser.username,
           reason,
           timing: 'pre',
-          templates: window.checklistState.queue.map(t => t.name)
+          templates: window.checklistState.queue.map(t => ({
+            _id: t._id, name: t.name, description: t.description,
+            schedule: t.schedule, startDate: t.startDate
+          }))
         })
       });
 
+      if (!bypassRes.ok) {
+        const err = await bypassRes.json().catch(() => ({}));
+        if (status) { status.style.color = '#ef4444'; status.textContent = err.error ? `❌ ${err.error}` : _byp('bypass_failed', '❌ Bypass failed'); }
+        return;
+      }
+      const bypassData = await bypassRes.json().catch(() => ({}));
+      window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...(bypassData.recordIds || {}) };
+      window.checklistState.submittedAt = Date.now();
       window.checklistState.isBypassed = true;
       window.checklistState.isPreComplete = true;
+      if (typeof window.saveChecklistDraftToStorage === 'function') { try { await window.saveChecklistDraftToStorage(); } catch (e) { } }
 
       const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
       localStorage.removeItem(pfx + 'activeChecklistStart');
@@ -16449,12 +16845,13 @@ if (manualSendModal) {
       closeSuperBypassModal();
 
       if (typeof showAppToast === 'function') {
-        showAppToast(`⚡ Checklist Super-Bypassed by ${leaderUser.firstName || leaderUser.username}`);
+        showAppToast(_byp('bypass_done_toast', '⚡ Checklist Super-Bypassed by {name}', leaderUser.firstName || leaderUser.username));
       }
 
       if (typeof window.goToTab === 'function') window.goToTab(0);
     } catch (e) {
       console.error('Error recording bypass:', e);
+      if (status) { status.style.color = '#ef4444'; status.textContent = _byp('bypass_network_error', '❌ Network error — bypass not recorded'); }
     }
   }
 
