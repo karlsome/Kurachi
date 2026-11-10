@@ -17260,7 +17260,7 @@ app.post('/api/masterdb/paginate', async (req, res) => {
   };
 
   try {
-    const dbClient = await MongoClient.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+    const dbClient = await MongoClient.connect(uri);
     const collection = dbClient.db('Sasaki_Coating_MasterDB').collection(collectionName);
 
     // ── Build combined query ──────────────────────────────────────────────────
@@ -17352,7 +17352,7 @@ app.get('/api/masterdb/schema', async (req, res) => {
   if (_hit && (Date.now() - _hit.ts) < _MASTER_DB_TTL) return res.json(_hit.data);
 
   try {
-    const dbClient = await MongoClient.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+    const dbClient = await MongoClient.connect(uri);
     const collection = dbClient.db('Sasaki_Coating_MasterDB').collection(collectionName);
     const sample = await collection.find(baseQuery).limit(200).toArray();
     await dbClient.close();
@@ -17381,7 +17381,7 @@ app.post('/api/masterdb/ids', async (req, res) => {
   const { collectionName, query = {} } = req.body;
   if (!collectionName) return res.status(400).json({ error: 'collectionName required' });
   try {
-    const dbClient = await MongoClient.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+    const dbClient = await MongoClient.connect(uri);
     const collection = dbClient.db('Sasaki_Coating_MasterDB').collection(collectionName);
     const docs = await collection.find(query, { projection: { _id: 1 } }).toArray();
     await dbClient.close();
