@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { MongoClient, ObjectId } = require('mongodb');
 const dotenv = require('dotenv');
+const { convertClassicProject } = require('./classicToShotstack');
 
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
@@ -18,6 +19,7 @@ const CLASSIC_ASSETS_COLLECTION = 'videoManualAssets';
 const SHOTSTACK_PLAYLISTS_COLLECTION = 'videoManualShotstackPlaylists';
 const SHOTSTACK_PROJECTS_COLLECTION = 'videoManualShotstackProjects';
 const SHOTSTACK_REVISIONS_COLLECTION = 'videoManualShotstackRevisions';
+const SHOTSTACK_ASSETS_COLLECTION = 'videoManualShotstackAssets';
 
 function parseArgs(argv) {
   const args = {
@@ -27,6 +29,7 @@ function parseArgs(argv) {
     playlistIds: [],
     projectIds: [],
     reportPath: '',
+    apiBase: '',
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -49,6 +52,11 @@ function parseArgs(argv) {
       case '--project':
         if (!argv[index + 1]) throw new Error('--project requires an id');
         args.projectIds.push(argv[index + 1]);
+        index += 1;
+        break;
+      case '--api-base':
+        if (!argv[index + 1]) throw new Error('--api-base requires a URL');
+        args.apiBase = argv[index + 1];
         index += 1;
         break;
       case '--report':
@@ -81,13 +89,14 @@ function printHelp() {
     '  --project <id>       Migrate only a specific classic project id (repeatable)',
     '  --include-deleted    Include soft-deleted classic projects',
     '  --overwrite          Replace previously imported Shotstack records for the same source ids',
+    '  --api-base <url>     Backend base URL used to build media proxy URLs the editor can load (required for a real run)',
     '  --report <file>      Write a JSON migration report to a file',
     '  --help               Show this message',
     '',
     'Notes:',
     '  - Default mode is dry-run.',
-    '  - One Shotstack track is created per classic step so the current VM2 editor keeps its step model.',
-    '  - Shapes/arrows/lines are approximated as inline SVG clips.',
+    '  - Only the latest working copy of each project is converted; no revisions are created.',
+    '  - Each classic step becomes a video clip; overlays become clips on tracks above the video.',
   ].join('\n'));
 }
 
@@ -116,494 +125,11 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function createIdFactory(prefix) {
-  let count = 0;
-  return () => {
-    count += 1;
-    return `${prefix}${String(count).padStart(4, '0')}`;
-  };
-}
-
-function buildAssetLookup(project, playlistAssets) {
-  const lookup = new Map();
-
-  (project.assets || []).forEach((asset) => {
-    const key = String(asset.assetId || asset._id || '').trim();
-    if (key) lookup.set(key, asset);
-  });
-
-  playlistAssets.forEach((asset) => {
-    const key = String(asset.assetId || asset._id || '').trim();
-    if (key && !lookup.has(key)) lookup.set(key, asset);
-  });
-
-  return lookup;
-}
-
-function resolveClassicAssetUrl(asset) {
-  if (!asset || typeof asset !== 'object') return null;
-  return asset.downloadUrl || asset.url || asset.src || null;
-}
-
-function resolveClassicStepVideoUrl(step, project, assetLookup) {
-  const assetId = step?.assetId || project?.currentAssetId || null;
-  if (assetId && assetLookup.has(String(assetId))) {
-    const assetUrl = resolveClassicAssetUrl(assetLookup.get(String(assetId)));
-    if (assetUrl) return { url: assetUrl, assetId: String(assetId) };
-  }
-
-  const directUrl = step?.videoUrl || project?.videoUrl || null;
-  if (directUrl) return { url: directUrl, assetId: null };
-  return { url: null, assetId: assetId ? String(assetId) : null };
-}
-
 function hasClassicProjectMedia(project) {
   if (!project || typeof project !== 'object') return false;
   if (safeText(project.videoUrl)) return true;
   if (Array.isArray(project.steps) && project.steps.some((step) => safeText(step?.videoUrl) || step?.assetId)) return true;
   return false;
-}
-
-function normalizeHexColor(value, fallback) {
-  const color = safeText(value);
-  if (!color) return fallback;
-  return color;
-}
-
-function percentOpacityToUnit(value, fallback = 1) {
-  const raw = toNumber(value, fallback * 100);
-  if (raw <= 1) return clamp(raw, 0, 1);
-  return clamp(raw / 100, 0, 1);
-}
-
-function isTransientLocalUrl(url) {
-  return typeof url === 'string' && (url.startsWith('blob:') || url.startsWith('data:application/octet-stream'));
-}
-
-function computeClipOffset(x, y, width, height, projectWidth, projectHeight) {
-  const centerX = toNumber(x, 0) + (toNumber(width, 0) / 2);
-  const centerY = toNumber(y, 0) + (toNumber(height, 0) / 2);
-
-  return {
-    x: clamp(((centerX / Math.max(1, projectWidth)) - 0.5) * 2, -1, 1),
-    y: clamp(((centerY / Math.max(1, projectHeight)) - 0.5) * 2, -1, 1),
-  };
-}
-
-function buildShapeSvg(shapeType, width, height, options = {}) {
-  const fill = normalizeHexColor(options.fill, '#fecaca');
-  const stroke = normalizeHexColor(options.stroke, '#ef4444');
-  const strokeWidth = Math.max(2, toNumber(options.strokeWidth, 3));
-  const safeWidth = Math.max(24, Math.round(toNumber(width, 120)));
-  const safeHeight = Math.max(24, Math.round(toNumber(height, 80)));
-  const strokePadding = strokeWidth + 14;
-
-  switch (shapeType) {
-    case 'rect': {
-      const inset = strokePadding;
-      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="rect" width="${safeWidth}" height="${safeHeight}" viewBox="0 0 ${safeWidth} ${safeHeight}"><rect x="${inset}" y="${inset}" width="${Math.max(1, safeWidth - (inset * 2))}" height="${Math.max(1, safeHeight - (inset * 2))}" rx="12" fill="${fill}" fill-opacity="0.35" stroke="${stroke}" stroke-width="${strokeWidth}"/></svg>`;
-    }
-    case 'circle': {
-      const radiusX = Math.max(8, (safeWidth / 2) - strokePadding);
-      const radiusY = Math.max(8, (safeHeight / 2) - strokePadding);
-      const centerX = safeWidth / 2;
-      const centerY = safeHeight / 2;
-      const ovalPath = [
-        `M ${centerX - radiusX} ${centerY}`,
-        `A ${radiusX} ${radiusY} 0 1 0 ${centerX + radiusX} ${centerY}`,
-        `A ${radiusX} ${radiusY} 0 1 0 ${centerX - radiusX} ${centerY}`,
-      ].join(' ');
-      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="circle" width="${safeWidth}" height="${safeHeight}" viewBox="0 0 ${safeWidth} ${safeHeight}"><path d="${ovalPath}" fill="${fill}" fill-opacity="0.35" stroke="${stroke}" stroke-width="${strokeWidth}"/></svg>`;
-    }
-    case 'arrow': {
-      const margin = strokePadding + 6;
-      const leftX = margin;
-      const rightX = safeWidth - margin;
-      const centerY = safeHeight / 2;
-      const usableHeight = Math.max(18, safeHeight - (margin * 2));
-      const headLength = Math.max(18, Math.min(safeWidth * 0.28, usableHeight * 1.1));
-      const shaftHalf = Math.max(4, usableHeight * 0.16);
-      const bodyRight = Math.max(leftX + 12, rightX - headLength);
-      const topY = centerY - (usableHeight / 2);
-      const bottomY = centerY + (usableHeight / 2);
-      const arrowPath = [
-        `M ${leftX} ${centerY - shaftHalf}`,
-        `L ${bodyRight} ${centerY - shaftHalf}`,
-        `L ${bodyRight} ${topY}`,
-        `L ${rightX} ${centerY}`,
-        `L ${bodyRight} ${bottomY}`,
-        `L ${bodyRight} ${centerY + shaftHalf}`,
-        `L ${leftX} ${centerY + shaftHalf}`,
-        'Z',
-      ].join(' ');
-      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="arrow" width="${safeWidth}" height="${safeHeight}" viewBox="0 0 ${safeWidth} ${safeHeight}"><path d="${arrowPath}" fill="${fill}" fill-opacity="0.35" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    }
-    case 'line': {
-      const margin = strokePadding + 8;
-      const centerY = safeHeight / 2;
-      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="line" width="${safeWidth}" height="${safeHeight}" viewBox="0 0 ${safeWidth} ${safeHeight}"><line x1="${margin}" y1="${centerY}" x2="${safeWidth - margin}" y2="${centerY}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="butt"/></svg>`;
-    }
-    default:
-      return '';
-  }
-}
-
-function buildRichTextClip(element, projectWidth, projectHeight) {
-  const clipWidth = Math.max(80, Math.round(toNumber(element.width, 360)));
-  const clipHeight = Math.max(40, Math.round(toNumber(element.height, 80)));
-  const clip = {
-    asset: {
-      type: 'rich-text',
-      text: safeText(element.text, safeText(element.label, 'Text')),
-      font: {
-        family: 'Work Sans',
-        size: 36,
-        weight: 600,
-        color: '#111111',
-        opacity: 1,
-      },
-      align: {
-        horizontal: 'center',
-        vertical: 'middle',
-      },
-    },
-    start: toNumber(element.startTime, 0),
-    length: Math.max(0.1, toNumber(element.endTime, 0) - toNumber(element.startTime, 0)),
-    width: clipWidth,
-    height: clipHeight,
-    offset: computeClipOffset(element.x, element.y, clipWidth, clipHeight, projectWidth, projectHeight),
-  };
-
-  return clip;
-}
-
-function buildUnavailableImageFallbackClip(element, projectWidth, projectHeight, reason) {
-  const clipWidth = Math.max(120, Math.round(toNumber(element.width, 260)));
-  const clipHeight = Math.max(80, Math.round(toNumber(element.height, 180)));
-
-  return {
-    asset: {
-      type: 'rich-text',
-      text: reason || 'Imported image unavailable',
-      font: {
-        family: 'Work Sans',
-        size: Math.max(14, Math.round(Math.min(28, clipHeight * 0.16))),
-        weight: 600,
-        color: '#475569',
-        opacity: 1,
-      },
-      align: {
-        horizontal: 'center',
-        vertical: 'middle',
-      },
-      background: {
-        color: '#E2E8F0',
-        opacity: 0.9,
-        borderRadius: 18,
-      },
-      padding: 20,
-    },
-    start: toNumber(element.startTime, 0),
-    length: Math.max(0.1, toNumber(element.endTime, 0) - toNumber(element.startTime, 0)),
-    width: clipWidth,
-    height: clipHeight,
-    offset: computeClipOffset(element.x, element.y, clipWidth, clipHeight, projectWidth, projectHeight),
-  };
-}
-
-function buildImageClip(element, projectWidth, projectHeight, report) {
-  const src = safeText(element.imageUrl || element.url || element.src);
-  if (!src) {
-    report.warnings.push(`Skipped image element ${element.id || '(unknown)'} because it has no image URL.`);
-    return null;
-  }
-
-  if (isTransientLocalUrl(src)) {
-    report.warnings.push(`Image element ${element.id || '(unknown)'} used a local blob URL and was converted to a text placeholder.`);
-    return buildUnavailableImageFallbackClip(element, projectWidth, projectHeight, 'Imported image unavailable');
-  }
-
-  const clipWidth = Math.max(24, Math.round(toNumber(element.width, 300)));
-  const clipHeight = Math.max(24, Math.round(toNumber(element.height, 200)));
-
-  const clip = {
-    asset: {
-      type: 'image',
-      src,
-    },
-    start: toNumber(element.startTime, 0),
-    length: Math.max(0.1, toNumber(element.endTime, 0) - toNumber(element.startTime, 0)),
-    width: clipWidth,
-    height: clipHeight,
-    offset: computeClipOffset(element.x, element.y, clipWidth, clipHeight, projectWidth, projectHeight),
-  };
-
-  return clip;
-}
-
-function buildAudioClip(element, report) {
-  const src = safeText(element.audioUrl || element.url || element.src);
-  if (!src) {
-    report.warnings.push(`Skipped audio element ${element.id || '(unknown)'} because it has no audio URL.`);
-    return null;
-  }
-
-  return {
-    asset: {
-      type: 'audio',
-      src,
-      volume: clamp(toNumber(element.volume, 100) / 100, 0, 1),
-    },
-    start: toNumber(element.startTime, 0),
-    length: Math.max(0.1, toNumber(element.endTime, 0) - toNumber(element.startTime, 0)),
-  };
-}
-
-function buildNativeShapeAsset(shapeType, width, height, options = {}) {
-  const clipWidth = Math.max(24, Math.round(toNumber(width, 180)));
-  const clipHeight = Math.max(24, Math.round(toNumber(height, 100)));
-  const strokeWidth = Math.max(1, Math.round(toNumber(options.strokeWidth, 3)));
-  const fillColor = '#FECACA';
-  const fillOpacity = 0.35;
-  const strokeColor = '#EF4444';
-
-  if (shapeType === 'rect') {
-    return {
-      type: 'shape',
-      shape: 'rectangle',
-      width: clipWidth,
-      height: clipHeight,
-      rectangle: {
-        width: Math.max(8, clipWidth - (strokeWidth * 2)),
-        height: Math.max(8, clipHeight - (strokeWidth * 2)),
-      },
-      fill: { color: fillColor, opacity: fillOpacity },
-      stroke: { color: strokeColor, width: strokeWidth },
-    };
-  }
-
-  if (shapeType === 'circle') {
-    return {
-      type: 'shape',
-      shape: 'circle',
-      width: clipWidth,
-      height: clipHeight,
-      circle: {
-        radius: Math.max(8, Math.floor((Math.min(clipWidth, clipHeight) - (strokeWidth * 2)) / 2)),
-      },
-      fill: { color: fillColor, opacity: fillOpacity },
-      stroke: { color: strokeColor, width: strokeWidth },
-    };
-  }
-
-  return {
-    type: 'shape',
-    shape: 'line',
-    width: clipWidth,
-    height: clipHeight,
-    line: {
-      length: Math.max(12, clipWidth - (strokeWidth * 2)),
-      thickness: strokeWidth,
-    },
-    fill: { color: '#000000', opacity: 0 },
-    stroke: { color: strokeColor, width: strokeWidth },
-  };
-}
-
-function buildShapeClip(element, projectWidth, projectHeight, report) {
-  const shapeType = safeText(element.subtype, 'rect');
-  const supportedType = ['rect', 'circle', 'arrow', 'line'].includes(shapeType) ? shapeType : 'rect';
-  const clipWidth = Math.max(24, Math.round(toNumber(element.width, 180)));
-  const clipHeight = Math.max(24, Math.round(toNumber(element.height, 100)));
-  const approximatedType = supportedType === 'arrow' ? 'line' : supportedType;
-  const shapeAsset = buildNativeShapeAsset(approximatedType, clipWidth, clipHeight, {
-    strokeWidth: toNumber(element.strokeWidth, 3),
-  });
-
-  if (shapeType !== approximatedType) {
-    report.warnings.push(`Converted classic shape "${shapeType}" to native Shotstack "${approximatedType}" for element ${element.id || '(unknown)'}.`);
-  }
-
-  const clip = {
-    asset: shapeAsset,
-    start: toNumber(element.startTime, 0),
-    length: Math.max(0.1, toNumber(element.endTime, 0) - toNumber(element.startTime, 0)),
-    width: clipWidth,
-    height: clipHeight,
-    offset: computeClipOffset(element.x, element.y, clipWidth, clipHeight, projectWidth, projectHeight),
-  };
-
-  return clip;
-}
-
-function getClipLayerWeight(clip) {
-  const assetType = clip?.asset?.type;
-  if (assetType === 'video') return 0;
-  if (assetType === 'audio') return 1;
-  if (assetType === 'image') return 2;
-  if (assetType === 'shape' || assetType === 'svg') return 3;
-  if (assetType === 'rich-text' || assetType === 'text' || assetType === 'title') return 4;
-  return 5;
-}
-
-function convertClassicElement(element, context) {
-  const { projectWidth, projectHeight, report } = context;
-  switch (element?.type) {
-    case 'text':
-    case 'title':
-      report.converted.nativeText += 1;
-      return buildRichTextClip(element, projectWidth, projectHeight);
-    case 'image':
-      report.converted.nativeImage += 1;
-      return buildImageClip(element, projectWidth, projectHeight, report);
-    case 'audio':
-      report.converted.nativeAudio += 1;
-      return buildAudioClip(element, report);
-    case 'shape':
-      report.converted.svgShape += 1;
-      return buildShapeClip(element, projectWidth, projectHeight, report);
-    default:
-      report.skipped.push({
-        elementId: element?.id || null,
-        type: element?.type || 'unknown',
-        reason: 'Unsupported classic element type',
-      });
-      report.warnings.push(`Skipped unsupported classic element type "${element?.type || 'unknown'}".`);
-      return null;
-  }
-}
-
-function createImportReport(project) {
-  return {
-    sourceProjectId: String(project._id),
-    sourceTitle: project.title || 'Untitled Project',
-    warnings: [],
-    skipped: [],
-    converted: {
-      stepTracks: 0,
-      baseVideoClips: 0,
-      nativeText: 0,
-      nativeImage: 0,
-      nativeAudio: 0,
-      svgShape: 0,
-    },
-  };
-}
-
-function convertClassicProjectToShotstack(project, playlistAssets, options = {}) {
-  const sourceProject = deepClone(project);
-  const report = createImportReport(sourceProject);
-  const stepId = createIdFactory('step_');
-  const projectWidth = Math.max(320, Math.round(toNumber(sourceProject.width, 1920)));
-  const projectHeight = Math.max(180, Math.round(toNumber(sourceProject.height, 1080)));
-  const assetLookup = buildAssetLookup(sourceProject, playlistAssets);
-  const tracks = [];
-  const stepMeta = [];
-  const assetSourceMap = {};
-
-  (sourceProject.steps || []).forEach((step) => {
-    const stepStart = toNumber(step?.startTime, 0);
-    const stepEnd = Math.max(stepStart + 0.1, toNumber(step?.endTime, stepStart + 5));
-    const clips = [];
-    const media = resolveClassicStepVideoUrl(step, sourceProject, assetLookup);
-
-    if (media.url) {
-      clips.push({
-        asset: {
-          type: 'video',
-          src: media.url,
-          trim: Math.max(0, toNumber(step?.sourceStart, 0)),
-          volume: step?.muted ? 0 : 1,
-        },
-        start: stepStart,
-        length: Math.max(0.1, stepEnd - stepStart),
-      });
-      assetSourceMap[media.url] = media.url;
-      report.converted.baseVideoClips += 1;
-    } else {
-      report.warnings.push(`Step "${safeText(step?.label, stepId())}" has no source video. Imported overlays only.`);
-    }
-
-    (step?.elements || []).forEach((element) => {
-      const clip = convertClassicElement(element, { projectWidth, projectHeight, report });
-      if (clip) {
-        if (clip.asset?.src && typeof clip.asset.src === 'string' && !clip.asset.src.startsWith('<svg')) {
-          assetSourceMap[clip.asset.src] = clip.asset.src;
-        }
-        clips.push(clip);
-      }
-    });
-
-    clips.sort((left, right) => {
-      const byStart = toNumber(left.start, 0) - toNumber(right.start, 0);
-      if (byStart !== 0) return byStart;
-      const byLayer = getClipLayerWeight(left) - getClipLayerWeight(right);
-      if (byLayer !== 0) return byLayer;
-      return toNumber(left.length, 0) - toNumber(right.length, 0);
-    });
-
-    tracks.push({ clips });
-    stepMeta.push({
-      classicStepId: step?.id || null,
-      classicLabel: safeText(step?.label, `Step ${tracks.length + 1}`),
-      classicDescription: safeText(step?.description),
-    });
-
-    report.converted.stepTracks += 1;
-  });
-
-  if (!tracks.length) {
-    report.warnings.push('Project has no classic steps. Imported as an empty Shotstack edit.');
-  }
-
-  const edit = {
-    timeline: {
-      background: '#ffffff',
-      tracks,
-    },
-    output: {
-      format: 'mp4',
-      fps: 24,
-      size: {
-        width: projectWidth,
-        height: projectHeight,
-      },
-    },
-  };
-
-  const settings = {
-    output: edit.output,
-    importMeta: {
-      source: 'classic-video-manual',
-      sourceProjectId: String(sourceProject._id),
-      sourcePlaylistId: String(sourceProject.playlistId),
-      importedAt: new Date().toISOString(),
-      classicWidth: sourceProject.width || null,
-      classicHeight: sourceProject.height || null,
-      classicDuration: sourceProject.duration || null,
-      classicCurrentAssetId: sourceProject.currentAssetId || null,
-      classicStepMeta: stepMeta,
-      classicAssets: (sourceProject.assets || []).map((asset) => ({
-        assetId: asset.assetId || asset._id || null,
-        title: asset.title || asset.name || null,
-        downloadUrl: asset.downloadUrl || asset.url || null,
-        storagePath: asset.storagePath || null,
-        mimeType: asset.mimeType || asset.contentType || null,
-      })),
-      warnings: report.warnings,
-      skipped: report.skipped,
-    },
-  };
-
-  return {
-    title: safeText(sourceProject.title, 'Untitled Project'),
-    description: safeText(sourceProject.description),
-    status: safeText(sourceProject.status, 'draft') || 'draft',
-    edit,
-    assetSourceMap,
-    settings,
-    report,
-  };
 }
 
 function shouldUseClassicRevisionFallback(project) {
@@ -717,8 +243,8 @@ async function upsertShotstackPlaylist(db, classicPlaylist, args) {
   }
 
   if (existing && args.overwrite) {
-    await db.collection(SHOTSTACK_PROJECTS_COLLECTION).deleteMany({ playlistId: existing._id });
-    await db.collection(SHOTSTACK_REVISIONS_COLLECTION).deleteMany({ playlistId: existing._id });
+    // Only metadata is refreshed here. Imported projects are replaced one by one (by source id);
+    // projects people created natively in this playlist are never touched.
     await db.collection(SHOTSTACK_PLAYLISTS_COLLECTION).updateOne({ _id: existing._id }, { $set: doc });
     return { mode: 'updated', playlistId: existing._id, doc: { ...existing, ...doc } };
   }
@@ -727,7 +253,7 @@ async function upsertShotstackPlaylist(db, classicPlaylist, args) {
   return { mode: 'inserted', playlistId: result.insertedId, doc: { _id: result.insertedId, ...doc } };
 }
 
-async function insertShotstackProjectWithRevision(db, classicProject, converted, targetPlaylistId, sourceRevision, args) {
+async function insertShotstackProject(db, classicProject, converted, targetPlaylistId, args) {
   const existing = await findImportedShotstackProject(db, classicProject._id);
   const now = new Date();
   const projectDoc = {
@@ -740,84 +266,88 @@ async function insertShotstackProjectWithRevision(db, classicProject, converted,
     edit: converted.edit,
     assetSourceMap: converted.assetSourceMap,
     settings: converted.settings,
-    currentRevisionNumber: 1,
+    currentRevisionNumber: 0,
     lastRevisionId: null,
+    deployedRevisionId: null,
+    deployedRevisionNumber: null,
+    deployedRevisionName: null,
+    deployedAt: null,
+    deployedBy: null,
+    deployedVideoUrl: null,
+    deployedVideoStoragePath: null,
+    deployedVideoMimeType: null,
+    deployedVideoFileName: null,
+    previewRevisionId: null,
+    previewUrl: null,
+    previewStoragePath: null,
+    previewMimeType: null,
+    previewThumbnailUrl: null,
+    previewThumbnailStoragePath: null,
+    previewThumbnailMimeType: null,
+    previewStatus: 'idle',
+    previewError: null,
+    previewUpdatedAt: null,
     createdBy: classicProject.createdBy || 'migration',
     createdAt: classicProject.createdAt || now,
     updatedAt: now,
     lastEditedAt: now,
     lastEditedBy: 'migration',
-    ...(classicProject.deleted ? {
-      deleted: true,
-      deletedAt: classicProject.deletedAt || now,
-      deletedBy: classicProject.deletedBy || 'migration',
-    } : {}),
-  };
-
-  const snapshot = {
-    title: converted.title,
-    description: converted.description,
-    status: converted.status,
-    edit: converted.edit,
-    assetSourceMap: converted.assetSourceMap,
-    settings: {
-      ...converted.settings,
-      importMeta: {
-        ...converted.settings.importMeta,
-        sourceClassicRevisionId: sourceRevision?._id ? String(sourceRevision._id) : null,
-        sourceClassicRevisionNumber: sourceRevision?.revisionNumber || classicProject.currentRevisionNumber || 0,
-      },
-    },
+    ...(classicProject.deleted ? { deleted: true, deletedAt: classicProject.deletedAt || now, deletedBy: classicProject.deletedBy || 'migration' } : {}),
   };
 
   if (!args.write) {
     return {
-      mode: existing
-        ? (args.overwrite ? 'would-replace' : 'would-skip-existing')
-        : 'would-insert',
+      mode: existing ? (args.overwrite ? 'would-replace' : 'would-skip-existing') : 'would-insert',
       projectId: existing?._id || null,
-      projectDoc,
-      snapshot,
     };
   }
+  if (existing && !args.overwrite) return { mode: 'skipped-existing', projectId: existing._id };
+  if (existing && args.overwrite) await deleteImportedShotstackProject(db, existing);
 
-  if (existing && !args.overwrite) {
-    return { mode: 'skipped-existing', projectId: existing._id, projectDoc: existing, snapshot: null };
+  const result = await db.collection(SHOTSTACK_PROJECTS_COLLECTION).insertOne(projectDoc);
+  return { mode: existing ? 'replaced' : 'inserted', projectId: result.insertedId };
+}
+
+/** Copy classic playlist assets into the Shotstack asset library (reference only; files stay in Firebase). */
+async function copyPlaylistAssets(db, classicAssets, targetPlaylistId, args) {
+  let copied = 0;
+  let existingCount = 0;
+  for (const asset of classicAssets) {
+    const assetId = asset.assetId || String(asset._id);
+    const exists = args.write && targetPlaylistId
+      ? await db.collection(SHOTSTACK_ASSETS_COLLECTION).findOne({ playlistId: targetPlaylistId, assetId })
+      : null;
+    if (exists) { existingCount += 1; continue; }
+    copied += 1;
+    if (!args.write) continue;
+    const uploadedAt = asset.uploadedAt || new Date();
+    await db.collection(SHOTSTACK_ASSETS_COLLECTION).insertOne({
+      playlistId: targetPlaylistId,
+      assetId,
+      name: asset.name || asset.title || assetId,
+      type: asset.type || 'video',
+      mimeType: asset.mimeType || asset.contentType || 'video/mp4',
+      storagePath: asset.storagePath || null,
+      downloadUrl: asset.downloadUrl || asset.url || null,
+      size: asset.size || 0,
+      uploadedBy: asset.uploadedBy || 'migration',
+      uploadedAt,
+      previewUrl: null,
+      previewStoragePath: null,
+      previewMimeType: null,
+      previewDurationSeconds: null,
+      thumbnailUrl: null,
+      thumbnailStoragePath: null,
+      thumbnailMimeType: null,
+      processingStatus: 'ready',
+      processingError: null,
+      processingStartedAt: null,
+      processingCompletedAt: uploadedAt,
+      shotstackRenderId: null,
+      importMeta: { source: 'classic-video-manual', sourceAssetId: String(asset._id) },
+    });
   }
-
-  if (existing && args.overwrite) {
-    await deleteImportedShotstackProject(db, existing);
-  }
-
-  const projectInsert = await db.collection(SHOTSTACK_PROJECTS_COLLECTION).insertOne(projectDoc);
-  const projectId = projectInsert.insertedId;
-  const revisionDoc = {
-    projectId,
-    playlistId: targetPlaylistId,
-    revisionName: `Imported from classic${classicProject.currentRevisionNumber ? ` Rev ${classicProject.currentRevisionNumber}` : ''}`,
-    revisionNumber: 1,
-    snapshot,
-    createdAt: now,
-    createdBy: 'migration',
-  };
-  const revisionInsert = await db.collection(SHOTSTACK_REVISIONS_COLLECTION).insertOne(revisionDoc);
-
-  await db.collection(SHOTSTACK_PROJECTS_COLLECTION).updateOne(
-    { _id: projectId },
-    {
-      $set: {
-        currentRevisionNumber: 1,
-        lastRevisionId: revisionInsert.insertedId,
-      },
-    },
-  );
-
-  return {
-    mode: existing ? 'replaced' : 'inserted',
-    projectId,
-    projectDoc: { _id: projectId, ...projectDoc, lastRevisionId: revisionInsert.insertedId },
-    snapshot,
-  };
+  return { copied, alreadyPresent: existingCount };
 }
 
 async function main() {
@@ -875,20 +405,15 @@ async function main() {
         projects: [],
       };
 
+      playlistSummary.assets = await copyPlaylistAssets(db, playlistAssets, playlistResult.playlistId, args);
+
       for (const classicProject of playlistProjects) {
         summary.totals.classicProjects += 1;
 
         const { sourceProject, sourceRevision } = await loadClassicSourceProject(db, classicProject);
-        const converted = convertClassicProjectToShotstack(sourceProject, playlistAssets, args);
+        const converted = convertClassicProject(sourceProject, playlistAssets, { apiBase: args.apiBase });
         const targetPlaylistId = playlistResult.playlistId || new ObjectId();
-        const projectResult = await insertShotstackProjectWithRevision(
-          db,
-          classicProject,
-          converted,
-          targetPlaylistId,
-          sourceRevision,
-          args,
-        );
+        const projectResult = await insertShotstackProject(db, classicProject, converted, targetPlaylistId, args);
 
         if (String(projectResult.mode).includes('skip')) {
           summary.totals.skippedProjects += 1;
