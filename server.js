@@ -13332,6 +13332,25 @@ app.post('/api/production-plans/update', async (req, res) => {
 });
 
 // ==================== GET PRODUCTION PLANS ====================
+// Broken-down machines stay broken until someone marks them repaired (like the legacy Freya Admin), so a day without its
+// own list inherits the list of the nearest EARLIER plan that has one. Read-only, returns only that field.
+app.get('/api/production-plans/unavailable-carry', async (req, res) => {
+    try {
+        const { factory, date } = req.query;
+        if (!factory || !date) {
+            return res.status(400).json({ success: false, error: 'factory and date are required' });
+        }
+        const plan = await client.db('submittedDB').collection('productionPlansDB').findOne(
+            { factory, date: { $lt: date }, unavailableEquipment: { $exists: true, $type: 'object' } },
+            { sort: { date: -1 }, projection: { date: 1, unavailableEquipment: 1 } }
+        );
+        res.json({ success: true, data: plan ? { date: plan.date, unavailableEquipment: plan.unavailableEquipment } : null });
+    } catch (error) {
+        console.error('Error fetching carried unavailable equipment:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 app.get('/api/production-plans', async (req, res) => {
     try {
         const { factory, date, startDate, endDate } = req.query;
