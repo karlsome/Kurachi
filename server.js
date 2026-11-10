@@ -13430,7 +13430,7 @@ app.get('/api/planner/live-production', async (req, res) => {
         // machine state). A Reset / completed Submit means idle. Live NG still comes from the in-memory state when it has one.
         const logs = await submittedDb.collection('tabletLogDB')
             .find({ 工場: factory, Date: date })
-            .project({ Timestamp: 1, Action: 1, Status: 1, 背番号: 1, 設備: 1, SpecificMachine: 1, AdditionalData: 1 }).toArray();
+            .project({ Timestamp: 1, Action: 1, Status: 1, 背番号: 1, 設備: 1, SpecificMachine: 1, AdditionalData: 1, sessionID: 1 }).toArray();
         logs.sort((a, b) => String(a.Timestamp || '').localeCompare(String(b.Timestamp || '')));
         const latestByMachine = new Map();
         logs.forEach((l) => {
@@ -13441,14 +13441,14 @@ app.get('/api/planner/live-production', async (req, res) => {
                 const status = String(l.Status || '');
                 const closed = action.includes('Reset') || status === 'Reset' || (action.includes('Submit') && status === 'Completed') || action.includes('clear');
                 if (closed) latestByMachine.set(id, { closed: true });
-                else if (l.背番号) latestByMachine.set(id, { closed: false, sebanggo: l.背番号 });
+                else if (l.背番号) latestByMachine.set(id, { closed: false, sebanggo: l.背番号, sessionID: l.sessionID || '' });
                 // events without a 背番号 (e.g. break, stop call) keep the previous entry
             });
         });
         const states = factoryMachineState.get(factory) || new Map();
         const running = [...latestByMachine.entries()]
             .filter(([, v]) => !v.closed && v.sebanggo)
-            .map(([id, v]) => [id, { sebanggo: v.sebanggo, totalNG: states.get(id)?.totalNG || 0 }]);
+            .map(([id, v]) => [id, { sebanggo: v.sebanggo, sessionID: v.sessionID, totalNG: states.get(id)?.totalNG || 0 }]);
         if (!running.length) return res.json({ success: true, data: { bySerial: {}, machines: [] } });
 
         // Submitted shots per machine today
@@ -13500,7 +13500,7 @@ app.get('/api/planner/live-production', async (req, res) => {
             const pc = Number(cfg?.pcPerCycle) || Number(product?.pcPerCycle) || 0;
             machines.push({
                 machine: id, 背番号: st.sebanggo, cycles, pcPerCycle: pc, pieces: cycles * pc,
-                ng: Number(st.totalNG) || 0, source, counter, counterTs: cyc.timestamp || null,
+                ng: Number(st.totalNG) || 0, source, counter, counterTs: cyc.timestamp || null, sessionID: st.sessionID || '',
             });
         }
 
