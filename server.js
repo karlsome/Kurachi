@@ -29232,14 +29232,11 @@ app.post("/submitToKensaDBInteractive", async (req, res) => {
       }
     }
 
-    // photos: 初物 is required, 終物 is optional
+    // photos: no first/last piece check any more (only the optional defect photos)
     const images = (Array.isArray(formData.images) ? formData.images : []).concat(Array.isArray(formData.photos) ? formData.photos : []);
     delete formData.images;
     delete formData.photos;
-    if (!images.some(i => i && i.label === "初物チェック" && i.base64)) {
-      return res.status(400).json({ error: "初物チェック (first-piece) photo is required" });
-    }
-    const labelToField = { "初物チェック": "初物チェック画像", "終物チェック": "終物チェック画像" };
+    const labelToField = { "初物チェック": "初物チェック画像", "終物チェック": "終物チェック画像" };   // older tablets may still send these: stored if present, never required
     const safe = (v) => String(v === undefined || v === null || v === "" ? "x" : v).replace(/[\\/]+/g, "_");
     const bucket = admin.storage().bucket();
     for (const img of images) {
@@ -29257,9 +29254,6 @@ app.post("/submitToKensaDBInteractive", async (req, res) => {
       } catch (uploadError) {
         console.error(`❌ Kensa interactive: photo upload failed (${img.label}):`, uploadError.message);
       }
-    }
-    if (!formData["初物チェック画像"]) {
-      return res.status(502).json({ error: "初物チェック photo upload failed, please retry" });
     }
 
     // optional defect photos taken during the inspection (max 25): a failed one is logged and skipped, it never blocks the submit

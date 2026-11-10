@@ -691,21 +691,6 @@
                 <textarea id="inspComment" rows="3" style="height:auto; min-height:96px; resize:vertical"></textarea>
             </div>
 
-            <!-- 初物 / 終物 first / last piece photos (same buttons as DCP interactive; 初物 is required to submit, 終物 is optional) -->
-            <div class="glass-card" id="checkCard">
-                <h3 data-i18n="kensa_checks_title">初物・終物チェック</h3>
-                <div class="prod-check-grid">
-                    <button type="button" id="hatsumonoButton" class="prod-check-btn">
-                        <span class="check-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 12l2 2 4-4" /></svg></span>
-                        <span class="check-txt"><span data-i18n="kensa_first_check">初物チェック</span><small id="hatsumonoSub">First Cycle</small></span>
-                    </button>
-                    <button type="button" id="atomonoButton" class="prod-check-btn">
-                        <span class="check-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 12l2 2 4-4" /></svg></span>
-                        <span class="check-txt"><span data-i18n="kensa_last_check">終物チェック</span><small id="atomonoSub">Last Cycle</small></span>
-                    </button>
-                </div>
-            </div>
-
             <!-- Kensa labels -->
             <div class="glass-card">
                 <h3 data-i18n="kensa_lbl_title">検査ラベル</h3>
@@ -760,13 +745,11 @@
     <div class="tab-panel" id="panel-images">
         <div class="glass-card">
             <h3 data-i18n="kensa_img_title">撮影画像</h3>
-            <p class="gallery-sub" data-i18n="kensa_img_desc">初物・終物の写真はここに集約されます。サムネイルをタップで拡大</p>
+            <p class="gallery-sub" data-i18n="kensa_img_desc">撮影した画像はここに集約されます。サムネイルをタップで拡大</p>
             <div id="imageGallery" class="gallery-sections"></div>
         </div>
     </div>
-    <input type="file" id="hatsumonoFileInput" accept="image/*" capture="environment" style="display:none">
     <input type="file" id="defectFileInput" accept="image/*" capture="environment" style="display:none">
-    <input type="file" id="atomonoFileInput" accept="image/*" capture="environment" style="display:none">
     <div id="imgPreviewModal" class="img-preview-modal">
         <button type="button" class="img-preview-close" id="imgPreviewClose">&times;</button>
         <img id="imgPreviewTarget" src="" alt="preview">
