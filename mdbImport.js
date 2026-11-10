@@ -85,11 +85,12 @@ async function readDataset(filePath, onStage = () => {}) {
       const keyCol = cols.includes(s.segment) ? s.segment : cols[0];
       for (const r of t.getData()) {
         const raw = String(r[keyCol] ?? "");
+        // Names are kept exactly as stored (untrimmed), matching existing documents.
+        const rawName = (v) => (v == null ? null : String(v));
         const rec = s.customer
-          ? { 得意先: cleanVal(r["得意先"]), 入出荷先: cleanVal(r["入出荷先"]) }
-          : { name: cleanVal(r[s.nameCol]) };
-        map.set(raw, rec);
-        if (!map.has(raw.trim())) map.set(raw.trim(), rec);
+          ? { 得意先: rawName(r["得意先"]), 入出荷先: rawName(r["入出荷先"]) }
+          : { name: rawName(r[s.nameCol]) };
+        if (!map.has(raw)) map.set(raw, rec);
       }
     }
     return map;
@@ -101,7 +102,7 @@ async function readDataset(filePath, onStage = () => {}) {
     const segments = SEGMENTS.map((s, i) => {
       const raw = h.slice(pos, pos + s.len);
       pos += s.len;
-      const hit = segLookups[i].get(raw) ?? segLookups[i].get(raw.trim());
+      const hit = segLookups[i].get(raw);
       if (s.customer) {
         return { segment: s.segment, raw, matched: !!hit, 得意先: hit?.得意先 ?? null, 入出荷先: hit?.入出荷先 ?? null };
       }
