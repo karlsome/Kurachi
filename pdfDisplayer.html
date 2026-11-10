@@ -3213,7 +3213,8 @@
         }
 
         function updateManualStepLabel() {
-            if (isManualFlattenedPlayback() && manualState.project) {
+            // A flattened video without step data just shows the running time; with steps it shows the current step like the classic player.
+            if (isManualFlattenedPlayback() && manualState.project && !manualState.project.steps?.length) {
                 const duration = manualState.duration || Number(getManualVideo()?.duration) || 0;
                 manualStepText.textContent = `Flattened video · ${formatManualTime(manualState.currentTime)} / ${formatManualTime(duration)}`;
                 if (manualStepDescription) {

@@ -38381,6 +38381,47 @@ app.post('/api/video-projects/:id/render-shotstack', async (req, res) => {
   }
 });
 
+// Shotstack Studio projects have no explicit "steps"; a step is a video clip on the timeline (same rule as the editor's
+// step list), with the optional description the author typed for it (settings.stepDescriptions, matched by start time).
+const VMSS_STEP_DESCRIPTION_TOLERANCE_SECONDS = 0.15;
+function vmssBuildPlaybackInfo(snapshot) {
+  const tracks = Array.isArray(snapshot?.edit?.timeline?.tracks) ? snapshot.edit.timeline.tracks : [];
+  const descriptions = Array.isArray(snapshot?.settings?.stepDescriptions) ? snapshot.settings.stepDescriptions : [];
+  const numeric = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+
+  const videoClips = [];
+  let duration = 0;
+  for (const track of tracks) {
+    for (const clip of Array.isArray(track?.clips) ? track.clips : []) {
+      const start = numeric(clip?.start);
+      const length = numeric(clip?.length);
+      if (start === null || length === null) continue;
+      duration = Math.max(duration, start + length);
+      if (clip?.asset?.type === 'video') videoClips.push({ start, end: start + length });
+    }
+  }
+
+  videoClips.sort((a, b) => a.start - b.start);
+  const steps = videoClips.map((clip, index) => {
+    const match = descriptions.find((entry) => Math.abs(Number(entry?.start) - clip.start) < VMSS_STEP_DESCRIPTION_TOLERANCE_SECONDS);
+    return {
+      id: `step-${index + 1}`,
+      label: `Step ${index + 1}`,
+      description: String(match?.description || '').trim(),
+      startTime: clip.start,
+      endTime: clip.end,
+    };
+  });
+
+  const size = snapshot?.edit?.output?.size || {};
+  return {
+    steps,
+    duration,
+    width: numeric(size.width) || 1920,
+    height: numeric(size.height) || 1080,
+  };
+}
+
 // GET /api/factory/video-manuals?model=<masterdb model>
 // Returns only explicitly deployed projects for the exact model value.
 app.get('/api/factory/video-manuals', async (req, res) => {
@@ -38451,32 +38492,31 @@ app.get('/api/factory/video-manuals', async (req, res) => {
         ]).toArray()
         : Promise.resolve([]),
       studioPlaylistIds.length
-        ? db.collection(VMSS_PROJECTS_COLLECTION).aggregate([
-          {
-            $match: {
-              playlistId: { $in: studioPlaylistIds },
-              deleted: { $ne: true },
-              deployedRevisionId: { $exists: true, $ne: null },
-            }
-          },
-          { $sort: { order: 1, updatedAt: -1, createdAt: 1 } },
-          {
-            $project: {
-              title: 1,
-              description: 1,
-              playlistId: 1,
-              thumbnailUrl: 1,
-              duration: 1,
-              updatedAt: 1,
-              deployedAt: 1,
-              deployedRevisionId: 1,
-              deployedRevisionNumber: 1,
-              deployedRevisionName: 1,
-              deployedVideoUrl: 1,
-              stepsCount: { $size: { $ifNull: ['$steps', []] } },
-            }
-          }
-        ]).toArray()
+        ? (async () => {
+          const studioDocs = await db.collection(VMSS_PROJECTS_COLLECTION)
+            .find(
+              { playlistId: { $in: studioPlaylistIds }, deleted: { $ne: true }, deployedRevisionId: { $exists: true, $ne: null } },
+              { projection: { title: 1, description: 1, playlistId: 1, order: 1, previewThumbnailUrl: 1, updatedAt: 1, deployedAt: 1, deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1, deployedVideoUrl: 1, createdAt: 1 } }
+            )
+            .sort({ order: 1, updatedAt: -1, createdAt: 1 })
+            .toArray();
+          const revisionIds = studioDocs.map((doc) => doc.deployedRevisionId).filter(Boolean).map((id) => new ObjectId(id));
+          const revisionDocs = revisionIds.length
+            ? await db.collection(VMSS_REVISIONS_COLLECTION)
+              .find({ _id: { $in: revisionIds } }, { projection: { 'snapshot.edit.timeline': 1, 'snapshot.edit.output': 1, 'snapshot.settings.stepDescriptions': 1 } })
+              .toArray()
+            : [];
+          const revisionById = new Map(revisionDocs.map((doc) => [String(doc._id), doc]));
+          return studioDocs.map(({ previewThumbnailUrl, createdAt, ...doc }) => {
+            const info = vmssBuildPlaybackInfo(revisionById.get(String(doc.deployedRevisionId))?.snapshot);
+            return {
+              ...doc,
+              thumbnailUrl: previewThumbnailUrl || null,
+              duration: info.duration || null,
+              stepsCount: info.steps.length,
+            };
+          });
+        })()
         : Promise.resolve([]),
     ]);
 
@@ -38532,7 +38572,7 @@ app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
       source: isStudioProject ? 'shotstack-studio' : 'classic',
       title: project.title,
       playlistId: project.playlistId,
-      thumbnailUrl: project.thumbnailUrl || null,
+      thumbnailUrl: project.thumbnailUrl || project.previewThumbnailUrl || null,
       deployedRevisionId: revision._id,
       deployedRevisionNumber: revision.revisionNumber || project.deployedRevisionNumber || null,
       deployedRevisionName: revision.revisionName || project.deployedRevisionName || null,
@@ -38541,7 +38581,7 @@ app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
       deployedVideoStoragePath,
       deployedVideoMimeType,
       deployedVideoFileName,
-      snapshot: revision.snapshot,
+      snapshot: isStudioProject ? { ...revision.snapshot, ...vmssBuildPlaybackInfo(revision.snapshot) } : revision.snapshot,
     });
   } catch (err) {
     console.error('❌ factory video-manual project get error:', err);

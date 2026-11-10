@@ -8534,7 +8534,7 @@ async function loadVideoManualProjects() {
   }
 
   try {
-    const response = await fetch(`${serverURL}/api/factory/video-manuals?model=${encodeURIComponent(model)}`);
+    const response = await fetch(`${serverURL}/api/factory/video-manuals?model=${encodeURIComponent(model)}&source=shotstack-studio`);
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.error || `HTTP ${response.status}`);
