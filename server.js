@@ -34115,7 +34115,15 @@ const VM_DEPLOYED_RETENTION_DAYS = 60;
 const VM_DEPLOYED_RETENTION_MS = VM_DEPLOYED_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const VM_DEPLOYED_CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const VM_SHOTSTACK_API_BASE = 'https://api.shotstack.io/edit';
-const VM_SHOTSTACK_STAGE = String(process.env.SHOTSTACK_STAGE || 'stage').trim() === 'v1' ? 'v1' : 'stage';
+// SHOTSTACK_ENV=production -> /v1 + SHOTSTACK_PRODUCTION_API_KEY; anything else -> sandbox (/stage) + SHOTSTACK_SANDBOX_API_KEY.
+const VM_SHOTSTACK_IS_PRODUCTION = String(process.env.SHOTSTACK_ENV || '').trim().toLowerCase() === 'production';
+const VM_SHOTSTACK_STAGE = VM_SHOTSTACK_IS_PRODUCTION ? 'v1' : 'stage';
+function vmShotstackGetApiKey() {
+  const key = VM_SHOTSTACK_IS_PRODUCTION
+    ? process.env.SHOTSTACK_PRODUCTION_API_KEY
+    : (process.env.SHOTSTACK_SANDBOX_API_KEY || process.env.SHOTSTACK_API_KEY);
+  return String(key || '').trim();
+}
 const VM_SHOTSTACK_POLL_INTERVAL_MS = 5000;
 const VM_SHOTSTACK_TIMEOUT_MS = 10 * 60 * 1000;
 const VMSS_ASSET_PREVIEW_DURATION_SECONDS = 4;
@@ -35771,7 +35779,7 @@ function vmCanManageDeployedFiles(role) {
 }
 
 function vmShotstackEnabled() {
-  return !!String(process.env.SHOTSTACK_API_KEY || '').trim();
+  return !!vmShotstackGetApiKey();
 }
 
 function vmShotstackExtractErrorMessages(payload = {}) {
@@ -36180,7 +36188,7 @@ function vmShotstackBuildEdit(project, revision) {
 }
 
 async function vmShotstackRequest(method, path, body = null) {
-  const apiKey = String(process.env.SHOTSTACK_API_KEY || '').trim();
+  const apiKey = vmShotstackGetApiKey();
   if (!apiKey) throw new Error('Shotstack is not configured on the server');
 
   const response = await fetch(`${VM_SHOTSTACK_API_BASE}/${VM_SHOTSTACK_STAGE}${path}`, {
