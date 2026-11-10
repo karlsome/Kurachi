@@ -259,6 +259,67 @@ function getMachineStateMap(factory) {
   return factoryMachineState.get(factory);
 }
 
+// ============================================
+// cycleAtStartDB: the machine's cycle counter at the moment a product is sent to the machine.
+// cycleCountDB only keeps the LATEST count per machine (and the listener resets it at 02:00), so the count a run
+// started from cannot be recovered later. We read it once, when the tablet reports the event.
+//   start  = "Send to machine pressed (Step 3)"  -> cycleAtStart (first press of a session wins, re-sends are listed)
+//   end    = "End time set"                       -> cycleAtEnd  (lets us check shots = end - start against ショット数)
+// Doc: { factory, machine, sessionID, 背番号, 品番, worker, Date, startedAt, cycleAtStart, cycleAtStartTs, resends[], endedAt, cycleAtEnd, cycleAtEndTs }
+// Never blocks or fails the tablet-log request.
+// ============================================
+const CYCLE_AT_START_COLLECTION = 'cycleAtStartDB';
+let cycleAtStartIndexReady = false;
+
+async function captureCycleAtStart(logEntry) {
+  try {
+    const action = String(logEntry.Action || '');
+    const isStart = action.includes('Send to machine pressed');
+    const isEnd = action === 'End time set' || action.startsWith('End time set');
+    if (!isStart && !isEnd) return;
+    const factory = logEntry.工場;
+    const sessionID = String(logEntry.sessionID || '');
+    const equipmentRaw = logEntry.SpecificMachine || logEntry.AdditionalData?.specificMachine || logEntry.設備 || '';
+    if (!factory || !sessionID || !equipmentRaw) return;
+    const ids = equipmentRaw.split(',').map((x) => x.trim()).filter(Boolean);
+    const ts = Date.parse(logEntry.Timestamp) || Date.now();
+
+    const db = client.db(DB_NAME);
+    const col = db.collection(CYCLE_AT_START_COLLECTION);
+    if (!cycleAtStartIndexReady) {
+      await col.createIndex({ factory: 1, machine: 1, sessionID: 1 }, { unique: true });
+      await col.createIndex({ factory: 1, Date: 1 });
+      cycleAtStartIndexReady = true;
+    }
+
+    for (const machine of ids) {
+      const cyc = await db.collection('cycleCountDB').findOne({ factory, machine: { $in: [machine, machine.toUpperCase()] } });
+      const cycle = cyc && Number.isFinite(Number(cyc.cycle)) ? Number(cyc.cycle) : null;
+      const cycleTs = cyc?.timestamp || null;
+      const key = { factory, machine, sessionID };
+
+      if (isStart) {
+        const existing = await col.findOne(key);
+        if (!existing) {
+          await col.insertOne({
+            ...key,
+            背番号: logEntry.背番号 || '', 品番: logEntry.品番 || '', worker: logEntry.Worker_Name || '',
+            Date: logEntry.Date || '', startedAt: new Date(ts), cycleAtStart: cycle, cycleAtStartTs: cycleTs,
+            resends: [], createdAt: new Date(),
+          });
+        } else {
+          await col.updateOne(key, { $push: { resends: { at: new Date(ts), cycle, cycleTs } } });
+        }
+      } else {
+        // End of the run: only meaningful if the start was captured; never create a doc from an end alone
+        await col.updateOne(key, { $set: { endedAt: new Date(ts), cycleAtEnd: cycle, cycleAtEndTs: cycleTs } });
+      }
+    }
+  } catch (err) {
+    console.error('cycleAtStart capture failed (ignored):', err.message);
+  }
+}
+
 // Update in-memory machine state from one tablet log. Returns the affected
 // equipment ids (a grouped 設備 like "OZNC08,OZNC10" updates both).
 function applyTabletLogToMachineState(logEntry) {
@@ -1779,6 +1840,7 @@ app.post("/api/tablet-log", async (req, res) => {
     if (!insertResult.duplicate && logEntry.工場) {
       broadcastToFactory(logEntry.工場, broadcastPayload);
       // Update + broadcast live machine status (running 背番号 / break / maint / idle)
+      captureCycleAtStart(logEntry); // fire-and-forget, never blocks the response
       const affected = applyTabletLogToMachineState(logEntry);
       if (affected.length) {
         const map = factoryMachineState.get(logEntry.工場);
@@ -13332,6 +13394,21 @@ app.post('/api/production-plans/update', async (req, res) => {
 });
 
 // ==================== GET PRODUCTION PLANS ====================
+// Inspect the captured cycle counters: GET /api/cycle-at-start?factory=小瀬&date=2026-11-10[&machine=OZNC01]
+app.get('/api/cycle-at-start', async (req, res) => {
+    try {
+        const { factory, date, machine } = req.query;
+        if (!factory || !date) return res.status(400).json({ success: false, error: 'factory and date are required' });
+        const query = { factory, Date: date };
+        if (machine) query.machine = machine;
+        const docs = await client.db(DB_NAME).collection(CYCLE_AT_START_COLLECTION).find(query).sort({ startedAt: 1 }).toArray();
+        res.json({ success: true, data: docs });
+    } catch (error) {
+        console.error('Error fetching cycleAtStart:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Broken-down machines stay broken until someone marks them repaired (like the legacy Freya Admin), so a day without its
 // own list inherits the list of the nearest EARLIER plan that has one. Read-only, returns only that field.
 app.get('/api/production-plans/unavailable-carry', async (req, res) => {
