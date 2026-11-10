@@ -17393,20 +17393,38 @@ app.post('/api/masterdb/ids', async (req, res) => {
 });
 
 // ─── Import マスタ管理N-2.mdb → materialMasterDB3 / bomMasterDB / processMasterDB ───
-// Two-step flow: preview (upload + diff, nothing written) → apply (writes the diff).
+// Two-step flow:
+//   preview: upload → child process reads the MDB, diffs against Mongo, writes ONLY the
+//            changed documents to an NDJSON payload file (nothing written to Mongo).
+//   apply:   streams that payload into Mongo. The MDB is never re-read, so the memory
+//            spike of parsing the 230MB file stays confined to the short-lived child.
 const mdbImport = require('./mdbImport');
-const mdbImportJobs = new Map(); // jobId -> { status, stage, filePath, summary, result, error, ... }
+const { fork } = require('child_process');
+const mdbImportJobs = new Map(); // jobId -> { status, stage, payloadPath, summary, result, error, ... }
 let mdbImportBusy = false;
+const MDB_IMPORT_MAX_HEAP_MB = parseInt(process.env.MDB_IMPORT_MAX_HEAP_MB || '1536', 10);
+
+function dropMdbJobFiles(j) {
+    for (const k of ['filePath', 'payloadPath']) {
+        if (j[k]) { fs.unlink(j[k], () => {}); j[k] = null; }
+    }
+}
 
 setInterval(() => {
     const cutoff = Date.now() - 60 * 60 * 1000;
     for (const [id, j] of mdbImportJobs) {
         if (j.createdAt < cutoff && j.status !== 'running') {
-            if (j.filePath) fs.unlink(j.filePath, () => {});
+            dropMdbJobFiles(j);
             mdbImportJobs.delete(id);
         }
     }
 }, 10 * 60 * 1000).unref();
+
+// Remove payload/upload leftovers from a previous server run.
+fs.readdir(os.tmpdir(), (err, files) => {
+    if (err) return;
+    for (const f of files) if (f.startsWith('mdb-import-payload-')) fs.unlink(path.join(os.tmpdir(), f), () => {});
+});
 
 function newMdbJob(extra = {}) {
     const id = require('crypto').randomBytes(8).toString('hex');
@@ -17426,29 +17444,42 @@ app.post('/api/masterdb/import-mdb/preview', upload.single('file'), async (req, 
         return res.status(409).json({ error: 'Another MDB import is already running. Please wait.' });
     }
     mdbImportBusy = true;
-    const job = newMdbJob({ kind: 'preview', filePath: req.file.path, fileName: req.body?.originalName || req.file.originalname, username: req.body?.username || null });
+    const mdbPath = req.file.path;
+    const payloadPath = path.join(os.tmpdir(), `mdb-import-payload-${Date.now()}-${Math.random().toString(36).slice(2)}.ndjson`);
+    const job = newMdbJob({ kind: 'preview', payloadPath, fileName: req.body?.originalName || req.file.originalname, username: req.body?.username || null });
     res.json({ jobId: job.id });
-    try {
-        const ds = await mdbImport.readDataset(job.filePath, (s) => { job.stage = s; });
-        const db = client.db(DB_NAME);
-        const { plan, summary } = await mdbImport.buildPlan(db, ds, (s) => { job.stage = s; });
-        job.summary = summary;
-        job.status = 'done';
-        job.stage = 'preview ready';
-    } catch (e) {
-        console.error('❌ MDB import preview failed:', e);
-        job.status = 'error';
-        job.error = e.message;
-        fs.unlink(job.filePath, () => {});
-        job.filePath = null;
-    } finally {
+
+    let finished = false;
+    const finish = (err) => {
+        if (finished) return;
+        finished = true;
         mdbImportBusy = false;
-    }
+        fs.unlink(mdbPath, () => {}); // the MDB itself is not needed after preview
+        if (err) {
+            console.error('❌ MDB import preview failed:', err);
+            job.status = 'error';
+            job.error = err;
+            dropMdbJobFiles(job);
+        }
+    };
+    const child = fork(path.join(__dirname, 'mdbImportWorker.js'), [mdbPath, payloadPath], {
+        execArgv: [`--max-old-space-size=${MDB_IMPORT_MAX_HEAP_MB}`],
+        env: process.env,
+    });
+    child.on('message', (m) => {
+        if (m.type === 'stage') job.stage = m.stage;
+        else if (m.type === 'done') { job.summary = m.summary; job.status = 'done'; job.stage = 'preview ready'; finish(); }
+        else if (m.type === 'error') finish(m.message);
+    });
+    child.on('error', (e) => finish(e.message));
+    child.on('exit', (code, signal) => {
+        if (!finished) finish(`Import worker stopped unexpectedly (code ${code}, signal ${signal}). The server may be out of memory — try a larger instance or raise MDB_IMPORT_MAX_HEAP_MB.`);
+    });
 });
 
 app.post('/api/masterdb/import-mdb/apply', async (req, res) => {
     const prev = mdbImportJobs.get(req.body?.previewJobId);
-    if (!prev || prev.kind !== 'preview' || prev.status !== 'done' || !prev.filePath || !fs.existsSync(prev.filePath)) {
+    if (!prev || prev.kind !== 'preview' || prev.status !== 'done' || !prev.payloadPath || !fs.existsSync(prev.payloadPath)) {
         return res.status(400).json({ error: 'Preview expired or not found. Please upload the file again.' });
     }
     if (mdbImportBusy) return res.status(409).json({ error: 'Another MDB import is already running. Please wait.' });
@@ -17457,20 +17488,16 @@ app.post('/api/masterdb/import-mdb/apply', async (req, res) => {
     res.json({ jobId: job.id });
     try {
         const db = client.db(DB_NAME);
-        // Re-read and re-plan so the diff reflects the DB right now, not at preview time.
-        const ds = await mdbImport.readDataset(prev.filePath, (s) => { job.stage = s; });
-        const { plan, summary } = await mdbImport.buildPlan(db, ds, (s) => { job.stage = s; });
-        const result = await mdbImport.applyPlan(db, ds, plan, (s) => { job.stage = s; });
-        job.summary = summary;
+        const result = await mdbImport.applyPayload(db, prev.payloadPath, (s) => { job.stage = s; });
+        job.summary = prev.summary;
         job.result = result;
         job.status = 'done';
         job.stage = 'finished';
         console.log(`✅ MDB import applied by ${job.username}:`, JSON.stringify(result));
         try {
-            await db.collection('mdbImportLogs').insertOne({ at: new Date(), username: job.username, fileName: prev.fileName, summary, result });
+            await db.collection('mdbImportLogs').insertOne({ at: new Date(), username: job.username, fileName: prev.fileName, summary: prev.summary, result });
         } catch (_) { /* log is best-effort */ }
-        fs.unlink(prev.filePath, () => {});
-        prev.filePath = null;
+        dropMdbJobFiles(prev);
     } catch (e) {
         console.error('❌ MDB import apply failed:', e);
         job.status = 'error';

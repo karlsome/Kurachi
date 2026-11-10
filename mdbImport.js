@@ -48,6 +48,12 @@ function stable(v) {
 }
 const same = (a, b) => stable(a) === stable(b);
 
+// Read big tables in slices so the raw MDB rows never all sit in memory at once.
+function* chunkedRows(table, size = 2000) {
+  const n = table.rowCount;
+  for (let o = 0; o < n; o += size) yield* table.getData({ rowOffset: o, rowLimit: size });
+}
+
 // ─── Read MDB → in-memory dataset ───────────────────────────────────────────
 async function readDataset(filePath, onStage = () => {}) {
   const { default: MDBReader } = await import("mdb-reader");
@@ -114,7 +120,7 @@ async function readDataset(filePath, onStage = () => {}) {
   onStage("品目マスタを変換中 / Converting 品目マスタ");
   const items = new Map(); // 品番 -> { fields, resolved, 品番構造 }
   let skippedNoHinban = 0;
-  for (const r of rows("tbl100_品目マスタ")) {
+  for (const r of chunkedRows(reader.getTable("tbl100_品目マスタ"))) {
     const hb = cleanVal(r["品番"]);
     if (hb == null || typeof hb !== "string") {
       skippedNoHinban++;
@@ -145,42 +151,35 @@ async function readDataset(filePath, onStage = () => {}) {
   }
 
   onStage("製造マスタ(BOM)を変換中 / Converting 製造マスタ (BOM)");
-  const bomRaw = new Map();
-  for (const r of rows("tbl100_製造マスタ")) {
+  // Convert each 製造マスタ row immediately (no raw-row grouping), sort per 品番 afterwards.
+  const boms = new Map();
+  for (const r of chunkedRows(reader.getTable("tbl100_製造マスタ"))) {
     const hb = cleanVal(r["品番"]);
     if (hb == null) continue;
-    if (!bomRaw.has(hb)) bomRaw.set(hb, []);
-    bomRaw.get(hb).push(r);
+    const pc = parseInt(String(r["工程コード"]).match(/\d+/)?.[0] ?? "", 10);
+    const proc = processByCode.get(pc);
+    const unit = cleanVal(r["生産単位"]);
+    const step = {
+      工程番号: cleanVal(r["工程番号"]),
+      工程コード: Number.isNaN(pc) ? null : pc,
+      工程名: cleanVal(proc?.["工程名"]) ?? null,
+      工程略名: cleanVal(proc?.["工程略名"]) ?? null,
+      構成品番: cleanVal(r["構成品番"]),
+      生産単位: { code: unit, name: ssketLookup(902, unit) },
+      原単位: cleanVal(r["原単位"]),
+      製品原単位: cleanVal(r["製品原単位"]),
+      作業リード日: cleanVal(r["作業リード日"]),
+      総作業リード日: cleanVal(r["総作業リード日"]),
+      段取時間: cleanVal(r["段取時間"]),
+      作業時間: cleanVal(r["作業時間"]),
+      型番: cleanVal(r["型番"]),
+      曜日オプション: cleanVal(r["曜日オプション"]),
+      時間オプション: cleanVal(r["時間オプション"]),
+    };
+    if (!boms.has(hb)) boms.set(hb, []);
+    boms.get(hb).push(step);
   }
-  const boms = new Map();
-  for (const [hb, list] of bomRaw) {
-    list.sort((a, b) => Number(a["工程番号"]) - Number(b["工程番号"]));
-    boms.set(
-      hb,
-      list.map((r) => {
-        const pc = parseInt(String(r["工程コード"]).match(/\d+/)?.[0] ?? "", 10);
-        const proc = processByCode.get(pc);
-        const unit = cleanVal(r["生産単位"]);
-        return {
-          工程番号: cleanVal(r["工程番号"]),
-          工程コード: Number.isNaN(pc) ? null : pc,
-          工程名: cleanVal(proc?.["工程名"]) ?? null,
-          工程略名: cleanVal(proc?.["工程略名"]) ?? null,
-          構成品番: cleanVal(r["構成品番"]),
-          生産単位: { code: unit, name: ssketLookup(902, unit) },
-          原単位: cleanVal(r["原単位"]),
-          製品原単位: cleanVal(r["製品原単位"]),
-          作業リード日: cleanVal(r["作業リード日"]),
-          総作業リード日: cleanVal(r["総作業リード日"]),
-          段取時間: cleanVal(r["段取時間"]),
-          作業時間: cleanVal(r["作業時間"]),
-          型番: cleanVal(r["型番"]),
-          曜日オプション: cleanVal(r["曜日オプション"]),
-          時間オプション: cleanVal(r["時間オプション"]),
-        };
-      })
-    );
-  }
+  for (const steps of boms.values()) steps.sort((a, b) => Number(a.工程番号) - Number(b.工程番号));
 
   onStage("工程マスタを変換中 / Converting 工程マスタ");
   const processes = new Map();
@@ -320,59 +319,81 @@ async function buildPlan(db, ds, onStage = () => {}) {
   return { plan, summary };
 }
 
-// ─── Apply ──────────────────────────────────────────────────────────────────
-async function bulk(coll, ops, onProgress) {
-  const res = { matched: 0, modified: 0, upserted: 0 };
-  for (let i = 0; i < ops.length; i += CHUNK) {
-    const r = await coll.bulkWrite(ops.slice(i, i + CHUNK), { ordered: false });
-    res.matched += r.matchedCount || 0;
-    res.modified += r.modifiedCount || 0;
-    res.upserted += r.upsertedCount || 0;
-    onProgress?.(Math.min(i + CHUNK, ops.length), ops.length);
+// ─── Apply payload (only the changed documents, written to an NDJSON file) ───
+// The preview step writes exactly what must be written; apply streams that file
+// and never has to re-read the 230MB MDB.
+function writePayload(ds, plan, payloadPath) {
+  const fd = fs.openSync(payloadPath, "w");
+  const w = (o) => fs.writeSync(fd, JSON.stringify(o) + "\n");
+  try {
+    for (const hb of [...plan.material.add, ...plan.material.change]) w({ t: "m", 品番: hb, set: itemSetDoc(hb, ds.items.get(hb)) });
+    const bomTargets = new Set([...plan.bom.add, ...plan.bom.change]);
+    // BOMs that reference newly added items must be rewritten so 構成品_id resolves.
+    const newItems = new Set(plan.material.add);
+    if (newItems.size) for (const [hb, steps] of ds.boms) if (steps.some((s) => newItems.has(s.構成品番))) bomTargets.add(hb);
+    for (const hb of bomTargets) w({ t: "b", 品番: hb, steps: ds.boms.get(hb) });
+    for (const code of [...plan.process.add, ...plan.process.change]) w({ t: "p", doc: ds.processes.get(code) });
+  } finally {
+    fs.closeSync(fd);
   }
-  return res;
 }
 
-async function applyPlan(db, ds, plan, onStage = () => {}) {
-  const result = {};
-  const mat = db.collection("materialMasterDB3");
-  const bomC = db.collection("bomMasterDB");
-  const procC = db.collection("processMasterDB");
-
-  for (const [c, f] of [[mat, "品番"], [bomC, "品番"], [procC, "工程コード"]]) {
-    try { await c.createIndex({ [f]: 1 }, { unique: true }); } catch (e) { console.warn(`⚠️ index ${c.collectionName}.${f}: ${e.message}`); }
+async function bulk(coll, ops, acc) {
+  for (let i = 0; i < ops.length; i += CHUNK) {
+    const r = await coll.bulkWrite(ops.slice(i, i + CHUNK), { ordered: false });
+    acc.matched += r.matchedCount || 0;
+    acc.modified += r.modifiedCount || 0;
+    acc.upserted += r.upsertedCount || 0;
   }
+}
 
-  const matTargets = [...plan.material.add, ...plan.material.change];
-  const matOps = matTargets.map((hb) => ({
-    updateOne: { filter: { 品番: hb }, update: { $set: itemSetDoc(hb, ds.items.get(hb)) }, upsert: true },
-  }));
-  result.material = await bulk(mat, matOps, (d, t) => onStage(`材料を更新中 / Writing materials ${d}/${t}`));
-
-  onStage("コンポーネントIDを解決中 / Resolving component ids");
-  const idMap = await loadIdMap(db);
-  // BOM must be recomputed against live ids (new items now exist).
-  const bomTargets = new Set([...plan.bom.add, ...plan.bom.change]);
-  // Also rewrite BOMs whose component link could now resolve differently (new items added).
-  const newItems = new Set(plan.material.add);
-  if (newItems.size) {
-    for (const [hb, steps] of ds.boms) if (steps.some((s) => newItems.has(s.構成品番))) bomTargets.add(hb);
+async function applyPayload(db, payloadPath, onStage = () => {}) {
+  const readline = require("readline");
+  const colls = { m: db.collection("materialMasterDB3"), b: db.collection("bomMasterDB"), p: db.collection("processMasterDB") };
+  const keyField = { m: "品番", b: "品番", p: "工程コード" };
+  for (const t of ["m", "b", "p"]) {
+    try { await colls[t].createIndex({ [keyField[t]]: 1 }, { unique: true }); } catch (e) { console.warn(`⚠️ index ${colls[t].collectionName}: ${e.message}`); }
   }
-  let missingLinks = 0;
-  const bomOps = [];
-  for (const hb of bomTargets) {
-    const doc = buildBomDoc(hb, ds.boms.get(hb), idMap);
-    for (const s of doc.BOM) if (s.構成品番 != null && s.構成品_id == null) missingLinks++;
-    bomOps.push({ updateOne: { filter: { 品番: hb }, update: { $set: doc }, upsert: true } });
-  }
-  result.bom = await bulk(bomC, bomOps, (d, t) => onStage(`BOMを更新中 / Writing BOMs ${d}/${t}`));
-  result.bom.missingComponentLinks = missingLinks;
+  const result = { material: { matched: 0, modified: 0, upserted: 0 }, bom: { matched: 0, modified: 0, upserted: 0, missingComponentLinks: 0 }, process: { matched: 0, modified: 0, upserted: 0 } };
+  const accOf = { m: result.material, b: result.bom, p: result.process };
+  const label = { m: "材料 / materials", b: "BOM", p: "工程 / processes" };
+  let curType = null, ops = [], idMap = null, done = 0;
 
-  const procOps = [...plan.process.add, ...plan.process.change].map((code) => ({
-    updateOne: { filter: { 工程コード: code }, update: { $set: ds.processes.get(code) }, upsert: true },
-  }));
-  result.process = await bulk(procC, procOps);
+  const flush = async () => {
+    if (ops.length && curType) {
+      await bulk(colls[curType], ops, accOf[curType]);
+      done += ops.length;
+      onStage(`${label[curType]}を更新中 / Writing ${label[curType]} (${done})`);
+    }
+    ops = [];
+  };
+
+  const rl = readline.createInterface({ input: fs.createReadStream(payloadPath, { encoding: "utf8" }), crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line) continue;
+    const o = JSON.parse(line);
+    if (o.t !== curType) {
+      await flush();
+      curType = o.t;
+      done = 0;
+      if (curType === "b") {
+        onStage("コンポーネントIDを解決中 / Resolving component ids");
+        idMap = await loadIdMap(db); // live ids, after new materials were written
+      }
+    }
+    if (o.t === "m") {
+      ops.push({ updateOne: { filter: { 品番: o.品番 }, update: { $set: o.set }, upsert: true } });
+    } else if (o.t === "b") {
+      const doc = buildBomDoc(o.品番, o.steps, idMap);
+      for (const s of doc.BOM) if (s.構成品番 != null && s.構成品_id == null) result.bom.missingComponentLinks++;
+      ops.push({ updateOne: { filter: { 品番: o.品番 }, update: { $set: doc }, upsert: true } });
+    } else if (o.t === "p") {
+      ops.push({ updateOne: { filter: { 工程コード: o.doc.工程コード }, update: { $set: o.doc }, upsert: true } });
+    }
+    if (ops.length >= CHUNK) await flush();
+  }
+  await flush();
   return result;
 }
 
-module.exports = { readDataset, buildPlan, applyPlan, DB_NAME };
+module.exports = { readDataset, buildPlan, writePayload, applyPayload, DB_NAME };
