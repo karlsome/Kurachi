@@ -14889,10 +14889,21 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
 
       const totalCompletedPieces = completedRuns.reduce((sum, r) => sum + r.pieces, 0);
       const totalCompletedShots = completedRuns.reduce((sum, r) => sum + r.shots, 0);
+      // Shots THIS machine ran in the completed runs. A pair's ショット数 is the pair total while each machine has its own
+      // cycle counter, so use the per-machine Lot_Details.shots (else split ショット数 evenly over the record's machines).
+      const machineCompletedShots = mPressDocs.reduce((sum, d) => {
+        const lots = Array.isArray(d.Lot_Details) ? d.Lot_Details.filter((l) => l && l.machine) : [];
+        if (lots.length) {
+          const own = lots.filter((l) => String(l.machine).trim().toUpperCase() === m.id);
+          if (own.length) return sum + own.reduce((n, l) => n + (Number(l.shots) || 0), 0);
+        }
+        const ids = String(d.設備 || '').split(',').map((x) => x.trim()).filter(Boolean);
+        return sum + (Number(d.ショット数) || 0) / Math.max(1, ids.length);
+      }, 0);
 
       // Active / in-progress run calculation
       const activeCycles = (cycleIsToday && m.hasCycleSensor)
-        ? (isScna ? (m.sebanggo ? lotCycles : 0) : Math.max(0, todayCycles - totalCompletedShots))
+        ? (isScna ? (m.sebanggo ? lotCycles : 0) : Math.max(0, todayCycles - Math.round(machineCompletedShots)))
         : 0;
       const activePcPerCycle = resolvePcPerCycle(productBySebanggo.get(m.sebanggo), m.id);
       const activePieces = activeCycles > 0 && activePcPerCycle ? activeCycles * activePcPerCycle : 0;
