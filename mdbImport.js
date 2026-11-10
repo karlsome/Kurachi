@@ -128,7 +128,7 @@ async function readDataset(filePath, onStage = () => {}) {
     const resolved = {
       品目区分: pair(701, "品目区分"),
       工程コード: {
-        raw: procRaw ?? null,
+        raw: typeof r["工程コード"] === "string" ? r["工程コード"] : procRaw ?? null, // untrimmed, as in existing docs
         code: procOk ? procCode : null,
         name: procOk ? cleanVal(processByCode.get(procCode)?.["工程名"]) ?? null : null,
       },
@@ -243,7 +243,9 @@ async function buildPlan(db, ds, onStage = () => {}) {
     const changedFields = [];
     const ex = doc.品目マスタ || {};
     for (const [k, v] of Object.entries(d.fields)) if (!same(ex[k] ?? null, v)) changedFields.push(k);
-    if (!same(doc.resolved, d.resolved)) changedFields.push("resolved");
+    for (const k of Object.keys(d.resolved)) {
+      if (!same(doc.resolved?.[k], d.resolved[k])) changedFields.push(`resolved.${k}`);
+    }
     if (d.品番構造 && !same(doc.品番構造, d.品番構造)) changedFields.push("品番構造");
     if (changedFields.length) {
       plan.material.change.push(hb);
