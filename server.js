@@ -14861,6 +14861,8 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         const endMin = timeToDigitalTwinMinutes(d.Time_end);
         const shots = Number(d.ショット数) || 0;
         const pieces = Number(d.Total_Pieces || d.Process_Quantity) || 0;
+        const ng = Number(d.Total_NG) || 0;
+        const good = Number.isFinite(Number(d.Total)) && d.Total !== '' && d.Total != null ? Number(d.Total) : Math.max(0, pieces - ng);
         const breaks = Object.values(d.Break_Time_Data || {})
           .filter((b) => b && b.start && b.end)
           .map((b) => ({
@@ -14880,6 +14882,8 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
           endMin,
           shots,
           pieces,
+          ng,
+          good,
           worker: d.Worker_Name || '',
           breaks,
           stopCalls: Array.isArray(d.StopCall?.records) ? d.StopCall.records : [],
@@ -14962,13 +14966,15 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       });
 
       // Clean runs for frontend response
-      const cleanRuns = completedRuns.map(({ sebanggo, hinban, start, end, shots, pieces: rPieces, worker }) => ({
+      const cleanRuns = completedRuns.map(({ sebanggo, hinban, start, end, shots, pieces: rPieces, ng: rNg, good: rGood, worker }) => ({
         sebanggo,
         hinban,
         start,
         end,
         shots,
         pieces: rPieces,
+        ng: rNg,
+        good: rGood,
         worker,
         durationMin: (timeToDigitalTwinMinutes(end) || 0) - (timeToDigitalTwinMinutes(start) || 0),
       }));
