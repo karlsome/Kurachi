@@ -34303,6 +34303,12 @@ async function vmssPermanentlyDeleteAssetDocument(db, asset, { deletedBy = 'admi
   ].map((path) => String(path || '').trim()).filter(Boolean);
 
   for (const storagePath of storagePaths) {
+    // Assets copied to another playlist share the same Firebase file; only delete it when nothing else uses it.
+    const stillReferenced = await db.collection(VMSS_ASSETS_COLLECTION).findOne({
+      _id: { $ne: asset._id },
+      $or: [{ storagePath }, { previewStoragePath: storagePath }, { thumbnailStoragePath: storagePath }],
+    });
+    if (stillReferenced) continue;
     await vmDeleteFirebaseStoragePathIfExists(storagePath);
   }
 
@@ -34798,6 +34804,122 @@ app.delete('/api/video-manuals-studio/projects/:id', async (req, res) => {
     res.json({ deleted: true, softDelete: true });
   } catch (err) {
     console.error('❌ video-manuals-studio project delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Duplicate a project in its own playlist, or copy it to another playlist.
+// Only the working copy is cloned (no revisions / deployment); referenced assets are shared with the target playlist.
+app.post('/api/video-manuals-studio/projects/:id/duplicate', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const projectId = new ObjectId(req.params.id);
+    const source = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } });
+    if (!source) return res.status(404).json({ error: 'Project not found' });
+
+    const sourcePlaylist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: source.playlistId });
+    if (!sourcePlaylist || !vmCanView(sourcePlaylist, username, role)) {
+      return res.status(403).json({ error: 'No access to this project' });
+    }
+
+    const rawTarget = String(req.body?.targetPlaylistId || '').trim();
+    if (rawTarget && !ObjectId.isValid(rawTarget)) return res.status(400).json({ error: 'Invalid targetPlaylistId' });
+    const targetPlaylistId = rawTarget ? new ObjectId(rawTarget) : source.playlistId;
+    const sameplaylist = String(targetPlaylistId) === String(source.playlistId);
+    const targetPlaylist = sameplaylist
+      ? sourcePlaylist
+      : await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: targetPlaylistId });
+    if (!targetPlaylist) return res.status(404).json({ error: 'Target playlist not found' });
+    if (!vmCanEdit(targetPlaylist, username, role)) {
+      return res.status(403).json({ error: 'No edit access to the target playlist' });
+    }
+
+    const baseTitle = String(source.title || 'Untitled Project');
+    const requestedTitle = String(req.body?.title || '').trim();
+    let title = requestedTitle || (sameplaylist ? `${baseTitle} (copy)` : baseTitle);
+    // Keep titles unique within the target playlist
+    const existingTitles = new Set((await db.collection(VMSS_PROJECTS_COLLECTION)
+      .find({ playlistId: targetPlaylistId, deleted: { $ne: true } }, { projection: { title: 1 } })
+      .toArray()).map((doc) => String(doc.title || '')));
+    if (existingTitles.has(title)) {
+      const stem = title.replace(/ \(copy(?: \d+)?\)$/, '');
+      let n = 1;
+      while (existingTitles.has(n === 1 ? `${stem} (copy)` : `${stem} (copy ${n})`)) n += 1;
+      title = n === 1 ? `${stem} (copy)` : `${stem} (copy ${n})`;
+    }
+
+    // Share referenced assets with the target playlist
+    let copiedAssets = 0;
+    if (!sameplaylist) {
+      const haystack = JSON.stringify({ edit: source.edit, map: source.assetSourceMap });
+      const sourceAssets = await db.collection(VMSS_ASSETS_COLLECTION)
+        .find({ playlistId: source.playlistId, deleted: { $ne: true } })
+        .toArray();
+      for (const asset of sourceAssets) {
+        const id = String(asset.assetId || asset._id);
+        const path = String(asset.storagePath || '');
+        const used = (id.length >= 8 && haystack.includes(id))
+          || (path && (haystack.includes(path) || haystack.includes(encodeURIComponent(path)) || haystack.includes(encodeURIComponent(encodeURIComponent(path)))));
+        if (!used) continue;
+        const already = await db.collection(VMSS_ASSETS_COLLECTION).findOne({
+          playlistId: targetPlaylistId,
+          deleted: { $ne: true },
+          $or: [{ assetId: asset.assetId }, ...(path ? [{ storagePath: path }] : [])],
+        });
+        if (already) continue;
+        const { _id, deleted, deletedAt, deletedBy, recycleExpiresAt, ...assetFields } = asset;
+        await db.collection(VMSS_ASSETS_COLLECTION).insertOne({
+          ...assetFields,
+          playlistId: targetPlaylistId,
+          copiedFromPlaylistId: source.playlistId,
+          copiedBy: username,
+          copiedAt: new Date(),
+        });
+        copiedAssets += 1;
+      }
+    }
+
+    const lastProject = await db.collection(VMSS_PROJECTS_COLLECTION)
+      .find({ playlistId: targetPlaylistId })
+      .sort({ order: -1 })
+      .limit(1)
+      .toArray();
+    const now = new Date();
+    const {
+      _id, playlistId, title: _title, order, createdAt, createdBy, updatedAt, lastEditedAt, lastEditedBy,
+      currentRevisionNumber, lastRevisionId, deployedRevisionId, deployedRevisionNumber, deployedRevisionName,
+      deployedAt, deployedBy, deployedVideoUrl, deployedVideoStoragePath, deployedVideoMimeType, deployedVideoFileName,
+      deleted, deletedAt, deletedBy, ...rest
+    } = source;
+    const doc = {
+      ...rest,
+      playlistId: targetPlaylistId,
+      title,
+      order: lastProject.length > 0 ? (lastProject[0].order || 0) + 1 : 0,
+      status: 'draft',
+      currentRevisionNumber: 0,
+      lastRevisionId: null,
+      deployedRevisionId: null,
+      deployedRevisionNumber: null,
+      deployedRevisionName: null,
+      deployedAt: null,
+      deployedBy: null,
+      deployedVideoUrl: null,
+      deployedVideoStoragePath: null,
+      deployedVideoMimeType: null,
+      deployedVideoFileName: null,
+      createdBy: username,
+      createdAt: now,
+      updatedAt: now,
+      lastEditedAt: now,
+      lastEditedBy: username,
+      copiedFromProjectId: source._id,
+    };
+    const result = await db.collection(VMSS_PROJECTS_COLLECTION).insertOne(doc);
+    res.json({ insertedId: result.insertedId, copiedAssets, ...doc });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project duplicate error:', err);
     res.status(500).json({ error: err.message });
   }
 });
