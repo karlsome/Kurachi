@@ -13426,8 +13426,29 @@ app.get('/api/planner/live-production', async (req, res) => {
 
         const masterDb = client.db(DB_NAME);
         const submittedDb = client.db('submittedDB');
+        // What each machine is running now = its latest tabletLogDB event today (survives server restarts, unlike the in-memory
+        // machine state). A Reset / completed Submit means idle. Live NG still comes from the in-memory state when it has one.
+        const logs = await submittedDb.collection('tabletLogDB')
+            .find({ 工場: factory, Date: date })
+            .project({ Timestamp: 1, Action: 1, Status: 1, 背番号: 1, 設備: 1, SpecificMachine: 1, AdditionalData: 1 }).toArray();
+        logs.sort((a, b) => String(a.Timestamp || '').localeCompare(String(b.Timestamp || '')));
+        const latestByMachine = new Map();
+        logs.forEach((l) => {
+            if (l.AdditionalData && l.AdditionalData.legacyApp) return;
+            const raw = l.SpecificMachine || l.AdditionalData?.specificMachine || l.設備 || '';
+            String(raw).split(',').map((x) => x.trim().toUpperCase()).filter(Boolean).forEach((id) => {
+                const action = String(l.Action || '');
+                const status = String(l.Status || '');
+                const closed = action.includes('Reset') || status === 'Reset' || (action.includes('Submit') && status === 'Completed') || action.includes('clear');
+                if (closed) latestByMachine.set(id, { closed: true });
+                else if (l.背番号) latestByMachine.set(id, { closed: false, sebanggo: l.背番号 });
+                // events without a 背番号 (e.g. break, stop call) keep the previous entry
+            });
+        });
         const states = factoryMachineState.get(factory) || new Map();
-        const running = [...states.entries()].filter(([, st]) => st && st.sebanggo);
+        const running = [...latestByMachine.entries()]
+            .filter(([, v]) => !v.closed && v.sebanggo)
+            .map(([id, v]) => [id, { sebanggo: v.sebanggo, totalNG: states.get(id)?.totalNG || 0 }]);
         if (!running.length) return res.json({ success: true, data: { bySerial: {}, machines: [] } });
 
         // Submitted shots per machine today
