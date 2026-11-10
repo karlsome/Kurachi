@@ -34303,6 +34303,55 @@ async function vmDeleteFirebaseStoragePathIfExists(storagePath) {
   }
 }
 
+// Works out what deleting a playlist removes. Firebase files are only deleted when nothing OUTSIDE the
+// playlist still references them (other Shotstack playlists, the classic editor's assets/projects, or other
+// projects' deployed videos). Files shared with another playlist are kept.
+async function vmssPlanPlaylistDeletion(db, playlistId) {
+  const projects = await db.collection(VMSS_PROJECTS_COLLECTION)
+    .find({ playlistId }, { projection: { _id: 1, title: 1, deployedVideoStoragePath: 1 } }).toArray();
+  const projectIds = projects.map((project) => project._id);
+  const revisions = projectIds.length
+    ? await db.collection(VMSS_REVISIONS_COLLECTION)
+      .find({ projectId: { $in: projectIds } }, { projection: { _id: 1, deployedVideoStoragePath: 1, 'deployedVideo.storagePath': 1 } }).toArray()
+    : [];
+  const assets = await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId }).toArray();
+
+  const candidates = new Set();
+  const addPath = (value) => { const path = String(value || '').trim(); if (path) candidates.add(path); };
+  assets.forEach((asset) => { addPath(asset.storagePath); addPath(asset.previewStoragePath); addPath(asset.thumbnailStoragePath); });
+  projects.forEach((project) => addPath(project.deployedVideoStoragePath));
+  revisions.forEach((revision) => { addPath(revision.deployedVideoStoragePath); addPath(revision.deployedVideo?.storagePath); });
+
+  // Everything outside this playlist that may still point at the same files.
+  const referencedPaths = new Set();
+  const collectPaths = (doc) => {
+    [doc?.storagePath, doc?.previewStoragePath, doc?.thumbnailStoragePath, doc?.deployedVideoStoragePath, doc?.deployedVideo?.storagePath]
+      .forEach((value) => { const path = String(value || '').trim(); if (path) referencedPaths.add(path); });
+  };
+  const pathFields = { storagePath: 1, previewStoragePath: 1, thumbnailStoragePath: 1 };
+  (await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId: { $ne: playlistId } }, { projection: pathFields }).toArray()).forEach(collectPaths);
+  (await db.collection(VM_ASSETS_COLLECTION).find({}, { projection: pathFields }).toArray()).forEach(collectPaths); // classic editor library
+  const otherProjects = await db.collection(VMSS_PROJECTS_COLLECTION)
+    .find({ playlistId: { $ne: playlistId } }, { projection: { edit: 1, assetSourceMap: 1, deployedVideoStoragePath: 1 } }).toArray();
+  otherProjects.forEach(collectPaths);
+  (await db.collection(VMSS_REVISIONS_COLLECTION)
+    .find({ projectId: { $nin: projectIds } }, { projection: { deployedVideoStoragePath: 1, 'deployedVideo.storagePath': 1 } }).toArray()).forEach(collectPaths);
+  // URLs embedded in other Shotstack projects' timelines and in classic projects' steps.
+  const blobParts = otherProjects.map((project) => JSON.stringify({ e: project.edit, m: project.assetSourceMap }));
+  const classicProjects = await db.collection(VM_PROJECTS_COLLECTION).find({}, { projection: { steps: 1 } }).toArray();
+  classicProjects.forEach((project) => blobParts.push(JSON.stringify(project.steps || [])));
+  const blob = blobParts.join('\n');
+
+  const filesToDelete = [];
+  const filesKept = [];
+  for (const path of candidates) {
+    const used = referencedPaths.has(path) || blob.includes(path) || blob.includes(encodeURIComponent(path));
+    (used ? filesKept : filesToDelete).push(path);
+  }
+
+  return { projects, projectIds, assets, filesToDelete, filesKept };
+}
+
 async function vmssPermanentlyDeleteAssetDocument(db, asset, { deletedBy = 'admin' } = {}) {
   const storagePaths = [
     asset?.storagePath,
@@ -34578,31 +34627,73 @@ app.patch('/api/video-manuals-studio/playlists/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/video-manuals-studio/playlists/:id', async (req, res) => {
+app.get('/api/video-manuals-studio/playlists/:id/delete-preview', async (req, res) => {
   try {
     const { role } = vmGetRequester(req);
-    if (role !== 'admin') {
-      return res.status(403).json({ error: 'Only admin can delete playlists.' });
-    }
+    if (role !== 'admin') return res.status(403).json({ error: 'Only admin can delete playlists.' });
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: 'Invalid playlist id' });
 
     const db = client.db(VM_DB);
     const playlistId = new ObjectId(req.params.id);
     const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
     if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
 
-    const projects = await db.collection(VMSS_PROJECTS_COLLECTION)
-      .find({ playlistId })
-      .project({ _id: 1 })
-      .toArray();
-    const projectIds = projects.map((project) => project._id).filter(Boolean);
+    const plan = await vmssPlanPlaylistDeletion(db, playlistId);
+    res.json({
+      projectCount: plan.projects.length,
+      assetCount: plan.assets.length,
+      filesToDelete: plan.filesToDelete.length,
+      filesKept: plan.filesKept.length,
+    });
+  } catch (err) {
+    console.error('❌ video-manuals-studio playlist delete-preview error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
-    if (projectIds.length) {
-      await db.collection(VMSS_REVISIONS_COLLECTION).deleteMany({ projectId: { $in: projectIds } });
-      await db.collection(VMSS_PROJECTS_COLLECTION).deleteMany({ _id: { $in: projectIds } });
+app.delete('/api/video-manuals-studio/playlists/:id', async (req, res) => {
+  try {
+    const { role } = vmGetRequester(req);
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only admin can delete playlists.' });
+    }
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: 'Invalid playlist id' });
+
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+
+    const plan = await vmssPlanPlaylistDeletion(db, playlistId);
+
+    // Database first; Firebase files afterwards (best effort) so a storage hiccup never leaves dangling records.
+    if (plan.projectIds.length) {
+      await db.collection(VMSS_REVISIONS_COLLECTION).deleteMany({ projectId: { $in: plan.projectIds } });
+      await db.collection(VMSS_PROJECTS_COLLECTION).deleteMany({ _id: { $in: plan.projectIds } });
+    }
+    await db.collection(VMSS_ASSETS_COLLECTION).deleteMany({ playlistId });
+    await db.collection(VMSS_PLAYLISTS_COLLECTION).deleteOne({ _id: playlistId });
+
+    let filesDeleted = 0;
+    let filesFailed = 0;
+    for (const storagePath of plan.filesToDelete) {
+      try {
+        if (await vmDeleteFirebaseStoragePathIfExists(storagePath)) filesDeleted += 1;
+      } catch (error) {
+        filesFailed += 1;
+        console.warn('⚠️ playlist delete: failed to delete storage file', storagePath, error?.message || error);
+      }
     }
 
-    await db.collection(VMSS_PLAYLISTS_COLLECTION).deleteOne({ _id: playlistId });
-    res.json({ deleted: true, playlistDeleted: true, projectsDeleted: projectIds.length });
+    res.json({
+      deleted: true,
+      playlistDeleted: true,
+      projectsDeleted: plan.projectIds.length,
+      assetsDeleted: plan.assets.length,
+      filesDeleted,
+      filesFailed,
+      filesKept: plan.filesKept.length,
+    });
   } catch (err) {
     console.error('❌ video-manuals-studio playlist delete error:', err);
     res.status(500).json({ error: err.message });
