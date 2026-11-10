@@ -19275,6 +19275,58 @@ app.get('/api/masterdb/products', async (req, res) => {
     }
   });
 
+  // Default break times per factory (Sasaki_Coating_MasterDB.plannerBreakDefaults)
+  const sanitizePlannerBreakDefaults = (list) => (Array.isArray(list) ? list : [])
+    .map((item, index) => ({
+      id: String(item?.id || `default-break-${index + 1}`).slice(0, 80),
+      name: String(item?.name || 'Break').trim().slice(0, 80) || 'Break',
+      start: String(item?.start || '').trim(),
+      end: String(item?.end || '').trim(),
+      equipment: item?.equipment ? String(item.equipment).trim().slice(0, 120) : null,
+      isDefault: true,
+    }))
+    .filter((item) => /^\d{1,2}:\d{2}$/.test(item.start) && /^\d{1,2}:\d{2}$/.test(item.end));
+
+  app.get('/api/planner-break-defaults', async (req, res) => {
+    try {
+      await client.connect();
+      const factory = String(req.query.factory || '').trim();
+      if (!factory) return res.status(400).json({ success: false, error: 'factory is required' });
+
+      const doc = await client.db('Sasaki_Coating_MasterDB').collection('plannerBreakDefaults').findOne({ factory });
+      res.json({
+        success: true,
+        data: doc
+          ? { factory, breaks: sanitizePlannerBreakDefaults(doc.breaks), updatedBy: doc.updatedBy || null, updatedAt: doc.updatedAt || null }
+          : null,
+      });
+    } catch (error) {
+      console.error('❌ Error loading planner break defaults:', error);
+      res.status(500).json({ success: false, error: 'Failed to load break defaults', message: error.message });
+    }
+  });
+
+  app.put('/api/planner-break-defaults', async (req, res) => {
+    try {
+      await client.connect();
+      const factory = String(req.body?.factory || '').trim();
+      const updatedBy = String(req.body?.updatedBy || 'system').trim() || 'system';
+      if (!factory) return res.status(400).json({ success: false, error: 'factory is required' });
+
+      const breaks = sanitizePlannerBreakDefaults(req.body?.breaks);
+      const now = new Date();
+      await client.db('Sasaki_Coating_MasterDB').collection('plannerBreakDefaults').updateOne(
+        { factory },
+        { $set: { factory, breaks, updatedBy, updatedAt: now }, $setOnInsert: { createdBy: updatedBy, createdAt: now } },
+        { upsert: true },
+      );
+      res.json({ success: true, data: { factory, breaks, updatedBy, updatedAt: now } });
+    } catch (error) {
+      console.error('❌ Error saving planner break defaults:', error);
+      res.status(500).json({ success: false, error: 'Failed to save break defaults', message: error.message });
+    }
+  });
+
   app.get('/api/production-planner/published', async (req, res) => {
     try {
       await client.connect();
