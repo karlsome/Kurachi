@@ -3526,9 +3526,10 @@
             <p style="font-size:0.8rem; color:#6b7280; text-align:center;" data-i18n="scan_leader_qr_to_bypass">Scan Leader QR Code to Bypass</p>
             <div id="checklistBypassQrReader" style="width:100%; aspect-ratio:1; border-radius:12px; background:#000; overflow:hidden;"></div>
             <p id="checklistBypassStatus" style="font-size:0.85rem; font-weight:700; text-align:center; min-height:20px; color:#6b7280;"></p>
-            <input type="text" id="checklistBypassReason" style="width:100%; padding:10px; border-radius:10px; border:1px solid #e6e8ef; font-size:0.85rem;" data-i18n-placeholder="bypass_reason_placeholder" placeholder="Enter reason for super bypass...">
+            <input type="text" id="checklistBypassReason" style="display:none; width:100%; padding:10px; border-radius:10px; border:1px solid #e6e8ef; font-size:0.85rem;" data-i18n-placeholder="bypass_reason_placeholder" placeholder="Enter reason for super bypass...">
             <div style="display:flex; gap:10px; margin-top:10px;">
                 <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeSuperBypassModal()" data-i18n="cancel">Cancel</button>
+                <button type="button" class="btn btn-primary" id="checklistBypassConfirmBtn" style="flex:1; display:none;" onclick="confirmSuperBypass()">Confirm Bypass</button>
             </div>
         </div>
     </div>

@@ -39752,27 +39752,111 @@ app.post('/api/check-forms/bypass', async (req, res) => {
   if (!factory || !machine) {
     return res.status(400).json({ error: 'factory and machine are required' });
   }
+  if (!String(leaderUsername || '').trim()) {
+    return res.status(400).json({ error: 'leaderUsername is required' });
+  }
+  if (!String(reason || '').trim()) {
+    return res.status(400).json({ error: 'reason is required' });
+  }
 
   try {
     await client.connect();
+
+    // Authoritative leader check (班長 / admin / 課長 / 部長)
+    const leaderUser = await client.db(DB_NAME).collection('users')
+      .findOne({ username: String(leaderUsername).trim() });
+    const authorizedRoles = ['班長', 'admin', '課長', '部長'];
+    if (!leaderUser || !authorizedRoles.includes(leaderUser.role)) {
+      return res.status(403).json({ error: 'User does not have leader privileges' });
+    }
+    const verifiedLeaderName = `${leaderUser.firstName || ''} ${leaderUser.lastName || ''}`.trim() || leaderUser.username;
+
     const db = client.db('submittedDB');
     const bypassCollection = db.collection('checklistBypassDB');
+    const recordsCollection = db.collection(CHECK_FORM_RECORDS_COLLECTION);
+
+    const factoryText = String(factory).trim();
+    const machineText = String(machine).trim();
+    const reasonText = String(reason).trim();
+    const timingText = String(timing || 'pre').trim();
+    const now = new Date();
 
     const doc = {
-      factory: String(factory).trim(),
-      machine: String(machine).trim(),
+      factory: factoryText,
+      machine: machineText,
       workerName: String(workerName || '').trim(),
-      leaderName: String(leaderName || '').trim(),
-      leaderUsername: String(leaderUsername || '').trim(),
-      reason: String(reason || '').trim(),
-      timing: String(timing || 'pre').trim(),
-      templates: Array.isArray(templates) ? templates : [],
-      bypassedAt: new Date().toISOString(),
-      createdAt: new Date(),
+      leaderName: verifiedLeaderName,
+      leaderUsername: String(leaderUsername).trim(),
+      leaderRole: leaderUser.role,
+      reason: reasonText,
+      timing: timingText,
+      templates: Array.isArray(templates) ? templates.map(t => (t && typeof t === 'object' ? (t.name || t.templateName || '') : String(t))) : [],
+      bypassedAt: now.toISOString(),
+      createdAt: now,
     };
-
     const result = await bypassCollection.insertOne(doc);
-    return res.json({ success: true, bypassId: result.insertedId.toHexString() });
+
+    // Write one "skipped" checklist record per template so today-status treats the checklist as done
+    // and freyaAdmin2 checklist submissions shows "skipped by <leader>" with the reason.
+    const jstDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+    const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
+    const tplList = Array.isArray(templates) ? templates.filter(t => t && typeof t === 'object') : [];
+    const recordIds = {};
+    const newRecords = [];
+
+    for (const t of tplList) {
+      const templateId = normalizeCheckFormText(t._id || t.templateId);
+      const templateName = normalizeCheckFormText(t.name || t.templateName);
+      if (!templateId || !templateName) continue;
+
+      const existing = await recordsCollection.findOne({
+        factory: factoryText,
+        templateId,
+        加工設備: machineText,
+        createdAt: { $gte: startOfDay }
+      });
+      if (existing) {
+        recordIds[templateId] = existing._id.toString();
+        recordIds[templateName] = existing._id.toString();
+        continue;
+      }
+
+      const rec = {
+        _id: new ObjectId(),
+        source: 'checkForm',
+        templateId,
+        templateName,
+        description: normalizeCheckFormText(t.description),
+        schedule: normalizeCheckFormSchedule(t.schedule),
+        startDate: normalizeCheckFormText(t.startDate),
+        factory: factoryText,
+        加工設備: machineText,
+        equipmentId: null,
+        workerName: String(workerName || '').trim(),
+        Worker_Name: String(workerName || '').split(',').map(s => s.trim()).filter(Boolean),
+        answers: [],
+        tickets: [],
+        isPreComplete: true,
+        isPostComplete: false,
+        skipped: true,
+        skippedBy: verifiedLeaderName,
+        skippedByUsername: doc.leaderUsername,
+        skipReason: reasonText,
+        skippedAt: now.toISOString(),
+        bypassId: result.insertedId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      newRecords.push(rec);
+      recordIds[templateId] = rec._id.toHexString();
+      recordIds[templateName] = rec._id.toHexString();
+    }
+
+    if (newRecords.length > 0) {
+      await recordsCollection.insertMany(newRecords);
+    }
+
+    return res.json({ success: true, bypassId: result.insertedId.toHexString(), recordIds, leaderName: verifiedLeaderName });
   } catch (error) {
     console.error('Error logging checklist bypass:', error);
     return res.status(500).json({ error: 'Failed to record checklist bypass' });

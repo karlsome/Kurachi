@@ -16257,7 +16257,14 @@ if (manualSendModal) {
   window.openSuperBypassModal = function () {
     const modal = document.getElementById('checklistBypassModal');
     const status = document.getElementById('checklistBypassStatus');
-    if (status) status.textContent = 'Scanning Leader QR...';
+    if (status) { status.style.color = '#6b7280'; status.textContent = 'Scanning Leader QR...'; }
+    window.checklistState.bypassLeader = null;
+    const reasonEl = document.getElementById('checklistBypassReason');
+    const confirmBtn = document.getElementById('checklistBypassConfirmBtn');
+    const qrReader = document.getElementById('checklistBypassQrReader');
+    if (reasonEl) { reasonEl.value = ''; reasonEl.style.display = 'none'; }
+    if (confirmBtn) confirmBtn.style.display = 'none';
+    if (qrReader) qrReader.style.display = 'block';
     if (modal) modal.style.display = 'flex';
 
     if (typeof Html5Qrcode !== 'undefined') {
@@ -16275,13 +16282,26 @@ if (manualSendModal) {
             const res = await fetch(`${serverURL}/api/check-forms/verify-qr?code=${encodeURIComponent(decodedText)}`);
             if (res.ok) {
               const userData = await res.json();
-              scanner.stop();
+              const leaderRoles = ['班長', 'admin', '課長', '部長'];
+              if (!leaderRoles.includes(userData.role)) {
+                if (status) {
+                  status.style.color = '#ef4444';
+                  status.textContent = '❌ Not a leader — Super Bypass requires a leader QR';
+                }
+                return;
+              }
+              try { await scanner.stop(); } catch (e) { }
               window.checklistState.bypassLeader = userData;
               if (status) {
                 status.style.color = '#1f9d6b';
-                status.textContent = `✓ Leader Verified: ${userData.firstName || userData.username}`;
+                status.textContent = `✓ Leader Verified: ${userData.firstName || userData.username} — enter a reason`;
               }
-              submitSuperBypass(userData);
+              const qr = document.getElementById('checklistBypassQrReader');
+              if (qr) qr.style.display = 'none';
+              const rEl = document.getElementById('checklistBypassReason');
+              const cBtn = document.getElementById('checklistBypassConfirmBtn');
+              if (rEl) { rEl.style.display = 'block'; rEl.focus(); }
+              if (cBtn) cBtn.style.display = 'block';
             } else {
               if (status) {
                 status.style.color = '#ef4444';
@@ -16297,6 +16317,18 @@ if (manualSendModal) {
         if (status) status.textContent = 'Could not access camera for QR scan';
       });
     }
+  };
+
+  window.confirmSuperBypass = function () {
+    const leader = window.checklistState.bypassLeader;
+    const status = document.getElementById('checklistBypassStatus');
+    const reason = (document.getElementById('checklistBypassReason')?.value || '').trim();
+    if (!leader) return;
+    if (!reason) {
+      if (status) { status.style.color = '#ef4444'; status.textContent = '❌ Reason is required'; }
+      return;
+    }
+    submitSuperBypass(leader, reason);
   };
 
   window.closeSuperBypassModal = function () {
@@ -16414,12 +16446,10 @@ if (manualSendModal) {
     renderCurrentChecklistTemplate();
   }
 
-  async function submitSuperBypass(leaderUser) {
-    const reasonInput = document.getElementById('checklistBypassReason');
-    const reason = (reasonInput?.value || '').trim() || 'Leader emergency bypass';
-
+  async function submitSuperBypass(leaderUser, reason) {
+    const status = document.getElementById('checklistBypassStatus');
     try {
-      await fetch(`${serverURL}/api/check-forms/bypass`, {
+      const bypassRes = await fetch(`${serverURL}/api/check-forms/bypass`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -16432,12 +16462,24 @@ if (manualSendModal) {
           leaderUsername: leaderUser.username,
           reason,
           timing: 'pre',
-          templates: window.checklistState.queue.map(t => t.name)
+          templates: window.checklistState.queue.map(t => ({
+            _id: t._id, name: t.name, description: t.description,
+            schedule: t.schedule, startDate: t.startDate
+          }))
         })
       });
 
+      if (!bypassRes.ok) {
+        const err = await bypassRes.json().catch(() => ({}));
+        if (status) { status.style.color = '#ef4444'; status.textContent = `❌ ${err.error || 'Bypass failed'}`; }
+        return;
+      }
+      const bypassData = await bypassRes.json().catch(() => ({}));
+      window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...(bypassData.recordIds || {}) };
+      window.checklistState.submittedAt = Date.now();
       window.checklistState.isBypassed = true;
       window.checklistState.isPreComplete = true;
+      if (typeof window.saveChecklistDraftToStorage === 'function') { try { await window.saveChecklistDraftToStorage(); } catch (e) { } }
 
       const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
       localStorage.removeItem(pfx + 'activeChecklistStart');
@@ -16455,6 +16497,7 @@ if (manualSendModal) {
       if (typeof window.goToTab === 'function') window.goToTab(0);
     } catch (e) {
       console.error('Error recording bypass:', e);
+      if (status) { status.style.color = '#ef4444'; status.textContent = '❌ Network error — bypass not recorded'; }
     }
   }
 
