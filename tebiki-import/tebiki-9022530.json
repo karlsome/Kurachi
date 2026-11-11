@@ -1,0 +1,107 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9022530,
+  "manualVersionId": 9098503,
+  "title": "Basic Steps to Run the Machine",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "1. Turn On Breaker",
+      "videoId": "01M34HA5Z1HKPKBQKEV1TMT81C",
+      "duration": 176.33,
+      "description": "Step 1. Turn on Breaker\nThere are 5 AOL machines.\nThis is AOL 1. It's larger than AOL machines 2, 3, 4, and 5.\nThe remaining AOL machines are smaller than AOL 1.\nThe breaker boxes are located on the back wall behind the Kuntai work area. There are two to the right of the air compressor and one to the left.\nNOTE: Breakers are not turned off as a regular closing function. The Breakers are typically already turned on. If the breakers are already turned on, then move to step 2.\nThe breaker box on the left contains AOL 1's circuit breaker switches.\nThese are the switches for AOL 1. They're in the \"on\" position.\nThe breaker box on the right contains the circuit breaker switches for the remaining AOL machines 4 and 5.\nBoth sets of switches are in the \"on\" position.\nThe circuit breaker switches for AOL machines 2 and 3 are located in this breaker box.\nThe two sets of switches are in the \"on\" position.\nFor safety purposes, only authorized personnel may activate the circuit breaker."
+    },
+    {
+      "position": 1,
+      "title": "2. Power On the Machine",
+      "videoId": "01M34J32RZQPJQS3E04XKB2H02",
+      "duration": 39.57,
+      "description": "Step 2: Turn on the machine.\nThe emergency-stop button is depressed, which means the machine is turned off.\nTurn on the machine by turning the emergency-stop button clockwise until the button pops up.\nThe screen should turn on.\nPress the upper left part of the screen to unlock the screen."
+    },
+    {
+      "position": 2,
+      "title": "3. Program Calibration",
+      "videoId": "01M34K9EHEWZM3RSRCRYAF12RH",
+      "duration": 73.78,
+      "description": "Step 3: Program Calibration\nPress the \"origin\" button after every start-up. The purpose of the origin is to calibrate the machine on its \"0 , 0\" position.\nYou should see \"start go origin\" displayed on the screen.\nYou should see the machine calibrating on its own.\nThe screens should say \"origin succeed\" if nothing failed.\nIf the origin calibration failed, STOP CALL WAIT.\nImportant: Whenever you press \"origin,\" it erases the loaded file. You must load the file again. See step 6."
+    },
+    {
+      "position": 3,
+      "title": "4. Material Setup (Fabric)",
+      "videoId": "01M3562EHHRDMCYH71DH6TY45W",
+      "duration": 295.37,
+      "description": "Step 4: Material Setup (Fabric)\nIdentify the material to be used.\nFind the information on the work order.\nYou can also find it on the Part Specification Sheet (PSS).\nLocate the correct material in the storage area.\nUse a hand truck to move the material roll from the storage area to the material roll stand behind the AOL machine.\nReturn hand truck to storage location.\nPut bubble wrap on the floor next to the material roll, and then push the roll onto the bubble wrap.\nTake the label holder and the base, and put them in the storage area.\nPut the base here with the others. These are continuously re-used.\nPut the label holder here with the others. They are not discarded. They are continuously re-used.\nPlace the label sleeve with the material label here.\nUnload the used material roll core from the material roll stand.\nPut the used core in the storage area with other cores.\nLoading the new roll requires two people. Ask a production team lead or another machine operator for help.\nMove the bubble wrap back under the material roll stand.\nThe wooden guide goes against the roll stand on the left side.\nThe material will line up all the way to the left side of the roll stand.\nThe right side of the material will lock in place with a metal ring.\nThere will be some gap between the locking ring and the roll stand. This will vary depending on how much of the paper core is sticking out.\nAnother locking ring may be used against the inside of the roll stand holder to increase stability.\nThere should be no space between the roll of material and the right-side wooden guide.\nRemove the bubble wrap from the material roll. Return it to the storage area.\nRemove the tape from the material roll.\nThe roll should unroll from the \"under\" position.\nWith help from a production team lead or another machine operator, pull the end of the material under the lower roll on the stand and set the material on the conveyor belt.\nFeeding the fabric material under the lower bar on the roll stand will help eliminate wrinkles.\nIf you're not sure if release paper is on the bottom or top, ask the production team lead.\nOrigin should be finished at this time. Move the bar to the back and press clamp. Then navigate the bar to the desired position."
+    },
+    {
+      "position": 4,
+      "title": "4. Material Setup (Carpet)",
+      "videoId": "01M357TCAR4ABKQ9HZF182HG0B",
+      "duration": 43.74,
+      "description": "Step 4: Material Setup (Carpet)\nCarpet materials must be fed straight onto the belt or on a slight downward angle. If the material is on an upper angle, the material will wrinkle before cutting.\nHere, the carpet is fed onto the belt at a very slight downward angle. This will help avoid wrinkling the material before cutting.\nHere, the carpet is being fed at an upper angle. This will cause material wrinkling before cutting.\nUse the yellow roll stand to get the material higher."
+    },
+    {
+      "position": 5,
+      "title": "5. Set Zero Position",
+      "videoId": "01M3PYH7SM6VG25ZSZBDJTDRXQ",
+      "duration": 52.01,
+      "description": "Step 5: Set Zero Position\nMake sure that the middle of the laser pointer is within 10 mm from the material edge.\nPeel back a small portion of the paper to make sure there's adhesive present under the laser position.\nIf you are satisfied with the position, press \"set zero\" on the \"work\" screen to lock in the starting point.\nPress the \"set zero\" button to lock in the position. Then, press the \" [] \" button to confirm the cutting area on the material.\nAfter pressing the \" [] \" button, make sure the cutting area stays inside the adhesive area of the material. Reset the \"zero position\" if the laser moves outside of the adhesive area.\nUse this guide only if there are both red and black lines present on the release paper side of the material."
+    },
+    {
+      "position": 6,
+      "title": "6. Choose File",
+      "videoId": "01M3PK8C9QT3JE6HYYMDXZ2STV",
+      "duration": 228.31,
+      "description": "Step 6: Choose File (AOL 2-5 Only)\nOn the touchscreen, go to the \"test\" page by pressing the \"test\" button.\nPress the \"SD\" button or the \"USB\" button, depending on the part to be cut.\nLocate the part to be cut. Then, press the pink \"read\" button to the left of the part number and name. Next, press the \"down arrow\" button.\nA drawing should appear. Press the refresh button and wait 10 seconds.\nHere is the same process, but pressing the \"USB\" button on the \"test\" screen.\nStep 6: Choose File (AOL 1 Only)\nAOL 1 uses a laptop to load the programs to the machine.\nLocate the laptop for this machine.\nTurn the computer on.\nEnter the PIN: 6 3 3 0 6 3 3 0.\nLocate the \"Xiao\" program icon.\nDouble-click on the icon to open the program.\nThe \"Xiao\" program is now running.\nCheck the work order to confirm the part information.\nSelect \"OPEN\" in the top left corner.\nFind the correct program.\nDouble-click the file to open it.\nCheck the shape of the part and confirm that it's the correct one for this work order.\nYou can confirm the shape by checking the Part Specification Sheet (PSS).\nIf the shape on the computer doesn't match what's shown on the PSS, or if you have any questions or concerns at all, ask a production team lead for help.\nAfter confirming the shape, locate and click once on the \"send 1 2\" button.\nThis will send the program to the AOL machine.\nAfter sending the program to the machine, confirm on the machine panel that the transfer was successful. You should see this message: \"Receive Complete\""
+    },
+    {
+      "position": 7,
+      "title": "7. AOL 2-5: Set \"rolldist\" Number",
+      "videoId": "01M3PVEYZCNDZ9R0MN41T94AYX",
+      "duration": 126.43,
+      "description": "Step 7: Set rolldist number (AOL 2-5 Only)\n\"Rolldist\" (short for \"roll distance\") means how far the machine will move the material after each completed cycle.\nThis is the previous cycle of six pieces. The pieces have already been removed by the machine operator.\nThis is the cutting area of the current cycle that is about to finish.\nThe \"roll distance\" is how far forward this cycle's cut pieces will be moved at the end of the cycle.\nGo to the \"test\" menu by pressing the \"test\" button on the touchscreen.\nSelect \"SD\" or \"USB,\" depending on the part.\nThe \"roll distance\" number should be at the end of the filename.\nHere, it's 580.\nTake note of this number: 580.\nGo to the \"speed\" menu by pressing the \"speed\" button.\nLocate the \"rolldist\" box.\nSet the \"rolldist\" number by pressing this box here.\nUse the keypad to enter the roll distance number you found at the end of the file name on the \"test\" menu page.\nStep 7: Set roll add number (AOL 1 Only)"
+    },
+    {
+      "position": 8,
+      "title": "7. AOL 1: \"Set \"roll add\" Number",
+      "videoId": "01M3PVHYNYXPQMFD7T5BYQ1T5W",
+      "duration": 76.82,
+      "description": "Step 7: Set Roll Add Number (AOL 1 Only)\nRoll add adds or subtracts from the designated amount of movement with the program to ensure the next cut does not create miscuts and does not waste material yield.\nGo back to the laptop. Check the Xiao file name. Look for the roll add number.\nThis is the file name.\nTake note of this number, including the + symbol.\nThis is the roll add number.\nPress the \"speed\" button to go to the speed screen.\nThe roll add box already contains the correct roll add number for this part: + (positive) 10. If there's a different number in the box, STOP CALL WAIT."
+    },
+    {
+      "position": 9,
+      "title": "8. Confirm Work Area",
+      "videoId": "01M37DJ17RS5BXEVDTHB8EWRES",
+      "duration": 186.6,
+      "description": "Step 8: Confirm Work Area\nMove to the \"work\" screen by pressing the \"work\" button on the touchscreen.\nOn the \"work\" screen, confirm the work area by pressing the \"[ ]\" button.\nAfter pressing the \"[ ]\" button, the machine will travel in the path shown.\nMake sure to confirm the whole path is within the cutting boundaries.\nYou should be able to see black boundary lines on both sides of the release paper side of the material roll.\nWhen confirming the work area, this red laser cross should stay within the boundary lines.\nIf the laser cross moves outside of the boundary lines, then that means the machine will cut parts outside of the adhesive area.\nThere is no adhesive in this area. Cut parts that include this area won't have adhesive, so they would be non-conforming.\nThere is a thin line of adhesive here.\nThen there's a thin area without adhesive before the main adhesive area begins as you move inward.\nThe main adhesive area begins here and continues to the other side of the release paper on the opposite side of the machine.\nWhen you press the \"[ ]\" to confirm the work area, the red laser cross must stay in the main adhesive area.\nFor parts cut on AOL machines 2, 3, 4, and 5, the area 10 millimeters inside the edge of the paper does not have adhesive.\nThere's no adhesive here.\nMake sure that the work area stays between the black lines, without also including the black lines."
+    },
+    {
+      "position": 10,
+      "title": "9. First Off Inspection",
+      "videoId": "01M3CEEWPFS6VP1EVW603EHYZ8",
+      "duration": 117.74,
+      "description": "Step 9: First-Off Inspection\nGo to the work screen by pressing the \"work\" button.\nPress the \"repeat\" button for a single cycle.\nCheck full cut cycle of parts.\nAOLs 2 and 3 and AOLs 4 and 5 are operated as a pair. Each pair of machines is operated by one machine operator. Stage one full cut cycle of parts from each machine together for the first-off inspection.\nThis stack of parts is from the machine to the left of this machine.\nThis stack of parts is from this machine.\nIn addition to the parts to be inspected, put the wooden inspection pick and the inspection guide card near the parts for the inspector.\nThe inspection guide card will be hanging from the inspection workstation.\nMove the card to where the quality inspector will inspect the first-off parts.\nLocate the inspection pick and place it with the parts to be inspected.\nUse the radio to call for a first-off inspector. Say \"First-off, AOL.\"\nAn inspector will come and check the parts.\nEach piece will be inspected to the standards listed on the Part Specification Sheet (P S S)."
+    },
+    {
+      "position": 11,
+      "title": "10. Run Production",
+      "videoId": "01M3CF1158SV086E2DY63N3RWN",
+      "duration": 56.7,
+      "description": "Step 10: Ready for Production\nIf you need to pause production for breaks or issues in the process, press the \"pause\" button on the work screen.\nWhen you need to resume production after pressing the \"pause\" button, press the \"continue\" button."
+    },
+    {
+      "position": 12,
+      "title": "11. Last Off Inspection",
+      "videoId": "01M3CF9FYHRJEMT09DWSB47V8F",
+      "duration": 74.47,
+      "description": "Step 11: Last-Off Inspection\nGo to the \"work\" screen by pressing the \"work\" button.\nPress the \"repeat\" button for a single cycle.\nCheck full cycle of cut parts.\nStage the parts to be inspected and the inspection tools neatly for the inspector.\nUse the radio to call for an inspector. Say \"Last Off, AOL.\"\nThe inspection must be done by a trained First-Off/Last-Off inspector, not the machine operator.\nInspect each piece to the standards listed on the Part Specification Sheet (PSS)."
+    },
+    {
+      "position": 13,
+      "title": "12. Shutdown and Closing Work",
+      "videoId": "01M37T7F81S6FR1HGF676Z53CP",
+      "duration": 56.64,
+      "description": "Step 12: Shutdown and Closing Work\nOnce production is complete, press the red emergency-stop button to turn off the machine.\nFinish recording any information on the work order.\n5-S the area, including discarding of any scrap material. There's a garbage chute in the back of the warehouse between the two bay doors."
+    }
+  ]
+}
