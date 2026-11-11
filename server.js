@@ -35237,6 +35237,8 @@ app.post('/api/video-manuals-studio/playlists/:id/projects', async (req, res) =>
       order,
       status: 'draft',
       schemaVersion: 1,
+      structure: req.body?.structure === 'steps' ? 'steps' : 'flat',
+      ...(req.body?.structure === 'steps' ? { steps: [] } : {}),
       edit: null,
       assetSourceMap: {},
       settings: { output: null },
@@ -35339,6 +35341,282 @@ app.patch('/api/video-manuals-studio/projects/:id', async (req, res) => {
   }
 });
 
+// ===== Step-based projects (structure: 'steps') =====
+// A project holds ordered steps; every step owns its own Shotstack edit + timed subtitles.
+// project.edit / assetSourceMap / settings.steps / settings.subtitles are DERIVED by vmssComposeSteps()
+// (steps concatenated in order, clip starts shifted by the length of the earlier steps).
+const VMSS_STEP_MAX = 200;
+
+function vmssNum(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function vmssStepEditDuration(edit) {
+  let end = 0;
+  for (const track of Array.isArray(edit?.timeline?.tracks) ? edit.timeline.tracks : []) {
+    for (const clip of Array.isArray(track?.clips) ? track.clips : []) {
+      const start = Number(clip?.start);
+      const length = Number(clip?.length);
+      if (Number.isFinite(start) && Number.isFinite(length)) end = Math.max(end, start + length);
+    }
+  }
+  return Math.round(end * 1000) / 1000;
+}
+
+function vmssNormalizeSubtitles(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((cue) => ({
+      id: String(cue?.id || new ObjectId().toString()),
+      start: Math.max(0, vmssNum(cue?.start)),
+      end: Math.max(0, vmssNum(cue?.end)),
+      text: String(cue?.text ?? '').trim(),
+    }))
+    .filter((cue) => cue.text && cue.end > cue.start)
+    .sort((a, b) => a.start - b.start);
+}
+
+function vmssComposeSteps(steps) {
+  const list = Array.isArray(steps) ? steps : [];
+  const baseEdit = list.map((step) => step?.edit).find((edit) => edit?.timeline?.tracks?.length) || null;
+  const composedTracks = [];
+  const stepRanges = [];
+  const subtitles = [];
+  const assetSourceMap = {};
+  let offset = 0;
+
+  for (const step of list) {
+    const duration = Math.max(vmssStepEditDuration(step?.edit), vmssNum(step?.durationSeconds));
+    const tracks = Array.isArray(step?.edit?.timeline?.tracks) ? step.edit.timeline.tracks : [];
+    tracks.forEach((track, trackIndex) => {
+      if (!composedTracks[trackIndex]) composedTracks[trackIndex] = { ...track, clips: [] };
+      for (const clip of Array.isArray(track?.clips) ? track.clips : []) {
+        const start = Number(clip?.start);
+        composedTracks[trackIndex].clips.push(
+          Number.isFinite(start) ? { ...clip, start: Math.round((start + offset) * 1000) / 1000 } : clip
+        );
+      }
+    });
+    Object.assign(assetSourceMap, step?.assetSourceMap || {});
+    const stepSubtitles = vmssNormalizeSubtitles(step?.subtitles);
+    stepSubtitles.forEach((cue) => subtitles.push({
+      id: cue.id,
+      stepId: step.id,
+      start: Math.round((cue.start + offset) * 1000) / 1000,
+      end: Math.round((cue.end + offset) * 1000) / 1000,
+      text: cue.text,
+    }));
+    stepRanges.push({
+      id: step.id,
+      title: String(step?.title || ''),
+      start: Math.round(offset * 1000) / 1000,
+      end: Math.round((offset + duration) * 1000) / 1000,
+    });
+    offset += duration;
+  }
+
+  const edit = baseEdit
+    ? { ...baseEdit, timeline: { ...baseEdit.timeline, tracks: composedTracks.map((t) => t || { clips: [] }) } }
+    : null;
+  return { edit, assetSourceMap, steps: stepRanges, subtitles, duration: Math.round(offset * 1000) / 1000 };
+}
+
+async function vmssSaveSteps(db, project, steps, username) {
+  const composed = vmssComposeSteps(steps);
+  const now = new Date();
+  const settings = { ...(project.settings || {}), steps: composed.steps, subtitles: composed.subtitles };
+  delete settings.stepDescriptions; // legacy per-clip descriptions are not used in step mode
+  await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+    { _id: project._id },
+    {
+      $set: {
+        structure: 'steps',
+        steps,
+        edit: composed.edit,
+        assetSourceMap: composed.assetSourceMap,
+        settings,
+        updatedAt: now,
+        lastEditedAt: now,
+        lastEditedBy: username,
+      },
+    }
+  );
+  return { composed, updatedAt: now };
+}
+
+// Shared guard: loads the project + checks edit access. Returns null after sending the error response.
+async function vmssLoadEditableProject(req, res) {
+  const { username, role } = vmGetRequester(req);
+  const db = client.db(VM_DB);
+  let projectId;
+  try { projectId = new ObjectId(req.params.id); } catch (_) { res.status(400).json({ error: 'Invalid project id' }); return null; }
+  const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } });
+  if (!project) { res.status(404).json({ error: 'Project not found' }); return null; }
+  const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+  if (!playlist || !vmCanEdit(playlist, username, role)) { res.status(403).json({ error: 'No edit access to this project' }); return null; }
+  if (project.structure !== 'steps' && !req.path.endsWith('/convert-to-steps')) {
+    res.status(409).json({ error: 'This project is not step-based' });
+    return null;
+  }
+  return { db, project, username };
+}
+
+const vmssStepSummary = (step) => ({
+  id: step.id,
+  title: step.title,
+  durationSeconds: vmssStepEditDuration(step.edit) || vmssNum(step.durationSeconds),
+  subtitleCount: Array.isArray(step.subtitles) ? step.subtitles.length : 0,
+  updatedAt: step.updatedAt || null,
+});
+
+// POST /projects/:id/steps  { title, afterStepId? } -> new empty step
+app.post('/api/video-manuals-studio/projects/:id/steps', async (req, res) => {
+  try {
+    const ctx = await vmssLoadEditableProject(req, res);
+    if (!ctx) return;
+    const { db, project, username } = ctx;
+    const steps = Array.isArray(project.steps) ? [...project.steps] : [];
+    if (steps.length >= VMSS_STEP_MAX) return res.status(400).json({ error: `A project can have at most ${VMSS_STEP_MAX} steps` });
+    const title = String(req.body?.title || '').trim() || `Step ${steps.length + 1}`;
+    const step = {
+      id: new ObjectId().toString(),
+      title,
+      edit: null,
+      assetSourceMap: {},
+      subtitles: [],
+      durationSeconds: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const afterIndex = req.body?.afterStepId ? steps.findIndex((s) => s.id === String(req.body.afterStepId)) : -1;
+    steps.splice(afterIndex >= 0 ? afterIndex + 1 : steps.length, 0, step);
+    await vmssSaveSteps(db, project, steps, username);
+    res.json({ step: vmssStepSummary(step), order: steps.map((s) => s.id) });
+  } catch (err) {
+    console.error('❌ video-manuals-studio step create error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /projects/:id/steps/order  { order: [stepId, ...] }  (must be a permutation of the current ids)
+app.put('/api/video-manuals-studio/projects/:id/steps/order', async (req, res) => {
+  try {
+    const ctx = await vmssLoadEditableProject(req, res);
+    if (!ctx) return;
+    const { db, project, username } = ctx;
+    const steps = Array.isArray(project.steps) ? project.steps : [];
+    const order = Array.isArray(req.body?.order) ? req.body.order.map(String) : [];
+    const sameSet = order.length === steps.length && new Set(order).size === order.length && steps.every((s) => order.includes(s.id));
+    if (!sameSet) return res.status(400).json({ error: 'order must list every step id exactly once' });
+    const byId = new Map(steps.map((s) => [s.id, s]));
+    const next = order.map((id) => byId.get(id));
+    const { composed } = await vmssSaveSteps(db, project, next, username);
+    res.json({ order, duration: composed.duration });
+  } catch (err) {
+    console.error('❌ video-manuals-studio step reorder error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /projects/:id/steps/:stepId -> full step (edit + subtitles) for the step editor
+app.get('/api/video-manuals-studio/projects/:id/steps/:stepId', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: new ObjectId(req.params.id), deleted: { $ne: true } });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanView(playlist, username, role)) return res.status(403).json({ error: 'No view access to this project' });
+    const step = (project.steps || []).find((s) => s.id === req.params.stepId);
+    if (!step) return res.status(404).json({ error: 'Step not found' });
+    res.json(step);
+  } catch (err) {
+    console.error('❌ video-manuals-studio step get error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /projects/:id/steps/:stepId  { title?, edit?, assetSourceMap?, subtitles? }
+app.patch('/api/video-manuals-studio/projects/:id/steps/:stepId', async (req, res) => {
+  try {
+    const ctx = await vmssLoadEditableProject(req, res);
+    if (!ctx) return;
+    const { db, project, username } = ctx;
+    const steps = Array.isArray(project.steps) ? [...project.steps] : [];
+    const index = steps.findIndex((s) => s.id === req.params.stepId);
+    if (index < 0) return res.status(404).json({ error: 'Step not found' });
+    const next = { ...steps[index], updatedAt: new Date() };
+    if (req.body?.title !== undefined) {
+      const title = String(req.body.title).trim();
+      if (!title) return res.status(400).json({ error: 'title cannot be empty' });
+      next.title = title;
+    }
+    if (req.body?.edit !== undefined) {
+      if (req.body.edit !== null && !Array.isArray(req.body.edit?.timeline?.tracks)) return res.status(400).json({ error: 'edit.timeline.tracks is required' });
+      next.edit = req.body.edit;
+      next.durationSeconds = vmssStepEditDuration(req.body.edit);
+    }
+    if (req.body?.assetSourceMap !== undefined) next.assetSourceMap = req.body.assetSourceMap || {};
+    if (req.body?.subtitles !== undefined) next.subtitles = vmssNormalizeSubtitles(req.body.subtitles);
+    steps[index] = next;
+    const { composed } = await vmssSaveSteps(db, project, steps, username);
+    res.json({ step: vmssStepSummary(next), duration: composed.duration });
+  } catch (err) {
+    console.error('❌ video-manuals-studio step patch error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/video-manuals-studio/projects/:id/steps/:stepId', async (req, res) => {
+  try {
+    const ctx = await vmssLoadEditableProject(req, res);
+    if (!ctx) return;
+    const { db, project, username } = ctx;
+    const steps = (project.steps || []).filter((s) => s.id !== req.params.stepId);
+    if (steps.length === (project.steps || []).length) return res.status(404).json({ error: 'Step not found' });
+    await vmssSaveSteps(db, project, steps, username);
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio step delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /projects/:id/convert-to-steps -> wraps an existing flat project as a single "Step 1".
+app.post('/api/video-manuals-studio/projects/:id/convert-to-steps', async (req, res) => {
+  try {
+    const ctx = await vmssLoadEditableProject(req, res);
+    if (!ctx) return;
+    const { db, project, username } = ctx;
+    if (project.structure === 'steps') return res.status(409).json({ error: 'Already step-based' });
+    if (project.deployedRevisionId) return res.status(409).json({ error: 'Undeploy this project before converting it' });
+    const cues = (Array.isArray(project.settings?.stepDescriptions) ? project.settings.stepDescriptions : [])
+      .filter((d) => String(d?.description || '').trim());
+    const clips = (project.edit?.timeline?.tracks || []).flatMap((t) => t?.clips || [])
+      .filter((c) => c?.asset?.type === 'video' && Number.isFinite(Number(c.start)) && Number.isFinite(Number(c.length)))
+      .sort((a, b) => a.start - b.start);
+    const subtitles = cues.map((d) => {
+      const clip = clips.find((c) => Math.abs(c.start - Number(d.start)) < VMSS_STEP_DESCRIPTION_TOLERANCE_SECONDS);
+      return clip ? { start: clip.start, end: clip.start + clip.length, text: d.description } : null;
+    }).filter(Boolean);
+    const step = {
+      id: new ObjectId().toString(),
+      title: String(req.body?.title || '').trim() || 'Step 1',
+      edit: project.edit || null,
+      assetSourceMap: project.assetSourceMap || {},
+      subtitles: vmssNormalizeSubtitles(subtitles),
+      durationSeconds: vmssStepEditDuration(project.edit),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    await vmssSaveSteps(db, project, [step], username);
+    res.json({ converted: true, step: vmssStepSummary(step) });
+  } catch (err) {
+    console.error('❌ video-manuals-studio convert-to-steps error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/api/video-manuals-studio/projects/:id', async (req, res) => {
   try {
     const { username, role } = vmGetRequester(req);
@@ -35411,7 +35689,7 @@ app.post('/api/video-manuals-studio/projects/:id/duplicate', async (req, res) =>
     // Share referenced assets with the target playlist
     let copiedAssets = 0;
     if (!sameplaylist) {
-      const haystack = JSON.stringify({ edit: source.edit, map: source.assetSourceMap });
+      const haystack = JSON.stringify({ edit: source.edit, map: source.assetSourceMap, steps: source.steps });
       const sourceAssets = await db.collection(VMSS_ASSETS_COLLECTION)
         .find({ playlistId: source.playlistId, deleted: { $ne: true } })
         .toArray();
@@ -38958,6 +39236,32 @@ function vmssBuildPlaybackInfo(snapshot) {
       duration = Math.max(duration, start + length);
       if (clip?.asset?.type === 'video') videoClips.push({ start, end: start + length });
     }
+  }
+
+  // Step-based projects: one playback step per project step, each with its timed subtitles.
+  const projectSteps = Array.isArray(snapshot?.settings?.steps) ? snapshot.settings.steps : [];
+  if (projectSteps.length > 0) {
+    const cues = Array.isArray(snapshot?.settings?.subtitles) ? snapshot.settings.subtitles : [];
+    const size = snapshot?.edit?.output?.size || {};
+    const stepsOut = projectSteps.map((step, index) => {
+      const stepCues = cues
+        .filter((cue) => cue?.stepId === step.id)
+        .map((cue) => ({ start: Number(cue.start), end: Number(cue.end), text: String(cue.text || '') }));
+      return {
+        id: String(step.id || `step-${index + 1}`),
+        label: String(step.title || '').trim() || `Step ${index + 1}`,
+        description: stepCues.map((cue) => cue.text).join('\n'),
+        startTime: Number(step.start),
+        endTime: Number(step.end),
+        subtitles: stepCues,
+      };
+    });
+    return {
+      steps: stepsOut,
+      duration: Math.max(duration, ...stepsOut.map((step) => step.endTime || 0)),
+      width: numeric(size.width) || 1920,
+      height: numeric(size.height) || 1080,
+    };
   }
 
   videoClips.sort((a, b) => a.start - b.start);
