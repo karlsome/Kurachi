@@ -14341,7 +14341,36 @@ const DIGITAL_TWIN_RESET_HOUR_JST = 2;             // ioT listener resets cycles
 const DIGITAL_TWIN_JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DIGITAL_TWIN_STATUS_PRIORITY = ['stopCall', 'cncCancel', 'maintenance', 'break', 'running', 'idle', 'off'];
 
-function getDigitalTwinProductionDay(nowMs = Date.now()) {
+// Factories whose production day starts at a local hour in their own timezone (not 02:00 JST).
+// SCNA is in Indianapolis: with the JST cutoff the day rolled over at noon local time and the monitor lost
+// the running schedule + piece count (tablet logs and cycles older than the cutoff are ignored).
+const DIGITAL_TWIN_PRODUCTION_DAY_ZONES = { SCNA: { timeZone: 'America/Indiana/Indianapolis', hour: 2 } };
+
+function localDateInZone(ms, timeZone) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function getDigitalTwinProductionDay(nowMs = Date.now(), factory = '') {
+  const zoneCfg = DIGITAL_TWIN_PRODUCTION_DAY_ZONES[String(factory || '').trim().toUpperCase()];
+  if (zoneCfg) {
+    const hh = String(zoneCfg.hour).padStart(2, '0');
+    let calendarDate = localDateInZone(nowMs, zoneCfg.timeZone);
+    let cutoffMs = naiveToEpochInZone(`${calendarDate}T${hh}:00:00`, zoneCfg.timeZone);
+    if (cutoffMs === null) cutoffMs = nowMs - 24 * 60 * 60 * 1000; // zone lookup failed: fall back to a rolling day
+    else if (nowMs < cutoffMs) {
+      const prev = new Date(Date.parse(`${calendarDate}T00:00:00Z`) - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      cutoffMs = naiveToEpochInZone(`${prev}T${hh}:00:00`, zoneCfg.timeZone) ?? (cutoffMs - 24 * 60 * 60 * 1000);
+    }
+    const productionDate = localDateInZone(cutoffMs, zoneCfg.timeZone);
+    // tabletLogDB.Date is written on the tablet's JST clock, pressDB.Date in local time: logs are filtered by ms afterwards,
+    // so asking for both date spellings is harmless
+    const jstDate = (ms) => new Date(ms + DIGITAL_TWIN_JST_OFFSET_MS).toISOString().slice(0, 10);
+    const logDates = [...new Set([productionDate, calendarDate, jstDate(cutoffMs), jstDate(nowMs)])];
+    return { cutoffMs, productionDate, calendarDate, logDates };
+  }
   const jstNow = new Date(nowMs + DIGITAL_TWIN_JST_OFFSET_MS); // UTC fields == JST wall clock
   const todayCutoff = Date.UTC(
     jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate(), DIGITAL_TWIN_RESET_HOUR_JST
@@ -14351,6 +14380,7 @@ function getDigitalTwinProductionDay(nowMs = Date.now()) {
     cutoffMs,
     productionDate: new Date(cutoffMs + DIGITAL_TWIN_JST_OFFSET_MS).toISOString().slice(0, 10),
     calendarDate: jstNow.toISOString().slice(0, 10),
+    logDates: null,
   };
 }
 
@@ -14625,8 +14655,8 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
     if (!factory) return res.status(400).json({ success: false, error: 'factoryName required' });
 
     const nowMs = Date.now();
-    const { cutoffMs, productionDate, calendarDate } = getDigitalTwinProductionDay(nowMs);
-    const recentSince = new Date(cutoffMs + DIGITAL_TWIN_JST_OFFSET_MS - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const { cutoffMs, productionDate, calendarDate, logDates } = getDigitalTwinProductionDay(nowMs, factory);
+    const recentSince = new Date(Date.parse(`${productionDate}T00:00:00Z`) - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const masterDb = client.db(DB_NAME);
     const submittedDb = client.db('submittedDB');
 
@@ -14637,7 +14667,7 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         .project({ name: 1, noOfHead: 1, tableLength: 1 })
         .toArray(),
       submittedDb.collection('tabletLogDB')
-        .find({ 工場: factory, Date: { $in: [...new Set([productionDate, calendarDate])] } })
+        .find({ 工場: factory, Date: { $in: logDates || [...new Set([productionDate, calendarDate])] } })
         .project({ 設備: 1, sessionID: 1, 背番号: 1, 品番: 1, Worker_Name: 1, Action: 1, Status: 1, Timestamp: 1 })
         .toArray(),
       submittedDb.collection('pressDB')
