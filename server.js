@@ -35175,7 +35175,7 @@ app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => 
       { playlistId, deleted: { $ne: true } },
       {
         projection: {
-          title: 1, description: 1, order: 1, status: 1,
+          title: 1, description: 1, order: 1, status: 1, structure: 1,
           currentRevisionNumber: 1, lastRevisionId: 1,
           createdBy: 1, createdAt: 1, updatedAt: 1,
           lastEditedBy: 1, lastEditedAt: 1, edit: 1,
