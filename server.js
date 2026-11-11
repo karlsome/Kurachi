@@ -29246,9 +29246,10 @@ app.get("/api/scna-trace/:id", async (req, res) => {
     if (!root) return res.status(404).json({ error: "Box not found" });
     nodes.set(rootId, { ...root, parents: [], children: [], records: [] });
 
-    const queue = [rootId];
+    // Only the line of descent through the searched box: ancestors expand backwards, descendants forwards (no cousins).
+    const queue = [{ id: rootId, walk: "both" }];
     while (queue.length && nodes.size < MAX_NODES) {
-      const id = queue.shift();
+      const { id, walk } = queue.shift();
       const n = nodes.get(id);
       const L = n.label;
       const found = [];   // [{ id, dir: "parent"|"child" }]
@@ -29271,6 +29272,7 @@ app.get("/api/scna-trace/:id", async (req, res) => {
       }
 
       for (const f of found) {
+        if (walk !== "both" && f.dir !== walk) continue;
         if (!nodes.has(f.id)) {
           if (nodes.size >= MAX_NODES) break;
           if (f.legacy) {
@@ -29279,7 +29281,7 @@ app.get("/api/scna-trace/:id", async (req, res) => {
             const loaded = await load(f.id);
             if (!loaded) continue;   // referenced but not registered (e.g. old data): skip
             nodes.set(f.id, { ...loaded, parents: [], children: [], records: [] });
-            queue.push(f.id);
+            queue.push({ id: f.id, walk: f.dir });
           }
         }
         if (f.dir === "parent") link(f.id, id); else link(id, f.id);
