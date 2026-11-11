@@ -178,3 +178,4 @@ server.log
 
 # Graphify files
 graphify-out/
+backups/

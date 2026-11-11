@@ -35237,8 +35237,8 @@ app.post('/api/video-manuals-studio/playlists/:id/projects', async (req, res) =>
       order,
       status: 'draft',
       schemaVersion: 1,
-      structure: req.body?.structure === 'steps' ? 'steps' : 'flat',
-      ...(req.body?.structure === 'steps' ? { steps: [] } : {}),
+      structure: 'steps', // every new manual is step-based (single-timeline projects are converted on demand)
+      steps: [],
       edit: null,
       assetSourceMap: {},
       settings: { output: null },
@@ -35582,35 +35582,91 @@ app.delete('/api/video-manuals-studio/projects/:id/steps/:stepId', async (req, r
   }
 });
 
-// POST /projects/:id/convert-to-steps -> wraps an existing flat project as a single "Step 1".
+// Splits a single-timeline project into steps: every video clip becomes one step (this is what the old editor
+// treated as a "step"). Overlay clips (text/shapes/images/audio) go to the step in which they start and are
+// shifted to that step's own timeline; an overlay that runs past its step is shortened to the step end.
+// Falls back to ONE step holding the whole timeline when video clips overlap or there is no video.
+function vmssBuildStepsFromFlatProject(project) {
+  const edit = project?.edit;
+  const tracks = Array.isArray(edit?.timeline?.tracks) ? edit.timeline.tracks : [];
+  const located = tracks.flatMap((track, trackIndex) => (Array.isArray(track?.clips) ? track.clips : []).map((clip) => ({ clip, trackIndex })));
+  const numeric = ({ clip }) => Number.isFinite(Number(clip?.start)) && Number.isFinite(Number(clip?.length));
+  const videos = located.filter((item) => item.clip?.asset?.type === 'video' && numeric(item)).sort((a, b) => a.clip.start - b.clip.start);
+  const descriptions = Array.isArray(project?.settings?.stepDescriptions) ? project.settings.stepDescriptions : [];
+  const map = project?.assetSourceMap || {};
+  const now = new Date();
+  const stats = { steps: 0, overlaysShortened: 0, mode: 'split' };
+
+  const overlapping = videos.some((item, i) => i > 0 && item.clip.start < videos[i - 1].clip.start + videos[i - 1].clip.length - 0.01);
+  const wrapAll = () => {
+    stats.mode = 'single';
+    stats.steps = 1;
+    const cues = descriptions.map((d) => {
+      const v = videos.find((item) => Math.abs(item.clip.start - Number(d.start)) < VMSS_STEP_DESCRIPTION_TOLERANCE_SECONDS);
+      return v && String(d.description || '').trim() ? { start: v.clip.start, end: v.clip.start + v.clip.length, text: d.description } : null;
+    }).filter(Boolean);
+    return [{
+      id: new ObjectId().toString(), title: String(project?.title || 'Step 1'), edit: edit || null, assetSourceMap: map,
+      subtitles: vmssNormalizeSubtitles(cues), durationSeconds: vmssStepEditDuration(edit), createdAt: now, updatedAt: now,
+    }];
+  };
+  if (!videos.length || overlapping) return { steps: wrapAll(), stats };
+
+  const lastEnd = Math.max(...located.filter(numeric).map(({ clip }) => Number(clip.start) + Number(clip.length)));
+  const ranges = videos.map((item, i) => ({
+    start: i === 0 ? 0 : item.clip.start,
+    end: i === videos.length - 1 ? Math.max(lastEnd, item.clip.start + item.clip.length) : videos[i + 1].clip.start,
+  }));
+
+  const stepClips = ranges.map(() => tracks.map(() => []));
+  for (const item of located) {
+    const { clip, trackIndex } = item;
+    if (!numeric(item)) { stepClips[0][trackIndex].push(clip); continue; } // 'auto'/'end' timing: keep with the first step
+    let idx = ranges.findIndex((r) => clip.start >= r.start && clip.start < r.end);
+    if (idx < 0) idx = clip.start < ranges[0].start ? 0 : ranges.length - 1;
+    const r = ranges[idx];
+    const start = Math.max(0, Math.round((clip.start - r.start) * 1000) / 1000);
+    let length = Number(clip.length);
+    if (clip.start + length > r.end + 0.01 && clip.asset?.type !== 'video') {
+      length = Math.max(0.1, Math.round((r.end - clip.start) * 1000) / 1000);
+      stats.overlaysShortened += 1;
+    }
+    stepClips[idx][trackIndex].push({ ...clip, start, length });
+  }
+
+  const steps = ranges.map((r, i) => {
+    const stepEdit = { ...edit, timeline: { ...edit.timeline, tracks: tracks.map((track, ti) => ({ ...track, clips: stepClips[i][ti] })) } };
+    const used = JSON.stringify(stepEdit);
+    const stepMap = Object.fromEntries(Object.entries(map).filter(([src]) => used.includes(src)));
+    const video = videos[i].clip;
+    const text = descriptions.filter((d) => Math.abs(Number(d.start) - video.start) < VMSS_STEP_DESCRIPTION_TOLERANCE_SECONDS)
+      .map((d) => String(d.description || '').trim()).filter(Boolean).join('\n');
+    return {
+      id: new ObjectId().toString(),
+      title: `Step ${i + 1}`,
+      edit: stepEdit,
+      assetSourceMap: stepMap,
+      subtitles: text ? vmssNormalizeSubtitles([{ start: Math.max(0, video.start - r.start), end: video.start - r.start + video.length, text }]) : [],
+      durationSeconds: vmssStepEditDuration(stepEdit),
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+  stats.steps = steps.length;
+  return { steps, stats };
+}
+
+// POST /projects/:id/convert-to-steps -> converts a single-timeline project (see vmssBuildStepsFromFlatProject).
+// A deployed revision stays deployed (its snapshot is untouched); only the working copy changes structure.
 app.post('/api/video-manuals-studio/projects/:id/convert-to-steps', async (req, res) => {
   try {
     const ctx = await vmssLoadEditableProject(req, res);
     if (!ctx) return;
     const { db, project, username } = ctx;
     if (project.structure === 'steps') return res.status(409).json({ error: 'Already step-based' });
-    if (project.deployedRevisionId) return res.status(409).json({ error: 'Undeploy this project before converting it' });
-    const cues = (Array.isArray(project.settings?.stepDescriptions) ? project.settings.stepDescriptions : [])
-      .filter((d) => String(d?.description || '').trim());
-    const clips = (project.edit?.timeline?.tracks || []).flatMap((t) => t?.clips || [])
-      .filter((c) => c?.asset?.type === 'video' && Number.isFinite(Number(c.start)) && Number.isFinite(Number(c.length)))
-      .sort((a, b) => a.start - b.start);
-    const subtitles = cues.map((d) => {
-      const clip = clips.find((c) => Math.abs(c.start - Number(d.start)) < VMSS_STEP_DESCRIPTION_TOLERANCE_SECONDS);
-      return clip ? { start: clip.start, end: clip.start + clip.length, text: d.description } : null;
-    }).filter(Boolean);
-    const step = {
-      id: new ObjectId().toString(),
-      title: String(req.body?.title || '').trim() || 'Step 1',
-      edit: project.edit || null,
-      assetSourceMap: project.assetSourceMap || {},
-      subtitles: vmssNormalizeSubtitles(subtitles),
-      durationSeconds: vmssStepEditDuration(project.edit),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    await vmssSaveSteps(db, project, [step], username);
-    res.json({ converted: true, step: vmssStepSummary(step) });
+    const { steps, stats } = vmssBuildStepsFromFlatProject(project);
+    await vmssSaveSteps(db, project, steps, username);
+    res.json({ converted: true, ...stats, steps: steps.map(vmssStepSummary) });
   } catch (err) {
     console.error('❌ video-manuals-studio convert-to-steps error:', err);
     res.status(500).json({ error: err.message });
