@@ -424,6 +424,20 @@
     if (dev && dev.id !== id) { try { if (dev.gatt.connected) dev.gatt.disconnect(); } catch (e) { } dev = null; resetLink(); }
     saveId(id);
   }
+  // "Reset BT settings": drop every Chrome Bluetooth permission this site has, the remembered printer and the live link,
+  // so the operator starts from a clean pairing. (Android's own Bluetooth pairing is not touched.)
+  async function resetAll() {
+    var granted = [], n = 0;
+    try { granted = navigator.bluetooth && navigator.bluetooth.getDevices ? await navigator.bluetooth.getDevices() : []; } catch (e) { }
+    for (var i = 0; i < granted.length; i++) {
+      try { if (granted[i].gatt && granted[i].gatt.connected) granted[i].gatt.disconnect(); } catch (e) { }
+      try { if (granted[i].forget) { await granted[i].forget(); n++; } } catch (e) { }
+    }
+    try { if (dev && dev.gatt && dev.gatt.connected) dev.gatt.disconnect(); } catch (e) { }
+    dev = null; resetLink(); lastError = '';
+    try { localStorage.removeItem(ID_KEY); } catch (e) { }
+    return n;
+  }
   async function forget(id) {
     var named = await grantedPrinters();
     for (var i = 0; i < named.length; i++) {
@@ -511,7 +525,7 @@
 
   root.KensaBT = {
     settings: settings, renderLabel: renderLabel, buildTspl: buildTspl, connect: connect, pick: pick, listPaired: listPaired, status: status, select: select, forget: forget, watch: watch, testPrint: testPrint,
-    printCanvas: printCanvas, printLayout: printLayout, diagnose: diagnose, lastError: function () { return lastError; }, getRoute: getRoute, setRoute: setRoute, routeText: routeText, renderRoutePage: renderRoutePage, HEAD_DOTS: HEAD_DOTS, _pack: pack,
+    printCanvas: printCanvas, printLayout: printLayout, diagnose: diagnose, resetAll: resetAll, lastError: function () { return lastError; }, getRoute: getRoute, setRoute: setRoute, routeText: routeText, renderRoutePage: renderRoutePage, HEAD_DOTS: HEAD_DOTS, _pack: pack,
     isSupported: function () { return !!(navigator.bluetooth && navigator.bluetooth.getDevices); },
   };
 })(typeof window !== 'undefined' ? window : this);

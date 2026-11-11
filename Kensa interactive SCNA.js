@@ -120,9 +120,28 @@ window.serverURL = serverURL;
     var a = $('alert-sound');
     if (a && a.play) { a.muted = false; a.volume = 1; a.currentTime = 0; var p = a.play(); if (p && p.catch) p.catch(function () { }); }
   }
+  var BT_ERR_RE = /bluetooth|gatt|characteristic|printer did not answer|printer not paired|sending to the printer|service lookup|notifications timed out|no longer in range|device/i;
+  async function resetBtSettings() {
+    var ok = await confirmBox(T('kensa_reset_btn'), T('kensa_reset_q'), T('kensa_reset_btn'), true);
+    if (!ok) return false;
+    try { await KensaBT.resetAll(); } catch (e) { console.warn('BT reset', e); }
+    try { setBt('unpaired'); } catch (e) { }
+    toast(T('kensa_reset_done'), 5000);
+    return true;
+  }
   function showAlert(text, title) {
     $('alertTitle').textContent = title || T('kensa_err_title');
     $('alertText').textContent = text;
+    var oldBtn = $('alertBtReset'); if (oldBtn) oldBtn.remove();
+    if (window.KensaBT && BT_ERR_RE.test(String(text))) {                 // Bluetooth problem: let the worker start over from the pop-up
+      var rb = document.createElement('button');
+      rb.type = 'button'; rb.id = 'alertBtReset'; rb.className = 'btn btn-secondary btn-full';
+      rb.style.cssText = 'margin-top:10px;width:100%;'; rb.textContent = T('kensa_reset_btn');
+      rb.onclick = async function () {
+        if (await resetBtSettings()) { $('alertOk').click(); if (typeof openSettings === 'function') openSettings('bt'); }
+      };
+      $('alertOk').parentNode.parentNode.appendChild(rb);
+    }
     $('alertModal').classList.add('show');
     document.body.classList.add('flash-red');
     playAlert();
@@ -162,7 +181,7 @@ window.serverURL = serverURL;
     var el = document.getElementById('kSubmitOverlay');
     if (!el) {
       el = document.createElement('div'); el.id = 'kSubmitOverlay';
-      el.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(17,24,39,.55);display:flex;align-items:center;justify-content:center;padding:24px;';
+      el.style.cssText = 'position:fixed;inset:0;z-index:10020;background:rgba(17,24,39,.55);display:flex;align-items:center;justify-content:center;padding:24px;';
       el.innerHTML = '<style>@keyframes kSpin{to{transform:rotate(360deg)}}</style>' +
         '<div style="background:#fff;border-radius:16px;padding:26px 28px;min-width:240px;max-width:90vw;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.3)">' +
         '<div style="width:46px;height:46px;margin:0 auto 14px;border:5px solid #E7F5EF;border-top-color:#1F9D6B;border-radius:50%;animation:kSpin .8s linear infinite"></div>' +
@@ -1222,16 +1241,17 @@ window.serverURL = serverURL;
     if (!window.KensaBT) return;
     var old = $('kBtDiag'); if (old) old.remove();
     var ov = document.createElement('div'); ov.id = 'kBtDiag';
-    ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10020;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
     ov.innerHTML = '<div style="background:var(--bg-surface,#fff);color:var(--text-main,#111);border-radius:14px;max-width:760px;width:100%;max-height:92vh;display:flex;flex-direction:column;padding:16px;gap:10px;box-shadow:0 10px 40px rgba(0,0,0,.4);">' +
       '<div style="font-size:1.25rem;font-weight:800;">' + esc(T('kensa_diag_title')) + '</div>' +
       '<div style="font-size:.875rem;font-weight:700;color:var(--text-soft,#555);">' + esc(T('kensa_diag_hint')) + '</div>' +
       '<pre id="kBtDiagOut" style="flex:1;min-height:120px;overflow:auto;margin:0;padding:10px;background:#f4f4f5;color:#111;border-radius:8px;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;"></pre>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;"><button type="button" class="btn btn-secondary btn-grow" id="kBtDiagRun"></button><button type="button" class="btn btn-secondary btn-grow" id="kBtDiagCopy"></button>' +
-      '<button type="button" class="btn btn-secondary btn-grow" id="kBtDiagSet"></button><button type="button" class="btn btn-primary btn-grow" id="kBtDiagClose"></button></div></div>';
+      '<button type="button" class="btn btn-secondary btn-grow" id="kBtDiagSet"></button><button type="button" class="btn btn-primary btn-grow" id="kBtDiagClose"></button></div>' +
+      '<button type="button" class="btn btn-secondary btn-full" id="kBtDiagReset"></button></div>';
     document.body.appendChild(ov);
     var out = $('kBtDiagOut'), run = $('kBtDiagRun'), text = '';
-    run.textContent = T('kensa_diag_rerun'); $('kBtDiagCopy').textContent = T('kensa_diag_copy'); $('kBtDiagSet').textContent = T('kensa_diag_settings'); $('kBtDiagClose').textContent = T('kensa_diag_close');
+    run.textContent = T('kensa_diag_rerun'); $('kBtDiagCopy').textContent = T('kensa_diag_copy'); $('kBtDiagSet').textContent = T('kensa_diag_settings'); $('kBtDiagClose').textContent = T('kensa_diag_close'); $('kBtDiagReset').textContent = T('kensa_reset_btn');
     async function go() {
       run.disabled = true; out.textContent = T('kensa_diag_running'); text = '';
       try { text = (await KensaBT.diagnose()).join('\n'); } catch (e) { text = 'Diagnostics failed: ' + (e && e.message || e); }
@@ -1241,6 +1261,7 @@ window.serverURL = serverURL;
     $('kBtDiagCopy').onclick = function () { try { navigator.clipboard.writeText(text).then(function () { toast(T('kensa_diag_copied'), 2000); }); } catch (e) { } };
     $('kBtDiagSet').onclick = function () { ov.remove(); openSettings('bt'); };
     $('kBtDiagClose').onclick = function () { ov.remove(); };
+    $('kBtDiagReset').onclick = async function () { if (await resetBtSettings()) { ov.remove(); openSettings('bt'); } };
     go();
   }
 
