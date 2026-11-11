@@ -36541,6 +36541,27 @@ async function vmssSaveAssetThumbnail(assetDoc, jpegBuffer) {
   return upload.url;
 }
 
+// POST /assets/:assetId/generate-preview -> queues the Shotstack hover-preview render for one video asset (returns 202).
+app.post('/api/video-manuals-studio/assets/:assetId/generate-preview', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    if (!vmShotstackEnabled()) return res.status(503).json({ error: 'Shotstack is not configured on the server' });
+    const db = client.db(VM_DB);
+    const asset = await db.collection(VMSS_ASSETS_COLLECTION).findOne({ _id: new ObjectId(req.params.assetId), deleted: { $ne: true } });
+    if (!asset) return res.status(404).json({ error: 'Asset not found' });
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: asset.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) return res.status(403).json({ error: 'No edit access to this asset' });
+    if (asset.type !== 'video') return res.status(400).json({ error: 'Only video assets have previews' });
+    if (asset.processingStatus === 'processing' && asset.shotstackRenderId) return res.status(409).json({ error: 'A preview render is already running for this asset' });
+    await db.collection(VMSS_ASSETS_COLLECTION).updateOne({ _id: asset._id }, { $set: { processingStatus: 'processing', processingError: null, processingStartedAt: new Date() } });
+    vmssQueueAssetDerivativeProcessing(asset);
+    res.status(202).json({ queued: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio generate-preview error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /assets/:assetId/thumbnail  (raw image/jpeg body) -> sets the library thumbnail of one video asset.
 app.post('/api/video-manuals-studio/assets/:assetId/thumbnail',
   express.raw({ type: 'image/*', limit: '5mb' }),
@@ -37725,9 +37746,12 @@ async function vmssProcessUploadedVideoAsset(assetDoc) {
         previewStoragePath: previewUpload.storagePath,
         previewMimeType: previewUpload.mimeType,
         previewDurationSeconds: Number.isFinite(Number(render?.duration)) ? Number(render.duration) : VMSS_ASSET_PREVIEW_DURATION_SECONDS,
-        thumbnailUrl: thumbnailUpload?.url || null,
-        thumbnailStoragePath: thumbnailUpload?.storagePath || null,
-        thumbnailMimeType: thumbnailUpload?.mimeType || null,
+        // Keep a thumbnail that already exists (e.g. the local ffmpeg one); only fill it in when missing.
+        ...(assetDoc?.thumbnailUrl ? {} : {
+          thumbnailUrl: thumbnailUpload?.url || null,
+          thumbnailStoragePath: thumbnailUpload?.storagePath || null,
+          thumbnailMimeType: thumbnailUpload?.mimeType || null,
+        }),
         processingStatus: 'ready',
         processingError: null,
         processingCompletedAt: new Date(),
