@@ -375,6 +375,12 @@ window.serverURL = serverURL;
   var DCP_RE = /-B\d{3,}$/i, SRS_RE = /-S\d{3,}$/i, KENSA_RE = /-K\d{3,}$/i;
   function splitQr(text) { return String(text || '').trim().split(/[,\s]+/).map(function (p) { return p.trim(); }).filter(Boolean); }
   // Box QR: DCP "品番,収容数,lot,<key>-B###"  SRS "…,<key>-S###"  legacy "品番,収容数,lot"  (a bare ID is also accepted)
+  // Legacy label QR: "品番,収容数,lot" or "品番,収容数,pcs,lot" (a unit between qty and lot); the unit is not part of the lot.
+  function legacyLot(parts) {
+    var rest = parts.slice(2);
+    if (rest.length > 1 && /^(pcs|pc|ea|個|枚)$/i.test(rest[0])) rest = rest.slice(1);
+    return rest.join('');
+  }
   function parseBoxQr(text) {
     var raw = String(text || '').trim(), parts = splitQr(raw), id = '', kind = '';
     for (var i = parts.length - 1; i >= 0; i--) {
@@ -382,7 +388,7 @@ window.serverURL = serverURL;
       if (SRS_RE.test(parts[i])) { id = parts[i].toUpperCase(); kind = 'srs'; parts.splice(i, 1); break; }
     }
     if (id) return { raw: raw, id: id, kind: kind, hinban: parts[0] || '', qty: parts.length > 1 ? toInt(parts[1]) : null, lot: parts[2] || '' };
-    if (parts.length >= 3 && toInt(parts[1]) > 0) return { raw: raw, id: '', kind: 'legacy', hinban: parts[0], qty: toInt(parts[1]), lot: parts.slice(2).join('') };
+    if (parts.length >= 3 && toInt(parts[1]) > 0) return { raw: raw, id: '', kind: 'legacy', hinban: parts[0], qty: toInt(parts[1]), lot: legacyLot(parts) };
     return null;
   }
   function kensaIdOf(text) {

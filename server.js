@@ -29409,7 +29409,7 @@ app.get("/api/scna-trace", async (req, res) => {
       const k = _kensaIdKind(parts[i]);
       if (k) { id = parts[i].toUpperCase(); kind = k; parts.splice(i, 1); break; }
     }
-    const lot = !id && parts.length >= 3 ? parts.slice(2).join("") : "";
+    const lot = !id && parts.length >= 3 ? (parts.length > 3 && /^(pcs|pc|ea|個|枚)$/i.test(parts[2]) ? parts.slice(3) : parts.slice(2)).join("") : "";
     if (!id && !lot) return res.status(404).json({ error: "Unknown QR format" });
 
     await client.connect();
@@ -29487,7 +29487,7 @@ app.get("/api/scna-info", async (req, res) => {
       const k = _kensaIdKind(parts[i]);
       if (k) { id = parts[i].toUpperCase(); kind = k; parts.splice(i, 1); break; }
     }
-    const lot = !id && parts.length >= 3 ? parts.slice(2).join("") : "";
+    const lot = !id && parts.length >= 3 ? (parts.length > 3 && /^(pcs|pc|ea|個|枚)$/i.test(parts[2]) ? parts.slice(3) : parts.slice(2)).join("") : "";
     if (!id && !lot) return res.status(404).json({ error: "Unknown QR format (expected a box / SRS / Kensa ID or a 品番,収容数,lot QR)" });
 
     await client.connect();

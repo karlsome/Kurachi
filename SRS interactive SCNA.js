@@ -342,13 +342,19 @@ window.serverURL = serverURL;
   var WO_RE = /^WO-\d+$/i;
   var BOXID_RE = /-B\d{3,}$/i;
   // Box QR: new = 品番,収容数,lotNumber,boxId   legacy = 品番,収容数,lotNumber   (a bare box ID is also accepted)
+  // Legacy label QR: "品番,収容数,lot" or "品番,収容数,pcs,lot" (a unit between qty and lot); the unit is not part of the lot.
+  function legacyLot(parts) {
+    var rest = parts.slice(2);
+    if (rest.length > 1 && /^(pcs|pc|ea|個|枚)$/i.test(rest[0])) rest = rest.slice(1);
+    return rest.join('');
+  }
   function parseBoxQr(text) {
     var raw = String(text || '').trim();
     var parts = raw.split(/[,\s]+/).map(function (p) { return p.trim(); }).filter(Boolean);
     var boxId = '';
     for (var i = parts.length - 1; i >= 0; i--) if (BOXID_RE.test(parts[i])) { boxId = parts[i].toUpperCase(); parts.splice(i, 1); break; }
     if (boxId) return { raw: raw, boxId: boxId, hinban: parts[0] || '', qty: parts.length > 1 ? toInt(parts[1]) : null, lot: parts[2] || '' };
-    if (parts.length >= 3 && toInt(parts[1]) > 0) return { raw: raw, boxId: '', hinban: parts[0], qty: toInt(parts[1]), lot: parts.slice(2).join('') };
+    if (parts.length >= 3 && toInt(parts[1]) > 0) return { raw: raw, boxId: '', hinban: parts[0], qty: toInt(parts[1]), lot: legacyLot(parts) };
     return null;
   }
   var SRS_RE = /-S\d{3,}(\b|$)/i;
