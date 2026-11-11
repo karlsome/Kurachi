@@ -3551,7 +3551,7 @@
                     deployedVideoFileName: data.deployedVideoFileName || null,
                     steps: Array.isArray(snapshot.steps) ? snapshot.steps : [],
                 };
-                setManualSubtitleOn(false);
+                setManualSubtitleOn(true); // CC on by default
                 manualState.duration = getManualSequenceDuration(manualState.project);
                 manualState.currentTime = 0;
                 manualState.currentStepIndex = 0;

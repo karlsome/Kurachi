@@ -10501,7 +10501,7 @@ async function openVideoManualPicker() {
   }
 }
 
-const videoManualTabletState = { project: null, steps: [], duration: 0, requestId: 0, subtitleOn: false };
+const videoManualTabletState = { project: null, steps: [], duration: 0, requestId: 0, subtitleOn: true };
 
 function getVideoManualMediaUrl(url) {
   if (!url || url.startsWith('blob:') || url.startsWith('data:')) return url;
@@ -10670,7 +10670,7 @@ async function openVideoManualTabletPlayer() {
       return;
     }
     videoManualTabletState.project = data;
-    videoManualTabletState.subtitleOn = false;
+    videoManualTabletState.subtitleOn = true; // CC on by default
     updateVideoManualTabletSubtitle();
     videoManualTabletState.steps = (Array.isArray(snapshot.steps) ? snapshot.steps : [])
       .filter(st => st && Number.isFinite(st.startTime))
