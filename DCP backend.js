@@ -8287,9 +8287,8 @@ function updateVideoManualControllerUi() {
   if (nextStepButton) nextStepButton.disabled = !canControl;
   const subtitleButton = document.getElementById('videoManualSubtitleButton');
   if (subtitleButton) {
-    const languages = Array.isArray(playerState.subtitleLanguages) ? playerState.subtitleLanguages : [];
-    subtitleButton.style.display = canControl && languages.length ? '' : 'none';
-    subtitleButton.textContent = `CC: ${playerState.subtitleLanguage && playerState.subtitleLanguage !== 'off' ? playerState.subtitleLanguage : 'Off'}`;
+    subtitleButton.style.display = canControl && playerState.subtitleAvailable ? '' : 'none';
+    subtitleButton.textContent = playerState.subtitleOn ? 'CC: On' : 'CC: Off';
   }
   if (exitButton) exitButton.disabled = !videoManualState.claimed;
 }
@@ -9323,9 +9322,7 @@ function ensureVideoManualPickerUi() {
   });
   document.getElementById('videoManualSubtitleButton')?.addEventListener('click', async () => {
     try {
-      const order = ['off', ...(videoManualState.playerState.subtitleLanguages || []).map((item) => item.lang)];
-      const current = videoManualState.playerState.subtitleLanguage || 'off';
-      await sendVideoManualCommand('subtitle', { language: order[(order.indexOf(current) + 1) % order.length] });
+      await sendVideoManualCommand('subtitle', { on: !videoManualState.playerState.subtitleOn });
     } catch (error) {
       showAlert(error.message);
     }

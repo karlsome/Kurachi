@@ -10158,9 +10158,8 @@ function updateVideoManualControllerUi() {
   if (nextStepButton) nextStepButton.disabled = !canControl;
   const subtitleButton = document.getElementById('videoManualSubtitleButton');
   if (subtitleButton) {
-    const languages = Array.isArray(playerState.subtitleLanguages) ? playerState.subtitleLanguages : [];
-    subtitleButton.style.display = canControl && languages.length ? '' : 'none';
-    subtitleButton.textContent = `CC: ${playerState.subtitleLanguage && playerState.subtitleLanguage !== 'off' ? playerState.subtitleLanguage : 'Off'}`;
+    subtitleButton.style.display = canControl && playerState.subtitleAvailable ? '' : 'none';
+    subtitleButton.textContent = playerState.subtitleOn ? 'CC: On' : 'CC: Off';
   }
   if (exitButton) exitButton.disabled = !videoManualState.claimed;
 }
@@ -10502,7 +10501,7 @@ async function openVideoManualPicker() {
   }
 }
 
-const videoManualTabletState = { project: null, steps: [], duration: 0, requestId: 0, subtitles: [], subtitleLang: 'off' };
+const videoManualTabletState = { project: null, steps: [], duration: 0, requestId: 0, subtitleOn: false };
 
 function getVideoManualMediaUrl(url) {
   if (!url || url.startsWith('blob:') || url.startsWith('data:')) return url;
@@ -10562,8 +10561,7 @@ function ensureVideoManualTabletPlayerUi() {
   seek.addEventListener('input', () => { seeking = true; el.querySelector('#vmtCurrent').textContent = formatVideoManualDuration(Number(seek.value)); });
   seek.addEventListener('change', () => { video.currentTime = Number(seek.value); seeking = false; });
   el.querySelector('#vmtCcBtn').addEventListener('click', () => {
-    const order = ['off', ...videoManualTabletState.subtitles.map((track) => track.lang)];
-    videoManualTabletState.subtitleLang = order[(order.indexOf(videoManualTabletState.subtitleLang) + 1) % order.length];
+    videoManualTabletState.subtitleOn = !videoManualTabletState.subtitleOn;
     updateVideoManualTabletSubtitle();
   });
   video.addEventListener('timeupdate', () => {
@@ -10588,12 +10586,12 @@ function updateVideoManualTabletSubtitle() {
   const button = document.getElementById('vmtCcBtn');
   const video = document.getElementById('vmtVideo');
   if (!box || !button || !video) return;
-  const { subtitles, subtitleLang } = videoManualTabletState;
-  button.style.display = subtitles.length ? '' : 'none';
-  button.textContent = subtitleLang === 'off' ? 'CC' : `CC · ${subtitleLang}`;
-  const track = subtitleLang === 'off' ? null : subtitles.find((item) => item.lang === subtitleLang);
-  const cue = track ? track.cues.find((item) => video.currentTime >= item.start && video.currentTime < item.end) : null;
-  box.textContent = cue ? cue.text : '';
+  const cues = videoManualTabletState.steps.filter(step => String(step.description || '').trim());
+  const on = videoManualTabletState.subtitleOn;
+  button.style.display = cues.length ? '' : 'none';
+  button.textContent = on ? 'CC · On' : 'CC';
+  const cue = on ? cues.find(step => video.currentTime >= step.startTime && video.currentTime < step.endTime) : null;
+  box.textContent = cue ? String(cue.description).trim() : '';
   box.style.display = cue ? '' : 'none';
 }
 
@@ -10672,13 +10670,13 @@ async function openVideoManualTabletPlayer() {
       return;
     }
     videoManualTabletState.project = data;
-    videoManualTabletState.subtitles = (Array.isArray(data.subtitles) ? data.subtitles : []).filter(track => track?.cues?.length);
-    videoManualTabletState.subtitleLang = 'off';
+    videoManualTabletState.subtitleOn = false;
     updateVideoManualTabletSubtitle();
     videoManualTabletState.steps = (Array.isArray(snapshot.steps) ? snapshot.steps : [])
       .filter(st => st && Number.isFinite(st.startTime))
       .sort((a, b) => a.startTime - b.startTime);
     videoManualTabletState.duration = Number(selected.duration) || 0;
+    updateVideoManualTabletSubtitle();
 
     video.src = getVideoManualMediaUrl(url);
     video.load();
@@ -11651,9 +11649,7 @@ function ensureVideoManualPickerUi() {
   });
   document.getElementById('videoManualSubtitleButton')?.addEventListener('click', async () => {
     try {
-      const order = ['off', ...(videoManualState.playerState.subtitleLanguages || []).map((item) => item.lang)];
-      const current = videoManualState.playerState.subtitleLanguage || 'off';
-      await sendVideoManualCommand('subtitle', { language: order[(order.indexOf(current) + 1) % order.length] });
+      await sendVideoManualCommand('subtitle', { on: !videoManualState.playerState.subtitleOn });
     } catch (error) {
       showAlert(error.message);
     }

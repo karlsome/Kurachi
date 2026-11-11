@@ -1690,7 +1690,7 @@
         const errorMessage = document.getElementById('errorMessage');
         const errorText = document.getElementById('errorText');
         const manualState = {
-            subtitleLang: 'off',
+            subtitleOn: false,
             mode: 'pdf',
             project: null,
             duration: 0,
@@ -3181,42 +3181,33 @@
             return null;
         }
 
-        // ── Selectable subtitles (not burned into the video) ──
-        function getManualSubtitleTracks() {
-            return Array.isArray(manualState.project?.subtitles) ? manualState.project.subtitles.filter((track) => track?.cues?.length) : [];
+        // ── CC: the deployed step descriptions are shown as subtitles (not burned into the video) ──
+        function getManualSubtitleCues() {
+            return (manualState.project?.steps || [])
+                .filter((step) => String(step?.description || '').trim())
+                .map((step) => ({ start: step.startTime, end: step.endTime, text: String(step.description).trim() }));
         }
 
         function updateManualSubtitle() {
-            const track = manualState.subtitleLang === 'off'
-                ? null
-                : getManualSubtitleTracks().find((item) => item.lang === manualState.subtitleLang);
             const time = Number(manualState.currentTime) || 0;
-            const cue = track ? track.cues.find((item) => time >= item.start && time < item.end) : null;
+            const cue = manualState.subtitleOn ? getManualSubtitleCues().find((item) => time >= item.start && time < item.end) : null;
             manualSubtitle.textContent = cue ? cue.text : '';
             manualSubtitle.classList.toggle('display-mode-hidden', !cue);
         }
 
-        function setManualSubtitleLanguage(lang) {
-            const tracks = getManualSubtitleTracks();
-            manualState.subtitleLang = lang !== 'off' && tracks.some((track) => track.lang === lang) ? lang : 'off';
-            manualCcButton.textContent = manualState.subtitleLang === 'off' ? 'CC' : `CC · ${manualState.subtitleLang}`;
+        function setManualSubtitleOn(on) {
+            const available = getManualSubtitleCues().length > 0;
+            manualState.subtitleOn = !!on && available;
+            manualCcButton.classList.toggle('display-mode-hidden', !available);
+            manualCcButton.textContent = manualState.subtitleOn ? 'CC · On' : 'CC';
             updateManualSubtitle();
             void postMachinePlayerState({
-                subtitleLanguages: tracks.map((track) => ({ lang: track.lang, label: track.label || track.lang })),
-                subtitleLanguage: manualState.subtitleLang,
+                subtitleAvailable: available,
+                subtitleOn: manualState.subtitleOn,
             }, { force: true });
         }
 
-        function refreshManualSubtitleUi() {
-            const tracks = getManualSubtitleTracks();
-            manualCcButton.classList.toggle('display-mode-hidden', !tracks.length);
-            setManualSubtitleLanguage(tracks.some((track) => track.lang === manualState.subtitleLang) ? manualState.subtitleLang : 'off');
-        }
-
-        manualCcButton.addEventListener('click', () => {
-            const order = ['off', ...getManualSubtitleTracks().map((track) => track.lang)];
-            setManualSubtitleLanguage(order[(order.indexOf(manualState.subtitleLang) + 1) % order.length]);
-        });
+        manualCcButton.addEventListener('click', () => setManualSubtitleOn(!manualState.subtitleOn));
         setInterval(updateManualSubtitle, 200);
 
         function renderManualFrame() {
@@ -3559,9 +3550,8 @@
                     deployedVideoMimeType: data.deployedVideoMimeType || null,
                     deployedVideoFileName: data.deployedVideoFileName || null,
                     steps: Array.isArray(snapshot.steps) ? snapshot.steps : [],
-                    subtitles: Array.isArray(data.subtitles) ? data.subtitles : [],
                 };
-                refreshManualSubtitleUi();
+                setManualSubtitleOn(false);
                 manualState.duration = getManualSequenceDuration(manualState.project);
                 manualState.currentTime = 0;
                 manualState.currentStepIndex = 0;
@@ -3649,7 +3639,7 @@
             }
 
             if (action === 'video-manual-subtitle') {
-                setManualSubtitleLanguage(String(data.additionalData.language || 'off'));
+                setManualSubtitleOn(!!data.additionalData.on);
                 return;
             }
 
