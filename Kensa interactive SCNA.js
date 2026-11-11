@@ -1213,8 +1213,35 @@ window.serverURL = serverURL;
     catch (e) { setBt(/not paired/i.test(e.message || '') ? 'unpaired' : 'off'); }
   }
   if (btOn && btBtn) {
-    btBtn.onclick = function () { if (!printing) openSettings('bt'); };
+    btBtn.onclick = function () { if (!printing) { if (btState === 'off') showBtDiag(); else openSettings('bt'); } };
     setTimeout(refreshBt, 1500);
+  }
+
+  // Pop-up listing what the printer really exposes (services / characteristics / last error), made to be screenshotted remotely
+  function showBtDiag() {
+    if (!window.KensaBT) return;
+    var old = $('kBtDiag'); if (old) old.remove();
+    var ov = document.createElement('div'); ov.id = 'kBtDiag';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML = '<div style="background:var(--bg-surface,#fff);color:var(--text-main,#111);border-radius:14px;max-width:760px;width:100%;max-height:92vh;display:flex;flex-direction:column;padding:16px;gap:10px;box-shadow:0 10px 40px rgba(0,0,0,.4);">' +
+      '<div style="font-size:1.25rem;font-weight:800;">' + esc(T('kensa_diag_title')) + '</div>' +
+      '<div style="font-size:.875rem;font-weight:700;color:var(--text-soft,#555);">' + esc(T('kensa_diag_hint')) + '</div>' +
+      '<pre id="kBtDiagOut" style="flex:1;min-height:120px;overflow:auto;margin:0;padding:10px;background:#f4f4f5;color:#111;border-radius:8px;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;"></pre>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;"><button type="button" class="btn btn-secondary btn-grow" id="kBtDiagRun"></button><button type="button" class="btn btn-secondary btn-grow" id="kBtDiagCopy"></button>' +
+      '<button type="button" class="btn btn-secondary btn-grow" id="kBtDiagSet"></button><button type="button" class="btn btn-primary btn-grow" id="kBtDiagClose"></button></div></div>';
+    document.body.appendChild(ov);
+    var out = $('kBtDiagOut'), run = $('kBtDiagRun'), text = '';
+    run.textContent = T('kensa_diag_rerun'); $('kBtDiagCopy').textContent = T('kensa_diag_copy'); $('kBtDiagSet').textContent = T('kensa_diag_settings'); $('kBtDiagClose').textContent = T('kensa_diag_close');
+    async function go() {
+      run.disabled = true; out.textContent = T('kensa_diag_running'); text = '';
+      try { text = (await KensaBT.diagnose()).join('\n'); } catch (e) { text = 'Diagnostics failed: ' + (e && e.message || e); }
+      out.textContent = text; run.disabled = false;
+    }
+    run.onclick = go;
+    $('kBtDiagCopy').onclick = function () { try { navigator.clipboard.writeText(text).then(function () { toast(T('kensa_diag_copied'), 2000); }); } catch (e) { } };
+    $('kBtDiagSet').onclick = function () { ov.remove(); openSettings('bt'); };
+    $('kBtDiagClose').onclick = function () { ov.remove(); };
+    go();
   }
 
   var layoutCache = {}, layoutLoadedAt = 0, recordCache = {};
@@ -1930,10 +1957,10 @@ window.serverURL = serverURL;
         return;
       }
       body.innerHTML = '<div id="kBtList" style="display:flex;flex-direction:column;gap:12px;"></div>' +
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;"><button type="button" class="btn btn-secondary btn-grow" id="kBtSearch"></button><button type="button" class="btn btn-secondary btn-grow" id="kBtTest"></button></div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;"><button type="button" class="btn btn-secondary btn-grow" id="kBtSearch"></button><button type="button" class="btn btn-secondary btn-grow" id="kBtTest"></button><button type="button" class="btn btn-secondary btn-grow" id="kBtDiagOpen"></button></div>' +
         '<button type="button" id="kBtAll" style="align-self:flex-start;border:0;background:none;color:var(--blue);font-weight:800;font-size:.8125rem;padding:4px 0;cursor:pointer;text-decoration:underline;"></button>' +
         '<p style="font-size:.8125rem;font-weight:700;color:var(--text-soft);line-height:1.5;">' + esc(T('kensa_set_hint')) + '</p>';
-      $('kBtSearch').textContent = '＋ ' + T('kensa_set_search'); $('kBtTest').textContent = '🖨 ' + T('kensa_set_test'); $('kBtAll').textContent = T('kensa_set_search_all');
+      $('kBtSearch').textContent = '＋ ' + T('kensa_set_search'); $('kBtTest').textContent = '🖨 ' + T('kensa_set_test'); $('kBtAll').textContent = T('kensa_set_search_all'); $('kBtDiagOpen').textContent = T('kensa_diag_btn'); $('kBtDiagOpen').onclick = function () { if (!printing) showBtDiag(); };
 
       var sig = {}, paired = [], stopWatch = null, dead = false, renderTimer = null, tick = null, busy = false;
       function paint() {

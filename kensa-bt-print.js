@@ -25,7 +25,10 @@
   var BLE = {
     service: 0xff00, write: 0xff02, notify: 0xff01,
     chunk: 128, delayMs: 15,           // writes are paced; the printer has no flow control we can rely on
-    doneTimeoutMs: 120000,
+    idleTimeoutMs: 15000,              // no progress (write accepted / printer message) for this long = give up with an error
+    // services the browser may let us read when listing what the printer exposes (Web Bluetooth only reveals services named when pairing)
+    extraServices: [0x1800, 0x1801, 0x180a, 0x180f, 0xfee7, 0xffe0, 0xfff0, 0xff00, 0x18f0, 0xae00,
+      '49535343-fe7d-4ae5-8fa9-9fafd205e455', 'e7810a71-73ae-499d-8c15-faa9aef0c3f2'],
   };
   var settings = { rotate: 'cw', density: 8, speed: 4, gapMm: 3 };
 
@@ -254,14 +257,24 @@
     var s = ''; try { s = new TextDecoder().decode(ev.target.value.buffer); } catch (e) { }
     waiters.slice().forEach(function (w) { w(s); });
   }
+  // resolves when the printer's messages match re. The idle timer only runs once touch() has been called (after the last
+  // write) and restarts on every message, so a printer that keeps talking is never cut off but a silent one errors after ms.
   function waitFor(re, ms) {
-    return new Promise(function (resolve, reject) {
-      var timer = setTimeout(function () { drop(); reject(new Error('printer did not answer')); }, ms);
-      var acc = '';
-      function fn(s) { acc += s; if (re.test(acc)) { drop(); clearTimeout(timer); resolve(acc); } }
-      function drop() { waiters = waiters.filter(function (x) { return x !== fn; }); }
+    var timer = null, acc = '', fn, p, touch;
+    function drop() { clearTimeout(timer); waiters = waiters.filter(function (x) { return x !== fn; }); }
+    p = new Promise(function (resolve, reject) {
+      function arm() { clearTimeout(timer); timer = setTimeout(function () { drop(); reject(new Error('printer did not answer (no response for ' + Math.round(ms / 1000) + ' s)')); }, ms); }
+      fn = function (s) { acc += s; if (re.test(acc)) { drop(); resolve(acc); } else if (timer) arm(); };
+      touch = arm;
       waiters.push(fn);
     });
+    p.touch = touch; p.cancel = drop;
+    return p;
+  }
+  function withTimeout(promise, ms, what) {
+    var t;
+    return Promise.race([promise, new Promise(function (_, rej) { t = setTimeout(function () { rej(new Error(what + ' timed out after ' + Math.round(ms / 1000) + ' s')); }, ms); })])
+      .then(function (v) { clearTimeout(t); return v; }, function (e) { clearTimeout(t); throw e; });
   }
 
   // Chrome only connects to a remembered device it has recently seen advertising ("no longer in range" otherwise),
@@ -291,7 +304,7 @@
     var old = dev, all = !!(opts && opts.all);
     var d = await navigator.bluetooth.requestDevice({
       filters: all ? [{ namePrefix: 'D520' }] : [{ name: 'D520', services: [0xfee7] }],
-      optionalServices: [BLE.service],
+      optionalServices: [BLE.service].concat(BLE.extraServices.filter(function (u) { return u !== BLE.service; })),
     });
     if (old && old.id !== d.id) { try { if (old.gatt.connected) old.gatt.disconnect(); if (old.forget) await old.forget(); } catch (e) { } }
     dev = d; resetLink(); saveId(d.id);
@@ -299,7 +312,12 @@
     return connect();
   }
 
+  var lastError = '';
   async function connect(opts) {
+    try { var r = await connectInner(opts); lastError = ''; return r; }
+    catch (e) { lastError = (e && e.message) || String(e); throw e; }
+  }
+  async function connectInner(opts) {
     opts = opts || {};
     if (!navigator.bluetooth) throw new Error('Web Bluetooth is not available (use Chrome over HTTPS)');
     if (!dev || !dev.gatt) {
@@ -313,27 +331,77 @@
     }
     if (!dev.gatt.connected || !wch) {
       await seeAdvert(dev);
-      var server = await dev.gatt.connect();
-      var svc = await server.getPrimaryService(BLE.service);
-      wch = await svc.getCharacteristic(BLE.write);
-      nch = await svc.getCharacteristic(BLE.notify);
-      await nch.startNotifications();
+      var server = await withTimeout(dev.gatt.connect(), BLE.idleTimeoutMs, 'Bluetooth connect');
+      var svc = await withTimeout(server.getPrimaryService(BLE.service), BLE.idleTimeoutMs, 'service lookup');
+      var w = await svc.getCharacteristic(BLE.write);
+      var n = await svc.getCharacteristic(BLE.notify);
+      await withTimeout(n.startNotifications(), BLE.idleTimeoutMs, 'notifications');
+      wch = w; nch = n;
       nch.addEventListener('characteristicvaluechanged', onNotify);
     }
     return dev.name || 'D520';
   }
 
   async function sendTspl(bytes, onProgress) {
-    var done = waitFor(/SSSGETPRINTING:DONE/, BLE.doneTimeoutMs);
+    var done = waitFor(/SSSGETPRINTING:DONE/, BLE.idleTimeoutMs);
     done.catch(function () { });
-    for (var o = 0; o < bytes.length; o += BLE.chunk) {
-      await wch.writeValueWithoutResponse(bytes.slice(o, o + BLE.chunk));
-      await sleep(BLE.delayMs);
-      if (onProgress && ((o / BLE.chunk) % 50 === 0)) onProgress(Math.min(1, o / bytes.length));
-    }
+    try {
+      for (var o = 0; o < bytes.length; o += BLE.chunk) {
+        await withTimeout(wch.writeValueWithoutResponse(bytes.slice(o, o + BLE.chunk)), BLE.idleTimeoutMs, 'sending to the printer');
+        await sleep(BLE.delayMs);
+        if (onProgress && ((o / BLE.chunk) % 50 === 0)) onProgress(Math.min(1, o / bytes.length));
+      }
+    } catch (e) { done.cancel(); throw e; }
     if (onProgress) onProgress(1);
+    done.touch();                                   // all sent: from here the printer has 15 s of silence at most
     try { await done; }
     catch (e) { e.afterSend = true; throw e; }      // everything was sent: the label may well have printed, so no blind retry
+  }
+
+  // What the printer really exposes, as plain text lines for a screenshot (Settings / BT offline tag).
+  async function diagnose() {
+    var L = [], add = function (t) { L.push(t); };
+    add('Time: ' + new Date().toISOString());
+    add('Secure context: ' + (root.isSecureContext !== false) + ' | Web Bluetooth: ' + !!navigator.bluetooth + ' | getDevices: ' + !!(navigator.bluetooth && navigator.bluetooth.getDevices));
+    add('Browser: ' + (navigator.userAgent || '').replace(/^Mozilla\/5.0 /, ''));
+    add('Print method: ' + getRoute() + ' | saved printer id: ' + (savedId() || '-'));
+    add('Last connect error: ' + (lastError || '-'));
+    if (!navigator.bluetooth) return L;
+    var granted = [];
+    try { granted = navigator.bluetooth.getDevices ? await navigator.bluetooth.getDevices() : []; } catch (e) { add('getDevices failed: ' + e.message); }
+    add('Granted devices: ' + (granted.length ? granted.map(function (d) { return (d.name || '?') + ' [' + String(d.id).slice(0, 8) + '] gatt.connected=' + !!(d.gatt && d.gatt.connected); }).join(', ') : 'none'));
+    var d = (dev && dev.gatt ? dev : null);
+    if (!d) { var named = granted.filter(function (x) { return /^D520/i.test(x.name || ''); }), want = savedId(); d = named.filter(function (x) { return x.id === want; })[0] || named[0] || null; }
+    if (!d) { add('No paired D520 to inspect. Pair the printer first.'); return L; }
+    add('Inspecting: ' + (d.name || '?') + ' [' + String(d.id).slice(0, 8) + ']');
+    add('Link in use by printing: write=' + !!wch + ' notify=' + !!nch);
+    var server;
+    try { await seeAdvert(d); add('Advertisement seen: yes'); } catch (e) { add('Advertisement: ' + e.message); }
+    try { server = await withTimeout(d.gatt.connect(), BLE.idleTimeoutMs, 'gatt.connect'); add('gatt.connect: OK'); }
+    catch (e) { add('gatt.connect FAILED: ' + e.message); return L; }
+    var services = [];
+    try { services = await withTimeout(server.getPrimaryServices(), BLE.idleTimeoutMs, 'getPrimaryServices'); add('Services found: ' + services.length); }
+    catch (e) { add('getPrimaryServices FAILED: ' + e.message); }
+    for (var i = 0; i < services.length; i++) {
+      add('SERVICE ' + services[i].uuid);
+      try {
+        var chars = await services[i].getCharacteristics();
+        if (!chars.length) add('   (no characteristics)');
+        chars.forEach(function (c) {
+          var p = ['read', 'write', 'writeWithoutResponse', 'notify', 'indicate'].filter(function (k) { return c.properties && c.properties[k]; });
+          add('   CHAR ' + c.uuid + '  [' + p.join(', ') + ']');
+        });
+      } catch (e) { add('   characteristics FAILED: ' + e.message); }
+    }
+    try {
+      var s2 = await server.getPrimaryService(BLE.service);
+      var names = { write: BLE.write, notify: BLE.notify };
+      for (var k in names) {
+        try { await s2.getCharacteristic(names[k]); add('Needed ' + k + ' (0x' + names[k].toString(16) + '): present'); }
+        catch (e) { add('Needed ' + k + ' (0x' + names[k].toString(16) + '): MISSING - ' + e.message); }
+      }
+    } catch (e) { add('Needed service 0xff00: MISSING - ' + e.message); }
+    return L;
   }
 
 
@@ -443,7 +511,7 @@
 
   root.KensaBT = {
     settings: settings, renderLabel: renderLabel, buildTspl: buildTspl, connect: connect, pick: pick, listPaired: listPaired, status: status, select: select, forget: forget, watch: watch, testPrint: testPrint,
-    printCanvas: printCanvas, printLayout: printLayout, getRoute: getRoute, setRoute: setRoute, routeText: routeText, renderRoutePage: renderRoutePage, HEAD_DOTS: HEAD_DOTS, _pack: pack,
+    printCanvas: printCanvas, printLayout: printLayout, diagnose: diagnose, lastError: function () { return lastError; }, getRoute: getRoute, setRoute: setRoute, routeText: routeText, renderRoutePage: renderRoutePage, HEAD_DOTS: HEAD_DOTS, _pack: pack,
     isSupported: function () { return !!(navigator.bluetooth && navigator.bluetooth.getDevices); },
   };
 })(typeof window !== 'undefined' ? window : this);
