@@ -1897,7 +1897,10 @@
       var boxId = await prepareBox();   // server-issued box ID (blocks the print when the server is unreachable)
       if (!boxId) return;
       var copies = await window.promptLaptopAutoPrintCopies();   // layout choice (if several), then copies
-      if (copies === null) return;
+      if (copies === null) {
+        toast('箱 ' + boxId + ' は未印刷です。もう一度印刷を押してください / Box ' + boxId + ' is NOT printed yet. Press Print again to print it.');
+        return;
+      }
 
       if (typeof window.setPrintBtnState === 'function') window.setPrintBtnState('printing');
       try {
@@ -2059,8 +2062,9 @@
 
     var allKnown = per.every(function (x) { return x.segs.every(function (g) { return g.pc != null; }); });
     var producedAll = per.reduce(function (n, x) { return n + x.produced; }, 0);
-    var capped = !!(cap && cap > 0 && allKnown && producedAll > cap);
+    var capped = !!(cap && allKnown && producedAll > Math.max(cap, 0));
     if (capped) {
+      if (cap < 0) cap = 0;
       // proportional share per machine, oldest cycles first inside it
       per.forEach(function (x) {
         var share = cap * x.produced / producedAll, left = share, used = 0;
@@ -2145,6 +2149,7 @@
     var taken = [], sum = 0;
     for (var k = 0; k < cycles.length; k++) {
       var c = cycles[k];
+      if (cap < 0) break;   // spare already fills the box: no machine pieces, everything carries over
       if (cap && cap > 0 && sum + c.avail > cap) {
         var room = cap - sum;
         if (room > 0) { taken.push({ c: c, pieces: room, full: false }); sum += room; }
@@ -2168,7 +2173,7 @@
       l.shots += t.pieces / c.pc; l.pieces += t.pieces; l.lastCycleAt = c.ts;
     });
     lots.forEach(function (l) { l.shots = Math.round(l.shots * 100) / 100; });
-    var capped = cap > 0 && producedAll > sum;
+    var capped = cap !== 0 && producedAll > sum;
     if (capped) notes.push('exact fill by cycle time: produced ' + producedAll + ', carried over ' + (producedAll - sum));
     return { lots: lots, nextSnap: nextSnap, approximate: approximate, notes: notes, capped: capped, fillMethod: 'timed',
       producedPieces: producedAll, machinePieces: sum, carriedPieces: producedAll - sum };
@@ -2184,7 +2189,8 @@
     for (var mi = 0; mi < machines.length; mi++) totals[machines[mi]] = await fetchCycleState(machines[mi]);
     var spareSum = spare.reduce(function (n, e) { return n + (e.pieces || 0); }, 0);
     var qtyLabel = boxCapacity();
-    var capMachine = qtyLabel ? Math.max(0, qtyLabel - spareSum) : 0;
+    // cap: >0 machine pieces that fit, 0 = no limit, -1 = no room (spare alone fills / exceeds 収容数)
+    var capMachine = qtyLabel ? (qtyLabel - spareSum > 0 ? qtyLabel - spareSum : -1) : 0;
     var r = null;
     var allLog = machines.length > 0 && machines.every(function (m) { return totals[m].auto && totals[m].log; });
     if (allLog) {
@@ -2280,6 +2286,15 @@
     var run = getRun();
     if (!run.pendingBox) {
       var boxes = todayBoxes();
+      // A box was issued earlier but never printed (copies prompt cancelled / print failed): print that one again.
+      // Offering "New box" here is what used to burn a number (B003 never printed, next labels B004/B005).
+      var sebNow = (($('sub-dropdown') || {}).value || '').trim();
+      var unprinted = boxes.filter(function (b) { return !b.printed && (!b.sebanggo || b.sebanggo === sebNow); }).pop();
+      if (unprinted) {
+        toast('未印刷の箱 ' + unprinted.boxId + ' を印刷します / Printing ' + unprinted.boxId + ' (issued earlier, not printed yet)');
+        SCNA.boxId = unprinted.boxId;
+        return SCNA.boxId;
+      }
       if (boxes.length) {
         var choice = await askBoxChoice(boxes);
         if (!choice) return null;
