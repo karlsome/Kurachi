@@ -17722,7 +17722,7 @@ app.post('/api/masterdb/ids', async (req, res) => {
 //   apply:   streams that payload into Mongo. The MDB is never re-read, so the memory
 //            spike of parsing the 230MB file stays confined to the short-lived child.
 const mdbImport = require('./mdbImport');
-const { fork } = require('child_process');
+const { fork, execFile } = require('child_process');
 const mdbImportJobs = new Map(); // jobId -> { status, stage, payloadPath, summary, result, error, ... }
 let mdbImportBusy = false;
 const MDB_IMPORT_MAX_HEAP_MB = parseInt(process.env.MDB_IMPORT_MAX_HEAP_MB || '1536', 10);
@@ -36503,6 +36503,66 @@ app.delete('/api/video-manuals-studio/playlists/:id/assets/permanent', async (re
   }
 });
 
+
+// ---- Local thumbnails for library videos (used when Shotstack derivatives are not generated) ----
+// Grabs one frame with ffmpeg (must be on PATH). Returns a JPEG Buffer or null if ffmpeg/the file is unusable.
+async function vmssExtractThumbnailJpeg(inputPathOrUrl) {
+  const fsp = require('fs').promises;
+  const outPath = require('path').join(require('os').tmpdir(), `vmss-thumb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`);
+  const run = (seekSeconds) => new Promise((resolve) => {
+    execFile('ffmpeg', ['-y', '-v', 'error', '-ss', String(seekSeconds), '-i', inputPathOrUrl, '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '4', outPath],
+      { timeout: 60000 }, (error) => resolve(!error));
+  });
+  try {
+    // Try 1 s in (skips black first frames); short clips fall back to the first frame.
+    if (!(await run(1)) || !(await fsp.stat(outPath).catch(() => null))?.size) {
+      if (!(await run(0))) return null;
+    }
+    const buffer = await fsp.readFile(outPath);
+    return buffer.length ? buffer : null;
+  } catch (_) {
+    return null;
+  } finally {
+    fsp.unlink(outPath).catch(() => {});
+  }
+}
+
+async function vmssSaveAssetThumbnail(assetDoc, jpegBuffer) {
+  const stem = vmBuildDerivativeFileStem(assetDoc?.name || assetDoc?.assetId || 'asset');
+  const upload = await vmUploadBuffer(jpegBuffer, {
+    fileName: `${stem}_thumbnail.jpg`,
+    mimeType: 'image/jpeg',
+    uploadFolder: VMSS_ASSET_THUMBNAIL_FOLDER,
+    tokenPrefix: 'vmss',
+  });
+  await client.db(VM_DB).collection(VMSS_ASSETS_COLLECTION).updateOne({ _id: assetDoc._id }, {
+    $set: { thumbnailUrl: upload.url, thumbnailStoragePath: upload.storagePath, thumbnailMimeType: upload.mimeType },
+  });
+  return upload.url;
+}
+
+// POST /assets/:assetId/thumbnail  (raw image/jpeg body) -> sets the library thumbnail of one video asset.
+app.post('/api/video-manuals-studio/assets/:assetId/thumbnail',
+  express.raw({ type: 'image/*', limit: '5mb' }),
+  async (req, res) => {
+    try {
+      const { username, role } = vmGetRequester(req);
+      const db = client.db(VM_DB);
+      const asset = await db.collection(VMSS_ASSETS_COLLECTION).findOne({ _id: new ObjectId(req.params.assetId) });
+      if (!asset) return res.status(404).json({ error: 'Asset not found' });
+      const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: asset.playlistId });
+      if (!playlist || !vmCanEdit(playlist, username, role)) return res.status(403).json({ error: 'No edit access to this asset' });
+      if (asset.type !== 'video') return res.status(400).json({ error: 'Only video assets have thumbnails' });
+      if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'No image data received' });
+      const thumbnailUrl = await vmssSaveAssetThumbnail(asset, req.body);
+      res.json({ thumbnailUrl });
+    } catch (err) {
+      console.error('❌ video-manuals-studio thumbnail error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
 app.post('/api/video-manuals-studio/upload-asset',
   express.raw({ type: '*/*', limit: '500mb' }),
   async (req, res) => {
@@ -36590,6 +36650,20 @@ app.post('/api/video-manuals-studio/upload-asset',
 
       if (shouldProcessVideo) {
         vmssQueueAssetDerivativeProcessing({ ...assetDoc, _id: insertResult.insertedId });
+      } else if (assetType === 'video') {
+        // No Shotstack derivative: still give the library a thumbnail (best effort, needs ffmpeg on the server).
+        (async () => {
+          const tmp = require('path').join(require('os').tmpdir(), `vmss-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${require('path').extname(fileName) || '.mp4'}`);
+          try {
+            await require('fs').promises.writeFile(tmp, buffer);
+            const jpeg = await vmssExtractThumbnailJpeg(tmp);
+            if (jpeg) await vmssSaveAssetThumbnail({ ...assetDoc, _id: insertResult.insertedId }, jpeg);
+          } catch (thumbError) {
+            console.warn('Thumbnail generation skipped:', thumbError?.message || thumbError);
+          } finally {
+            require('fs').promises.unlink(tmp).catch(() => {});
+          }
+        })();
       }
     } catch (err) {
       console.error('❌ video-manuals-studio upload error:', err);
