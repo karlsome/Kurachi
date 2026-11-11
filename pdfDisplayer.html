@@ -374,6 +374,40 @@
             z-index: 0;
         }
 
+        .manual-subtitle {
+            position: absolute;
+            left: 50%;
+            bottom: 9%;
+            transform: translateX(-50%);
+            max-width: 82%;
+            padding: 6px 16px;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.68);
+            color: #fff;
+            font-size: clamp(18px, 2.6vw, 44px);
+            font-weight: 600;
+            line-height: 1.3;
+            text-align: center;
+            white-space: pre-line;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .manual-cc-button {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 5;
+            padding: 6px 12px;
+            border: 0;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.7);
+            color: #fff;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
         .manual-project-viewport {
             position: relative;
             flex-shrink: 0;
@@ -1265,6 +1299,8 @@
                             </div>
                         </div>
                     </div>
+                    <div class="manual-subtitle display-mode-hidden" id="manualSubtitle"></div>
+                    <button type="button" class="manual-cc-button display-mode-hidden" id="manualCcButton">CC</button>
                     <div class="manual-overlay">
                         <div class="manual-topbar">
                             <div class="manual-title-block">
@@ -1641,6 +1677,8 @@
         const manualVideo = document.getElementById('manualVideo');
         const manualMediaCache = document.getElementById('manualMediaCache');
         const manualElements = document.getElementById('manualElements');
+        const manualSubtitle = document.getElementById('manualSubtitle');
+        const manualCcButton = document.getElementById('manualCcButton');
         const manualBlankState = document.getElementById('manualBlankState');
         const manualTitle = document.getElementById('manualTitle');
         const manualMeta = document.getElementById('manualMeta');
@@ -1652,6 +1690,7 @@
         const errorMessage = document.getElementById('errorMessage');
         const errorText = document.getElementById('errorText');
         const manualState = {
+            subtitleLang: 'off',
             mode: 'pdf',
             project: null,
             duration: 0,
@@ -3142,6 +3181,44 @@
             return null;
         }
 
+        // ── Selectable subtitles (not burned into the video) ──
+        function getManualSubtitleTracks() {
+            return Array.isArray(manualState.project?.subtitles) ? manualState.project.subtitles.filter((track) => track?.cues?.length) : [];
+        }
+
+        function updateManualSubtitle() {
+            const track = manualState.subtitleLang === 'off'
+                ? null
+                : getManualSubtitleTracks().find((item) => item.lang === manualState.subtitleLang);
+            const time = Number(manualState.currentTime) || 0;
+            const cue = track ? track.cues.find((item) => time >= item.start && time < item.end) : null;
+            manualSubtitle.textContent = cue ? cue.text : '';
+            manualSubtitle.classList.toggle('display-mode-hidden', !cue);
+        }
+
+        function setManualSubtitleLanguage(lang) {
+            const tracks = getManualSubtitleTracks();
+            manualState.subtitleLang = lang !== 'off' && tracks.some((track) => track.lang === lang) ? lang : 'off';
+            manualCcButton.textContent = manualState.subtitleLang === 'off' ? 'CC' : `CC · ${manualState.subtitleLang}`;
+            updateManualSubtitle();
+            void postMachinePlayerState({
+                subtitleLanguages: tracks.map((track) => ({ lang: track.lang, label: track.label || track.lang })),
+                subtitleLanguage: manualState.subtitleLang,
+            }, { force: true });
+        }
+
+        function refreshManualSubtitleUi() {
+            const tracks = getManualSubtitleTracks();
+            manualCcButton.classList.toggle('display-mode-hidden', !tracks.length);
+            setManualSubtitleLanguage(tracks.some((track) => track.lang === manualState.subtitleLang) ? manualState.subtitleLang : 'off');
+        }
+
+        manualCcButton.addEventListener('click', () => {
+            const order = ['off', ...getManualSubtitleTracks().map((track) => track.lang)];
+            setManualSubtitleLanguage(order[(order.indexOf(manualState.subtitleLang) + 1) % order.length]);
+        });
+        setInterval(updateManualSubtitle, 200);
+
         function renderManualFrame() {
             renderManualElements();
         }
@@ -3268,6 +3345,8 @@
             manualVideo.classList.add('display-mode-hidden');
             manualBlankState.classList.remove('display-mode-hidden');
             manualState.project = null;
+            manualSubtitle.classList.add('display-mode-hidden');
+            manualCcButton.classList.add('display-mode-hidden');
             manualState.duration = 0;
             manualState.currentTime = 0;
             manualState.currentStepIndex = 0;
@@ -3480,7 +3559,9 @@
                     deployedVideoMimeType: data.deployedVideoMimeType || null,
                     deployedVideoFileName: data.deployedVideoFileName || null,
                     steps: Array.isArray(snapshot.steps) ? snapshot.steps : [],
+                    subtitles: Array.isArray(data.subtitles) ? data.subtitles : [],
                 };
+                refreshManualSubtitleUi();
                 manualState.duration = getManualSequenceDuration(manualState.project);
                 manualState.currentTime = 0;
                 manualState.currentStepIndex = 0;
@@ -3564,6 +3645,11 @@
 
             if (action === 'video-manual-play') {
                 await manualSeekTo(manualState.currentTime, { autoplay: true });
+                return;
+            }
+
+            if (action === 'video-manual-subtitle') {
+                setManualSubtitleLanguage(String(data.additionalData.language || 'off'));
                 return;
             }
 

@@ -34904,11 +34904,15 @@ async function vmssApplyDeployedRevision(db, projectId, revision, username, depl
   const deployedVideoMimeType = String(deployedVideoMetadata.mimeType || '').trim() || 'video/mp4';
   const deployedVideoFileName = String(deployedVideoMetadata.fileName || '').trim() || null;
   const deployedAt = new Date();
+  // Selectable subtitles are published together with the video (kept separate from the burned-in render).
+  const subtitleSource = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId }, { projection: { subtitles: 1 } });
+  const deployedSubtitles = Array.isArray(subtitleSource?.subtitles) ? subtitleSource.subtitles : [];
 
   await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
     { _id: projectId },
     {
       $set: {
+        deployedSubtitles,
         deployedRevisionId: revision._id,
         deployedRevisionNumber: revision.revisionNumber || null,
         deployedRevisionName: revision.revisionName || null,
@@ -35309,7 +35313,7 @@ app.patch('/api/video-manuals-studio/projects/:id', async (req, res) => {
       return res.status(403).json({ error: 'No edit access to this project' });
     }
 
-    const allowed = ['title', 'description', 'status', 'edit', 'assetSourceMap', 'settings', 'schemaVersion', 'order'];
+    const allowed = ['title', 'description', 'status', 'edit', 'assetSourceMap', 'settings', 'schemaVersion', 'order', 'subtitles'];
     const now = new Date();
     const updates = {
       updatedAt: now,
@@ -39140,6 +39144,7 @@ app.get('/api/factory/video-manuals/projects/:id', async (req, res) => {
       deployedVideoStoragePath,
       deployedVideoMimeType,
       deployedVideoFileName,
+      subtitles: isStudioProject && Array.isArray(project.deployedSubtitles) ? project.deployedSubtitles : [],
       snapshot: isStudioProject ? { ...revision.snapshot, ...vmssBuildPlaybackInfo(revision.snapshot) } : revision.snapshot,
     });
   } catch (err) {
