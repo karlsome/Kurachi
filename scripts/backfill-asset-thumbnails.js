@@ -23,7 +23,11 @@ const ONLY_PLAYLIST = opt('playlist', null);
 const auth = { Authorization: `Bearer ${Buffer.from(JSON.stringify({ username: 'thumbnail-backfill', role: 'admin' })).toString('base64')}` };
 
 async function api(endpoint, init = {}) {
-  const res = await fetch(`${API}/${endpoint}`, { ...init, headers: { ...auth, ...(init.headers || {}) } });
+  let res;
+  for (let attempt = 1; ; attempt += 1) { // transient socket resets happen on big uploads; retry a few times
+    try { res = await fetch(`${API}/${endpoint}`, { ...init, headers: { ...auth, ...(init.headers || {}) } }); break; }
+    catch (e) { if (attempt >= 4) throw new Error(`${e.message}${e.cause ? ` (${e.cause.code || e.cause.message})` : ''}`); await new Promise((r) => setTimeout(r, 1500 * attempt)); }
+  }
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch { data = text; }
   if (!res.ok) throw new Error(`${endpoint}: ${res.status} ${typeof data === 'string' ? data : data.error || ''}`);
