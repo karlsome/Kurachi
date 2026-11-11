@@ -8285,6 +8285,12 @@ function updateVideoManualControllerUi() {
   }
   if (prevStepButton) prevStepButton.disabled = !canControl;
   if (nextStepButton) nextStepButton.disabled = !canControl;
+  const subtitleButton = document.getElementById('videoManualSubtitleButton');
+  if (subtitleButton) {
+    const languages = Array.isArray(playerState.subtitleLanguages) ? playerState.subtitleLanguages : [];
+    subtitleButton.style.display = canControl && languages.length ? '' : 'none';
+    subtitleButton.textContent = `CC: ${playerState.subtitleLanguage && playerState.subtitleLanguage !== 'off' ? playerState.subtitleLanguage : 'Off'}`;
+  }
   if (exitButton) exitButton.disabled = !videoManualState.claimed;
 }
 
@@ -9261,6 +9267,7 @@ function ensureVideoManualPickerUi() {
               <button type="button" class="video-manual-controller-button" id="videoManualPrevStepButton">Prev Step</button>
               <button type="button" class="video-manual-controller-button video-manual-controller-button--play" id="videoManualPlayPauseButton">Play</button>
               <button type="button" class="video-manual-controller-button" id="videoManualNextStepButton">Next Step</button>
+              <button type="button" class="video-manual-controller-button" id="videoManualSubtitleButton" style="display:none">CC</button>
               <button type="button" class="video-manual-controller-button" id="videoManualBackToPickerButton">Projects</button>
               <button type="button" class="video-manual-controller-button video-manual-controller-button--exit" id="videoManualExitButton">Exit</button>
             </div>
@@ -9310,6 +9317,15 @@ function ensureVideoManualPickerUi() {
   document.getElementById('videoManualNextStepButton')?.addEventListener('click', async () => {
     try {
       await sendVideoManualCommand('next-step');
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+  document.getElementById('videoManualSubtitleButton')?.addEventListener('click', async () => {
+    try {
+      const order = ['off', ...(videoManualState.playerState.subtitleLanguages || []).map((item) => item.lang)];
+      const current = videoManualState.playerState.subtitleLanguage || 'off';
+      await sendVideoManualCommand('subtitle', { language: order[(order.indexOf(current) + 1) % order.length] });
     } catch (error) {
       showAlert(error.message);
     }

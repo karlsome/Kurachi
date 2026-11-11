@@ -10156,6 +10156,12 @@ function updateVideoManualControllerUi() {
   }
   if (prevStepButton) prevStepButton.disabled = !canControl;
   if (nextStepButton) nextStepButton.disabled = !canControl;
+  const subtitleButton = document.getElementById('videoManualSubtitleButton');
+  if (subtitleButton) {
+    const languages = Array.isArray(playerState.subtitleLanguages) ? playerState.subtitleLanguages : [];
+    subtitleButton.style.display = canControl && languages.length ? '' : 'none';
+    subtitleButton.textContent = `CC: ${playerState.subtitleLanguage && playerState.subtitleLanguage !== 'off' ? playerState.subtitleLanguage : 'Off'}`;
+  }
   if (exitButton) exitButton.disabled = !videoManualState.claimed;
 }
 
@@ -10496,7 +10502,7 @@ async function openVideoManualPicker() {
   }
 }
 
-const videoManualTabletState = { project: null, steps: [], duration: 0, requestId: 0 };
+const videoManualTabletState = { project: null, steps: [], duration: 0, requestId: 0, subtitles: [], subtitleLang: 'off' };
 
 function getVideoManualMediaUrl(url) {
   if (!url || url.startsWith('blob:') || url.startsWith('data:')) return url;
@@ -10523,6 +10529,8 @@ function ensureVideoManualTabletPlayerUi() {
     </div>
     <div class="vmt__stage">
       <video id="vmtVideo" class="vmt__video" playsinline preload="auto"></video>
+      <div id="vmtSubtitle" class="vmt__subtitle" style="display:none"></div>
+      <button type="button" class="vmt__cc" id="vmtCcBtn" style="display:none">CC</button>
       <div id="vmtMessage" class="vmt__message">Loading…</div>
     </div>
     <div class="vmt__controls">
@@ -10553,7 +10561,13 @@ function ensureVideoManualTabletPlayerUi() {
   el.querySelector('#vmtNextBtn').addEventListener('click', () => stepVideoManualTablet(1));
   seek.addEventListener('input', () => { seeking = true; el.querySelector('#vmtCurrent').textContent = formatVideoManualDuration(Number(seek.value)); });
   seek.addEventListener('change', () => { video.currentTime = Number(seek.value); seeking = false; });
+  el.querySelector('#vmtCcBtn').addEventListener('click', () => {
+    const order = ['off', ...videoManualTabletState.subtitles.map((track) => track.lang)];
+    videoManualTabletState.subtitleLang = order[(order.indexOf(videoManualTabletState.subtitleLang) + 1) % order.length];
+    updateVideoManualTabletSubtitle();
+  });
   video.addEventListener('timeupdate', () => {
+    updateVideoManualTabletSubtitle();
     if (!seeking) seek.value = String(video.currentTime);
     el.querySelector('#vmtCurrent').textContent = formatVideoManualDuration(video.currentTime);
     updateVideoManualTabletStepLabel();
@@ -10567,6 +10581,20 @@ function ensureVideoManualTabletPlayerUi() {
   video.addEventListener('pause', () => { el.querySelector('#vmtPlayBtn').textContent = '▶ Play'; });
   video.addEventListener('ended', () => { el.querySelector('#vmtPlayBtn').textContent = '↻ Replay'; });
   video.addEventListener('error', () => showVideoManualTabletMessage('Failed to load video. Please try again or use Play on Monitor.'));
+}
+
+function updateVideoManualTabletSubtitle() {
+  const box = document.getElementById('vmtSubtitle');
+  const button = document.getElementById('vmtCcBtn');
+  const video = document.getElementById('vmtVideo');
+  if (!box || !button || !video) return;
+  const { subtitles, subtitleLang } = videoManualTabletState;
+  button.style.display = subtitles.length ? '' : 'none';
+  button.textContent = subtitleLang === 'off' ? 'CC' : `CC · ${subtitleLang}`;
+  const track = subtitleLang === 'off' ? null : subtitles.find((item) => item.lang === subtitleLang);
+  const cue = track ? track.cues.find((item) => video.currentTime >= item.start && video.currentTime < item.end) : null;
+  box.textContent = cue ? cue.text : '';
+  box.style.display = cue ? '' : 'none';
 }
 
 function showVideoManualTabletMessage(text) {
@@ -10644,6 +10672,9 @@ async function openVideoManualTabletPlayer() {
       return;
     }
     videoManualTabletState.project = data;
+    videoManualTabletState.subtitles = (Array.isArray(data.subtitles) ? data.subtitles : []).filter(track => track?.cues?.length);
+    videoManualTabletState.subtitleLang = 'off';
+    updateVideoManualTabletSubtitle();
     videoManualTabletState.steps = (Array.isArray(snapshot.steps) ? snapshot.steps : [])
       .filter(st => st && Number.isFinite(st.startTime))
       .sort((a, b) => a.startTime - b.startTime);
@@ -11035,6 +11066,37 @@ function ensureVideoManualPickerUi() {
       height: 100%;
       object-fit: contain;
       background: #000;
+    }
+    .vmt__subtitle {
+      position: absolute;
+      left: 50%;
+      bottom: 6%;
+      transform: translateX(-50%);
+      max-width: 90%;
+      padding: 4px 12px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.68);
+      color: #fff;
+      font-size: 18px;
+      font-weight: 600;
+      text-align: center;
+      white-space: pre-line;
+      pointer-events: none;
+    }
+    .vmt__cc {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 2;
+      padding: 8px 14px;
+      border: none;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.75);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
     }
     .vmt__message {
       position: absolute;
@@ -11533,6 +11595,7 @@ function ensureVideoManualPickerUi() {
               <button type="button" class="video-manual-controller-button" id="videoManualPrevStepButton">Prev Step</button>
               <button type="button" class="video-manual-controller-button video-manual-controller-button--play" id="videoManualPlayPauseButton">Play</button>
               <button type="button" class="video-manual-controller-button" id="videoManualNextStepButton">Next Step</button>
+              <button type="button" class="video-manual-controller-button" id="videoManualSubtitleButton" style="display:none">CC</button>
               <button type="button" class="video-manual-controller-button" id="videoManualBackToPickerButton">Projects</button>
               <button type="button" class="video-manual-controller-button video-manual-controller-button--exit" id="videoManualExitButton">Exit</button>
             </div>
@@ -11582,6 +11645,15 @@ function ensureVideoManualPickerUi() {
   document.getElementById('videoManualNextStepButton')?.addEventListener('click', async () => {
     try {
       await sendVideoManualCommand('next-step');
+    } catch (error) {
+      showAlert(error.message);
+    }
+  });
+  document.getElementById('videoManualSubtitleButton')?.addEventListener('click', async () => {
+    try {
+      const order = ['off', ...(videoManualState.playerState.subtitleLanguages || []).map((item) => item.lang)];
+      const current = videoManualState.playerState.subtitleLanguage || 'off';
+      await sendVideoManualCommand('subtitle', { language: order[(order.indexOf(current) + 1) % order.length] });
     } catch (error) {
       showAlert(error.message);
     }
