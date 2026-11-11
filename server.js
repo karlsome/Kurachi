@@ -29214,6 +29214,95 @@ app.get("/api/kensa-boxes/:kensaId", async (req, res) => {
   }
 });
 
+// GET /api/scna-trace/:id - the whole traceability chain around one box/label, for the admin Box ID Lookup.
+//   id is a press box (...-B###), an SRS label (...-S###) or a Kensa label (...-K###). Walks backwards (what it was made
+//   from) and forwards (what was made from it): press box -> SRS label -> Kensa label (SRS may be skipped). Read-only.
+//   Returns { rootId, nodes:[{ id, kind: press|srs|kensa|legacy, label, records, parents:[id], children:[id] }] }.
+app.get("/api/scna-trace/:id", async (req, res) => {
+  try {
+    const rootId = String(req.params.id || "").trim().toUpperCase();
+    const kindOf = id => (/-S\d+$/.test(id) ? "srs" : /-K\d+$/.test(id) ? "kensa" : "press");
+    await client.connect();
+    const db = client.db(DB_NAME);
+    const sub = client.db("submittedDB");
+    const cols = { press: ["scnaBoxDB", "boxId"], srs: ["srsBoxDB", "srsId"], kensa: ["kensaBoxDB", "kensaId"] };
+    const nodes = new Map();
+    const MAX_NODES = 60;
+
+    async function load(id) {
+      const kind = kindOf(id);
+      const [col, key] = cols[kind];
+      const label = await db.collection(col).findOne({ [key]: id });
+      return label ? { id, kind, label } : null;
+    }
+    function link(parentId, childId) {   // parent = earlier process
+      const p = nodes.get(parentId), c = nodes.get(childId);
+      if (!p || !c) return;
+      if (!p.children.includes(childId)) p.children.push(childId);
+      if (!c.parents.includes(parentId)) c.parents.push(parentId);
+    }
+
+    const root = await load(rootId);
+    if (!root) return res.status(404).json({ error: "Box not found" });
+    nodes.set(rootId, { ...root, parents: [], children: [], records: [] });
+
+    const queue = [rootId];
+    while (queue.length && nodes.size < MAX_NODES) {
+      const id = queue.shift();
+      const n = nodes.get(id);
+      const L = n.label;
+      const found = [];   // [{ id, dir: "parent"|"child" }]
+
+      if (n.kind === "kensa" || n.kind === "srs") {
+        (L.lines || []).forEach((l, i) => {
+          if (l.boxId) found.push({ id: String(l.boxId).toUpperCase(), dir: "parent" });
+          else if (l.srsId) found.push({ id: String(l.srsId).toUpperCase(), dir: "parent" });
+          else if (l.legacy && !l.carried) found.push({ id: `LEGACY:${n.id}:${i}`, dir: "parent", legacy: l });
+        });
+      }
+      if (n.kind === "press") {
+        (L.srsConsumed || []).filter(e => e && e.void !== true && e.srsId).forEach(e => found.push({ id: String(e.srsId).toUpperCase(), dir: "child" }));
+        const ks = await db.collection("kensaBoxDB").find({ "lines.boxId": id, status: { $in: ["complete", "draft"] } }).project({ kensaId: 1 }).toArray();
+        ks.forEach(k => found.push({ id: k.kensaId, dir: "child" }));
+      }
+      if (n.kind === "srs") {
+        const ks = await db.collection("kensaBoxDB").find({ "lines.srsId": id, status: { $in: ["complete", "draft"] } }).project({ kensaId: 1 }).toArray();
+        ks.forEach(k => found.push({ id: k.kensaId, dir: "child" }));
+      }
+
+      for (const f of found) {
+        if (!nodes.has(f.id)) {
+          if (nodes.size >= MAX_NODES) break;
+          if (f.legacy) {
+            nodes.set(f.id, { id: f.id, kind: "legacy", label: f.legacy, parents: [], children: [], records: [] });
+          } else {
+            const loaded = await load(f.id);
+            if (!loaded) continue;   // referenced but not registered (e.g. old data): skip
+            nodes.set(f.id, { ...loaded, parents: [], children: [], records: [] });
+            queue.push(f.id);
+          }
+        }
+        if (f.dir === "parent") link(f.id, id); else link(id, f.id);
+      }
+    }
+
+    // submitted records per node
+    for (const n of nodes.values()) {
+      if (n.kind === "kensa") n.records = await sub.collection("kensaDB").find({ Kensa_Box_IDs: n.id }).sort({ createdAt: 1 }).limit(20).toArray();
+      else if (n.kind === "srs") n.records = await sub.collection("SRSDB").find({ Srs_Box_IDs: n.id }).sort({ createdAt: 1 }).limit(20).toArray();
+      else if (n.kind === "press") {
+        const or = [{ Box_IDs: n.id }];
+        if (n.label.runId) or.push({ Run_ID: n.label.runId });
+        n.records = await sub.collection("pressDB").find({ 工場: "SCNA", $or: or }).sort({ createdAt: 1 }).limit(20).toArray();
+      }
+    }
+    res.json({ rootId, truncated: nodes.size >= MAX_NODES, nodes: [...nodes.values()] });
+  } catch (error) {
+    console.error("❌ Error building SCNA trace:", error);
+    res.status(500).json({ error: "Failed to build trace", details: error.message });
+  }
+});
+
 // GET /api/kensa-inputs/:id - what the Kensa tablet scans: a DCP box (...-B###) or an SRS label (...-S###) with its remaining pieces.
 app.get("/api/kensa-inputs/:id", async (req, res) => {
   try {
