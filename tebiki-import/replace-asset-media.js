@@ -23,9 +23,10 @@ const APPLY = args.includes('--apply');
 if (!storagePath || !file) { console.error('usage: --storage-path <path> --file <mp4> [--apply]'); process.exit(1); }
 
 const probe = (target) => {
-  const r = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,duration', '-of', 'json', target], { encoding: 'utf8' });
+  const r = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,duration,width,height', '-of', 'json', target], { encoding: 'utf8' });
   const streams = JSON.parse(r.stdout || '{"streams":[]}').streams;
-  return { audio: streams.some((s) => s.codec_type === 'audio'), duration: Number(streams.find((s) => s.codec_type === 'video')?.duration) || 0 };
+  const video = streams.find((s) => s.codec_type === 'video');
+  return { audio: streams.some((s) => s.codec_type === 'audio'), duration: Number(video?.duration) || 0, size: video ? `${video.width}x${video.height}` : '' };
 };
 
 (async () => {
@@ -46,8 +47,9 @@ const probe = (target) => {
 
   const before = probe(url);
   const after = probe(file);
-  console.log(`stored : ${meta.size} bytes, audio=${before.audio}, ${before.duration.toFixed(2)}s, token ${token ? 'present' : 'MISSING'}`);
-  console.log(`new    : ${fs.statSync(file).size} bytes, audio=${after.audio}, ${after.duration.toFixed(2)}s`);
+  console.log(`stored : ${meta.size} bytes, audio=${before.audio}, ${before.duration.toFixed(2)}s ${before.size}, token ${token ? 'present' : 'MISSING'}`);
+  console.log(`new    : ${fs.statSync(file).size} bytes, audio=${after.audio}, ${after.duration.toFixed(2)}s ${after.size}`);
+  if (before.audio) { console.log('stored file already has audio: nothing to do.'); return; }
   if (!token) throw new Error('stored object has no download token; refusing');
   if (!after.audio) throw new Error('new file has no audio stream; refusing');
   if (Math.abs(after.duration - before.duration) > 0.3) throw new Error('duration differs by more than 0.3 s; refusing');
