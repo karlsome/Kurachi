@@ -122,11 +122,11 @@ window.serverURL = serverURL;
   }
   var BT_ERR_RE = /bluetooth|gatt|characteristic|printer did not answer|printer not paired|sending to the printer|service lookup|notifications timed out|no longer in range|device/i;
   async function resetBtSettings() {
-    var ok = await confirmBox(T('kensa_reset_btn'), T('kensa_reset_q'), T('kensa_reset_btn'), true);
+    var ok = await confirmBox(T('kensa_btreset_btn'), T('kensa_btreset_q'), T('kensa_btreset_btn'), true);
     if (!ok) return false;
     try { await KensaBT.resetAll(); } catch (e) { console.warn('BT reset', e); }
     try { setBt('unpaired'); } catch (e) { }
-    toast(T('kensa_reset_done'), 5000);
+    toast(T('kensa_btreset_done'), 5000);
     return true;
   }
   function showAlert(text, title) {
@@ -136,7 +136,7 @@ window.serverURL = serverURL;
     if (window.KensaBT && BT_ERR_RE.test(String(text))) {                 // Bluetooth problem: let the worker start over from the pop-up
       var rb = document.createElement('button');
       rb.type = 'button'; rb.id = 'alertBtReset'; rb.className = 'btn btn-secondary btn-full';
-      rb.style.cssText = 'margin-top:10px;width:100%;'; rb.textContent = T('kensa_reset_btn');
+      rb.style.cssText = 'margin-top:10px;width:100%;'; rb.textContent = T('kensa_btreset_btn');
       rb.onclick = async function () {
         if (await resetBtSettings()) { $('alertOk').click(); if (typeof openSettings === 'function') openSettings('bt'); }
       };
@@ -1276,7 +1276,7 @@ window.serverURL = serverURL;
       '<button type="button" class="btn btn-secondary btn-full" id="kBtDiagReset"></button></div>';
     document.body.appendChild(ov);
     var out = $('kBtDiagOut'), run = $('kBtDiagRun'), text = '';
-    run.textContent = T('kensa_diag_rerun'); $('kBtDiagCopy').textContent = T('kensa_diag_copy'); $('kBtDiagSet').textContent = T('kensa_diag_settings'); $('kBtDiagClose').textContent = T('kensa_diag_close'); $('kBtDiagReset').textContent = T('kensa_reset_btn');
+    run.textContent = T('kensa_diag_rerun'); $('kBtDiagCopy').textContent = T('kensa_diag_copy'); $('kBtDiagSet').textContent = T('kensa_diag_settings'); $('kBtDiagClose').textContent = T('kensa_diag_close'); $('kBtDiagReset').textContent = T('kensa_btreset_btn');
     async function go() {
       run.disabled = true; out.textContent = T('kensa_diag_running'); text = '';
       try { text = (await KensaBT.diagnose()).join('\n'); } catch (e) { text = 'Diagnostics failed: ' + (e && e.message || e); }
