@@ -35160,6 +35160,76 @@ app.delete('/api/video-manuals-studio/playlists/:id', async (req, res) => {
   }
 });
 
+// ---- Project list: server-side pagination / sort / search + 1-minute cache -------------------------
+// Cache key = playlist + page + size + sort + query. Any write under /api/video-manuals-studio clears the whole cache,
+// so creates / edits / deletes / moves show up immediately; only background jobs (e.g. preview renders) can lag up to 1 min.
+const VMSS_PROJECT_LIST_CACHE_TTL_MS = 60 * 1000;
+const VMSS_PROJECT_LIST_CACHE_MAX = 400;
+const vmssProjectListCache = new Map();
+app.use('/api/video-manuals-studio', (req, res, next) => {
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    res.on('finish', () => vmssProjectListCache.clear());
+  }
+  next();
+});
+function vmssProjectListCacheGet(key) {
+  const hit = vmssProjectListCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > VMSS_PROJECT_LIST_CACHE_TTL_MS) { vmssProjectListCache.delete(key); return null; }
+  return hit.payload;
+}
+function vmssProjectListCacheSet(key, payload) {
+  if (vmssProjectListCache.size >= VMSS_PROJECT_LIST_CACHE_MAX) vmssProjectListCache.delete(vmssProjectListCache.keys().next().value);
+  vmssProjectListCache.set(key, { ts: Date.now(), payload });
+}
+
+const VMSS_PROJECT_PAGE_SIZES = [15, 50, 100];
+const VMSS_PROJECT_SORTS = {
+  newest: { createdAt: -1, _id: -1 },
+  oldest: { createdAt: 1, _id: 1 },
+  edited: { lastEditedAt: -1, updatedAt: -1, _id: -1 },
+  titleAsc: { title: 1, _id: 1 },
+  titleDesc: { title: -1, _id: -1 },
+  deployed: { deployedAt: -1, createdAt: -1, _id: -1 },
+};
+
+function vmssProjectListFilter(playlistId, q) {
+  const filter = { playlistId, deleted: { $ne: true } };
+  const text = String(q || '').trim().slice(0, 120);
+  if (text) {
+    const rx = new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    filter.$or = [{ title: rx }, { description: rx }];
+  }
+  return filter;
+}
+
+function vmssProjectStepStats(project) {
+  const steps = Array.isArray(project?.steps) ? project.steps : null;
+  if (steps) {
+    return { stepCount: steps.length, durationSeconds: Math.round(steps.reduce((sum, st) => sum + (Number(st?.durationSeconds) || 0), 0) * 100) / 100 };
+  }
+  const clips = (project?.edit?.timeline?.tracks || []).flatMap((t) => t?.clips || []);
+  const videos = clips.filter((c) => c?.asset?.type === 'video');
+  const end = clips.reduce((m, c) => Math.max(m, (Number(c?.start) || 0) + (Number(c?.length) || 0)), 0);
+  return { stepCount: videos.length, durationSeconds: Math.round(end * 100) / 100 };
+}
+
+// Card cover for projects without a rendered project preview: first video clip's asset thumbnail / hover preview.
+async function vmssProjectCovers(db, playlistId, projects) {
+  const coverUrlFor = (project) => {
+    const clips = (project.edit?.timeline?.tracks || []).flatMap((t) => t?.clips || []);
+    const first = clips.filter((c) => c?.asset?.type === 'video' && c.asset.src).sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0))[0];
+    return first ? (project.assetSourceMap?.[first.asset.src] || null) : null;
+  };
+  const need = projects.filter((p) => !p.previewThumbnailUrl && !p.previewUrl);
+  const urls = [...new Set(need.map(coverUrlFor).filter(Boolean))];
+  const assets = urls.length
+    ? await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId, downloadUrl: { $in: urls } }, { projection: { downloadUrl: 1, thumbnailUrl: 1, previewUrl: 1 } }).toArray()
+    : [];
+  const byUrl = new Map(assets.map((a) => [a.downloadUrl, a]));
+  return (project) => (!project.previewThumbnailUrl && !project.previewUrl ? byUrl.get(coverUrlFor(project)) || null : null);
+}
+
 app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => {
   try {
     const { username, role } = vmGetRequester(req);
@@ -35171,6 +35241,68 @@ app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => 
       return res.status(403).json({ error: 'No view access to this playlist' });
     }
 
+    const paged = req.query.page !== undefined || req.query.limit !== undefined;
+    const idsOnly = req.query.idsOnly === '1';
+
+    if (idsOnly) {
+      // every project id matching the search (all pages) - used by "select all matching"
+      const q = String(req.query.q || '');
+      const docs = await db.collection(VMSS_PROJECTS_COLLECTION)
+        .find(vmssProjectListFilter(playlistId, q), { projection: { _id: 1 } })
+        .sort(VMSS_PROJECT_SORTS[req.query.sort] || VMSS_PROJECT_SORTS.newest)
+        .limit(5000)
+        .toArray();
+      return res.json({ ids: docs.map((d) => String(d._id)), total: docs.length });
+    }
+
+    if (paged) {
+      const pageSize = VMSS_PROJECT_PAGE_SIZES.includes(Number(req.query.limit)) ? Number(req.query.limit) : VMSS_PROJECT_PAGE_SIZES[0];
+      const sortKey = Object.prototype.hasOwnProperty.call(VMSS_PROJECT_SORTS, req.query.sort) ? String(req.query.sort) : 'newest';
+      const q = String(req.query.q || '').trim().slice(0, 120);
+      const filter = vmssProjectListFilter(playlistId, q);
+      const total = await db.collection(VMSS_PROJECTS_COLLECTION).countDocuments(filter);
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const page = Math.min(Math.max(1, parseInt(req.query.page, 10) || 1), totalPages);
+
+      const cacheKey = `${playlistId}|${page}|${pageSize}|${sortKey}|${q}`;
+      if (req.query.nocache !== '1') {
+        const hit = vmssProjectListCacheGet(cacheKey);
+        if (hit) { res.set('X-Cache', 'HIT'); return res.json(hit); }
+      }
+
+      const docs = await db.collection(VMSS_PROJECTS_COLLECTION)
+        .find(filter, {
+          projection: {
+            title: 1, description: 1, order: 1, status: 1, structure: 1, createdBy: 1, createdAt: 1, updatedAt: 1,
+            lastEditedBy: 1, lastEditedAt: 1, currentRevisionNumber: 1, lastRevisionId: 1,
+            deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1, deployedAt: 1, deployedBy: 1, deployedVideoUrl: 1,
+            previewUrl: 1, previewThumbnailUrl: 1, previewDurationSeconds: 1, previewStatus: 1, previewError: 1, previewUpdatedAt: 1,
+            'steps.durationSeconds': 1, edit: 1, assetSourceMap: 1,
+          },
+        })
+        .sort(VMSS_PROJECT_SORTS[sortKey])
+        .collation({ locale: 'en', strength: 2, numericOrdering: true })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .toArray();
+
+      const coverFor = await vmssProjectCovers(db, playlistId, docs);
+      const projects = docs.map(({ edit, assetSourceMap, steps, ...project }) => {
+        const cover = coverFor({ ...project, edit, assetSourceMap });
+        return {
+          ...project,
+          ...vmssProjectStepStats({ steps, edit }),
+          ...(cover ? { previewThumbnailUrl: cover.thumbnailUrl || null, previewUrl: cover.previewUrl || null } : {}),
+          tracksCount: vmssCountTracks({ edit }),
+        };
+      });
+      const payload = { projects, total, page, pageSize, totalPages, sort: sortKey, q };
+      vmssProjectListCacheSet(cacheKey, payload);
+      res.set('X-Cache', 'MISS');
+      return res.json(payload);
+    }
+
+    // Legacy: full unpaginated array (import / maintenance scripts)
     const projects = await db.collection(VMSS_PROJECTS_COLLECTION).find(
       { playlistId, deleted: { $ne: true } },
       {
@@ -35182,36 +35314,16 @@ app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => 
           deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1,
           deployedAt: 1, deployedBy: 1,
           deployedVideoUrl: 1, deployedVideoStoragePath: 1, deployedVideoMimeType: 1, deployedVideoFileName: 1,
-          previewRevisionId: 1,
-          previewUrl: 1,
-          previewStoragePath: 1,
-          previewMimeType: 1,
-          previewThumbnailUrl: 1,
-          previewThumbnailStoragePath: 1,
-          previewThumbnailMimeType: 1,
-          previewDurationSeconds: 1,
-          previewStatus: 1,
-          previewError: 1,
-          previewUpdatedAt: 1,
+          previewRevisionId: 1, previewUrl: 1, previewStoragePath: 1, previewMimeType: 1,
+          previewThumbnailUrl: 1, previewThumbnailStoragePath: 1, previewThumbnailMimeType: 1,
+          previewDurationSeconds: 1, previewStatus: 1, previewError: 1, previewUpdatedAt: 1,
         }
       }
     ).sort({ order: 1, createdAt: 1 }).toArray();
 
-    // Cards without a rendered project preview fall back to the first video clip's asset thumbnail / hover preview.
-    const coverUrlFor = (project) => {
-      const clips = (project.edit?.timeline?.tracks || []).flatMap((t) => t?.clips || []);
-      const first = clips.filter((c) => c?.asset?.type === 'video' && c.asset.src).sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0))[0];
-      return first ? (project.assetSourceMap?.[first.asset.src] || null) : null;
-    };
-    const needCover = projects.filter((p) => !p.previewThumbnailUrl && !p.previewUrl);
-    const coverUrls = [...new Set(needCover.map(coverUrlFor).filter(Boolean))];
-    const coverAssets = coverUrls.length
-      ? await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId, downloadUrl: { $in: coverUrls } }, { projection: { downloadUrl: 1, thumbnailUrl: 1, previewUrl: 1 } }).toArray()
-      : [];
-    const coverByUrl = new Map(coverAssets.map((a) => [a.downloadUrl, a]));
-
+    const coverFor = await vmssProjectCovers(db, playlistId, projects);
     res.json(projects.map(({ assetSourceMap, ...project }) => {
-      const cover = (!project.previewThumbnailUrl && !project.previewUrl) ? coverByUrl.get(coverUrlFor({ ...project, assetSourceMap })) : null;
+      const cover = coverFor({ ...project, assetSourceMap });
       return {
         ...project,
         ...(cover ? { previewThumbnailUrl: cover.thumbnailUrl || null, previewUrl: cover.previewUrl || null } : {}),
@@ -35718,118 +35830,247 @@ app.delete('/api/video-manuals-studio/projects/:id', async (req, res) => {
   }
 });
 
+// ---- Copy / move helpers (shared by the single-project routes and the bulk route) ----------------------
+// ctx (optional) caches per-playlist lookups so a bulk run does not re-scan assets / titles for every project.
+async function vmssPlaylistAssetKeys(db, playlistId, ctx) {
+  const key = String(playlistId);
+  if (ctx?.assetKeys?.has(key)) return ctx.assetKeys.get(key);
+  const docs = await db.collection(VMSS_ASSETS_COLLECTION)
+    .find({ playlistId, deleted: { $ne: true } }, { projection: { assetId: 1, storagePath: 1 } }).toArray();
+  const keys = new Set();
+  docs.forEach((d) => { if (d.assetId) keys.add(`id:${d.assetId}`); if (d.storagePath) keys.add(`p:${d.storagePath}`); });
+  if (ctx?.assetKeys) ctx.assetKeys.set(key, keys);
+  return keys;
+}
+
+async function vmssPlaylistTitles(db, playlistId, ctx) {
+  const key = String(playlistId);
+  if (ctx?.titles?.has(key)) return ctx.titles.get(key);
+  const titles = new Set((await db.collection(VMSS_PROJECTS_COLLECTION)
+    .find({ playlistId, deleted: { $ne: true } }, { projection: { title: 1 } }).toArray()).map((d) => String(d.title || '')));
+  if (ctx?.titles) ctx.titles.set(key, titles);
+  return titles;
+}
+
+async function vmssNextProjectOrder(db, playlistId, ctx) {
+  const key = String(playlistId);
+  if (ctx?.orders?.has(key)) { const n = ctx.orders.get(key) + 1; ctx.orders.set(key, n); return n; }
+  const last = await db.collection(VMSS_PROJECTS_COLLECTION).find({ playlistId }).sort({ order: -1 }).limit(1).toArray();
+  const n = last.length > 0 ? (last[0].order || 0) + 1 : 0;
+  if (ctx?.orders) ctx.orders.set(key, n);
+  return n;
+}
+
+// Share the assets a project references with another playlist (same rule the copy route always used).
+async function vmssShareAssetsToPlaylist(db, source, targetPlaylistId, username, ctx) {
+  const haystack = JSON.stringify({ edit: source.edit, map: source.assetSourceMap, steps: source.steps });
+  const srcKey = String(source.playlistId);
+  let sourceAssets = ctx?.sourceAssets?.get(srcKey);
+  if (!sourceAssets) {
+    sourceAssets = await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId: source.playlistId, deleted: { $ne: true } }).toArray();
+    ctx?.sourceAssets?.set(srcKey, sourceAssets);
+  }
+  const targetKeys = await vmssPlaylistAssetKeys(db, targetPlaylistId, ctx);
+  let copied = 0;
+  for (const asset of sourceAssets) {
+    const id = String(asset.assetId || asset._id);
+    const path = String(asset.storagePath || '');
+    const used = (id.length >= 8 && haystack.includes(id))
+      || (path && (haystack.includes(path) || haystack.includes(encodeURIComponent(path)) || haystack.includes(encodeURIComponent(encodeURIComponent(path)))));
+    if (!used) continue;
+    if ((asset.assetId && targetKeys.has(`id:${asset.assetId}`)) || (path && targetKeys.has(`p:${path}`))) continue;
+    const { _id, deleted, deletedAt, deletedBy, recycleExpiresAt, ...assetFields } = asset;
+    await db.collection(VMSS_ASSETS_COLLECTION).insertOne({
+      ...assetFields,
+      playlistId: targetPlaylistId,
+      copiedFromPlaylistId: source.playlistId,
+      copiedBy: username,
+      copiedAt: new Date(),
+    });
+    if (asset.assetId) targetKeys.add(`id:${asset.assetId}`);
+    if (path) targetKeys.add(`p:${path}`);
+    copied += 1;
+  }
+  return copied;
+}
+
+// Returns { status, error } on failure, or { doc, insertedId, copiedAssets }.
+async function vmssCopyProjectCore(db, { sourceId, targetRaw, requestedTitle, username, role, ctx }) {
+  const source = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: sourceId, deleted: { $ne: true } });
+  if (!source) return { status: 404, error: 'Project not found' };
+
+  const sourcePlaylist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: source.playlistId });
+  if (!sourcePlaylist || !vmCanView(sourcePlaylist, username, role)) return { status: 403, error: 'No access to this project' };
+
+  const raw = String(targetRaw || '').trim();
+  if (raw && !ObjectId.isValid(raw)) return { status: 400, error: 'Invalid targetPlaylistId' };
+  const targetPlaylistId = raw ? new ObjectId(raw) : source.playlistId;
+  const sameplaylist = String(targetPlaylistId) === String(source.playlistId);
+  const targetPlaylist = sameplaylist ? sourcePlaylist : await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: targetPlaylistId });
+  if (!targetPlaylist) return { status: 404, error: 'Target playlist not found' };
+  if (!vmCanEdit(targetPlaylist, username, role)) return { status: 403, error: 'No edit access to the target playlist' };
+
+  const baseTitle = String(source.title || 'Untitled Project');
+  let title = String(requestedTitle || '').trim() || (sameplaylist ? `${baseTitle} (copy)` : baseTitle);
+  const existingTitles = await vmssPlaylistTitles(db, targetPlaylistId, ctx);
+  if (existingTitles.has(title)) {
+    const stem = title.replace(/ \(copy(?: \d+)?\)$/, '');
+    let n = 1;
+    while (existingTitles.has(n === 1 ? `${stem} (copy)` : `${stem} (copy ${n})`)) n += 1;
+    title = n === 1 ? `${stem} (copy)` : `${stem} (copy ${n})`;
+  }
+
+  const copiedAssets = sameplaylist ? 0 : await vmssShareAssetsToPlaylist(db, source, targetPlaylistId, username, ctx);
+  const order = await vmssNextProjectOrder(db, targetPlaylistId, ctx);
+  const now = new Date();
+  const {
+    _id, playlistId, title: _title, order: _order, createdAt, createdBy, updatedAt, lastEditedAt, lastEditedBy,
+    currentRevisionNumber, lastRevisionId, deployedRevisionId, deployedRevisionNumber, deployedRevisionName,
+    deployedAt, deployedBy, deployedVideoUrl, deployedVideoStoragePath, deployedVideoMimeType, deployedVideoFileName,
+    deleted, deletedAt, deletedBy, ...rest
+  } = source;
+  const doc = {
+    ...rest,
+    playlistId: targetPlaylistId,
+    title,
+    order,
+    status: 'draft',
+    currentRevisionNumber: 0,
+    lastRevisionId: null,
+    deployedRevisionId: null,
+    deployedRevisionNumber: null,
+    deployedRevisionName: null,
+    deployedAt: null,
+    deployedBy: null,
+    deployedVideoUrl: null,
+    deployedVideoStoragePath: null,
+    deployedVideoMimeType: null,
+    deployedVideoFileName: null,
+    createdBy: username,
+    createdAt: now,
+    updatedAt: now,
+    lastEditedAt: now,
+    lastEditedBy: username,
+    copiedFromProjectId: source._id,
+  };
+  const result = await db.collection(VMSS_PROJECTS_COLLECTION).insertOne(doc);
+  existingTitles.add(title);
+  return { insertedId: result.insertedId, copiedAssets, doc };
+}
+
+// Move a project (with its revisions and deployment) to another playlist. Referenced assets are shared into the target playlist.
+// Returns { status, error } on failure, or { project, copiedAssets }.
+async function vmssMoveProjectCore(db, { projectId, targetRaw, username, role, ctx }) {
+  const source = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } });
+  if (!source) return { status: 404, error: 'Project not found' };
+  const raw = String(targetRaw || '').trim();
+  if (!raw || !ObjectId.isValid(raw)) return { status: 400, error: 'A valid targetPlaylistId is required' };
+  const targetPlaylistId = new ObjectId(raw);
+  if (String(targetPlaylistId) === String(source.playlistId)) return { status: 400, error: 'Project is already in that playlist' };
+
+  const sourcePlaylist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: source.playlistId });
+  if (!sourcePlaylist || !vmCanEdit(sourcePlaylist, username, role)) return { status: 403, error: 'No edit access to the source playlist' };
+  const targetPlaylist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: targetPlaylistId });
+  if (!targetPlaylist) return { status: 404, error: 'Target playlist not found' };
+  if (!vmCanEdit(targetPlaylist, username, role)) return { status: 403, error: 'No edit access to the target playlist' };
+
+  const existingTitles = await vmssPlaylistTitles(db, targetPlaylistId, ctx);
+  let title = String(source.title || 'Untitled Project');
+  if (existingTitles.has(title)) {
+    let n = 2;
+    while (existingTitles.has(`${title} (${n})`)) n += 1;
+    title = `${title} (${n})`;
+  }
+
+  const copiedAssets = await vmssShareAssetsToPlaylist(db, source, targetPlaylistId, username, ctx);
+  const order = await vmssNextProjectOrder(db, targetPlaylistId, ctx);
+  const now = new Date();
+  await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+    { _id: source._id },
+    { $set: { playlistId: targetPlaylistId, title, order, updatedAt: now, lastEditedAt: now, lastEditedBy: username, movedFromPlaylistId: source.playlistId, movedAt: now, movedBy: username } }
+  );
+  await db.collection(VMSS_REVISIONS_COLLECTION).updateMany({ projectId: source._id }, { $set: { playlistId: targetPlaylistId } });
+  existingTitles.add(title);
+  return { project: { _id: source._id, title, playlistId: targetPlaylistId }, copiedAssets };
+}
+
 // Duplicate a project in its own playlist, or copy it to another playlist.
 // Only the working copy is cloned (no revisions / deployment); referenced assets are shared with the target playlist.
 app.post('/api/video-manuals-studio/projects/:id/duplicate', async (req, res) => {
   try {
     const { username, role } = vmGetRequester(req);
     const db = client.db(VM_DB);
-    const projectId = new ObjectId(req.params.id);
-    const source = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: projectId, deleted: { $ne: true } });
-    if (!source) return res.status(404).json({ error: 'Project not found' });
-
-    const sourcePlaylist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: source.playlistId });
-    if (!sourcePlaylist || !vmCanView(sourcePlaylist, username, role)) {
-      return res.status(403).json({ error: 'No access to this project' });
-    }
-
-    const rawTarget = String(req.body?.targetPlaylistId || '').trim();
-    if (rawTarget && !ObjectId.isValid(rawTarget)) return res.status(400).json({ error: 'Invalid targetPlaylistId' });
-    const targetPlaylistId = rawTarget ? new ObjectId(rawTarget) : source.playlistId;
-    const sameplaylist = String(targetPlaylistId) === String(source.playlistId);
-    const targetPlaylist = sameplaylist
-      ? sourcePlaylist
-      : await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: targetPlaylistId });
-    if (!targetPlaylist) return res.status(404).json({ error: 'Target playlist not found' });
-    if (!vmCanEdit(targetPlaylist, username, role)) {
-      return res.status(403).json({ error: 'No edit access to the target playlist' });
-    }
-
-    const baseTitle = String(source.title || 'Untitled Project');
-    const requestedTitle = String(req.body?.title || '').trim();
-    let title = requestedTitle || (sameplaylist ? `${baseTitle} (copy)` : baseTitle);
-    // Keep titles unique within the target playlist
-    const existingTitles = new Set((await db.collection(VMSS_PROJECTS_COLLECTION)
-      .find({ playlistId: targetPlaylistId, deleted: { $ne: true } }, { projection: { title: 1 } })
-      .toArray()).map((doc) => String(doc.title || '')));
-    if (existingTitles.has(title)) {
-      const stem = title.replace(/ \(copy(?: \d+)?\)$/, '');
-      let n = 1;
-      while (existingTitles.has(n === 1 ? `${stem} (copy)` : `${stem} (copy ${n})`)) n += 1;
-      title = n === 1 ? `${stem} (copy)` : `${stem} (copy ${n})`;
-    }
-
-    // Share referenced assets with the target playlist
-    let copiedAssets = 0;
-    if (!sameplaylist) {
-      const haystack = JSON.stringify({ edit: source.edit, map: source.assetSourceMap, steps: source.steps });
-      const sourceAssets = await db.collection(VMSS_ASSETS_COLLECTION)
-        .find({ playlistId: source.playlistId, deleted: { $ne: true } })
-        .toArray();
-      for (const asset of sourceAssets) {
-        const id = String(asset.assetId || asset._id);
-        const path = String(asset.storagePath || '');
-        const used = (id.length >= 8 && haystack.includes(id))
-          || (path && (haystack.includes(path) || haystack.includes(encodeURIComponent(path)) || haystack.includes(encodeURIComponent(encodeURIComponent(path)))));
-        if (!used) continue;
-        const already = await db.collection(VMSS_ASSETS_COLLECTION).findOne({
-          playlistId: targetPlaylistId,
-          deleted: { $ne: true },
-          $or: [{ assetId: asset.assetId }, ...(path ? [{ storagePath: path }] : [])],
-        });
-        if (already) continue;
-        const { _id, deleted, deletedAt, deletedBy, recycleExpiresAt, ...assetFields } = asset;
-        await db.collection(VMSS_ASSETS_COLLECTION).insertOne({
-          ...assetFields,
-          playlistId: targetPlaylistId,
-          copiedFromPlaylistId: source.playlistId,
-          copiedBy: username,
-          copiedAt: new Date(),
-        });
-        copiedAssets += 1;
-      }
-    }
-
-    const lastProject = await db.collection(VMSS_PROJECTS_COLLECTION)
-      .find({ playlistId: targetPlaylistId })
-      .sort({ order: -1 })
-      .limit(1)
-      .toArray();
-    const now = new Date();
-    const {
-      _id, playlistId, title: _title, order, createdAt, createdBy, updatedAt, lastEditedAt, lastEditedBy,
-      currentRevisionNumber, lastRevisionId, deployedRevisionId, deployedRevisionNumber, deployedRevisionName,
-      deployedAt, deployedBy, deployedVideoUrl, deployedVideoStoragePath, deployedVideoMimeType, deployedVideoFileName,
-      deleted, deletedAt, deletedBy, ...rest
-    } = source;
-    const doc = {
-      ...rest,
-      playlistId: targetPlaylistId,
-      title,
-      order: lastProject.length > 0 ? (lastProject[0].order || 0) + 1 : 0,
-      status: 'draft',
-      currentRevisionNumber: 0,
-      lastRevisionId: null,
-      deployedRevisionId: null,
-      deployedRevisionNumber: null,
-      deployedRevisionName: null,
-      deployedAt: null,
-      deployedBy: null,
-      deployedVideoUrl: null,
-      deployedVideoStoragePath: null,
-      deployedVideoMimeType: null,
-      deployedVideoFileName: null,
-      createdBy: username,
-      createdAt: now,
-      updatedAt: now,
-      lastEditedAt: now,
-      lastEditedBy: username,
-      copiedFromProjectId: source._id,
-    };
-    const result = await db.collection(VMSS_PROJECTS_COLLECTION).insertOne(doc);
-    res.json({ insertedId: result.insertedId, copiedAssets, ...doc });
+    const r = await vmssCopyProjectCore(db, { sourceId: new ObjectId(req.params.id), targetRaw: req.body?.targetPlaylistId, requestedTitle: req.body?.title, username, role });
+    if (r.error) return res.status(r.status).json({ error: r.error });
+    res.json({ insertedId: r.insertedId, copiedAssets: r.copiedAssets, ...r.doc });
   } catch (err) {
     console.error('❌ video-manuals-studio project duplicate error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Move a project to another playlist (keeps revisions and deployment).
+app.post('/api/video-manuals-studio/projects/:id/move', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const r = await vmssMoveProjectCore(db, { projectId: new ObjectId(req.params.id), targetRaw: req.body?.targetPlaylistId, username, role });
+    if (r.error) return res.status(r.status).json({ error: r.error });
+    res.json({ moved: true, copiedAssets: r.copiedAssets, ...r.project });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project move error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Bulk delete (recycle bin) / move / copy. Body: { action: 'delete'|'move'|'copy', ids: [...], targetPlaylistId? }
+app.post('/api/video-manuals-studio/projects/bulk', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const action = String(req.body?.action || '');
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(String))].filter((id) => ObjectId.isValid(id));
+    if (!['delete', 'move', 'copy'].includes(action)) return res.status(400).json({ error: 'action must be delete, move or copy' });
+    if (!ids.length) return res.status(400).json({ error: 'No projects selected' });
+    if (ids.length > 2000) return res.status(400).json({ error: 'Too many projects (max 2000 per request)' });
+    if (action === 'delete' && role !== 'admin') return res.status(403).json({ error: 'Only admin can delete projects.' });
+
+    const ctx = { assetKeys: new Map(), titles: new Map(), orders: new Map(), sourceAssets: new Map() };
+    const failed = [];
+    let ok = 0;
+    let copiedAssets = 0;
+
+    if (action === 'delete') {
+      const projects = await db.collection(VMSS_PROJECTS_COLLECTION).find({ _id: { $in: ids.map((id) => new ObjectId(id)) }, deleted: { $ne: true } }, { projection: { playlistId: 1 } }).toArray();
+      const found = new Set(projects.map((p) => String(p._id)));
+      ids.filter((id) => !found.has(id)).forEach((id) => failed.push({ id, error: 'Project not found' }));
+      const playlistIds = [...new Set(projects.map((p) => String(p.playlistId)))];
+      const allowed = new Set();
+      for (const pid of playlistIds) {
+        const pl = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: new ObjectId(pid) });
+        if (pl && vmCanEdit(pl, username, role)) allowed.add(pid);
+      }
+      const okIds = [];
+      projects.forEach((p) => { if (allowed.has(String(p.playlistId))) okIds.push(p._id); else failed.push({ id: String(p._id), error: 'No edit access to this project' }); });
+      if (okIds.length) {
+        await db.collection(VMSS_PROJECTS_COLLECTION).updateMany({ _id: { $in: okIds } }, { $set: { deleted: true, deletedAt: new Date(), deletedBy: username } });
+      }
+      ok = okIds.length;
+    } else {
+      for (const id of ids) {
+        try {
+          const r = action === 'move'
+            ? await vmssMoveProjectCore(db, { projectId: new ObjectId(id), targetRaw: req.body?.targetPlaylistId, username, role, ctx })
+            : await vmssCopyProjectCore(db, { sourceId: new ObjectId(id), targetRaw: req.body?.targetPlaylistId, requestedTitle: '', username, role, ctx });
+          if (r.error) failed.push({ id, error: r.error }); else { ok += 1; copiedAssets += r.copiedAssets || 0; }
+        } catch (err) {
+          failed.push({ id, error: err.message });
+        }
+      }
+    }
+    res.json({ action, requested: ids.length, ok, failed, copiedAssets });
+  } catch (err) {
+    console.error('❌ video-manuals-studio bulk project error:', err);
     res.status(500).json({ error: err.message });
   }
 });
