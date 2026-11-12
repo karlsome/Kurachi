@@ -35277,7 +35277,7 @@ app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => 
             lastEditedBy: 1, lastEditedAt: 1, currentRevisionNumber: 1, lastRevisionId: 1,
             deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1, deployedAt: 1, deployedBy: 1, deployedVideoUrl: 1,
             previewUrl: 1, previewThumbnailUrl: 1, previewDurationSeconds: 1, previewStatus: 1, previewError: 1, previewUpdatedAt: 1,
-            'steps.durationSeconds': 1, edit: 1, assetSourceMap: 1,
+            'steps.durationSeconds': 1, edit: 1, assetSourceMap: 1, tags: 1,
           },
         })
         .sort(VMSS_PROJECT_SORTS[sortKey])
@@ -35316,7 +35316,7 @@ app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => 
           deployedVideoUrl: 1, deployedVideoStoragePath: 1, deployedVideoMimeType: 1, deployedVideoFileName: 1,
           previewRevisionId: 1, previewUrl: 1, previewStoragePath: 1, previewMimeType: 1,
           previewThumbnailUrl: 1, previewThumbnailStoragePath: 1, previewThumbnailMimeType: 1,
-          previewDurationSeconds: 1, previewStatus: 1, previewError: 1, previewUpdatedAt: 1,
+          previewDurationSeconds: 1, previewStatus: 1, previewError: 1, previewUpdatedAt: 1, tags: 1,
         }
       }
     ).sort({ order: 1, createdAt: 1 }).toArray();
@@ -36185,13 +36185,121 @@ app.post('/api/video-manuals-studio/projects/:id/move', async (req, res) => {
 });
 
 // Bulk delete (recycle bin) / move / copy. Body: { action: 'delete'|'move'|'copy', ids: [...], targetPlaylistId? }
+// ---------------------------------------------------------------------------
+// Project tags: a project can be tagged with 工場 (factories) and 設備 (machines). A DCP tablet opened with
+// ?filter=<工場>&machine=<設備> lists every deployed project tagged for its 工場 or any of its machines, in addition to the
+// projects of the scanned model. `tagKeys` ("f:<工場>" / "m:<設備>", lower-cased) is the indexed copy used for matching.
+// ---------------------------------------------------------------------------
+function vmssCleanTagList(value) {
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(value) ? value : []).forEach((item) => {
+    const text = String(item ?? '').trim().slice(0, 60);
+    if (!text || seen.has(text.toLowerCase())) return;
+    seen.add(text.toLowerCase());
+    out.push(text);
+  });
+  return out.slice(0, 100);
+}
+function vmssCleanTags(tags) {
+  return { factories: vmssCleanTagList(tags?.factories), machines: vmssCleanTagList(tags?.machines) };
+}
+function vmssTagKeys(tags) {
+  return [
+    ...tags.factories.map((value) => `f:${value.toLowerCase()}`),
+    ...tags.machines.map((value) => `m:${value.toLowerCase()}`),
+  ];
+}
+let vmssTagIndexReady = false;
+async function vmssEnsureTagIndex(db) {
+  if (vmssTagIndexReady) return;
+  await db.collection(VMSS_PROJECTS_COLLECTION).createIndex({ tagKeys: 1 });
+  vmssTagIndexReady = true;
+}
+// next = (current + add) - remove, compared case-insensitively
+function vmssApplyTagChange(current, { add, remove }) {
+  const out = {};
+  ['factories', 'machines'].forEach((kind) => {
+    const removeKeys = new Set(vmssCleanTagList(remove?.[kind]).map((value) => value.toLowerCase()));
+    out[kind] = vmssCleanTagList([...vmssCleanTagList(current?.[kind]), ...vmssCleanTagList(add?.[kind])])
+      .filter((value) => !removeKeys.has(value.toLowerCase()));
+  });
+  return out;
+}
+
+// Values offered when tagging: the 工場 and 設備 masters, plus anything already used as a tag.
+app.get('/api/video-manuals-studio/tag-options', async (req, res) => {
+  try {
+    const db = client.db(VM_DB);
+    const [factoryNames, machineDocs, usedFactories, usedMachines] = await Promise.all([
+      db.collection('factoryDB').distinct('工場'),
+      db.collection('setsubiDB').find({}, { projection: { name: 1, 工場: 1 } }).toArray(),
+      db.collection(VMSS_PROJECTS_COLLECTION).distinct('tags.factories', { deleted: { $ne: true } }),
+      db.collection(VMSS_PROJECTS_COLLECTION).distinct('tags.machines', { deleted: { $ne: true } }),
+    ]);
+    const factories = vmssCleanTagList([...factoryNames, ...usedFactories]).sort((a, b) => a.localeCompare(b, 'ja'));
+    const machineFactory = new Map(machineDocs.filter((doc) => doc.name).map((doc) => [String(doc.name).trim(), doc.工場 || '']));
+    const machines = vmssCleanTagList([...machineFactory.keys(), ...usedMachines])
+      .map((name) => ({ name, factory: machineFactory.get(name) || '' }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+    res.json({ factories, machines });
+  } catch (err) {
+    console.error('❌ video-manuals-studio tag-options error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Tags in use in a playlist with project counts (for the "remove tags" picker).
+app.get('/api/video-manuals-studio/playlists/:id/project-tags', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const playlistId = new ObjectId(req.params.id);
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: playlistId });
+    if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+    if (!vmCanView(playlist, username, role)) return res.status(403).json({ error: 'No view access to this playlist' });
+    const count = async (field) => (await db.collection(VMSS_PROJECTS_COLLECTION).aggregate([
+      { $match: { playlistId, deleted: { $ne: true } } },
+      { $unwind: `$tags.${field}` },
+      { $group: { _id: `$tags.${field}`, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray()).map((row) => ({ name: row._id, count: row.count }));
+    res.json({ factories: await count('factories'), machines: await count('machines') });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project-tags error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Set the exact tags of one project: body { factories: [...], machines: [...] }.
+app.put('/api/video-manuals-studio/projects/:id/tags', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const db = client.db(VM_DB);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: new ObjectId(req.params.id), deleted: { $ne: true } }, { projection: { playlistId: 1 } });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanEdit(playlist, username, role)) return res.status(403).json({ error: 'No edit access to this project' });
+    const tags = vmssCleanTags(req.body);
+    await vmssEnsureTagIndex(db);
+    await db.collection(VMSS_PROJECTS_COLLECTION).updateOne(
+      { _id: project._id },
+      { $set: { tags, tagKeys: vmssTagKeys(tags), tagsUpdatedAt: new Date(), tagsUpdatedBy: username } },
+    );
+    res.json({ tags });
+  } catch (err) {
+    console.error('❌ video-manuals-studio project tags error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/video-manuals-studio/projects/bulk', async (req, res) => {
   try {
     const { username, role } = vmGetRequester(req);
     const db = client.db(VM_DB);
     const action = String(req.body?.action || '');
     const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(String))].filter((id) => ObjectId.isValid(id));
-    if (!['delete', 'move', 'copy'].includes(action)) return res.status(400).json({ error: 'action must be delete, move or copy' });
+    if (!['delete', 'move', 'copy', 'tags'].includes(action)) return res.status(400).json({ error: 'action must be delete, move, copy or tags' });
     if (!ids.length) return res.status(400).json({ error: 'No projects selected' });
     if (ids.length > 2000) return res.status(400).json({ error: 'Too many projects (max 2000 per request)' });
     if (action === 'delete' && role !== 'admin') return res.status(403).json({ error: 'Only admin can delete projects.' });
@@ -36201,7 +36309,30 @@ app.post('/api/video-manuals-studio/projects/bulk', async (req, res) => {
     let ok = 0;
     let copiedAssets = 0;
 
-    if (action === 'delete') {
+    if (action === 'tags') {
+      // body: { add: { factories, machines }, remove: { factories, machines } } applied to every selected project
+      const change = { add: vmssCleanTags(req.body?.add), remove: vmssCleanTags(req.body?.remove) };
+      const hasChange = Object.values(change.add).some((list) => list.length) || Object.values(change.remove).some((list) => list.length);
+      if (!hasChange) return res.status(400).json({ error: 'Nothing to add or remove' });
+      const projects = await db.collection(VMSS_PROJECTS_COLLECTION).find({ _id: { $in: ids.map((id) => new ObjectId(id)) }, deleted: { $ne: true } }, { projection: { playlistId: 1, tags: 1 } }).toArray();
+      const found = new Set(projects.map((p) => String(p._id)));
+      ids.filter((id) => !found.has(id)).forEach((id) => failed.push({ id, error: 'Project not found' }));
+      const allowed = new Map();
+      for (const pid of [...new Set(projects.map((p) => String(p.playlistId)))]) {
+        const pl = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: new ObjectId(pid) });
+        allowed.set(pid, !!pl && vmCanEdit(pl, username, role));
+      }
+      await vmssEnsureTagIndex(db);
+      const now = new Date();
+      const writes = [];
+      projects.forEach((p) => {
+        if (!allowed.get(String(p.playlistId))) { failed.push({ id: String(p._id), error: 'No edit access to this project' }); return; }
+        const tags = vmssApplyTagChange(p.tags, change);
+        writes.push({ updateOne: { filter: { _id: p._id }, update: { $set: { tags, tagKeys: vmssTagKeys(tags), tagsUpdatedAt: now, tagsUpdatedBy: username } } } });
+      });
+      if (writes.length) await db.collection(VMSS_PROJECTS_COLLECTION).bulkWrite(writes, { ordered: false });
+      ok = writes.length;
+    } else if (action === 'delete') {
       const projects = await db.collection(VMSS_PROJECTS_COLLECTION).find({ _id: { $in: ids.map((id) => new ObjectId(id)) }, deleted: { $ne: true } }, { projection: { playlistId: 1 } }).toArray();
       const found = new Set(projects.map((p) => String(p._id)));
       ids.filter((id) => !found.has(id)).forEach((id) => failed.push({ id, error: 'Project not found' }));
@@ -39864,8 +39995,15 @@ app.get('/api/factory/video-manuals', async (req, res) => {
   try {
     const model = String(req.query.model || '').trim();
     const requestedSource = String(req.query.source || '').trim();
-    if (!model) {
-      return res.status(400).json({ error: 'model query parameter is required' });
+    // Tablet context: ?factory=<工場>&machine=<設備[,設備...]> also lists projects tagged for that 工場 / 設備.
+    const factoryTag = String(req.query.factory || '').trim();
+    const machineTags = String(req.query.machine || '').split(',').map((value) => value.trim()).filter(Boolean);
+    const tagKeys = [
+      ...(factoryTag ? [`f:${factoryTag.toLowerCase()}`] : []),
+      ...machineTags.map((value) => `m:${value.toLowerCase()}`),
+    ];
+    if (!model && !tagKeys.length) {
+      return res.status(400).json({ error: 'model (or factory/machine) query parameter is required' });
     }
     if (requestedSource && !['classic', 'shotstack-studio'].includes(requestedSource)) {
       return res.status(400).json({ error: 'source must be either classic or shotstack-studio' });
@@ -39878,7 +40016,7 @@ app.get('/api/factory/video-manuals', async (req, res) => {
         : db.collection(VM_PLAYLISTS_COLLECTION)
           .find({ model }, { projection: { name: 1, model: 1 } })
           .toArray(),
-      requestedSource === 'classic'
+      requestedSource === 'classic' || !model
         ? Promise.resolve([])
         : db.collection(VMSS_PLAYLISTS_COLLECTION)
           .find({ model }, { projection: { name: 1, model: 1 } })
@@ -39890,7 +40028,7 @@ app.get('/api/factory/video-manuals', async (req, res) => {
       ...studioPlaylists.map((playlist) => ({ ...playlist, source: 'shotstack-studio' })),
     ];
 
-    if (!playlists.length) {
+    if (!playlists.length && !tagKeys.length) {
       return res.json({ model, projects: [] });
     }
 
@@ -39929,10 +40067,14 @@ app.get('/api/factory/video-manuals', async (req, res) => {
         : Promise.resolve([]),
       studioPlaylistIds.length
         ? (async () => {
+          const studioMatch = [];
+          if (studioPlaylistIds.length) studioMatch.push({ playlistId: { $in: studioPlaylistIds } });
+          if (tagKeys.length && requestedSource !== 'classic') studioMatch.push({ tagKeys: { $in: tagKeys } });
+          if (!studioMatch.length) return [];
           const studioDocs = await db.collection(VMSS_PROJECTS_COLLECTION)
             .find(
-              { playlistId: { $in: studioPlaylistIds }, deleted: { $ne: true }, deployedRevisionId: { $exists: true, $ne: null } },
-              { projection: { title: 1, description: 1, playlistId: 1, order: 1, previewThumbnailUrl: 1, updatedAt: 1, deployedAt: 1, deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1, deployedVideoUrl: 1, createdAt: 1 } }
+              { $or: studioMatch, deleted: { $ne: true }, deployedRevisionId: { $exists: true, $ne: null } },
+              { projection: { title: 1, description: 1, playlistId: 1, order: 1, previewThumbnailUrl: 1, updatedAt: 1, deployedAt: 1, deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1, deployedVideoUrl: 1, createdAt: 1, tagKeys: 1 } }
             )
             .sort({ order: 1, updatedAt: -1, createdAt: 1 })
             .toArray();
@@ -39943,10 +40085,12 @@ app.get('/api/factory/video-manuals', async (req, res) => {
               .toArray()
             : [];
           const revisionById = new Map(revisionDocs.map((doc) => [String(doc._id), doc]));
-          return studioDocs.map(({ previewThumbnailUrl, createdAt, ...doc }) => {
+          return studioDocs.map(({ previewThumbnailUrl, createdAt, tagKeys: docTagKeys, ...doc }) => {
             const info = vmssBuildPlaybackInfo(revisionById.get(String(doc.deployedRevisionId))?.snapshot);
+            const byModel = studioPlaylistIds.some((id) => String(id) === String(doc.playlistId));
             return {
               ...doc,
+              matchedBy: byModel ? 'model' : 'tag',
               thumbnailUrl: previewThumbnailUrl || null,
               duration: info.duration || null,
               stepsCount: info.steps.length,
@@ -39960,6 +40104,16 @@ app.get('/api/factory/video-manuals', async (req, res) => {
       ...classicProjects.map((project) => ({ ...project, source: 'classic' })),
       ...studioProjects.map((project) => ({ ...project, source: 'shotstack-studio' })),
     ];
+
+    // tag-matched projects can live in playlists of another model: look up their playlist names too
+    const unknownStudioPlaylists = [...new Set(projects
+      .filter((project) => project.source === 'shotstack-studio' && !playlistByKey.has(`shotstack-studio:${String(project.playlistId)}`))
+      .map((project) => String(project.playlistId)))];
+    if (unknownStudioPlaylists.length) {
+      const extra = await db.collection(VMSS_PLAYLISTS_COLLECTION)
+        .find({ _id: { $in: unknownStudioPlaylists.map((id) => new ObjectId(id)) } }, { projection: { name: 1 } }).toArray();
+      extra.forEach((playlist) => playlistByKey.set(`shotstack-studio:${String(playlist._id)}`, playlist));
+    }
 
     res.json({
       model,

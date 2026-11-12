@@ -10278,10 +10278,11 @@ function syncVideoManualLauncherState() {
   const model = String(getCurrentProductModel() || '').trim();
   const enabled = !!model;
   button.disabled = false; // never truly disable — we handle it in click
-  button.className = `video-manual-launcher${enabled ? '' : ' is-disabled'}${button.classList.contains('is-expanded') ? ' is-expanded' : ''}`;
+  // The video manual launcher is always usable: projects tagged for this tablet's 工場/設備 show even before a product is scanned.
+  button.className = `video-manual-launcher${button.classList.contains('is-expanded') ? ' is-expanded' : ''}`;
   button.innerHTML = `
     <span class="video-manual-launcher__icon">🎬</span>
-    <span class="video-manual-launcher__label">${enabled ? 'Manual' : 'Manual<small>Scan first</small>'}</span>
+    <span class="video-manual-launcher__label">Manual</span>
   `;
 
   // Sync PDF buttons too
@@ -10302,9 +10303,7 @@ function renderVideoManualProjects() {
 
   if (!grid || !empty || !loading || !subtitle || !selectedLabel || !actionButton) return;
 
-  subtitle.textContent = model
-    ? `${model} · ${videoManualState.projects.length} deployed project${videoManualState.projects.length === 1 ? '' : 's'}`
-    : 'No scanned model';
+  subtitle.textContent = `${model || getQueryParam('filter') || ''} · ${videoManualState.projects.length} deployed project${videoManualState.projects.length === 1 ? '' : 's'}`;
 
   loading.style.display = videoManualState.loading ? 'flex' : 'none';
 
@@ -10393,9 +10392,7 @@ function openVideoManualDetail(projectId) {
   document.getElementById('videoManualDetailBackBtn')?.addEventListener('click', () => {
     const model = String(getCurrentProductModel() || '').trim();
     const sub = document.getElementById('videoManualSubtitle');
-    if (sub) sub.textContent = model
-      ? `${model} · ${videoManualState.projects.length} deployed project${videoManualState.projects.length === 1 ? '' : 's'}`
-      : 'No scanned model';
+    if (sub) sub.textContent = `${model || getQueryParam('filter') || ''} · ${videoManualState.projects.length} deployed project${videoManualState.projects.length === 1 ? '' : 's'}`;
     setVideoManualMode('picker');
   });
   document.getElementById('videoManualDetailPlayBtn')?.addEventListener('click', () => {
@@ -10415,14 +10412,11 @@ async function loadVideoManualProjects() {
   videoManualState.selectedProjectId = null;
   renderVideoManualProjects();
 
-  if (!model) {
-    videoManualState.loading = false;
-    renderVideoManualProjects();
-    return;
-  }
-
   try {
-    const response = await fetch(`${serverURL}/api/factory/video-manuals?model=${encodeURIComponent(model)}&source=shotstack-studio`);
+    // model = scanned product; factory/machine = this tablet's ?filter= / ?machine= (projects tagged for them are listed too)
+    const tabletFactory = String(getQueryParam('filter') || '').trim();
+    const tabletMachine = String(getQueryParam('machine') || '').trim();
+    const response = await fetch(`${serverURL}/api/factory/video-manuals?model=${encodeURIComponent(model)}&factory=${encodeURIComponent(tabletFactory)}&machine=${encodeURIComponent(tabletMachine)}&source=shotstack-studio`);
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.error || `HTTP ${response.status}`);
@@ -10472,12 +10466,7 @@ async function closeVideoManualPicker({ sendExit = true } = {}) {
 }
 
 async function openVideoManualPicker() {
-  const model = String(getCurrentProductModel() || '').trim();
-  if (!model) {
-    showAlert('No Video Manuals found. Please call leader for assistance');
-    return;
-  }
-
+  // No scan needed: projects tagged for this tablet's 工場/設備 are listed even without a scanned model.
   const modal = document.getElementById('videoManualModal');
   if (!modal) return;
 
