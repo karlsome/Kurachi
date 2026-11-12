@@ -1,0 +1,254 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9022133,
+  "title": "Die Operation",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "1. Set the machine to semi-auto mode",
+      "videoId": "01M31XVNJEZ4TNW6GAVYGHBBJ5",
+      "duration": 14.07,
+      "description": "Set the machine to semi-auto mode.",
+      "cues": [
+        {
+          "start": 0.35,
+          "end": 2.83,
+          "text": "Set the machine to semi-auto mode."
+        }
+      ]
+    },
+    {
+      "position": 1,
+      "title": "2. Press the green start button to cut 1 full shot",
+      "videoId": "01M320C6MYQJJJ6G1PXZK72DX5",
+      "duration": 33,
+      "description": "Press the green start button to cut 1 full shot.\nThere are two green start buttons. There's one here on the cabinet control panel.\nThere's also one on the front of the machine next to the right-side emergency stop button.\nYou can use either one.\nThe first shot is cut.",
+      "cues": [
+        {
+          "start": 0.36,
+          "end": 3.49,
+          "text": "Press the green start button to cut 1 full shot."
+        },
+        {
+          "start": 6.4,
+          "end": 11.54,
+          "text": "There are two green start buttons. There's one here on the cabinet control panel."
+        },
+        {
+          "start": 13.11,
+          "end": 18.15,
+          "text": "There's also one on the front of the machine next to the right-side emergency stop button."
+        },
+        {
+          "start": 22.5,
+          "end": 24.4,
+          "text": "You can use either one."
+        },
+        {
+          "start": 26.79,
+          "end": 28.69,
+          "text": "The first shot is cut."
+        }
+      ]
+    },
+    {
+      "position": 2,
+      "title": "3. Collect the pieces.",
+      "videoId": "01M320HV4CRS506JS8KP5HX9H2",
+      "duration": 25.83,
+      "description": "Collect the pieces and stage them for first-off inspection.",
+      "cues": [
+        {
+          "start": 1.74,
+          "end": 5.62,
+          "text": "Collect the pieces and stage them for first-off inspection."
+        }
+      ]
+    },
+    {
+      "position": 3,
+      "title": "4. Call for First-Off/Last-Off Inspection",
+      "videoId": "01M320QMFEJ1VSDZY5SHB4MHBB",
+      "duration": 18.57,
+      "description": "Use the hand-held radio to call for \"first-off\" or \"last-off\" inspection.",
+      "cues": [
+        {
+          "start": 1.68,
+          "end": 6.75,
+          "text": "Use the hand-held radio to call for \"first-off\" or \"last-off\" inspection."
+        }
+      ]
+    },
+    {
+      "position": 4,
+      "title": "5. Inspector will determine: Parts are Good/No Good",
+      "videoId": "01M321JR2Y8XNXVNTJRP9MEYQ6",
+      "duration": 69.7,
+      "description": "Quality Inspector will determine if the first-off/last-off parts are good or no good.\nIf the parts are no good, then start the die-mold cutting operation process from the beginning: set the machine to semi-auto mode, press the green start button to cut 1 full shot, collect the pieces, and call for another first-off/last-off inspection.\nIf the parts are OK, proceed to process in auto mode.\nTurn the cutting mode knob two positions to the right to put the machine in auto mode.",
+      "cues": [
+        {
+          "start": 1.6,
+          "end": 7.18,
+          "text": "Quality Inspector will determine if the first-off/last-off parts are good or no good."
+        },
+        {
+          "start": 18.07,
+          "end": 33.91,
+          "text": "If the parts are no good, then start the die-mold cutting operation process from the beginning: set the machine to semi-auto mode, press the green start button to cut 1 full shot, collect the pieces, and call for another first-off/last-off inspection."
+        },
+        {
+          "start": 42.44,
+          "end": 46.11,
+          "text": "If the parts are OK, proceed to process in auto mode."
+        },
+        {
+          "start": 54.64,
+          "end": 59.35,
+          "text": "Turn the cutting mode knob two positions to the right to put the machine in auto mode."
+        }
+      ]
+    },
+    {
+      "position": 5,
+      "title": "6. During operation, operator is to monitor parts for miscuts.",
+      "videoId": "01M32201GH3J15QKC33BM84QKT",
+      "duration": 24.2,
+      "description": "During operation, operator is to monitor parts for miscuts.\nMiscuts are areas where the scrap is not connected\nSee course \"Miss-cut/Double-shot Condition\" for more information.",
+      "cues": [
+        {
+          "start": 1.2,
+          "end": 5.7,
+          "text": "During operation, operator is to monitor parts for miscuts."
+        },
+        {
+          "start": 8.1,
+          "end": 11.7,
+          "text": "Miscuts are areas where the scrap is not connected"
+        },
+        {
+          "start": 15.32,
+          "end": 20.07,
+          "text": "See course \"Miss-cut/Double-shot Condition\" for more information."
+        }
+      ]
+    },
+    {
+      "position": 6,
+      "title": "7. Once parts are cut, the operator places them neatly on staging table for inspectors",
+      "videoId": "01M322RHN77MZKK055DJAPF992",
+      "duration": 26.03,
+      "description": "Once parts are cut, the operator places the parts neatly on staging table for the inspectors.\nThis is the staging table.\nThere are two inspection stations, one on either side of the staging table.\nQuality Inspectors will use these stations to inspect the parts before shipping out to customers.",
+      "cues": [
+        {
+          "start": 2.01,
+          "end": 7.84,
+          "text": "Once parts are cut, the operator places the parts neatly on staging table for the inspectors."
+        },
+        {
+          "start": 11.15,
+          "end": 13.09,
+          "text": "This is the staging table."
+        },
+        {
+          "start": 13.65,
+          "end": 18.18,
+          "text": "There are two inspection stations, one on either side of the staging table."
+        },
+        {
+          "start": 18.88,
+          "end": 24.85,
+          "text": "Quality Inspectors will use these stations to inspect the parts before shipping out to customers."
+        }
+      ]
+    },
+    {
+      "position": 7,
+      "title": "8. After production, the operator must be sure that the table is clean without tape or material residue",
+      "videoId": "01M324WP1Y9GJT35KGEBDCZWBJ",
+      "duration": 91.93,
+      "description": "After production, the operator must be sure that the table is clean without tape or material residue.\nPacking tape adhesive can stick on the surface of the table. Be sure to remove pieces of tape and adhesive residue.\nLaminated material is made up of three parts: the material, the adhesive, and the release paper.\nThis is the material side.\nThis is the release paper side.\nThis is the pressure sensitive adhesive that transferred from the release paper to the underside of the material during lamination.\nIt's possible that adhesive residue may have gotten stuck on the staging table. Make sure to clean it off the table surface if there is any.\nThere may be material debris/residue on the staging table surface.\nUse a cloth or paper towel to clean it off.",
+      "cues": [
+        {
+          "start": 0.34,
+          "end": 6.64,
+          "text": "After production, the operator must be sure that the table is clean without tape or material residue."
+        },
+        {
+          "start": 9.54,
+          "end": 16.41,
+          "text": "Packing tape adhesive can stick on the surface of the table. Be sure to remove pieces of tape and adhesive residue."
+        },
+        {
+          "start": 20.34,
+          "end": 27.18,
+          "text": "Laminated material is made up of three parts: the material, the adhesive, and the release paper."
+        },
+        {
+          "start": 28.39,
+          "end": 30.44,
+          "text": "This is the material side."
+        },
+        {
+          "start": 36.28,
+          "end": 38.58,
+          "text": "This is the release paper side."
+        },
+        {
+          "start": 50.25,
+          "end": 57.77,
+          "text": "This is the pressure sensitive adhesive that transferred from the release paper to the underside of the material during lamination."
+        },
+        {
+          "start": 60.37,
+          "end": 68.14,
+          "text": "It's possible that adhesive residue may have gotten stuck on the staging table. Make sure to clean it off the table surface if there is any."
+        },
+        {
+          "start": 73.47,
+          "end": 78.07,
+          "text": "There may be material debris/residue on the staging table surface."
+        },
+        {
+          "start": 83.07,
+          "end": 86.2,
+          "text": "Use a cloth or paper towel to clean it off."
+        }
+      ]
+    },
+    {
+      "position": 8,
+      "title": "9. At the end of each shift operator must clear the debris between the sponge and blade of the die mold",
+      "videoId": "01M325W9H29X39EGYZ4VAWSAQA",
+      "duration": 80.83,
+      "description": "At the end of each shift, the operator must clear the debris between the sponge and blade of the die mold.\nLocate the container with the die mold cleaning tool. It's on the shelf on the underside of the staging table.\nOpen the container and locate the orange plastic cleaning pick.\nUse the pick to clear the debris.\nYou can also use an air compressor tool to clear the debris from the die mold.",
+      "cues": [
+        {
+          "start": 0.9,
+          "end": 7.81,
+          "text": "At the end of each shift, the operator must clear the debris between the sponge and blade of the die mold."
+        },
+        {
+          "start": 14.97,
+          "end": 21.12,
+          "text": "Locate the container with the die mold cleaning tool. It's on the shelf on the underside of the staging table."
+        },
+        {
+          "start": 25.23,
+          "end": 29.37,
+          "text": "Open the container and locate the orange plastic cleaning pick."
+        },
+        {
+          "start": 32.16,
+          "end": 34.5,
+          "text": "Use the pick to clear the debris."
+        },
+        {
+          "start": 59.92,
+          "end": 64.31,
+          "text": "You can also use an air compressor tool to clear the debris from the die mold."
+        }
+      ]
+    }
+  ]
+}

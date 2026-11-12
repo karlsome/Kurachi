@@ -186,12 +186,22 @@ function toEditorSource(publicUrl) {
   const project = await api(`api/video-manuals-studio/playlists/${playlistId}/projects`, { method: 'POST', json: { title: data.title, description: `Imported from Tebiki video ${data.sourceVideoId}` } });
   const projectId = String(project.insertedId || project._id);
 
-  const stepDescriptions = clips.filter((c) => c._desc).map((c) => ({ start: c.start, description: c._desc }));
-  const edit = {
-    timeline: { background: '#ffffff', tracks: [{ clips: clips.map(({ _desc, ...c }) => c) }] },
-    output: { format: 'mp4', fps: 30, size: { width: 1920, height: 1080 } },
-  };
-  await api(`api/video-manuals-studio/projects/${projectId}`, { method: 'PATCH', json: { edit, assetSourceMap, settings: { output: null, stepDescriptions } } });
+  // Step-based project: every Tebiki step becomes a project step with its own timeline + timed subtitles.
+  const fit = (cues, len) => (cues || []).map((c) => ({ start: Math.max(0, Math.min(len, c.start)), end: Math.min(len, c.end), text: c.text })).filter((c) => c.text && c.end > c.start + 0.05);
+  const output = { format: 'mp4', fps: 30, size: { width: 1920, height: 1080 } };
+  for (let i = 0; i < clips.length; i += 1) {
+    const { _desc, ...clip } = clips[i];
+    const stepData = local[i].step;
+    const { step } = await api(`api/video-manuals-studio/projects/${projectId}/steps`, { method: 'POST', json: { title: stepData.title } });
+    await api(`api/video-manuals-studio/projects/${projectId}/steps/${step.id}`, {
+      method: 'PATCH',
+      json: {
+        edit: { timeline: { background: '#ffffff', tracks: [{ clips: [{ ...clip, start: 0 }] }] }, output },
+        assetSourceMap: { [clip.asset.src]: assetSourceMap[clip.asset.src] },
+        subtitles: fit(stepData.cues, clip.length),
+      },
+    });
+  }
 
   console.log(`\nDone. Project "${data.title}" (${projectId}) created with ${clips.length} steps, ${(cursor / 60).toFixed(1)} min.`);
   console.log('Open it in Freya Admin 2 (Video Manual > TEBIKI videos), check the steps and CC text, then Save / Deploy.');
