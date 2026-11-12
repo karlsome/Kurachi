@@ -1,0 +1,122 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9013710,
+  "title": "Safety Features: Emergency Stop Buttons, Light Curtain, Doors",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Safety Features: Emergency Stop Buttons, Light Curtain, Doors",
+      "videoId": "01M2TTCFMYEVACCP3Y9XX2Y7G5",
+      "duration": 218.67,
+      "description": "Kuntai Safety Features\nSafety Feature: Emergency Stop Buttons\nThe Kuntai machine has five emergency stop buttons.\nThere are two emergency stop buttons on the front of the machine.\nPress down on the button until it locks into place. Then release your hand.\nThe button will remain in the stop position until you twist it clockwise.\nThe power cabinet's control panel has one emergency stop button.\nThe back side of the machine has two additional emergency stop buttons.\nThe machine will not operate if one or more emergency stop buttons are activated.\nSafety Feature: Light Curtain\nThe safety light curtain has two sensors on the front side of the machine, one on the right and one on the left.\nWhen an object (such as an operator's hand or a produced part) comes into contact with the sensor, the machine will stop operating and an alarm will sound.\nThe emergency \"buzzer\" light is on, and a high-pitched beep will continue to sound until you turn it off.\nPress the \"Alarm reset\" button on the touchscreen.\nThe alarm sound will stop, and the machine operations can be restarted.\nSafety Feature: Doors\nThere are four safety doors (two on each side of the machine) on the back side of the machine.\nWhen any one of these doors is open, the machine will shut down and an alarm will sound.\nAll four doors must be closed completely to deactivate the emergency stop and alarm sound.\nThe \"Buzzer\" light and alarm sound are on. To deactivate the alarm and emergency stop, press the \"Alarm reset\" button on the touchscreen.\nThe machine is now able to restart production.",
+      "cues": [
+        {
+          "start": 0.7,
+          "end": 2.64,
+          "text": "Kuntai Safety Features"
+        },
+        {
+          "start": 5.76,
+          "end": 9.28,
+          "text": "Safety Feature: Emergency Stop Buttons"
+        },
+        {
+          "start": 10.4,
+          "end": 14.18,
+          "text": "The Kuntai machine has five emergency stop buttons."
+        },
+        {
+          "start": 15.52,
+          "end": 19.12,
+          "text": "There are two emergency stop buttons on the front of the machine."
+        },
+        {
+          "start": 19.86,
+          "end": 24.46,
+          "text": "Press down on the button until it locks into place. Then release your hand."
+        },
+        {
+          "start": 25.22,
+          "end": 29.54,
+          "text": "The button will remain in the stop position until you twist it clockwise."
+        },
+        {
+          "start": 45.86,
+          "end": 50.18,
+          "text": "The power cabinet's control panel has one emergency stop button."
+        },
+        {
+          "start": 59.2,
+          "end": 63.59,
+          "text": "The back side of the machine has two additional emergency stop buttons."
+        },
+        {
+          "start": 98.17,
+          "end": 103.21,
+          "text": "The machine will not operate if one or more emergency stop buttons are activated."
+        },
+        {
+          "start": 104.52,
+          "end": 107.14,
+          "text": "Safety Feature: Light Curtain"
+        },
+        {
+          "start": 109.47,
+          "end": 115.98,
+          "text": "The safety light curtain has two sensors on the front side of the machine, one on the right and one on the left."
+        },
+        {
+          "start": 130.26,
+          "end": 140.44,
+          "text": "When an object (such as an operator's hand or a produced part) comes into contact with the sensor, the machine will stop operating and an alarm will sound."
+        },
+        {
+          "start": 142.54,
+          "end": 148.91,
+          "text": "The emergency \"buzzer\" light is on, and a high-pitched beep will continue to sound until you turn it off."
+        },
+        {
+          "start": 149.28,
+          "end": 152.55,
+          "text": "Press the \"Alarm reset\" button on the touchscreen."
+        },
+        {
+          "start": 153.6,
+          "end": 158.2,
+          "text": "The alarm sound will stop, and the machine operations can be restarted."
+        },
+        {
+          "start": 159.24,
+          "end": 161.43,
+          "text": "Safety Feature: Doors"
+        },
+        {
+          "start": 164.28,
+          "end": 169.68,
+          "text": "There are four safety doors (two on each side of the machine) on the back side of the machine."
+        },
+        {
+          "start": 174.44,
+          "end": 180.34,
+          "text": "When any one of these doors is open, the machine will shut down and an alarm will sound."
+        },
+        {
+          "start": 194.76,
+          "end": 200.7,
+          "text": "All four doors must be closed completely to deactivate the emergency stop and alarm sound."
+        },
+        {
+          "start": 204.12,
+          "end": 213.44,
+          "text": "The \"Buzzer\" light and alarm sound are on. To deactivate the alarm and emergency stop, press the \"Alarm reset\" button on the touchscreen."
+        },
+        {
+          "start": 214.84,
+          "end": 217.93,
+          "text": "The machine is now able to restart production."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9022504,
+  "title": "Miscut/Double-Shot Condition",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Miscut/Double-Shot Condition",
+      "videoId": "01M39KEX2T94VBT58PVJQN2B0H",
+      "duration": 117.73,
+      "description": "Miscut/Double-Shot Condition\nThe Machine Operator must take care to avoid miscut/double-shot condition.\nThere are two possibilities for the miscut or double-shot to happen.\n(1) The operator stops the machine by pressing one of the emergency-stop buttons. \nIn this situation, the machine will stop in an \"as-is\" condition.\nThe operator has not been given proper training regarding “Let it Feed, stop it just before Die cut.”\nIf operators are aware of this situation, they can avoid miscut and double-shot defects.\n(2) Something causes the material to stop or move more slowly than the conveyor belt speed.\nIf the operator makes usre that there is no accumulated material at their end, or at the die-cut area, there should be no issue with cut condition.\nAnother way to prevent miscut parts from being passed to inspectors is to look at the pattern of the scrap.\nIf the scrap pattern changes during the process, then there is something wrong.\nOperators should closely look at those parts associated with uneven scrap patterns.\nIf the operator needs further instruction, they should call the team lead.\nIf the process is going well, the pattern of the die-cutting process will look like this.\nIf the process is not going well (miscut issue), the pattern of the die-cutting process will look like this. The pattern will have smaller scrap pieces.",
+      "cues": [
+        {
+          "start": 0.93,
+          "end": 3.77,
+          "text": "Miscut/Double-Shot Condition"
+        },
+        {
+          "start": 6.81,
+          "end": 12.31,
+          "text": "The Machine Operator must take care to avoid miscut/double-shot condition."
+        },
+        {
+          "start": 15.12,
+          "end": 19.22,
+          "text": "There are two possibilities for the miscut or double-shot to happen."
+        },
+        {
+          "start": 22.02,
+          "end": 27.7,
+          "text": "(1) The operator stops the machine by pressing one of the emergency-stop buttons. "
+        },
+        {
+          "start": 30.42,
+          "end": 34.92,
+          "text": "In this situation, the machine will stop in an \"as-is\" condition."
+        },
+        {
+          "start": 37.11,
+          "end": 43.37,
+          "text": "The operator has not been given proper training regarding “Let it Feed, stop it just before Die cut.”"
+        },
+        {
+          "start": 45.18,
+          "end": 51.44,
+          "text": "If operators are aware of this situation, they can avoid miscut and double-shot defects."
+        },
+        {
+          "start": 53.91,
+          "end": 59.85,
+          "text": "(2) Something causes the material to stop or move more slowly than the conveyor belt speed."
+        },
+        {
+          "start": 61.92,
+          "end": 70.81,
+          "text": "If the operator makes usre that there is no accumulated material at their end, or at the die-cut area, there should be no issue with cut condition."
+        },
+        {
+          "start": 72.84,
+          "end": 79.03,
+          "text": "Another way to prevent miscut parts from being passed to inspectors is to look at the pattern of the scrap."
+        },
+        {
+          "start": 80.64,
+          "end": 85.1,
+          "text": "If the scrap pattern changes during the process, then there is something wrong."
+        },
+        {
+          "start": 86.31,
+          "end": 91.45,
+          "text": "Operators should closely look at those parts associated with uneven scrap patterns."
+        },
+        {
+          "start": 92.82,
+          "end": 97.28,
+          "text": "If the operator needs further instruction, they should call the team lead."
+        },
+        {
+          "start": 99.48,
+          "end": 104.55,
+          "text": "If the process is going well, the pattern of the die-cutting process will look like this."
+        },
+        {
+          "start": 106.59,
+          "end": 115.84,
+          "text": "If the process is not going well (miscut issue), the pattern of the die-cutting process will look like this. The pattern will have smaller scrap pieces."
+        }
+      ]
+    }
+  ]
+}

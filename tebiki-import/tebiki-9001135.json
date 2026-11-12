@@ -1,0 +1,142 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9001135,
+  "title": "Operations Screens Part 1 of 3",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Operations Screens Part 1 of 3",
+      "videoId": "01M2R9BWX1JRV9WT6MCQATW55R",
+      "duration": 171.33,
+      "description": "Operations Screens\nBasic Introduction Only\nOperation View Screen\nThis is the \"Output Setting.\" Output Setting is the target number of hits.\nThis is the \"Current Output.\" Current Output is the current number of hits.\nThis is the \"Cutting Depth.\" Cutting Depth is how deep the blade will push into the belt material to cut.\nThis is the \"Alarm Reset\" button. This button will stop the alarm sound of the machine.\nManual Operation View Screen\nThese are the \"Back Clamp\" buttons. The back clamp is located on the back side of the machine.\nThis is the back clamp.\nPressing the Back Clamp \"Forward\" button will move the Back Clamp towards the front of the machine.\nThe Back Clamp will stop moving when it has gone as far forward as possible.\nThis alert will show on the display: \"Hit the Front limit.\" This means that if you press the \"Forward\" button again, nothing will happen.\nPressing the Back Clamp \"Backward\" button will move the Back Clamp towards the rear of the machine.\nThe Back Clamp will stop moving when it has moved as far back as possible.\nThis alert will show on the display: \"Hit the Rear limit.\" This means that if you press the \"Backward\" button again, nothing will happen.\nIn addition to moving forward and backward, the Back Clamp can move up and down.\nPressing the Back Clamp \"Up\" button will raise the clamp.\nPressing the Back Clamp \"Down\" button will lower the clamp.\nThis is the \"up\" position.\nThis is the \"down\" position.\nThese are the Front Clamp buttons. The Front Clamp is stationary: It can only move up and down.\nThis is the Front Clamp.\nPressing the Front Clamp \"Up\" button will raise the clamp.\nPressing \"Down\" will lower it.",
+      "cues": [
+        {
+          "start": 0.18,
+          "end": 2.08,
+          "text": "Operations Screens"
+        },
+        {
+          "start": 2.85,
+          "end": 4.86,
+          "text": "Basic Introduction Only"
+        },
+        {
+          "start": 6.08,
+          "end": 8.02,
+          "text": "Operation View Screen"
+        },
+        {
+          "start": 8.74,
+          "end": 13.78,
+          "text": "This is the \"Output Setting.\" Output Setting is the target number of hits."
+        },
+        {
+          "start": 14.97,
+          "end": 19.9,
+          "text": "This is the \"Current Output.\" Current Output is the current number of hits."
+        },
+        {
+          "start": 20.61,
+          "end": 26.94,
+          "text": "This is the \"Cutting Depth.\" Cutting Depth is how deep the blade will push into the belt material to cut."
+        },
+        {
+          "start": 27.72,
+          "end": 33.51,
+          "text": "This is the \"Alarm Reset\" button. This button will stop the alarm sound of the machine."
+        },
+        {
+          "start": 34.92,
+          "end": 37.18,
+          "text": "Manual Operation View Screen"
+        },
+        {
+          "start": 39.6,
+          "end": 45.25,
+          "text": "These are the \"Back Clamp\" buttons. The back clamp is located on the back side of the machine."
+        },
+        {
+          "start": 50.5,
+          "end": 52.4,
+          "text": "This is the back clamp."
+        },
+        {
+          "start": 55.54,
+          "end": 61.19,
+          "text": "Pressing the Back Clamp \"Forward\" button will move the Back Clamp towards the front of the machine."
+        },
+        {
+          "start": 72.44,
+          "end": 76.97,
+          "text": "The Back Clamp will stop moving when it has gone as far forward as possible."
+        },
+        {
+          "start": 77.9,
+          "end": 86.03,
+          "text": "This alert will show on the display: \"Hit the Front limit.\" This means that if you press the \"Forward\" button again, nothing will happen."
+        },
+        {
+          "start": 87.88,
+          "end": 93.85,
+          "text": "Pressing the Back Clamp \"Backward\" button will move the Back Clamp towards the rear of the machine."
+        },
+        {
+          "start": 107.96,
+          "end": 112.46,
+          "text": "The Back Clamp will stop moving when it has moved as far back as possible."
+        },
+        {
+          "start": 113.4,
+          "end": 121.64,
+          "text": "This alert will show on the display: \"Hit the Rear limit.\" This means that if you press the \"Backward\" button again, nothing will happen."
+        },
+        {
+          "start": 124.78,
+          "end": 130.28,
+          "text": "In addition to moving forward and backward, the Back Clamp can move up and down."
+        },
+        {
+          "start": 132.52,
+          "end": 136.01,
+          "text": "Pressing the Back Clamp \"Up\" button will raise the clamp."
+        },
+        {
+          "start": 137.16,
+          "end": 140.68,
+          "text": "Pressing the Back Clamp \"Down\" button will lower the clamp."
+        },
+        {
+          "start": 144.56,
+          "end": 146.54,
+          "text": "This is the \"up\" position."
+        },
+        {
+          "start": 149.06,
+          "end": 151.14,
+          "text": "This is the \"down\" position."
+        },
+        {
+          "start": 154.12,
+          "end": 160.56,
+          "text": "These are the Front Clamp buttons. The Front Clamp is stationary: It can only move up and down."
+        },
+        {
+          "start": 161.72,
+          "end": 163.62,
+          "text": "This is the Front Clamp."
+        },
+        {
+          "start": 164.2,
+          "end": 167.72,
+          "text": "Pressing the Front Clamp \"Up\" button will raise the clamp."
+        },
+        {
+          "start": 168.01,
+          "end": 170.13,
+          "text": "Pressing \"Down\" will lower it."
+        }
+      ]
+    }
+  ]
+}

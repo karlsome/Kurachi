@@ -1,0 +1,251 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9051128,
+  "title": "Cutting and Stamping Work Order",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Introduction",
+      "videoId": "01M3A7CJYG2D2RT9FWDVCBBZ62",
+      "duration": 245.1,
+      "description": "This video will show you how to fill out a work order form (schedule).\nThis is the facility location. Here, it's \"Warehouse, Indianapolis Plant.\"\nThis is the part description. Here, it's \"B-Pillar Molt Black RH.\"\nThis is the customer program number. Here, it's \"2 4 1 B.\"\nThis is the control number. Here's it's \"W O - 001189.\"\nThis is the scheduled completion date. Here, it's November 15, 2024.\nThis is the work order creation date. Here's it's November 6, 2024.\nThis is the machine assignment. Here, it's AOLs 4 and 5.\nThis section contains the raw material information.\nThis column shows the raw materials and packaging to be used.\nThis column shows the target usages.\nThis column shows the unit of measurement.\nThe machine operator will write the lot numbers from the material labels here.\nIn this column, the machine operator will write the total amount of material used.\nThis section contains operation information.\nDie mold numbers will only appear when running a machine that uses die molds.\nThese are from two different work orders.\nThis work order's operation information does not include a die mold number.\nThis is because this work order for AOL machines 4 and 5. AOL machines do not use die molds to cut parts.\nThis work order's operation information does include a die mold number.\nThis is because this work order is for the Kuntai machine, which uses die molds to cut parts.\nThis information shows the amount of time needed to complete the schedule per the cycle time in the \"E R P A G\" system.\nThe first work order will take 0 days, 3 hours, and 45 minutes to complete.\nThe second work order will take 0 days, 5 hours, and 0 minutes to complete.\nThis is the Finished Product Information section.\nThis is the finished product part number.\nIt must match the label being placed on the box.\nPart numbers ending in \"-W I P\" must always get blue labels unless otherwise directed.\nThis area shows the target quantity of good finished parts. Here, the target quantity is: 3 boxes (each with 200 pieces) for a total of 600 pieces.\nThis is the \"Time Information\" section of the work order.\nWrite in the date production started.\nWrite in the time production started.\nWrite in the date production finished.\nWrite in the time production finished, including any downtime.\nThis is the \"Process Inspection Information\" section.\nThe First-Off inspector will write his or her initials here.\nEvery two hours during production, the machine operator must stop production and call an inspector for a \"two-hour check.\"\nThe inspector will write his or her initials here.\nWhen the work order has been completed, or when production ends for the day, the machine operator must call for an inspector to complete a \"Last-Off\" inspection. The inspector will write his or her initials here.",
+      "cues": [
+        {
+          "start": 0.31,
+          "end": 4.55,
+          "text": "This video will show you how to fill out a work order form (schedule)."
+        },
+        {
+          "start": 5.21,
+          "end": 10.89,
+          "text": "This is the facility location. Here, it's \"Warehouse, Indianapolis Plant.\""
+        },
+        {
+          "start": 11.48,
+          "end": 16.41,
+          "text": "This is the part description. Here, it's \"B-Pillar Molt Black RH.\""
+        },
+        {
+          "start": 17.39,
+          "end": 22.17,
+          "text": "This is the customer program number. Here, it's \"2 4 1 B.\""
+        },
+        {
+          "start": 22.96,
+          "end": 29,
+          "text": "This is the control number. Here's it's \"W O - 001189.\""
+        },
+        {
+          "start": 29.88,
+          "end": 35.49,
+          "text": "This is the scheduled completion date. Here, it's November 15, 2024."
+        },
+        {
+          "start": 36.34,
+          "end": 41.63,
+          "text": "This is the work order creation date. Here's it's November 6, 2024."
+        },
+        {
+          "start": 42.57,
+          "end": 47.35,
+          "text": "This is the machine assignment. Here, it's AOLs 4 and 5."
+        },
+        {
+          "start": 49.37,
+          "end": 52.82,
+          "text": "This section contains the raw material information."
+        },
+        {
+          "start": 53.62,
+          "end": 57.61,
+          "text": "This column shows the raw materials and packaging to be used."
+        },
+        {
+          "start": 58.65,
+          "end": 61.35,
+          "text": "This column shows the target usages."
+        },
+        {
+          "start": 62.42,
+          "end": 65.08,
+          "text": "This column shows the unit of measurement."
+        },
+        {
+          "start": 65.86,
+          "end": 70.36,
+          "text": "The machine operator will write the lot numbers from the material labels here."
+        },
+        {
+          "start": 71.1,
+          "end": 76.93,
+          "text": "In this column, the machine operator will write the total amount of material used."
+        },
+        {
+          "start": 78.1,
+          "end": 81.12,
+          "text": "This section contains operation information."
+        },
+        {
+          "start": 82.05,
+          "end": 86.98,
+          "text": "Die mold numbers will only appear when running a machine that uses die molds."
+        },
+        {
+          "start": 88.23,
+          "end": 90.67,
+          "text": "These are from two different work orders."
+        },
+        {
+          "start": 91.84,
+          "end": 96.66,
+          "text": "This work order's operation information does not include a die mold number."
+        },
+        {
+          "start": 97.66,
+          "end": 105.54,
+          "text": "This is because this work order for AOL machines 4 and 5. AOL machines do not use die molds to cut parts."
+        },
+        {
+          "start": 106.91,
+          "end": 111.44,
+          "text": "This work order's operation information does include a die mold number."
+        },
+        {
+          "start": 112.97,
+          "end": 118.55,
+          "text": "This is because this work order is for the Kuntai machine, which uses die molds to cut parts."
+        },
+        {
+          "start": 120.22,
+          "end": 127.31,
+          "text": "This information shows the amount of time needed to complete the schedule per the cycle time in the \"E R P A G\" system."
+        },
+        {
+          "start": 128.03,
+          "end": 134.22,
+          "text": "The first work order will take 0 days, 3 hours, and 45 minutes to complete."
+        },
+        {
+          "start": 135.63,
+          "end": 141.35,
+          "text": "The second work order will take 0 days, 5 hours, and 0 minutes to complete."
+        },
+        {
+          "start": 143.5,
+          "end": 146.84,
+          "text": "This is the Finished Product Information section."
+        },
+        {
+          "start": 148.92,
+          "end": 151.83,
+          "text": "This is the finished product part number."
+        },
+        {
+          "start": 153.2,
+          "end": 156.4,
+          "text": "It must match the label being placed on the box."
+        },
+        {
+          "start": 158.78,
+          "end": 164.97,
+          "text": "Part numbers ending in \"-W I P\" must always get blue labels unless otherwise directed."
+        },
+        {
+          "start": 166.72,
+          "end": 178.49,
+          "text": "This area shows the target quantity of good finished parts. Here, the target quantity is: 3 boxes (each with 200 pieces) for a total of 600 pieces."
+        },
+        {
+          "start": 181.7,
+          "end": 185.19,
+          "text": "This is the \"Time Information\" section of the work order."
+        },
+        {
+          "start": 186.2,
+          "end": 188.57,
+          "text": "Write in the date production started."
+        },
+        {
+          "start": 190.98,
+          "end": 193.32,
+          "text": "Write in the time production started."
+        },
+        {
+          "start": 196,
+          "end": 198.44,
+          "text": "Write in the date production finished."
+        },
+        {
+          "start": 201.5,
+          "end": 205.38,
+          "text": "Write in the time production finished, including any downtime."
+        },
+        {
+          "start": 207.58,
+          "end": 210.92,
+          "text": "This is the \"Process Inspection Information\" section."
+        },
+        {
+          "start": 211.78,
+          "end": 215.59,
+          "text": "The First-Off inspector will write his or her initials here."
+        },
+        {
+          "start": 216.54,
+          "end": 224.2,
+          "text": "Every two hours during production, the machine operator must stop production and call an inspector for a \"two-hour check.\""
+        },
+        {
+          "start": 225.11,
+          "end": 228.35,
+          "text": "The inspector will write his or her initials here."
+        },
+        {
+          "start": 229.68,
+          "end": 242.85,
+          "text": "When the work order has been completed, or when production ends for the day, the machine operator must call for an inspector to complete a \"Last-Off\" inspection. The inspector will write his or her initials here."
+        }
+      ]
+    },
+    {
+      "position": 1,
+      "title": "1. Process Information Section",
+      "videoId": "01M3A80P4MW2VQPGW2NYWWH7G9",
+      "duration": 71.57,
+      "description": "This is the \"Process Information\" section.\nThis is the \"Produced Quantity\" box. Write in the quantity of the good finished parts produced. Do not include any non-conforming parts or partial quantities from previous production days.\nThis is the \"Partial from Spare Quantity\" box. Write in the partial box quantity used at the beginning of the production run. Do not add this number to the \"Produced Quantity.\"\nThis is the \"non-conforming (Internal)\" box. Write in the total number of non-conforming parts that were created during the production run. Do not add this number to the \"Produced Quantity.\"\nThis is the \"Non-conforming (Supplier)\" box. Write in the total number of nonconforming parts that was created during the production run. Do not add this number to the \"Produced Quantity.\"\nThis is the \"Operator\" box. The machine operator will write his or her name here.",
+      "cues": [
+        {
+          "start": 0.47,
+          "end": 3.24,
+          "text": "This is the \"Process Information\" section."
+        },
+        {
+          "start": 4.67,
+          "end": 15.83,
+          "text": "This is the \"Produced Quantity\" box. Write in the quantity of the good finished parts produced. Do not include any non-conforming parts or partial quantities from previous production days."
+        },
+        {
+          "start": 17.38,
+          "end": 27.53,
+          "text": "This is the \"Partial from Spare Quantity\" box. Write in the partial box quantity used at the beginning of the production run. Do not add this number to the \"Produced Quantity.\""
+        },
+        {
+          "start": 30.63,
+          "end": 41.75,
+          "text": "This is the \"non-conforming (Internal)\" box. Write in the total number of non-conforming parts that were created during the production run. Do not add this number to the \"Produced Quantity.\""
+        },
+        {
+          "start": 45.52,
+          "end": 56.57,
+          "text": "This is the \"Non-conforming (Supplier)\" box. Write in the total number of nonconforming parts that was created during the production run. Do not add this number to the \"Produced Quantity.\""
+        },
+        {
+          "start": 61.24,
+          "end": 66.56,
+          "text": "This is the \"Operator\" box. The machine operator will write his or her name here."
+        }
+      ]
+    }
+  ]
+}

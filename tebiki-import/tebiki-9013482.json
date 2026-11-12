@@ -1,0 +1,182 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9013482,
+  "title": "Standard Operating Procedure: Kuntai Die Cutting Operation Procedures",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Standard Operating Procedure: Kuntai Die Cutting Operation Procedures",
+      "videoId": "01M2TP4KS267ANPGM6DZGAPRQ2",
+      "duration": 232.37,
+      "description": "Standard Operating Procedure: Kuntai Die Cutting Operation Procedures\nPurpose: These operating procedures are intended for the use by operators responsible for the Kuntai die cutting press.\nDefinition: \"Kuntai\" is the manufacturing company of the cutting press. This press is classified as a \"roll to die cut\" machine.\nDefinition: Die Board - Is the board with the cutting blades imbedded into the board.\nResponsibilities: Machine Operator\nDie installation and adjustment when applicable\nMaintaining Tools\nAll control panel operations\nResponsible for achieving machine efficiency rates.\nLoading material into the machine.\nIdentifying proper material from machine schedule.\nRecording production results into the tablet provided.\nTablet entries include: runtime, material usage (W I P and dunnage), and finished good piece counts.\nResponsibilities: Quality Inspector\nIt is the inspector's responsibility to check all parts as defined in the QC Check point of the Part Specification Sheet and to NOTIFY the machine operator if a quality issue exists.\nThe operator will be producing at the defined production rate for the machine, and it is the inspector's responsibility to remove parts from the Machine Operator's area so the Operator can run at the defined rate.\nTHE OPERATOR IS NOT TO SLOW TO THE RATE OF THE INSPECTOR.\nResponsibilities: Team Leaders\nMake sure that Machine Operators are properly trained on the equipment.\nCoordinate 5 S activities.\nRequest maintenance repairs to equipment through maintenance application.\nMonitor machine efficiencies and act as needed when underperforming.\nResponsibilities: Quality Department\nResponsible for decisions in instances where defective parts are made.\nWill request input from General Manager when needed.\nResponsible for creating, posting, and maintaining the Part Specification Sheets.\nResponsibilities: Maintenance\nSupports production operations as needed.\nResolve any equipment operational issues the operator may encounter.\nMachine PM's and needed repairs.\nResponsibilities: Safety\nSafety glasses are to always be worn.\nHands must be always kept out of the press head area.",
+      "cues": [
+        {
+          "start": 0.35,
+          "end": 5.31,
+          "text": "Standard Operating Procedure: Kuntai Die Cutting Operation Procedures"
+        },
+        {
+          "start": 6.78,
+          "end": 14.23,
+          "text": "Purpose: These operating procedures are intended for the use by operators responsible for the Kuntai die cutting press."
+        },
+        {
+          "start": 15.37,
+          "end": 24.08,
+          "text": "Definition: \"Kuntai\" is the manufacturing company of the cutting press. This press is classified as a \"roll to die cut\" machine."
+        },
+        {
+          "start": 26.49,
+          "end": 31.85,
+          "text": "Definition: Die Board - Is the board with the cutting blades imbedded into the board."
+        },
+        {
+          "start": 32.47,
+          "end": 35.6,
+          "text": "Responsibilities: Machine Operator"
+        },
+        {
+          "start": 36.49,
+          "end": 39.65,
+          "text": "Die installation and adjustment when applicable"
+        },
+        {
+          "start": 39.85,
+          "end": 41.75,
+          "text": "Maintaining Tools"
+        },
+        {
+          "start": 41.92,
+          "end": 44.26,
+          "text": "All control panel operations"
+        },
+        {
+          "start": 44.43,
+          "end": 47.92,
+          "text": "Responsible for achieving machine efficiency rates."
+        },
+        {
+          "start": 48.17,
+          "end": 50.54,
+          "text": "Loading material into the machine."
+        },
+        {
+          "start": 50.72,
+          "end": 54.06,
+          "text": "Identifying proper material from machine schedule."
+        },
+        {
+          "start": 54.24,
+          "end": 57.76,
+          "text": "Recording production results into the tablet provided."
+        },
+        {
+          "start": 57.97,
+          "end": 66.14,
+          "text": "Tablet entries include: runtime, material usage (W I P and dunnage), and finished good piece counts."
+        },
+        {
+          "start": 67.76,
+          "end": 70.96,
+          "text": "Responsibilities: Quality Inspector"
+        },
+        {
+          "start": 72.76,
+          "end": 83.27,
+          "text": "It is the inspector's responsibility to check all parts as defined in the QC Check point of the Part Specification Sheet and to NOTIFY the machine operator if a quality issue exists."
+        },
+        {
+          "start": 86.88,
+          "end": 98.76,
+          "text": "The operator will be producing at the defined production rate for the machine, and it is the inspector's responsibility to remove parts from the Machine Operator's area so the Operator can run at the defined rate."
+        },
+        {
+          "start": 103.24,
+          "end": 106.73,
+          "text": "THE OPERATOR IS NOT TO SLOW TO THE RATE OF THE INSPECTOR."
+        },
+        {
+          "start": 111.84,
+          "end": 114.86,
+          "text": "Responsibilities: Team Leaders"
+        },
+        {
+          "start": 118.38,
+          "end": 122.7,
+          "text": "Make sure that Machine Operators are properly trained on the equipment."
+        },
+        {
+          "start": 125.97,
+          "end": 128.31,
+          "text": "Coordinate 5 S activities."
+        },
+        {
+          "start": 131.08,
+          "end": 135.32,
+          "text": "Request maintenance repairs to equipment through maintenance application."
+        },
+        {
+          "start": 138.32,
+          "end": 142.85,
+          "text": "Monitor machine efficiencies and act as needed when underperforming."
+        },
+        {
+          "start": 147.76,
+          "end": 150.89,
+          "text": "Responsibilities: Quality Department"
+        },
+        {
+          "start": 156,
+          "end": 160.32,
+          "text": "Responsible for decisions in instances where defective parts are made."
+        },
+        {
+          "start": 164.86,
+          "end": 168.24,
+          "text": "Will request input from General Manager when needed."
+        },
+        {
+          "start": 172.82,
+          "end": 178.5,
+          "text": "Responsible for creating, posting, and maintaining the Part Specification Sheets."
+        },
+        {
+          "start": 183.99,
+          "end": 186.76,
+          "text": "Responsibilities: Maintenance"
+        },
+        {
+          "start": 190.51,
+          "end": 193.35,
+          "text": "Supports production operations as needed."
+        },
+        {
+          "start": 198.61,
+          "end": 202.93,
+          "text": "Resolve any equipment operational issues the operator may encounter."
+        },
+        {
+          "start": 208.49,
+          "end": 211.04,
+          "text": "Machine PM's and needed repairs."
+        },
+        {
+          "start": 216.63,
+          "end": 219.11,
+          "text": "Responsibilities: Safety"
+        },
+        {
+          "start": 220.47,
+          "end": 223.35,
+          "text": "Safety glasses are to always be worn."
+        },
+        {
+          "start": 227.15,
+          "end": 230.42,
+          "text": "Hands must be always kept out of the press head area."
+        }
+      ]
+    }
+  ]
+}

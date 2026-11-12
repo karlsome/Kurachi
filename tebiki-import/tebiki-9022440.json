@@ -1,0 +1,67 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9022440,
+  "title": "Quality Inspection",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "1. The quality inspector must perform the inspection with the bench lights on.",
+      "videoId": "01M32D1K0XX3VP704E6NYWPE2J",
+      "duration": 105.9,
+      "description": "Quality Inspection\nThe quality inspector must perform the inspection with the bench lights on.\nInspector will inspect each piece per the designated guidelines of the Part Specification Sheet (P S S).\nThe P S S is located here.\nThese are Part Specification Sheets (PSS).\nThe P S S includes inspection instructions for the Quality Inspector.\nIn addition to inspection, Quality Inspectors pack inspected parts for shipping to the customer. Packing specifications are provided on the P S S.\nThe P S S provides Quality Control (Q C) checkpoints to assist inspectors with quality checks.\nUpon completion of the inspection, the inspector will do the final packing of the parts.\nYou will stamp your number on the shipping label. If the inspector doesn't have a stamp, the inspector must sign their initials on the shipping label.",
+      "cues": [
+        {
+          "start": 0.48,
+          "end": 2.38,
+          "text": "Quality Inspection"
+        },
+        {
+          "start": 5.3,
+          "end": 9.87,
+          "text": "The quality inspector must perform the inspection with the bench lights on."
+        },
+        {
+          "start": 12.1,
+          "end": 18.9,
+          "text": "Inspector will inspect each piece per the designated guidelines of the Part Specification Sheet (P S S)."
+        },
+        {
+          "start": 21.26,
+          "end": 23.7,
+          "text": "The P S S is located here."
+        },
+        {
+          "start": 28.04,
+          "end": 30.95,
+          "text": "These are Part Specification Sheets (PSS)."
+        },
+        {
+          "start": 40.2,
+          "end": 44.59,
+          "text": "The P S S includes inspection instructions for the Quality Inspector."
+        },
+        {
+          "start": 51.76,
+          "end": 61.69,
+          "text": "In addition to inspection, Quality Inspectors pack inspected parts for shipping to the customer. Packing specifications are provided on the P S S."
+        },
+        {
+          "start": 68.04,
+          "end": 75.27,
+          "text": "The P S S provides Quality Control (Q C) checkpoints to assist inspectors with quality checks."
+        },
+        {
+          "start": 78.66,
+          "end": 84.13,
+          "text": "Upon completion of the inspection, the inspector will do the final packing of the parts."
+        },
+        {
+          "start": 92.41,
+          "end": 100.47,
+          "text": "You will stamp your number on the shipping label. If the inspector doesn't have a stamp, the inspector must sign their initials on the shipping label."
+        }
+      ]
+    }
+  ]
+}

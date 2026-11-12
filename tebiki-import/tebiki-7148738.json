@@ -1,0 +1,107 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 7148738,
+  "title": "Die Mold Installation Procedures",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Die Mold Installation Procedures",
+      "videoId": "01M2QXTNHSGRGACFCK212QPEDC",
+      "duration": 213.5,
+      "description": "Die Mold Installation Procedures\nCheck the Part Specification Sheet (PSS) for the die mold number.\nThese are Part Specification Sheets (PSS).\nThis is the die mold number for the part shown on the PSS.\nHere, the die mold number is 845.\nGo to the die mold storage area and locate die mold 8 4 5.\nThe die mold number is written on a label located on the side of the die mold.\nBring the die mold to the front of the machine.\nLift the die mold and feed it into the side rails of the press head. (Mold should be centered in all directions.)\nTo lock the die mold in place, you will first raise the side rails. Second, you will move the center clamp to the closed position.\nThese are the side rails. They are in the down position.\nThis is the center clamp. It's in the open position.\nGo to the \"Manual Operation View\" screen on the computer terminal.\nLocate the \"Mould Clamp\" and \"Middle Hook\" buttons.\nThis is the \"Mould Clamp\" button. This button's status is: \"lose,\" meaning \"loose\" or \"down.\" This means that the side rails are in the \"down\" position.\nThis is the \"Middle Hook\" button. Pressing this button will lock or unlock the center clamp. The button's status is \"lose,\" which means \"loose\" or \"unlocked.\"\nPress the \"Mould Clamp\" button. The status will change to \"clamp,\" meaning \"locked.\"\nPress the \"Middle Hook\" button. The status will change from \"lose\" to \"clamp,\" meaning the center clamp is in the \"locked\" position.",
+      "cues": [
+        {
+          "start": 0.62,
+          "end": 3.17,
+          "text": "Die Mold Installation Procedures"
+        },
+        {
+          "start": 6.44,
+          "end": 11.43,
+          "text": "Check the Part Specification Sheet (PSS) for the die mold number."
+        },
+        {
+          "start": 18.4,
+          "end": 21.71,
+          "text": "These are Part Specification Sheets (PSS)."
+        },
+        {
+          "start": 37.02,
+          "end": 41.1,
+          "text": "This is the die mold number for the part shown on the PSS."
+        },
+        {
+          "start": 43.86,
+          "end": 47.29,
+          "text": "Here, the die mold number is 845."
+        },
+        {
+          "start": 51.9,
+          "end": 56.94,
+          "text": "Go to the die mold storage area and locate die mold 8 4 5."
+        },
+        {
+          "start": 80.52,
+          "end": 85.46,
+          "text": "The die mold number is written on a label located on the side of the die mold."
+        },
+        {
+          "start": 87.75,
+          "end": 90.48,
+          "text": "Bring the die mold to the front of the machine."
+        },
+        {
+          "start": 94.74,
+          "end": 101.43,
+          "text": "Lift the die mold and feed it into the side rails of the press head. (Mold should be centered in all directions.)"
+        },
+        {
+          "start": 133.01,
+          "end": 140.96,
+          "text": "To lock the die mold in place, you will first raise the side rails. Second, you will move the center clamp to the closed position."
+        },
+        {
+          "start": 142.21,
+          "end": 145.77,
+          "text": "These are the side rails. They are in the down position."
+        },
+        {
+          "start": 146.38,
+          "end": 150.12,
+          "text": "This is the center clamp. It's in the open position."
+        },
+        {
+          "start": 151.5,
+          "end": 155.53,
+          "text": "Go to the \"Manual Operation View\" screen on the computer terminal."
+        },
+        {
+          "start": 156.36,
+          "end": 159.92,
+          "text": "Locate the \"Mould Clamp\" and \"Middle Hook\" buttons."
+        },
+        {
+          "start": 160.61,
+          "end": 170.65,
+          "text": "This is the \"Mould Clamp\" button. This button's status is: \"lose,\" meaning \"loose\" or \"down.\" This means that the side rails are in the \"down\" position."
+        },
+        {
+          "start": 172.4,
+          "end": 182.73,
+          "text": "This is the \"Middle Hook\" button. Pressing this button will lock or unlock the center clamp. The button's status is \"lose,\" which means \"loose\" or \"unlocked.\""
+        },
+        {
+          "start": 185.46,
+          "end": 191.07,
+          "text": "Press the \"Mould Clamp\" button. The status will change to \"clamp,\" meaning \"locked.\""
+        },
+        {
+          "start": 196.58,
+          "end": 205.07,
+          "text": "Press the \"Middle Hook\" button. The status will change from \"lose\" to \"clamp,\" meaning the center clamp is in the \"locked\" position."
+        }
+      ]
+    }
+  ]
+}

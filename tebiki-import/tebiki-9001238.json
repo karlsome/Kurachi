@@ -1,0 +1,157 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9001238,
+  "title": "Operation Screens Part 2 of 3",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Operation Screens Part 2 of 3",
+      "videoId": "01M2T9W1H6XPK30FR4V0B47AE8",
+      "duration": 248.73,
+      "description": "This is the Middle Hook button. It controls the machine's two center die mold hooks.\nThis is the front middle hook.\nThe rear middle hook is located on the back side of the machine.\nThis is the rear middle hook.\nThe middle hooks secure a die mold in place after it's been loaded onto the side rails and raised up to the press head.\nMost of the die molds have two areas (one in the front and one in the back) on the blade-side of the mold where the Kuntai middle hooks can fit.\nThese carved out areas allow the middle hooks to hold the molds in place during production.\nWithout the middle hooks to hold the die molds in place, the molds would change position as the press head moves up and down.\nPressing the Middle Hook button will change the condition of both the front and rear middle hooks at the same time.\nHere, both Middle Hooks are currently in the \"clamp\" position, meaning that they are \"down\" or \"locked.\"\nThe front middle hook is in the \"clamp\" condition.\nThe rear middle hook is in the \"clamp\" condition.\nPressing the Middle Hook button will change the hooks' condition from \"clamp\" to \"lose,\" meaning that the hook will be \"loose\" or \"open, making it possible to load or unload a  die mold.\nFront Middle Hook\nRear Middle Hook\nPress button again for \"clamp\" condition.\nFront Middle Hook\nRear Middle Hook\nThis is the \"Mould Clamp\" button. It controls the clamping of the side rails that hold the die mold.\nThere are two conditions: \"clamp\" and \"lose.\" \"clamp\" means the side rails are up. \"lose,\" or \"loose,\" means that the side rails are down. \nTo load or unload a die mold, the side rails must be in the \"lose\" condition. To cut parts, the side rails must be in the \"clamp\" condition.\nThe two side rails are located mostly on the underside of the press head.\nThis is the right-side rail. It's in the \"clamp\" condition.\nThis is the left-side rail. It's also in the \"clamp\" condition. The right- and left-side rails are always in the same condition together: \"clamp\" or \"lose.\"\nIf you press the button when it's in the \"clamp\" condition, it will change to \"lose.\"\nThe side rails change condition from \"clamp\" to \"lose.\"\nIf you press the button when it's in the \"lose\" condition, it will change to \"clamp.\"\nThe side rails change condition from \"lose\" to \"clamp.\"",
+      "cues": [
+        {
+          "start": 0.72,
+          "end": 6.55,
+          "text": "This is the Middle Hook button. It controls the machine's two center die mold hooks."
+        },
+        {
+          "start": 10.6,
+          "end": 12.83,
+          "text": "This is the front middle hook."
+        },
+        {
+          "start": 18.88,
+          "end": 22.73,
+          "text": "The rear middle hook is located on the back side of the machine."
+        },
+        {
+          "start": 29.44,
+          "end": 31.52,
+          "text": "This is the rear middle hook."
+        },
+        {
+          "start": 40.24,
+          "end": 46.97,
+          "text": "The middle hooks secure a die mold in place after it's been loaded onto the side rails and raised up to the press head."
+        },
+        {
+          "start": 48.37,
+          "end": 56.83,
+          "text": "Most of the die molds have two areas (one in the front and one in the back) on the blade-side of the mold where the Kuntai middle hooks can fit."
+        },
+        {
+          "start": 60.16,
+          "end": 65.3,
+          "text": "These carved out areas allow the middle hooks to hold the molds in place during production."
+        },
+        {
+          "start": 70.36,
+          "end": 77.84,
+          "text": "Without the middle hooks to hold the die molds in place, the molds would change position as the press head moves up and down."
+        },
+        {
+          "start": 79.16,
+          "end": 85.67,
+          "text": "Pressing the Middle Hook button will change the condition of both the front and rear middle hooks at the same time."
+        },
+        {
+          "start": 87.5,
+          "end": 93.9,
+          "text": "Here, both Middle Hooks are currently in the \"clamp\" position, meaning that they are \"down\" or \"locked.\""
+        },
+        {
+          "start": 96.9,
+          "end": 99.88,
+          "text": "The front middle hook is in the \"clamp\" condition."
+        },
+        {
+          "start": 103.84,
+          "end": 106.79,
+          "text": "The rear middle hook is in the \"clamp\" condition."
+        },
+        {
+          "start": 109.86,
+          "end": 121.41,
+          "text": "Pressing the Middle Hook button will change the hooks' condition from \"clamp\" to \"lose,\" meaning that the hook will be \"loose\" or \"open, making it possible to load or unload a  die mold."
+        },
+        {
+          "start": 130.62,
+          "end": 132.52,
+          "text": "Front Middle Hook"
+        },
+        {
+          "start": 137.36,
+          "end": 139.26,
+          "text": "Rear Middle Hook"
+        },
+        {
+          "start": 141.4,
+          "end": 144.35,
+          "text": "Press button again for \"clamp\" condition."
+        },
+        {
+          "start": 146.74,
+          "end": 148.64,
+          "text": "Front Middle Hook"
+        },
+        {
+          "start": 150.68,
+          "end": 152.58,
+          "text": "Rear Middle Hook"
+        },
+        {
+          "start": 156.25,
+          "end": 162.4,
+          "text": "This is the \"Mould Clamp\" button. It controls the clamping of the side rails that hold the die mold."
+        },
+        {
+          "start": 165.95,
+          "end": 175.31,
+          "text": "There are two conditions: \"clamp\" and \"lose.\" \"clamp\" means the side rails are up. \"lose,\" or \"loose,\" means that the side rails are down. "
+        },
+        {
+          "start": 177.3,
+          "end": 187.38,
+          "text": "To load or unload a die mold, the side rails must be in the \"lose\" condition. To cut parts, the side rails must be in the \"clamp\" condition."
+        },
+        {
+          "start": 189.55,
+          "end": 193.72,
+          "text": "The two side rails are located mostly on the underside of the press head."
+        },
+        {
+          "start": 201.97,
+          "end": 205.82,
+          "text": "This is the right-side rail. It's in the \"clamp\" condition."
+        },
+        {
+          "start": 210.49,
+          "end": 220.49,
+          "text": "This is the left-side rail. It's also in the \"clamp\" condition. The right- and left-side rails are always in the same condition together: \"clamp\" or \"lose.\""
+        },
+        {
+          "start": 222.5,
+          "end": 227.5,
+          "text": "If you press the button when it's in the \"clamp\" condition, it will change to \"lose.\""
+        },
+        {
+          "start": 229.28,
+          "end": 233.13,
+          "text": "The side rails change condition from \"clamp\" to \"lose.\""
+        },
+        {
+          "start": 234.18,
+          "end": 239.07,
+          "text": "If you press the button when it's in the \"lose\" condition, it will change to \"clamp.\""
+        },
+        {
+          "start": 242.14,
+          "end": 245.92,
+          "text": "The side rails change condition from \"lose\" to \"clamp.\""
+        }
+      ]
+    }
+  ]
+}

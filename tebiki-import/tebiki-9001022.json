@@ -1,0 +1,82 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9001022,
+  "title": "Settings Check",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Settings Check",
+      "videoId": "01M2R3V2EYSBXQNMFN1HBA5GAF",
+      "duration": 97.97,
+      "description": "Settings Check\nCheck the settings on the Operations Screens.\nThe computer terminal has a touchscreen interface.\nIt's possible to use your finger to navigate through the system. However, it might be easier to use a pen (the bottom side or the cap, not the ink point).\nThe first screen that appears on the computer terminal is this. You can choose Chinese language on the left or English on the right.\nPress the \"Back\" button to move to the previous screen.\nMost settings will be entered into the program of the machine by trained team members.\nOperators should verify the settings first.\nIf settings on the Part Specification Sheet don't match, operator may adjust as needed.\nConfirm the settings with a more experienced machine operator or a Production Team Lead.\nIn addition to the \"Operation View\" screen, the \"Parameter Setting\" screen has additional settings specific to each cutting program.\nFor more information on each screen, see video \"Operations Screens.\"\nFor more information on how to adjust settings, see video \"Adjust Settings.\"",
+      "cues": [
+        {
+          "start": 0.76,
+          "end": 2.66,
+          "text": "Settings Check"
+        },
+        {
+          "start": 7.6,
+          "end": 10.48,
+          "text": "Check the settings on the Operations Screens."
+        },
+        {
+          "start": 12.08,
+          "end": 15.24,
+          "text": "The computer terminal has a touchscreen interface."
+        },
+        {
+          "start": 16.26,
+          "end": 25.72,
+          "text": "It's possible to use your finger to navigate through the system. However, it might be easier to use a pen (the bottom side or the cap, not the ink point)."
+        },
+        {
+          "start": 27.18,
+          "end": 34.66,
+          "text": "The first screen that appears on the computer terminal is this. You can choose Chinese language on the left or English on the right."
+        },
+        {
+          "start": 42.84,
+          "end": 46.26,
+          "text": "Press the \"Back\" button to move to the previous screen."
+        },
+        {
+          "start": 49.66,
+          "end": 54.34,
+          "text": "Most settings will be entered into the program of the machine by trained team members."
+        },
+        {
+          "start": 55.28,
+          "end": 58.37,
+          "text": "Operators should verify the settings first."
+        },
+        {
+          "start": 59.78,
+          "end": 65.21,
+          "text": "If settings on the Part Specification Sheet don't match, operator may adjust as needed."
+        },
+        {
+          "start": 66.44,
+          "end": 71.58,
+          "text": "Confirm the settings with a more experienced machine operator or a Production Team Lead."
+        },
+        {
+          "start": 74.12,
+          "end": 82.25,
+          "text": "In addition to the \"Operation View\" screen, the \"Parameter Setting\" screen has additional settings specific to each cutting program."
+        },
+        {
+          "start": 86.34,
+          "end": 90.98,
+          "text": "For more information on each screen, see video \"Operations Screens.\""
+        },
+        {
+          "start": 91.96,
+          "end": 96.53,
+          "text": "For more information on how to adjust settings, see video \"Adjust Settings.\""
+        }
+      ]
+    }
+  ]
+}

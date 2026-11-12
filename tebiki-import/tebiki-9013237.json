@@ -1,0 +1,47 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9013237,
+  "title": "Operation Screens Part 3 of 3",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Operation Screens Part 3 of 3",
+      "videoId": "01M2TBJ2QDN4A35K6HF0EHBEN0",
+      "duration": 49.17,
+      "description": "Operation Setting Screen\nNavigate to the \"Operation Setting\" screen by pressing the \"Parameter Setting\" button on the \"Operation View\" screen.\nThis is the \"Rising Height\" setting. Rising Height is how far the press head will rise after the cut is finished.\nThis is the \"Auto Feeding\" setting. Auto Feeding is the feeding speed of the material to the next hit.\nThis is the \"Feeding Distance\" setting. Feeding Distance is how far the material will move for the next hit.\nThis is the \"Feeding Delay\" setting. Feeding Delay is how long the machine will wait after making a cut to move the material.",
+      "cues": [
+        {
+          "start": 0.24,
+          "end": 2.32,
+          "text": "Operation Setting Screen"
+        },
+        {
+          "start": 3.44,
+          "end": 10.35,
+          "text": "Navigate to the \"Operation Setting\" screen by pressing the \"Parameter Setting\" button on the \"Operation View\" screen."
+        },
+        {
+          "start": 15.24,
+          "end": 22.15,
+          "text": "This is the \"Rising Height\" setting. Rising Height is how far the press head will rise after the cut is finished."
+        },
+        {
+          "start": 24.58,
+          "end": 30.95,
+          "text": "This is the \"Auto Feeding\" setting. Auto Feeding is the feeding speed of the material to the next hit."
+        },
+        {
+          "start": 32.7,
+          "end": 39.25,
+          "text": "This is the \"Feeding Distance\" setting. Feeding Distance is how far the material will move for the next hit."
+        },
+        {
+          "start": 40.48,
+          "end": 47.89,
+          "text": "This is the \"Feeding Delay\" setting. Feeding Delay is how long the machine will wait after making a cut to move the material."
+        }
+      ]
+    }
+  ]
+}

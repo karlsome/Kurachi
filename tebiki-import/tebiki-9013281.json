@@ -1,0 +1,52 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9013281,
+  "title": "Main Control Panel",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Main Control Panel",
+      "videoId": "01M2TCQ3VZA3R4CDFGWVPNMTV1",
+      "duration": 38.8,
+      "description": "Main Control Panel\nOil pump start\nOil pump stop\nCutting mode\nOnly mold setup options available\nStart Button: to start cutting\nEmergency Stop Button: in case of emergency, press the button quickly",
+      "cues": [
+        {
+          "start": 0.26,
+          "end": 2.16,
+          "text": "Main Control Panel"
+        },
+        {
+          "start": 16.22,
+          "end": 18.12,
+          "text": "Oil pump start"
+        },
+        {
+          "start": 19.6,
+          "end": 21.5,
+          "text": "Oil pump stop"
+        },
+        {
+          "start": 22.44,
+          "end": 24.34,
+          "text": "Cutting mode"
+        },
+        {
+          "start": 25.34,
+          "end": 27.86,
+          "text": "Only mold setup options available"
+        },
+        {
+          "start": 29.06,
+          "end": 31.61,
+          "text": "Start Button: to start cutting"
+        },
+        {
+          "start": 32.54,
+          "end": 37.79,
+          "text": "Emergency Stop Button: in case of emergency, press the button quickly"
+        }
+      ]
+    }
+  ]
+}

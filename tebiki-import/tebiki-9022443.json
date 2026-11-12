@@ -1,0 +1,312 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9022443,
+  "title": "Nonconforming Parts",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Introduction: Nonconforming Parts",
+      "videoId": "01M32FETCRYGKXFK6GYR000FM8",
+      "duration": 42.2,
+      "description": "Nonconforming Parts\nNonconforming parts shall be separated and placed in the non-conforming area.\nSeparate non-conforming parts from good parts by putting the non-conforming parts in the plastic container found on the ground below the inspection table.\nWhen the work order is finished, take these non-conforming parts to the non-conforming area.\nThe non-conforming area is located behind the Girasol workstations.",
+      "cues": [
+        {
+          "start": 0.74,
+          "end": 2.68,
+          "text": "Nonconforming Parts"
+        },
+        {
+          "start": 4.03,
+          "end": 8.74,
+          "text": "Nonconforming parts shall be separated and placed in the non-conforming area."
+        },
+        {
+          "start": 11.14,
+          "end": 19.6,
+          "text": "Separate non-conforming parts from good parts by putting the non-conforming parts in the plastic container found on the ground below the inspection table."
+        },
+        {
+          "start": 21.64,
+          "end": 27.54,
+          "text": "When the work order is finished, take these non-conforming parts to the non-conforming area."
+        },
+        {
+          "start": 28.5,
+          "end": 33.18,
+          "text": "The non-conforming area is located behind the Girasol workstations."
+        }
+      ]
+    },
+    {
+      "position": 1,
+      "title": "1. Critical Quality Alerts: Defects --- STAIN",
+      "videoId": "01M32GMQ168Y94FX23VSVWWGPK",
+      "duration": 13,
+      "description": "Critical Quality Alerts: Defects\n1. STAIN",
+      "cues": [
+        {
+          "start": 0.66,
+          "end": 3.54,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 8.3,
+          "end": 10.2,
+          "text": "1. STAIN"
+        }
+      ]
+    },
+    {
+      "position": 2,
+      "title": "2. Critical Quality Alerts: Defects --- WRINKLES ON MATERIAL",
+      "videoId": "01M32GPMW7KZENE6XKW7AVFDAM",
+      "duration": 12.8,
+      "description": "Critical Quality Alerts: Defects\n2. Wrinkles on Material",
+      "cues": [
+        {
+          "start": 1.17,
+          "end": 4.05,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 8.23,
+          "end": 10.64,
+          "text": "2. Wrinkles on Material"
+        }
+      ]
+    },
+    {
+      "position": 3,
+      "title": "3. Critical Quality Alerts: Defects --- DEBRIS",
+      "videoId": "01M32GRFC6RMV208KJCQ2FGN9B",
+      "duration": 13.27,
+      "description": "Critical Quality Alerts: Defects\n3. DEBRIS",
+      "cues": [
+        {
+          "start": 1.87,
+          "end": 4.75,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 9.02,
+          "end": 10.92,
+          "text": "3. DEBRIS"
+        }
+      ]
+    },
+    {
+      "position": 4,
+      "title": "4. Critical Quality Alerts: Defects --- EMBEDDED",
+      "videoId": "01M32GT7XQ0DP64X0HG1DD5YQ1",
+      "duration": 13.27,
+      "description": "Critical Quality Alerts: Defects\n4. EMBEDDED",
+      "cues": [
+        {
+          "start": 1.55,
+          "end": 4.43,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 9.14,
+          "end": 11.04,
+          "text": "4. EMBEDDED"
+        }
+      ]
+    },
+    {
+      "position": 5,
+      "title": "5. Critical Quality Alerts: Defects --- WRINKLES ON MATERIAL",
+      "videoId": "01M32GWMDQ0Q7H3N8B4SD34HHV",
+      "duration": 13.2,
+      "description": "Critical Quality Alerts: Defects\n5. WRINKLES ON MATERIAL",
+      "cues": [
+        {
+          "start": 1.45,
+          "end": 4.33,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 8.67,
+          "end": 11.26,
+          "text": "5. WRINKLES ON MATERIAL"
+        }
+      ]
+    },
+    {
+      "position": 6,
+      "title": "6. Critical Quality Alerts: Defects --- BAD CUT",
+      "videoId": "01M32GYS3YCWXJ4ZM979CBSGVK",
+      "duration": 13.3,
+      "description": "6. BAD CUT",
+      "cues": [
+        {
+          "start": 8.82,
+          "end": 10.76,
+          "text": "6. BAD CUT"
+        }
+      ]
+    },
+    {
+      "position": 7,
+      "title": "7. Critical Quality Alerts: Defects --- WHITE LINES",
+      "videoId": "01M32H2290GWHE1TKN4GSX7F0V",
+      "duration": 13.6,
+      "description": "Critical Quality Alerts: Defects\n7. WHITE LINES",
+      "cues": [
+        {
+          "start": 1.4,
+          "end": 4.28,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 9.17,
+          "end": 11.33,
+          "text": "7. WHITE LINES"
+        }
+      ]
+    },
+    {
+      "position": 8,
+      "title": "8. Critical Quality Alerts: Defects --- CUTTING WRONG",
+      "videoId": "01M32H3DKVM2E8XGZ039PMZE05",
+      "duration": 13.13,
+      "description": "Critical Quality Alerts: Defects\n8. CUTTING WRONG",
+      "cues": [
+        {
+          "start": 1.52,
+          "end": 4.4,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 8.52,
+          "end": 10.5,
+          "text": "8. CUTTING WRONG"
+        }
+      ]
+    },
+    {
+      "position": 9,
+      "title": "9. Critical Quality Alerts: Defects --- BLACK OR RED LINE",
+      "videoId": "01M32H6FXKDEDMWXA97XVFFFV1",
+      "duration": 13.57,
+      "description": "Critical Quality Alerts: Defects\n9. BLACK OR RED LINE",
+      "cues": [
+        {
+          "start": 2.16,
+          "end": 5.04,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 9.19,
+          "end": 11.85,
+          "text": "9. BLACK OR RED LINE"
+        }
+      ]
+    },
+    {
+      "position": 10,
+      "title": "10. Critical Quality Alerts: Defects --- WRINKLES PSA",
+      "videoId": "01M32H9F30V6DJZAEYADP8K6R5",
+      "duration": 13.47,
+      "description": "Critical Quality Alerts: Defects\n10. WRINKLES P S A (Pressure Sensitive Adhesive)",
+      "cues": [
+        {
+          "start": 1.58,
+          "end": 4.46,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 8.64,
+          "end": 12.99,
+          "text": "10. WRINKLES P S A (Pressure Sensitive Adhesive)"
+        }
+      ]
+    },
+    {
+      "position": 11,
+      "title": "11. Critical Quality Alerts: Defects --- MISSING ADHESIVE",
+      "videoId": "01M32HBDR8J7PTEKGJ34KQJQWJ",
+      "duration": 12.17,
+      "description": "11. MISSING ADHESIVE",
+      "cues": [
+        {
+          "start": 7.87,
+          "end": 10.35,
+          "text": "11. MISSING ADHESIVE"
+        }
+      ]
+    },
+    {
+      "position": 12,
+      "title": "12. Critical Quality Alerts: Defects --- LINES ON MATERIAL",
+      "videoId": "01M32HFRC73Q3Z3W221FMTQ6N0",
+      "duration": 13.3,
+      "description": "Critical Quality Alerts: Defects\n12. LINES ON MATERIAL",
+      "cues": [
+        {
+          "start": 1.58,
+          "end": 4.46,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 8.91,
+          "end": 11.39,
+          "text": "12. LINES ON MATERIAL"
+        }
+      ]
+    },
+    {
+      "position": 13,
+      "title": "13. Critical Quality Alerts: Defects --- CARPET WITH WHITE DEBRIS",
+      "videoId": "01M32HJ0H2KW6NJV1DBGV23V9C",
+      "duration": 13.33,
+      "description": "Critical Quality Alerts: Defects\n13. CARPET WITH WHITE DEBRIS",
+      "cues": [
+        {
+          "start": 2.11,
+          "end": 4.99,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 9.01,
+          "end": 12.03,
+          "text": "13. CARPET WITH WHITE DEBRIS"
+        }
+      ]
+    },
+    {
+      "position": 14,
+      "title": "14. Critical Quality Alerts: Defects --- MISSING SEALING",
+      "videoId": "01M32HM16ZQE50GNMW6C22ZDW8",
+      "duration": 13.33,
+      "description": "14. MISSING SEALING",
+      "cues": [
+        {
+          "start": 8.93,
+          "end": 11.48,
+          "text": "14. MISSING SEALING"
+        }
+      ]
+    },
+    {
+      "position": 15,
+      "title": "15. Critical Quality Alerts: Defects --- WRONG DIRECTION",
+      "videoId": "01M32HR8K2Q5YFB9Q6XR5NVJ5H",
+      "duration": 18.47,
+      "description": "Critical Quality Alerts: Defects\n15. WRONG DIRECTION",
+      "cues": [
+        {
+          "start": 1.63,
+          "end": 4.51,
+          "text": "Critical Quality Alerts: Defects"
+        },
+        {
+          "start": 8.96,
+          "end": 11.44,
+          "text": "15. WRONG DIRECTION"
+        }
+      ]
+    }
+  ]
+}

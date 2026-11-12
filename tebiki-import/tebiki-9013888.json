@@ -1,0 +1,97 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9013888,
+  "title": "Procedures: Daily Overview",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Procedures: Daily Overview",
+      "videoId": "01M2TZPYHKJZTWZ3Q4MWR1FVZX",
+      "duration": 140.17,
+      "description": "At the start of each shift, review the production schedule (work order). You will receive the work order from a Production Team Lead.\nVerify that any material that has already been staged is the proper material.\nFor this work order, the required material is: \"T A I - 1590 Thinsulate 60 inches x 675 feet\"\nCheck the material roll's label. If it's a new, unopened roll, the label should be on the roll. If it's an open roll that was previously used, the label should be kept near the roll.\nThis is the pre-staged material's label.\nThis information on the work order matches the information on the material label: T A I - 1 5 9 0\nThis information also matches.\nThis also matches.\nThe pre-staged material's label confirms that it's the proper material for this work order.\nKeep the label with the work order. You'll transfer the lot number shown on the label to the work order.\nVerify the die in the machine matches the requirement from the production schedule, if continuing previous production.\nThe side of the die mold that's already loaded into the machine shows the Mold Number. Here, it's 9 3 3.\nOn the side of the power control cabinet, there's a list of parts and their respective die mold numbers.\nFind the part number on the work order.\nThis is the part number. Find it on the list attached to the side of the cabinet.\nThe pre-loaded die mold is the correct one for this work order.",
+      "cues": [
+        {
+          "start": 0.44,
+          "end": 8.43,
+          "text": "At the start of each shift, review the production schedule (work order). You will receive the work order from a Production Team Lead."
+        },
+        {
+          "start": 9.82,
+          "end": 15.07,
+          "text": "Verify that any material that has already been staged is the proper material."
+        },
+        {
+          "start": 16.16,
+          "end": 25.12,
+          "text": "For this work order, the required material is: \"T A I - 1590 Thinsulate 60 inches x 675 feet\""
+        },
+        {
+          "start": 26.9,
+          "end": 38.6,
+          "text": "Check the material roll's label. If it's a new, unopened roll, the label should be on the roll. If it's an open roll that was previously used, the label should be kept near the roll."
+        },
+        {
+          "start": 40.58,
+          "end": 43.53,
+          "text": "This is the pre-staged material's label."
+        },
+        {
+          "start": 45.02,
+          "end": 52.11,
+          "text": "This information on the work order matches the information on the material label: T A I - 1 5 9 0"
+        },
+        {
+          "start": 59.94,
+          "end": 62.42,
+          "text": "This information also matches."
+        },
+        {
+          "start": 69.98,
+          "end": 71.88,
+          "text": "This also matches."
+        },
+        {
+          "start": 80.88,
+          "end": 86.13,
+          "text": "The pre-staged material's label confirms that it's the proper material for this work order."
+        },
+        {
+          "start": 87.1,
+          "end": 92.93,
+          "text": "Keep the label with the work order. You'll transfer the lot number shown on the label to the work order."
+        },
+        {
+          "start": 97.26,
+          "end": 104.28,
+          "text": "Verify the die in the machine matches the requirement from the production schedule, if continuing previous production."
+        },
+        {
+          "start": 106.02,
+          "end": 112.93,
+          "text": "The side of the die mold that's already loaded into the machine shows the Mold Number. Here, it's 9 3 3."
+        },
+        {
+          "start": 115.56,
+          "end": 121.64,
+          "text": "On the side of the power control cabinet, there's a list of parts and their respective die mold numbers."
+        },
+        {
+          "start": 123.14,
+          "end": 125.4,
+          "text": "Find the part number on the work order."
+        },
+        {
+          "start": 127.96,
+          "end": 132.96,
+          "text": "This is the part number. Find it on the list attached to the side of the cabinet."
+        },
+        {
+          "start": 133.92,
+          "end": 137.77,
+          "text": "The pre-loaded die mold is the correct one for this work order."
+        }
+      ]
+    }
+  ]
+}
