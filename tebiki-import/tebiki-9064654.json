@@ -1,0 +1,77 @@
+{
+  "source": "tebiki",
+  "sourceVideoId": 9064654,
+  "title": "Freya System",
+  "vodBase": "https://pw5ia4.tebiki.jp/vod/v2/599",
+  "steps": [
+    {
+      "position": 0,
+      "title": "Freya System",
+      "videoId": "01M3D0SVAGM9EAVD7ZYJCQBXKM",
+      "duration": 215.5,
+      "description": "Freya System\nThe Freya System is used to manage individual work orders. It's accessed at the machine workstations using the tablets with the orange protective cover.\nLocate the work order form.\nOn the work order form, locate the QR code.\nLocate the tablet.\nLocate the power button on the tablet and press it.\nSwipe the screen to unlock.\nEnter the PIN: 6 3 3 0. Then press OK.\nLocate the Freya System app and tap on in.\nThe home screen will show four options to choose from: NC Cutting Process, Press Cutting Process, SRS, and Inspection.\nIn this example, the work order is for AOL 1. Select \"NC Cutting Process.\"\nSelect \"AOL-1.\"",
+      "cues": [
+        {
+          "start": 0.82,
+          "end": 2.72,
+          "text": "Freya System"
+        },
+        {
+          "start": 4.96,
+          "end": 13.96,
+          "text": "The Freya System is used to manage individual work orders. It's accessed at the machine workstations using the tablets with the orange protective cover."
+        },
+        {
+          "start": 17.7,
+          "end": 19.93,
+          "text": "Locate the work order form."
+        },
+        {
+          "start": 28.52,
+          "end": 31.83,
+          "text": "On the work order form, locate the QR code."
+        },
+        {
+          "start": 47.3,
+          "end": 49.2,
+          "text": "Locate the tablet."
+        },
+        {
+          "start": 55.44,
+          "end": 58.93,
+          "text": "Locate the power button on the tablet and press it."
+        },
+        {
+          "start": 76.71,
+          "end": 79.01,
+          "text": "Swipe the screen to unlock."
+        },
+        {
+          "start": 83.54,
+          "end": 88.04,
+          "text": "Enter the PIN: 6 3 3 0. Then press OK."
+        },
+        {
+          "start": 90.7,
+          "end": 93.83,
+          "text": "Locate the Freya System app and tap on in."
+        },
+        {
+          "start": 107.34,
+          "end": 115.51,
+          "text": "The home screen will show four options to choose from: NC Cutting Process, Press Cutting Process, SRS, and Inspection."
+        },
+        {
+          "start": 116.32,
+          "end": 122.65,
+          "text": "In this example, the work order is for AOL 1. Select \"NC Cutting Process.\""
+        },
+        {
+          "start": 125.5,
+          "end": 127.69,
+          "text": "Select \"AOL-1.\""
+        }
+      ]
+    }
+  ]
+}
