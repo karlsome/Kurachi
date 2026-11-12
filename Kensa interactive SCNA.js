@@ -507,7 +507,7 @@ window.serverURL = serverURL;
         if (!r.ok) throw new Error('HTTP ' + r.status);
         inp = await r.json();
       } catch (e) { return fail(T('kensa_e_server', e.message)); }
-      if (inp.usable === false || !(inp.remaining > 0)) return fail(T('kensa_e_box_empty', q.id));
+      if (inp.usable === false) return fail(T('kensa_e_box_empty', q.id));   // a box with 0 pieces left is still accepted (no restriction)
       kind = inp.kind === 'srs' ? 'srs' : inp.kind === 'dcp' ? 'dcp' : q.kind;
       hinban = inp.品番 || hinban || '';
       qty = toInt(inp.remaining); base = toInt(inp.base);
@@ -516,7 +516,7 @@ window.serverURL = serverURL;
       lotDetails = (inp.lots || []).filter(function (x) { return x && x.lotNumber; }).map(function (x) { return { lotNumber: x.lotNumber, pieces: x.pieces == null ? null : toInt(x.pieces) }; });
     }
     if (!hinban) return fail(T('kensa_e_no_hinban'));
-    if (!qty) return fail(T('kensa_e_no_qty'));
+    if (!qty && !q.id) return fail(T('kensa_e_no_qty'));          // legacy QR needs a quantity; a press box / SRS label may have 0 left
 
     // 3. product: the first scan fixes it, later scans must match
     if (!benchOpen(b)) {
