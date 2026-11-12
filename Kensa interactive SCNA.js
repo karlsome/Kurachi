@@ -1218,8 +1218,32 @@ window.serverURL = serverURL;
   // ------------------------------------------------------------
   var btOn = !!(window.KensaBT && KensaBT.isSupported());
   var btBtn = $('btPrinterBtn'), btState = '';
+  // Pop-up shown while a label goes out over Bluetooth, so the worker waits instead of tapping around. X hides it (printing continues).
+  var btProg = { el: null, dismissed: false };
+  function btProgressUi(st, pct, prev) {
+    if (st !== 'busy') { if (btProg.el) { btProg.el.remove(); btProg.el = null; } return; }
+    if (prev !== 'busy') btProg.dismissed = false;
+    if (btProg.dismissed) return;
+    if (!btProg.el) {
+      var ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;z-index:10020;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;';
+      ov.innerHTML = '<div style="position:relative;background:var(--bg-surface,#fff);color:var(--text-main,#111);border-radius:16px;max-width:420px;width:100%;padding:28px 24px 24px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.4);">' +
+        '<button type="button" data-x aria-label="' + esc(T('kensa_prog_close')) + '" style="position:absolute;top:8px;right:8px;width:44px;height:44px;border:0;background:none;font-size:1.75rem;line-height:1;cursor:pointer;color:var(--text-muted,#666);">✕</button>' +
+        '<div style="font-size:2.25rem;">🖨</div><div style="font-size:1.25rem;font-weight:800;margin:6px 0;">' + esc(T('kensa_prog_title')) + '</div>' +
+        '<div data-pct style="font-size:2.5rem;font-weight:800;margin:8px 0;">0%</div>' +
+        '<div style="height:12px;border-radius:6px;background:var(--border-strong,#ddd);overflow:hidden;"><div data-bar style="height:100%;width:0;background:var(--brand,#16a34a);transition:width .2s;"></div></div>' +
+        '<div style="font-size:.9375rem;font-weight:700;color:var(--text-soft,#555);margin-top:14px;">' + esc(T('kensa_prog_wait')) + '</div></div>';
+      ov.querySelector('[data-x]').onclick = function () { btProg.dismissed = true; ov.remove(); btProg.el = null; };
+      document.body.appendChild(ov); btProg.el = ov;
+    }
+    var v = Math.round((pct || 0) * 100);
+    btProg.el.querySelector('[data-pct]').textContent = v + '%';
+    btProg.el.querySelector('[data-bar]').style.width = v + '%';
+  }
   function setBt(st, pct) {
-    btState = st; if (!btBtn || !btOn) return;
+    var prevBt = btState;
+    btState = st; if (btOn) btProgressUi(st, pct, prevBt);
+    if (!btBtn || !btOn) return;
     var key = { ok: 'kensa_bt_ok', off: 'kensa_bt_off', unpaired: 'kensa_bt_unpaired', busy: 'kensa_bt_busy', connecting: 'kensa_bt_connecting' }[st];
     btBtn.className = 'status-tag bt-tag ' + (st === 'connecting' ? 'busy' : st === 'unpaired' ? 'off' : st);
     btBtn.textContent = T(key) + (st === 'busy' && pct != null ? ' ' + Math.round(pct * 100) + '%' : '');
