@@ -538,7 +538,8 @@ window.serverURL = serverURL;
     lots.forEach(function (x) { if (known.indexOf(x) < 0) known.push(x); });
     b.lotNumbers = known.join(', ');
     save(); refreshAll();
-    toast('✅ ' + T('kensa_t_box_ok', q.id || T('kensa_legacy_short', qty)));
+    if (q.id && !qty) showAlert(T('kensa_w_box_inspected', q.id), T('kensa_warn_title'));      // already fully used: allowed, but the worker is told
+    else toast('✅ ' + T('kensa_t_box_ok', q.id || T('kensa_legacy_short', qty)));
   }
 
   // ---------- Scan tab: product + scanned inputs (chips, x removes an untouched input) ----------
