@@ -538,7 +538,7 @@ window.serverURL = serverURL;
     lots.forEach(function (x) { if (known.indexOf(x) < 0) known.push(x); });
     b.lotNumbers = known.join(', ');
     save(); refreshAll();
-    if (q.id && !qty) showAlert(T('kensa_w_box_inspected', q.id), T('kensa_warn_title'));      // already fully used: allowed, but the worker is told
+    if (q.id && !qty) showInspectedDialog(q.id);      // already fully used: allowed, but the worker is told and can reprint its label
     else toast('✅ ' + T('kensa_t_box_ok', q.id || T('kensa_legacy_short', qty)));
   }
 
@@ -1430,6 +1430,65 @@ window.serverURL = serverURL;
   // Optional printing: the ID is still issued (so the next process can trace the box), but nothing is sent to a printer
   async function registerOnly() {
     return printLabel(toInt(state.bench.cap) ? 'complete' : 'draft', true);
+  }
+
+  // Already-inspected box scanned again: warning with a "Reprint label" button for the Kensa label(s) made from it.
+  // Looks the labels up through the traceability chain (/api/scna-trace) and reprints the same ID, nothing new is registered.
+  function showInspectedDialog(id) {
+    var old = $('kInspDlg'); if (old) old.remove();
+    var ov = document.createElement('div'); ov.id = 'kInspDlg';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10030;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;';
+    ov.innerHTML = '<div style="background:var(--bg-surface,#fff);color:var(--text-main,#111);border-radius:16px;max-width:460px;width:100%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.4);display:flex;flex-direction:column;gap:12px;">' +
+      '<div style="font-size:1.25rem;font-weight:800;color:var(--red,#d92d20);">⚠ ' + esc(T('kensa_warn_title')) + '</div>' +
+      '<div style="white-space:pre-line;font-weight:700;line-height:1.5;">' + esc(T('kensa_w_box_inspected', id)) + '</div>' +
+      '<div data-list style="display:flex;flex-direction:column;gap:8px;"></div>' +
+      '<div style="display:flex;gap:10px;"><button type="button" class="btn btn-secondary btn-grow" data-re></button><button type="button" class="btn btn-primary btn-grow" data-ok>OK</button></div></div>';
+    document.body.appendChild(ov);
+    var list = ov.querySelector('[data-list]'), reBtn = ov.querySelector('[data-re]');
+    reBtn.textContent = '🖨 ' + T('kensa_w_reprint_btn');
+    ov.querySelector('[data-ok]').onclick = function () { ov.remove(); };
+    reBtn.onclick = async function () {
+      if (printing) return;
+      reBtn.disabled = true; list.textContent = T('kensa_w_looking');
+      var docs = [];
+      try {
+        var r = await fetch(serverURL + '/api/scna-trace/' + encodeURIComponent(id));
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var tr = await r.json();
+        var ids = (tr.nodes || []).filter(function (n) { return n.kind === 'kensa'; }).map(function (n) { return n.id; }).slice(0, 10);
+        var got = await Promise.all(ids.map(function (k) { return fetch(serverURL + '/api/kensa-boxes/' + encodeURIComponent(k)).then(function (x) { return x.ok ? x.json() : null; }).catch(function () { return null; }); }));
+        docs = got.filter(function (d) { return d && (d.status === 'complete' || d.status === 'draft') && !d.void; });
+      } catch (e) { list.textContent = ''; reBtn.disabled = false; return showAlert(T('kensa_e_server', e.message)); }
+      reBtn.disabled = false;
+      if (!docs.length) { list.textContent = T('kensa_w_reprint_none'); return; }
+      async function go(d) { ov.remove(); await reprintKensaDoc(d); }
+      if (docs.length === 1) return go(docs[0]);
+      list.innerHTML = '<div style="font-weight:800;">' + esc(T('kensa_w_reprint_pick')) + '</div>';
+      docs.forEach(function (d) {
+        var bt = document.createElement('button'); bt.type = 'button'; bt.className = 'btn btn-secondary btn-full';
+        bt.textContent = d.kensaId + ' · ' + d.qtyLabel + ' pcs · ' + d.status;
+        bt.onclick = function () { go(d); }; list.appendChild(bt);
+      });
+    };
+  }
+  // reprint a label that is not on this bench (found by the lookup above): same ID / boxUid, nothing new is registered
+  async function reprintKensaDoc(d) {
+    if (printing) return;
+    printing = true;
+    try {
+      var hb = { sebango: d['背番号'], hinban: d['品番'] };
+      var entry = { kensaId: d.kensaId, boxUid: d.boxUid, status: d.status, qty: d.qtyLabel, layoutId: d.layoutId || null };
+      if (!entry.layoutId) {
+        var layouts; try { layouts = await fetchPrintLayouts(hb.sebango); } catch (e) { return showAlert(T('kensa_e_server', e.message)); }
+        if (!layouts.length) return showAlert(T('kensa_e_no_layout'));
+        entry.layoutId = layouts.length > 1 ? await chooseLayout(layouts) : layouts[0].layoutId;
+        if (!entry.layoutId) return;
+      }
+      var pr;
+      try { pr = await choosePrinter(); } catch (e) { return showAlert(T('kensa_e_printer', e.message)); }
+      try { await sendLabel(hb, entry, pr); toast(T('kensa_t_printed', entry.kensaId)); }
+      catch (e) { showAlert(T('kensa_e_print_fail', e.message, entry.kensaId)); }
+    } finally { printing = false; }
   }
 
   // reprint = same ID / same boxUid, nothing new is registered
