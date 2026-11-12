@@ -35206,9 +35206,9 @@ app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => 
     const needCover = projects.filter((p) => !p.previewThumbnailUrl && !p.previewUrl);
     const coverUrls = [...new Set(needCover.map(coverUrlFor).filter(Boolean))];
     const coverAssets = coverUrls.length
-      ? await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId, url: { $in: coverUrls } }, { projection: { url: 1, thumbnailUrl: 1, previewUrl: 1 } }).toArray()
+      ? await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId, downloadUrl: { $in: coverUrls } }, { projection: { downloadUrl: 1, thumbnailUrl: 1, previewUrl: 1 } }).toArray()
       : [];
-    const coverByUrl = new Map(coverAssets.map((a) => [a.url, a]));
+    const coverByUrl = new Map(coverAssets.map((a) => [a.downloadUrl, a]));
 
     res.json(projects.map(({ assetSourceMap, ...project }) => {
       const cover = (!project.previewThumbnailUrl && !project.previewUrl) ? coverByUrl.get(coverUrlFor({ ...project, assetSourceMap })) : null;
