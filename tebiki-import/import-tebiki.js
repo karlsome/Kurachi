@@ -82,8 +82,11 @@ function encodeFromLocal(step, out) {
   run('tar', ['-xf', tar, '-C', dir]);
   const v = path.join(dir, 'video.ts'), und = path.join(dir, 'audio_und.bin'), en = path.join(dir, 'audio_en.bin');
   const a = (f) => JSON.parse(run('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_streams', f])).streams.filter((s) => s.codec_type === 'audio').length;
-  console.log(`    audio streams: 0:und(${a(und)}), 1:en(${a(en)})  [local tar]`);
-  const inputs = ['-y', '-v', 'error', '-i', v, '-i', und, '-i', en, '-map', '0:v:0', '-c:v', 'copy'];
+  // --audio none only needs video.ts (the audio tracks may be absent in the tar)
+  const hasAudioFiles = fs.existsSync(und) && fs.existsSync(en);
+  if (AUDIO !== 'none' && !hasAudioFiles) throw new Error(`tar for ${step.videoId} has no audio tracks; use --audio none`);
+  if (hasAudioFiles) console.log(`    audio streams: 0:und(${a(und)}), 1:en(${a(en)})  [local tar]`);
+  const inputs = hasAudioFiles ? ['-y', '-v', 'error', '-i', v, '-i', und, '-i', en, '-map', '0:v:0', '-c:v', 'copy'] : ['-y', '-v', 'error', '-i', v, '-map', '0:v:0', '-c:v', 'copy'];
   let audioArgs;
   if (AUDIO === 'none') audioArgs = ['-an'];
   else if (AUDIO === 'mix') audioArgs = ['-filter_complex', '[1:a:0][2:a:0]amix=inputs=2:duration=longest:normalize=0[a]', '-map', '[a]', '-c:a', 'aac', '-b:a', '128k'];

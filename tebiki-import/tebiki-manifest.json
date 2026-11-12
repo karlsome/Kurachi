@@ -1,0 +1,5524 @@
+[
+ {
+  "id": 8688801,
+  "title": "【承認】輸出向け同軸パッキン梱包方法マニュアル",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:36",
+  "dir": "vod/599/01M0H35B9JM2VKZCXEPHEKKJMK",
+  "name": "ed17419bf8a5e028de1ae5dd2de23f1a",
+  "desc": null,
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 9064654,
+  "title": "Freya System",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:35",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 9022530,
+  "title": "Basic Steps to Run the Machine",
+  "type": "Video",
+  "ev": 2,
+  "steps": 14,
+  "dur": "26:53",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 9051128,
+  "title": "Cutting and Stamping Work Order",
+  "type": "Video",
+  "ev": 2,
+  "steps": 1,
+  "dur": "5:17",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 9022504,
+  "title": "Miscut/Double-Shot Condition",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:58",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 9022443,
+  "title": "Nonconforming Parts",
+  "type": "Video",
+  "ev": 2,
+  "steps": 15,
+  "dur": "4:05",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 9022440,
+  "title": "Quality Inspection",
+  "type": "Video",
+  "ev": 2,
+  "steps": 1,
+  "dur": "1:46",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 8986119,
+  "title": "Material Feeding Part 1 of 2",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "8:35",
+  "dir": "",
+  "name": "",
+  "desc": "1. Gather WIP material from storage area.<br>2. Using a hand truck, bring material to the back side of the machine.<br>3. Ask Team Leader to load material on roll stand with a forklift. (Must be forklift certified.)",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 9022133,
+  "title": "Die Operation",
+  "type": "Video",
+  "ev": 2,
+  "steps": 9,
+  "dur": "6:23",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 9013888,
+  "title": "Procedures: Daily Overview",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "2:20",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 9013710,
+  "title": "Safety Features: Emergency Stop Buttons, Light Curtain, Doors",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:38",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 9013482,
+  "title": "Standard Operating Procedure: Kuntai Die Cutting Operation Procedures",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:52",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 9013281,
+  "title": "Main Control Panel",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:39",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 9001135,
+  "title": "Operations Screens Part 1 of 3",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "2:51",
+  "dir": "",
+  "name": "",
+  "desc": "1. Operation View Screen<br><br>a. Output Setting: target number of hits<br>b. Current Output: current hit number<br>c. Cutting Depth: how deep the blade will push into the belt material to cut<br>d. Alarm Reset: will stop the alarm sound of the machine.<br><br>2. Manual Operation View Screen<br><br>a. Back Clamp (forward/backward): control of movable clamp<br>b. Back Clamp (Down/Up): rise and lower movable clamp<br>c. Front Clamp (Down/Up): rise and lower stationary clamp<br>d. Middle Hook: controls center clamp of die mold<br>e. Mould Clamp: controls side rail clamp of die mold<br><br>3. Operation Setting Screen<br><br>a. Rising Height: how far the press head will rise after the cut is finished<br>b. Auto Feeding: feeding speed of the material to the next hit<br>c. Feeding Distance: how far the material will move for the next hit<br>d. Feeding Delay: how long the machine will wait after making a cut to move the material",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 9001238,
+  "title": "Operation Screens Part 2 of 3",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "4:08",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 9013237,
+  "title": "Operation Screens Part 3 of 3",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:49",
+  "dir": "",
+  "name": "",
+  "desc": "Operation Setting Screen<br><br>1. Rising Height: how far the press head will rise after the cut is finished<br>2. Auto Feeding: feeding speed of the material to the next hit<br>3. Feeding Distance: how far the material will move for the next hit<br>4. Feeding Delay: how long the machine will wait after making a cut to move the material",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 9001022,
+  "title": "Settings Check",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:38",
+  "dir": "",
+  "name": "",
+  "desc": "1. Check settings on the Operation Screens<br>2. Most settings will be entered into the program of the machine by trained team members. Operators should verify the settings first. If settings on the Part Specification Sheet do not match, operator may adjust as needed.",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 7148738,
+  "title": "Die Mold Installation Procedures",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:33",
+  "dir": "",
+  "name": "",
+  "desc": "1. Check Part Specification Sheet for die mold number.<br>2. Find die mold in storage rack.<br>3. Bring die mold to the front of the machine.<br>4. Lift the die mold and feed it into the side rails of the press head. (Mold should be centered in all directions)<br>5. Go to the setting screen and press the 2 clamp buttons starting with the side rails then moving to the center clamp.",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 9000446,
+  "title": "Material Feeding Part 2 of 2",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "5:23",
+  "dir": "",
+  "name": "",
+  "desc": "4. Move roll stand into place so that the material will cover the full cut from the die mold. (Needs physical training.)<br data-pasted=\"true\">5. Feed the material under the first clamp on the back side of the machine.<br>6. Using the control switches on the back side of the machine, move the material under the press head so that the leading edge of the material is fully covering the cut area of the die mold.<br><br>Move back to the front of the machine.",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 2170514,
+  "title": "労働災害にあった場合の対応",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<h1 data-section-id=\"pggacy\" dir=\"auto\" data-start=\"80\" data-end=\"94\" data-pasted=\"true\">労働災害発生時の初動対応</h1><p dir=\"auto\" data-start=\"96\" data-end=\"145\">労働災害が発生した場合は、<strong data-start=\"109\" data-end=\"127\">人命および安全の確保を最優先</strong>として、以下の対応を行ってください。</p><p dir=\"auto\" data-start=\"147\" data-end=\"234\">初動対応は<strong data-start=\"152\" data-end=\"170\">現場リーダーが行うことを基本</strong>とします。<br data-start=\"175\" data-end=\"178\">ただし、現場リーダーが不在の場合や緊急を要する場合は、<strong data-start=\"205\" data-end=\"227\">その場にいる従業員が可能な範囲で対応</strong>してください。</p><p dir=\"auto\" data-start=\"236\" data-end=\"322\">対応方法や判断が分からない場合は、<strong data-start=\"253\" data-end=\"275\">上長へ連絡し、指示を受けてください。</strong><br data-start=\"275\" data-end=\"278\">ただし、<strong data-start=\"282\" data-end=\"322\">人命に関わる緊急時は、上長への確認を待たず119番通報を行ってください。</strong></p><hr data-start=\"324\" data-end=\"327\"><h2 data-section-id=\"1bwqv5\" dir=\"auto\" data-start=\"329\" data-end=\"349\">① 現場の安全確保・二次災害の防止</h2><p dir=\"auto\" data-start=\"351\" data-end=\"389\">事故が発生した場合は、まず<strong data-start=\"364\" data-end=\"382\">負傷者および周囲の安全を確保</strong>してください。</p><p dir=\"auto\" data-start=\"391\" data-end=\"412\">必要に応じて、以下の対応を行ってください。</p><ul data-start=\"414\" data-end=\"509\"><li data-section-id=\"72oae\" data-start=\"414\" data-end=\"426\">機械・設備を停止する</li><li data-section-id=\"23fgp9\" data-start=\"427\" data-end=\"442\">必要に応じて電源を遮断する</li><li data-section-id=\"pxzhif\" data-start=\"443\" data-end=\"463\">周囲の作業者を安全な場所へ退避させる</li><li data-section-id=\"5gzv4l\" data-start=\"464\" data-end=\"480\">危険箇所への立入りを禁止する</li><li data-section-id=\"1jsgdrc\" data-start=\"481\" data-end=\"509\">落下物、薬品、火気など、その他の危険がないか確認する</li></ul><p dir=\"auto\" data-start=\"511\" data-end=\"611\">対応方法が分からない場合や、安全に対応できない場合は<strong data-start=\"537\" data-end=\"554\">無理に対応せず、上長へ連絡</strong>してください。<br data-start=\"561\" data-end=\"564\">また、<strong data-start=\"567\" data-end=\"611\">救助を行う人自身に危険が及ぶ可能性がある場合は、無理な救助を行わないでください。</strong></p><hr data-start=\"613\" data-end=\"616\"><h2 data-section-id=\"b5idge\" dir=\"auto\" data-start=\"618\" data-end=\"637\">② 負傷者への応急対応・救急要請</h2><p dir=\"auto\" data-start=\"639\" data-end=\"659\"><strong data-start=\"639\" data-end=\"652\">負傷者の状態を確認</strong>してください。</p><ul data-start=\"661\" data-end=\"717\"><li data-section-id=\"1vhp31t\" data-start=\"661\" data-end=\"669\">意識があるか</li><li data-section-id=\"vvwvmz\" data-start=\"670\" data-end=\"680\">呼吸をしているか</li><li data-section-id=\"s8msnx\" data-start=\"681\" data-end=\"692\">大量の出血がないか</li><li data-section-id=\"6ajwn6\" data-start=\"693\" data-end=\"705\">どこを負傷しているか</li><li data-section-id=\"1d9zwhz\" data-start=\"706\" data-end=\"717\">自力で動ける状態か</li></ul><p dir=\"auto\" data-start=\"719\" data-end=\"779\">負傷者の状態に応じて必要な応急処置を行い、<strong data-start=\"740\" data-end=\"769\">119番通報による救急車の要請または医療機関の受診</strong>を判断してください。</p><p dir=\"auto\" data-start=\"781\" data-end=\"837\"><strong data-start=\"781\" data-end=\"837\">重篤な状態が疑われる場合や、緊急性の判断に迷う場合は、上長への確認を待たず119番通報を行ってください。</strong></p><p dir=\"auto\" data-start=\"839\" data-end=\"905\">応急処置の方法が分からない場合は無理な処置を行わず、<strong data-start=\"865\" data-end=\"905\">119番通報時に指示を受ける、または対応可能な人へ応援を求めてください。</strong></p><hr data-start=\"907\" data-end=\"910\"><h2 data-section-id=\"by1o6o\" dir=\"auto\" data-start=\"912\" data-end=\"937\">③ 上長・HR &amp; Admin.Gへの第一報</h2><p dir=\"auto\" data-start=\"939\" data-end=\"974\">負傷者への対応と並行して、<strong data-start=\"952\" data-end=\"967\">事故の発生を上長へ連絡</strong>してください。</p><p dir=\"auto\" data-start=\"976\" data-end=\"1062\">上長は速やかに<strong data-start=\"983\" data-end=\"1003\">HR &amp; Admin.Gへ第一報</strong>を行ってください。<br data-start=\"1012\" data-end=\"1015\"><strong data-start=\"1015\" data-end=\"1062\">上長が不在または連絡が取れない場合は、HR &amp; Admin.Gへ直接連絡してください。</strong></p><p dir=\"auto\" data-start=\"1064\" data-end=\"1094\">第一報では、現時点で把握している以下の内容を伝えてください。</p><ul data-start=\"1096\" data-end=\"1169\"><li data-section-id=\"1f3bxdx\" data-start=\"1096\" data-end=\"1105\">発生日時・場所</li><li data-section-id=\"28s6my\" data-start=\"1106\" data-end=\"1111\">負傷者</li><li data-section-id=\"1gy7fm3\" data-start=\"1112\" data-end=\"1130\">何をしていた際に、何が発生したか</li><li data-section-id=\"l8a64p\" data-start=\"1131\" data-end=\"1139\">負傷者の状態</li><li data-section-id=\"1s66xtf\" data-start=\"1140\" data-end=\"1150\">実施した応急処置</li><li data-section-id=\"1jkip2\" data-start=\"1151\" data-end=\"1169\">救急車の要請・医療機関受診の有無</li></ul><p dir=\"auto\" data-start=\"1171\" data-end=\"1256\"><strong data-start=\"1171\" data-end=\"1203\">すべての情報が確認できるまで報告を待つ必要はありません。</strong><br data-start=\"1203\" data-end=\"1206\">不明な事項は**「不明」または「確認中」**として第一報を行い、確認でき次第、追加報告してください。</p><br><h2>④ 現場の保全・発生状況の確認</h2>人命救助および安全確保を優先したうえで、事故発生時の状況を可能な限り保全し、発生状況を確認してください。<br>主に以下の事項を確認・記録します。<br><ul data-spread=\"false\"><li>発生日時・場所</li><li>発生時に行っていた作業</li><li>事故が発生するまでの経緯</li><li>使用していた設備、機械、工具、材料等</li><li>設備や機械の状態・設定</li><li>負傷者の状況</li><li>目撃者および関係者</li><li>現場の写真</li><li>その他、事故発生時の状況を確認するために必要な情報</li></ul>この段階では原因を推測・断定せず、「実際に何が起きたのか」という事実の確認と記録を行ってください。<br><h2>⑤ 当日の状況報告</h2>④で確認した内容をHR &amp; Admin.へ報告してください。<br>当日中に確認できない事項については「確認中」として報告し、確認でき次第、追加報告してください。<br>報告された内容をもとに、HR &amp; Admin.および関係責任者は、関係者への連絡、必要な手続き、作業停止・再開等について必要な対応を判断します。<br><h2>⑥ 原因調査・分析</h2>確認した事実をもとに、事故が発生した原因および背景要因を調査・分析します。<br>事故を個人の不注意だけで判断せず、以下の観点も含めて確認します。<br><ul data-spread=\"false\"><li>設備・機械</li><li>作業方法</li><li>作業手順・ルール</li><li>作業環境</li><li>教育・訓練</li><li>保護具</li><li>管理・監督方法</li><li>その他、事故につながった可能性のある要因</li></ul>直接的な原因だけでなく、「なぜその状態が発生したのか」まで確認します。<br><h2>⑦ 是正・再発防止策の決定と実施</h2>原因調査・分析の結果に基づき、同様の事故を再発させないための対策を決定し、実施します。<br>対策を検討する際は、注意喚起や教育だけで終わらせず、可能な限り以下のような対策を検討してください。<br><ul data-spread=\"false\"><li>危険源そのものの除去</li><li>設備・安全装置・治具等の改善</li><li>作業方法・工程の変更</li><li>作業手順・ルールの見直し</li><li>保護具の見直し</li><li>教育・訓練の実施</li></ul><h2>⑧ 関係者への情報共有・水平展開</h2>事故の概要、原因および再発防止策について、必要な範囲で関係者へ共有してください。<br>また、事故が発生した部署・設備だけでなく、他部署、類似設備、類似作業に同じ危険が存在していないか確認し、必要に応じて再発防止策を水平展開してください。<br><h2>⑨ 効果確認・継続管理</h2>再発防止策を実施した後、その対策が実際に実施されているか、また事故防止に有効に機能しているかを確認してください。<br>「対策を実施したこと」をもって完了とせず、一定期間経過後に効果を確認し、不十分な場合は追加の改善を行ってください。",
+  "tags": [
+   "HR"
+  ],
+  "courses": [
+   "特殊な対応"
+  ]
+ },
+ {
+  "id": 7162309,
+  "title": "Kuntai Reference Sheet: Part Number, Die Mold, and Program Number",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:40",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 7148708,
+  "title": "Die Mold Storage Area",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:22",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 7148678,
+  "title": "Emergency Stop Button, Conveyor Belt",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:41",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 7148641,
+  "title": "Kuntai Spare Parts",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:26",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 7162404,
+  "title": "Kuntai Machine Start-Up",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "2:22",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Kuntai Die Cutting Operation Procedures"
+  ]
+ },
+ {
+  "id": 8368802,
+  "title": "Thinsulate Die-Mold",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "4:17",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Thinsulate Parts"
+  ]
+ },
+ {
+  "id": 8684740,
+  "title": "Fly Dye",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:03",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "QC Points"
+  ]
+ },
+ {
+  "id": 8254577,
+  "title": "Shipment Preparation, Meiwa, Locate Plastic Strap Kit",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:37",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Meiwa"
+  ]
+ },
+ {
+  "id": 8368815,
+  "title": "Thinsulate Part Specification Sheet (PSS)",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:32",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Thinsulate Parts"
+  ]
+ },
+ {
+  "id": 8356389,
+  "title": "Worn Conveyor Belt, Clear Packing Tape on Mylar",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "2:05",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Thinsulate Parts"
+  ]
+ },
+ {
+  "id": 8342502,
+  "title": "Detach and Trim Mylar Material",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "4:59",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Thinsulate Parts"
+  ]
+ },
+ {
+  "id": 8343193,
+  "title": "Removing the Mylar",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "2:32",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Thinsulate Parts"
+  ]
+ },
+ {
+  "id": 8342788,
+  "title": "Secure Mylar Material to Conveyor Belt",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:14",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Thinsulate Parts"
+  ]
+ },
+ {
+  "id": 8342422,
+  "title": "Unwind Mylar Material",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:24",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Thinsulate Parts"
+  ]
+ },
+ {
+  "id": 8342324,
+  "title": "Set Mylar Material to Kuntai Conveyor Belt",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:33",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Thinsulate Parts"
+  ]
+ },
+ {
+  "id": 8343016,
+  "title": "Thinsulate Material, Mylar Introduction",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:02",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Thinsulate Parts"
+  ]
+ },
+ {
+  "id": 8326398,
+  "title": "Packing Parts for Shipping",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:37",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Packing Specifications"
+  ]
+ },
+ {
+  "id": 8290454,
+  "title": "Boxes",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "2:15",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Boxes"
+  ]
+ },
+ {
+  "id": 8309022,
+  "title": "Discarding Scrap Material",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:37",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Discarding Scrap Material"
+  ]
+ },
+ {
+  "id": 8308813,
+  "title": "Girasol, Spare Parts",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:56",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 8290377,
+  "title": "Polybags",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:16",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Polybags"
+  ]
+ },
+ {
+  "id": 6586600,
+  "title": "Chip Board",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "4:50",
+  "dir": "vod/599/01KHY7QV07829EHZJPSYXG3RDZ",
+  "name": "69889f0a18c765d6187418ad7963ea91",
+  "desc": null,
+  "tags": [
+   "SCNA Chip Board 1"
+  ],
+  "courses": [
+   "Chip Board"
+  ]
+ },
+ {
+  "id": 8269205,
+  "title": "A-Pillar and B-Pillar, Air Permeability Rework",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:42",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Vuteq Canada"
+  ]
+ },
+ {
+  "id": 8254462,
+  "title": "Shipment Preparation, Meiwa, Pallet Location",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:20",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Meiwa"
+  ]
+ },
+ {
+  "id": 8254484,
+  "title": "Shipment Preparation, Meiwa, Corner Guard Location",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:19",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Meiwa"
+  ]
+ },
+ {
+  "id": 8254570,
+  "title": "Shipment Preparation, Meiwa, Locate Plastic Stretch-Wrap",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:30",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Meiwa"
+  ]
+ },
+ {
+  "id": 8038186,
+  "title": "ナイフギャップ変更方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:39",
+  "dir": "vod/599/01KVQD3YPJA4NVKBBC0SX8AA1S",
+  "name": "cf1b4ca6fac5486679baf9f41fc52ed3",
+  "desc": "<span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "粘着剤塗布工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 8038094,
+  "title": "エアシャフトの持ち方",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<h3>エアシリンダは下記図のように手の支える方向を互い違いにして持ちます。</h3><img src=\"/img/599/1782120152997-1782120152997.png\" style=\"width: 422px;\" class=\"fr-fic fr-fil fr-dib\" data-fr-last-image-pasted=\"true\"><h3><span style=\"color: rgb(184, 49, 47);\">以下の図のように同一方向でエアシャフトを持つと落下の可能性があるので、絶対にこの持ち方をしてはいけません。</span></h3><span style=\"color: rgb(184, 49, 47);\"><img src=\"/img/599/1782120351451-1782120351451.png\" style=\"width: 439px;\" class=\"fr-fic fr-fil fr-dib\" data-fr-last-image-pasted=\"true\"></span><br><span style=\"color: rgb(184, 49, 47);\"><img src=\"/img/599/1782120430878-1782120430878.png\" style=\"width: 434px;\" class=\"fr-fic fr-fil fr-dib\" data-fr-last-image-pasted=\"true\"></span>",
+  "tags": [
+   "塗工2号機",
+   "離型紙投入工程",
+   "梱包・積載工程",
+   "被着材料投入工程"
+  ],
+  "courses": [
+   "離型紙投入工程：全て",
+   "被着材料投入工程：全て",
+   "梱包・積載工程：全て",
+   "【塗2号】被着材料投入工程：全て",
+   "【塗2号】離型紙投入工程：全て",
+   "【塗2号】巻き取り・梱包・積載工程：全て"
+  ]
+ },
+ {
+  "id": 8030006,
+  "title": "繰り出し操作盤基本操作",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:37",
+  "dir": "vod/599/01KVQ9RVFR8MTVBQ5AKVTJ634T",
+  "name": "0c1a1f6754baaac2418f3096f51b8fc0",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "被着材料投入工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】被着材料投入工程：全て"
+  ]
+ },
+ {
+  "id": 8029966,
+  "title": "エアシャフトの固定方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:51",
+  "dir": "vod/599/01KVPWK0G8KWAVVJKHDXXJGFXJ",
+  "name": "7b30c8b5a8c2b87c7578a0c5d5903577",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/06</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：岩本ルイ、松浦哲也</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/02</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：永瀬貴胤、劒慶伍</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル、江﨑弘朗</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "離型紙投入工程",
+   "梱包・積載工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】離型紙投入工程：全て",
+   "【塗2号】巻き取り・梱包・積載工程：全て"
+  ]
+ },
+ {
+  "id": 8030188,
+  "title": "片側のギャップ調整基本操作",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:27",
+  "dir": "vod/599/01KVQ6FA78R7TPWYRR2CSPWKNX",
+  "name": "df695f8df48fff0d8169db1aeaa49a6a",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "圧着工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】圧着工程：全て"
+  ]
+ },
+ {
+  "id": 8030129,
+  "title": "離型紙の繋ぎ変え方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:48",
+  "dir": "vod/599/01KVQ1NK1PKQCC3XGABPC3D2T4",
+  "name": "40f58ab1ac104c6b004ba4a1fd453bb7",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/02</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：永瀬貴胤、劒慶伍</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "離型紙投入工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】離型紙投入工程：全て"
+  ]
+ },
+ {
+  "id": 8030055,
+  "title": "離型紙の設置",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:16",
+  "dir": "vod/599/01KVPQBJV5GT2VHSZZC0PSYR9S",
+  "name": "a221567795daeb97e55330be8c0774d9",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/04</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：永瀬貴胤、劒慶伍</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "離型紙投入工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】離型紙投入工程：全て"
+  ]
+ },
+ {
+  "id": 8030237,
+  "title": "乾燥炉温度変更方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:13",
+  "dir": "vod/599/01KVPXEZQYK5BVSF8W8B3P229M",
+  "name": "a3ca05bccb868747743201bfcafd6ca8",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル、江﨑弘朗</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "乾燥工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】粘着剤乾燥工程：全て"
+  ]
+ },
+ {
+  "id": 8030355,
+  "title": "巻き取り操作盤基本操作",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:08",
+  "dir": "vod/599/01KVPYRTFVY3J4QZ2Z2NWJXP58",
+  "name": "5d20e9a240795c28bab00bf00f8c184c",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/06</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：アタッカ ダリル、岩本ルイ</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">ミン コ コ</span></span><br><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/02</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：永瀬貴胤、劒慶伍</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "梱包・積載工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】巻き取り・梱包・積載工程：全て"
+  ]
+ },
+ {
+  "id": 8030413,
+  "title": "エアシャフトの取り外し、固定方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:49",
+  "dir": "vod/599/01KVPTVN6N3FMCPY0JX98HB83E",
+  "name": "531dae8a29c3ad16b0d537a13434bce7",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/06</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：岩本ルイ</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span></span><br><br><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/02</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：江﨑弘朗、アハマド ハシブ</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "被着材料投入工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】被着材料投入工程：全て"
+  ]
+ },
+ {
+  "id": 8029906,
+  "title": "ライン速度の変更",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:37",
+  "dir": "vod/599/01KVPSMEAZBF6WJ49GJ3TQNAD0",
+  "name": "d5edbe54baca8d78e96048e56a6b1fd1",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、江﨑弘朗</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "圧着工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】圧着工程：全て"
+  ]
+ },
+ {
+  "id": 8024887,
+  "title": "梱包方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:28",
+  "dir": "vod/599/01KVMV3ZMDDE6MKY4J2NB0ZX8S",
+  "name": "6c11098f9253a094e6d843f582fdbbdb",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/02</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：永瀬貴胤、劒慶伍</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "梱包・積載工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】巻き取り・梱包・積載工程：全て"
+  ]
+ },
+ {
+  "id": 8023356,
+  "title": "ラベル添付、ラック積載",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "vod/599/01KVMTNEGJCZ95RGNZZCQJ83TQ",
+  "name": "1f4044099168940f0a616ab72ea82111",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/02</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：永瀬貴胤、劒慶伍</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "梱包・積載工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】巻き取り・梱包・積載工程：全て"
+  ]
+ },
+ {
+  "id": 8023360,
+  "title": "裁断・紙管切り替え",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "vod/599/01KVMSNT9R0TKG23ESRXJH9N7A",
+  "name": "79ac180cae78efe59f1150f507069cc0",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/02</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：永瀬貴胤、劒慶伍</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "梱包・積載工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】巻き取り・梱包・積載工程：全て"
+  ]
+ },
+ {
+  "id": 8023465,
+  "title": "被着材料巻き終わり～次被着材料の投入",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:50",
+  "dir": "vod/599/01KVMM1NAWG7FGWRMD03FAC2PG",
+  "name": "88838b19c77c4363c0913cc2d532a3dc",
+  "desc": "<span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">2026/6</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：アタッカ ダリル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：ミン コ コ</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/2</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、江﨑弘朗、アハマド ハシブ</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "被着材料投入工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】被着材料投入工程：全て"
+  ]
+ },
+ {
+  "id": 8023358,
+  "title": "荷下ろし、紙管交換",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:05",
+  "dir": "vod/599/01KVMJQ3CR774191G7QABFD4S7",
+  "name": "595cccae7102ede36075118320af7521",
+  "desc": "2026/6<br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">受講者：岩本ルイ、松浦 哲也</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">山根ガブリエル</span></span><br><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/3</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：永瀬貴胤、劒慶伍</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">宇添真一</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">ミン コ コ、山根ガブリエル</span></span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "梱包・積載工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】巻き取り・梱包・積載工程：全て"
+  ]
+ },
+ {
+  "id": 8023426,
+  "title": "被着材料のつなぎ方",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:26",
+  "dir": "vod/599/01KVMJ8G825T69ZF7ZD1A80VEZ",
+  "name": "8c7abcaeca431f09b04ef63ac1e0b2e1",
+  "desc": "2026/6<br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">受講者：アタッカ ダリル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：ミン コ コ</span><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/2</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、江﨑弘朗、アハマド ハシブ</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "被着材料投入工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】被着材料投入工程：全て"
+  ]
+ },
+ {
+  "id": 8023326,
+  "title": "裁断開始のタイミング",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:19",
+  "dir": "vod/599/01KVM20MZ4Q23NSAPZ4X6DD1N5",
+  "name": "068ac65e055f69ab606fd857121604e9",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">2026/02</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：永瀬貴胤、劒慶伍</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span></span><br><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "梱包・積載工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】巻き取り・梱包・積載工程：全て"
+  ]
+ },
+ {
+  "id": 3324136,
+  "title": "個人評価表作成（対象者へ目標設定依頼）の方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:56",
+  "dir": "vod/599/01JGWMB52ZB34SDNM85YJRD799",
+  "name": "bbd222fbee1c168d1062c677f5f5da18",
+  "desc": null,
+  "tags": [
+   "MINAJIN"
+  ],
+  "courses": [
+   "MINAJIN：全て",
+   "管理者用"
+  ]
+ },
+ {
+  "id": 8022204,
+  "title": "粘着剤供給",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "vod/599/01KVJ3159QSNZFS28G33TAQXBQ",
+  "name": "a43e2769045976afb3e5e08652c2a890",
+  "desc": "",
+  "tags": [
+   "粘着剤塗布工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 8020976,
+  "title": "被着材料圧着",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:26",
+  "dir": "vod/599/01KVHYTSWJ8D2DT7Z35DS2WTXV",
+  "name": "e99694f0a599d5b770836ee84b3e570b",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "塗工2号機",
+   "圧着工程"
+  ],
+  "courses": [
+   "【塗2号】圧着工程：全て"
+  ]
+ },
+ {
+  "id": 8020962,
+  "title": "被着材料切り替え",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:19",
+  "dir": "vod/599/01KVJ2409G3ZY217J7108NPKRM",
+  "name": "9d978b0143e41873c4d25caba0a9f570",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2026/2</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：江﨑 弘朗、アハマド ハシブ</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "被着材料投入工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】被着材料投入工程：全て"
+  ]
+ },
+ {
+  "id": 8020920,
+  "title": "圧着調整基本操作",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:35",
+  "dir": "vod/599/01KVJ15SG0NZ9991PW6QKCE8CW",
+  "name": "dfc9dcde0aef9386fb753e4baf174772",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "圧着工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】圧着工程：全て"
+  ]
+ },
+ {
+  "id": 8021046,
+  "title": "終業作業",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:00",
+  "dir": "vod/599/01KVHQN5W8YCBRZQ8E0JMD31PQ",
+  "name": "524ae273e30c8118c10d55338f4f55b8",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "終業作業",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】終業作業：全て"
+  ]
+ },
+ {
+  "id": 8020695,
+  "title": "ナイフロール上昇",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:20",
+  "dir": "vod/599/01KVHE360HM5P14HJPNKWQ3F3F",
+  "name": "8776560a6d6c4826660dda8dc61b4bbb",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "粘着剤塗布工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 8020529,
+  "title": "ナイフロール下降・ギャップ調整",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:47",
+  "dir": "vod/599/01KVHCQK091690DJKPK1Q566RG",
+  "name": "55185479fc63a6bf509fafc8a544a56f",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "粘着剤塗布工程",
+   "塗工2号機"
+  ],
+  "courses": [
+   "【塗2号】粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 8020421,
+  "title": "始動準備",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:25",
+  "dir": "vod/599/01KVH9RNXX80MAFB1VCDCS4HBZ",
+  "name": "c6289d9f9a95f802fbbb0abd11a23fe5",
+  "desc": "<span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" data-pasted=\"true\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2025/12</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：ミン コ コ、山根ガブリエル</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添真一</span>",
+  "tags": [
+   "塗工2号機",
+   "始動準備"
+  ],
+  "courses": [
+   "【塗2号】始動準備：全て"
+  ]
+ },
+ {
+  "id": 7938426,
+  "title": "AOL NC Cutter QC Point: Adjusting Material Position",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:28",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "QC Points"
+  ]
+ },
+ {
+  "id": 7386826,
+  "title": "Lamination Station Tour",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "6:00",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Introduction"
+  ]
+ },
+ {
+  "id": 7496595,
+  "title": "Lamination Work Order, Part 1",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:04",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7560887,
+  "title": "Work Order Example, Part 10 of 10",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:11",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7209376,
+  "title": "CTI Setup",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:13",
+  "dir": "vod/599/01KNJ2AWVNWP4N9311Y9T4R1J7",
+  "name": "eb0415cbb6b2f432e9771e6e8b395780",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "Initial Setup"
+  ]
+ },
+ {
+  "id": 7209372,
+  "title": "Set the material on unwinding device",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:27",
+  "dir": "vod/599/01KN574WQ3KQCGATTG1CP2C9SB",
+  "name": "3843c09ef8238c30280c3cc4b7268c5f",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "Initial Setup"
+  ]
+ },
+ {
+  "id": 7209374,
+  "title": "Material Alignment",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:00",
+  "dir": "vod/599/01KNJ1JFBCQJ0D1JC959B9A8CX",
+  "name": "46982a917dc45a91f8afa18a75543687",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "Initial Setup"
+  ]
+ },
+ {
+  "id": 7560534,
+  "title": "Locate Correct Raw Material Roll",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:14",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7356165,
+  "title": "Locate the Correct CTI Roll",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "5:34",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7517278,
+  "title": "Work Order Example, Part 5 of 10",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "6:13",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7512120,
+  "title": "Work Order Example, Part 4 of 10",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "5:33",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7512000,
+  "title": "Work Order Example, Part 3 of 10",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "5:58",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7509517,
+  "title": "Work Order Example, Part 2 of 10",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "5:17",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7529894,
+  "title": "Work Order Example, Part 6 of 10",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "4:38",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7542674,
+  "title": "Work Order Example, Part 7 of 10",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "5:10",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7543118,
+  "title": "Work Order Example, Part 8 of 10",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "5:09",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7496942,
+  "title": "Work Order Example, Part 1 of 10",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "4:56",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7543416,
+  "title": "Work Order Example, Part 9 of 10",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "4:42",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7509635,
+  "title": "Air Shaft Selection",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:45",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Introduction"
+  ]
+ },
+ {
+  "id": 6886196,
+  "title": "Material Splice",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "4:23",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Splice"
+  ]
+ },
+ {
+  "id": 7488423,
+  "title": "Part Specification Sheet (PSS) Introduction",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "5:29",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Part Specification Sheet (PSS)"
+  ]
+ },
+ {
+  "id": 7496891,
+  "title": "Heating Device",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:47",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Introduction"
+  ]
+ },
+ {
+  "id": 7467663,
+  "title": "Machine Power On/Off",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:38",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Introduction"
+  ]
+ },
+ {
+  "id": 7467473,
+  "title": "Lamination Air Compressor Tools",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "4:35",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Introduction"
+  ]
+ },
+ {
+  "id": 7496823,
+  "title": "Lamination Work Order, Part 2",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:45",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Work Order"
+  ]
+ },
+ {
+  "id": 7482285,
+  "title": "Loading the Program and Setting the Gap",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:43",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Initial Setup"
+  ]
+ },
+ {
+  "id": 7468344,
+  "title": "Raw Material Pushcart Operation",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:03",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Lamination Introduction"
+  ]
+ },
+ {
+  "id": 7401561,
+  "title": "CTI Supplier Quality Problem: \"Adhesive Lifting\"",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "2:41",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Quality Problems"
+  ]
+ },
+ {
+  "id": 7209382,
+  "title": "Set to Paper Core",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:41",
+  "dir": "vod/599/01KNQ7PPH5CVM243JZETDEDF31",
+  "name": "f3c3074c47bedd81989b5656b451c51e",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "Initial Setup"
+  ]
+ },
+ {
+  "id": 7209380,
+  "title": "Laminating the spliced area",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:04",
+  "dir": "vod/599/01KNQ699GGTN4PM67FAVSQ1PCR",
+  "name": "0fbd358ff62e15e21251f2fca7196134",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "Initial Setup"
+  ]
+ },
+ {
+  "id": 7209378,
+  "title": "Material Setup",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:59",
+  "dir": "vod/599/01KNJ3XDQHWYZV2QA2HM7CE227",
+  "name": "97d9a4cf9e7ef28520a697ac2b8fda5b",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "Initial Setup"
+  ]
+ },
+ {
+  "id": 7209370,
+  "title": "Prepare raw material roll",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:02",
+  "dir": "vod/599/01KN567VETRAPTRKSRM6YJ2YBE",
+  "name": "01527d2e28f080c66318f5adb5845794",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "Initial Setup"
+  ]
+ },
+ {
+  "id": 7100251,
+  "title": "Locate Girasol Workstations",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:38",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055091,
+  "title": "Girasol 1 and 2, Turn Off Workstation Lights",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:20",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055080,
+  "title": "Girasol 1 and 2, Machine Shutdown Procedure",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:37",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7100205,
+  "title": "Machine Error Alarm",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:28",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7100160,
+  "title": "Girasol, Production: Stamping Procedure and Quality Checks, Part 2",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:41",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055376,
+  "title": "Girasol, Production: Stamping Procedure and Quality Checks",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "7:43",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055065,
+  "title": "Girasol, Install Fixtures",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "3:00",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055355,
+  "title": "Girasol, Rubber Fixtures",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:38",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7099860,
+  "title": "Girasol Fixtures, General Information, Part 2 of 2",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:13",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7099679,
+  "title": "Girasol Fixtures, General Information, Part 1 of 2",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "4:14",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7099922,
+  "title": "Girasol Staging WIP Parts for Stamping",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "2:11",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055359,
+  "title": "Girasol, Transport Work-in-Progress (WIP) Parts to Workstation",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:13",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055357,
+  "title": "Girasol, Locate Work-in-Progress (WIP) Parts",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:50",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055052,
+  "title": "Girasol, Collect SRS Stamps for Work Order",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:45",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055044,
+  "title": "Part Specification Sheet",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:04",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055029,
+  "title": "Girasol Work Order Details",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "4:42",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055025,
+  "title": "Girasol Work Order",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:14",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7038802,
+  "title": "Girasol 3 and 4, Machine Startup Procedure: Temperature Controllers, Timers, and Function Switch",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:07",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7038791,
+  "title": "Girasol 3 and 4, Machine Start-Up Procedure",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:28",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7038745,
+  "title": "Girasol 3 and 4, Turn on Workstation Lights",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:51",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055021,
+  "title": "Girasol 1 and 2, Machine Start-Up Procedure: Function Switch",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:17",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7055017,
+  "title": "Girasol 1 and 2, Machine Start-Up Procedure: Timers",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:37",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7054997,
+  "title": "Girasol 1 and 2, Machine Start-Up Procedure: Temperature Controls",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:21",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7054986,
+  "title": "Girasol 1 and 2, Machine Start-Up Procedure",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:25",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7099976,
+  "title": "Clean Heat Stamp Area",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:28",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 7054962,
+  "title": "Girasol 1 and 2, Turn on Workstation Lights",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:20",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": [
+   "Girasol Operation Standard Operating Procedures"
+  ]
+ },
+ {
+  "id": 6552385,
+  "title": "スーパーカッター刃交換",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:49",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [
+   "tebiki"
+  ],
+  "courses": []
+ },
+ {
+  "id": 6193051,
+  "title": "ケンザンローラー御前工場（電源のオン/オフ方法）",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "1:05",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 4727161,
+  "title": "IMG_1079.MOV",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "4:17",
+  "dir": "vod/599/01K82PEXQPCB4CSWD2G1D6KRMY",
+  "name": "f4b4a40e906f9415fa72e279ce814e2e",
+  "desc": null,
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 5989532,
+  "title": "117330-0063",
+  "type": "Video",
+  "ev": 2,
+  "steps": 0,
+  "dur": "0:59",
+  "dir": "",
+  "name": "",
+  "desc": "",
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 6030153,
+  "title": "肥田瀬プリンター手差し設定　ｆ001",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:34",
+  "dir": "vod/599/01KC116ZFN0EXH37X7TNME8KDH",
+  "name": "80fabf62cf62f3888b239f011a83d9e7",
+  "desc": "船戸作成：練習用",
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 4830829,
+  "title": "GEN：ダイヤ産業様向け発注書作成手順①",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:14",
+  "dir": "vod/599/01K2Y1VYD2J2K1N7C0T1HRCXSS",
+  "name": "d24398f300bbf25a93b75f798b907b83",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 5777096,
+  "title": "粘着作業日報_Excel入力方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:50",
+  "dir": "vod/599/01KA0QE81MWYYXMT59VJPKC4MC",
+  "name": "9747d97cb99fc1806c2fc6f6231d9495",
+  "desc": null,
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 4830853,
+  "title": "GEN：発注書作成後手順",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:08",
+  "dir": "vod/599/01K2137YBXDDDFVTPVVV3EM9CW",
+  "name": "2509e40877ce425dc14ebe6df26c2b2a",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 813492,
+  "title": "工程巡回方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:17",
+  "dir": "vod/599/01K6W9ZY5XZ7H3XD4J7M877NE2",
+  "name": "551feddfa6a7ff18d175f06b7fbf8e57",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "工場巡回：全て"
+  ]
+ },
+ {
+  "id": 5356815,
+  "title": "粘着剤ドラム缶交換作業手順",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:41",
+  "dir": "vod/599/01K6J63RDGB1D81X88WSMNR61E",
+  "name": "f4bd70cebc275224146a952a5d274a1b",
+  "desc": null,
+  "tags": [
+   "粘着剤塗布工程"
+  ],
+  "courses": [
+   "粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 5172378,
+  "title": "離形紙準備手順",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "7:14",
+  "dir": "vod/599/01K4Y658F66CBGY4GMC0FKNQTX",
+  "name": "520df1d3eba109f67a7bf5b0fff3b085",
+  "desc": null,
+  "tags": [
+   "離型紙投入工程"
+  ],
+  "courses": [
+   "離型紙投入工程：全て"
+  ]
+ },
+ {
+  "id": 4923811,
+  "title": "ラベル発行QR用紙準備手順",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "4:00",
+  "dir": "vod/599/01K2RHEM01232YASBTQAVX7M7Q",
+  "name": "902699a3971689324ac8454013302e88",
+  "desc": "★ラベル発行QR用紙準備手順<br id=\"isPasted\">①対象日の『生産計画表_製造1課』を出力し、Excelでファイルを開く<br>　※『編集を有効にする(E)』が表示されたら有効にするをクリックする<br>②『生産計画表_製造1課』の『Sheet1』セルJ1に「QR」と入力する<br>③セルJ2に下記をコピペする<br>=IMAGE(\"<a target=\"_blank\" rel=\"noopener noreferrer\" data-fr-linked=\"true\" href=\"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=\">https://api.qrserver.com/v1/create-qr-code/?size=300x300&amp;data=\"&amp;H2)</a><br>　※『コンテンツの有効化』が表示されたら有効化するをクリックする<br>④A列で0以上の数値が入力されている行までセルJ2をコピーする<br>⑤予定がない「0」が入力されている行を削除する<br>⑥セルI1に「=」を入力し、『lst_作業計画X検索_未完_工程コード_作業日』セルBA1を選択して「Enter」を押す<br>⑦A列で計画がある行までセルI1をコピーする<br>⑧入力がされている範囲を選択してアイコン『罫線』で『格子(A)』を選択する<br>⑨B列およびD～H列を非表示にする<br>⑩I列J列の間をクリックしてセル幅を調整する<br>⑪2行目から入力がされている範囲まで選択する<br>⑫2行目と3行目の間をクリックしたまま、高さを60程度に合わせる（±5程度違っても問題ない）<br>⑬タブ『ページ レイアウト』をクリックし、『余白』で『狭い』を選択する<br>⑭PDFファイルに出力する<br>⑮CWG『【PJ】第一工場　フレアシステム』に出力したPDFファイルをアップする",
+  "tags": [
+   "Freya System(フレヤシステム)"
+  ],
+  "courses": [
+   "フレヤシステム：全て"
+  ]
+ },
+ {
+  "id": 4923842,
+  "title": "粘着工程ラベル発行情報のサーバアップロード手順",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:35",
+  "dir": "vod/599/01K2RHP81RV02G0NEGNCZG5CC1",
+  "name": "fffdf97a2a9efbc1983f582d8bebc824",
+  "desc": "★ラベル発行情報をサーバにアップロードする<br id=\"isPasted\">①対象日の『生産計画表_製造1課』の『lst_作業計画X検索_未完_工程コード_作業日』をCSV(コンマ区切り)で保存する<br>※メッセージが出た場合は『OK』を押す<br>②下記に接続する<br><a target=\"_blank\" rel=\"noopener noreferrer\" data-fr-linked=\"true\" href=\"https://karlsome.github.io/Kurachi/csvUploader.html?filter=%E7%AC%AC%E4%B8%80%E5%B7%A5%E5%A0%B4\">https://karlsome.github.io/Kurachi/csvUploader.html?filter=%E7%AC%AC%E4%B8%80%E5%B7%A5%E5%A0%B4</a><br>③「ファイル選択」をクリックして、①で保存したCSVファイルをアップロードする<br>④プレビューをクリックする<br>⑤下にスクロールして「データ挿入」をクリックする<br>⑥『データが正常に挿入されました：〇〇件』が表示されたら『OK』を押す",
+  "tags": [
+   "Freya System(フレヤシステム)"
+  ],
+  "courses": [
+   "フレヤシステム：全て"
+  ]
+ },
+ {
+  "id": 4843160,
+  "title": "ISO入門",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:22",
+  "dir": "vod/599/01K1PSYQAN3DEFG7D27F7Y2WKJ",
+  "name": "41c5829715475fd1162a1dd9eb29c583",
+  "desc": null,
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 4770926,
+  "title": "KoTシステムを利用した有給休暇申請方法_How to request paid leave using KoT System_Solicitando folga remunerado no KoT",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:38",
+  "dir": "vod/599/01K105VHA2X40SSNY49T56SETJ",
+  "name": "d16091d019832294b24a80a64b7bc2a0",
+  "desc": "<p data-start=\"727\" data-end=\"823\" id=\"isPasted\">本マニュアルは、佐々木コーティングの従業員の皆様に向けて、<strong data-start=\"756\" data-end=\"796\">King of Time（KoT）<strong data-start=\"775\" data-end=\"788\">システムを使用した</strong>有給休暇申請</strong>の正しい手順を案内することを目的として作成されました。</p><p data-start=\"825\" data-end=\"857\">このガイドに従っていただくことで、以下のステップを理解できます：</p><ul data-start=\"859\" data-end=\"907\"><li data-start=\"859\" data-end=\"888\"><p data-start=\"861\" data-end=\"888\">スマートフォンからKoTシステムへアクセスする方法</p></li><li data-start=\"889\" data-end=\"907\"><p data-start=\"891\" data-end=\"907\">有給休暇を正しく申請する方法</p></li></ul><p data-start=\"909\" data-end=\"959\">欠勤申請の正確な入力と確認は、勤怠情報の正確性を確保し、給与処理への影響を防ぐために非常に重要です。</p><p data-start=\"961\" data-end=\"995\">ご不明な点やサポートが必要な場合は、人事部までお問い合わせください。</p><p data-start=\"141\" data-end=\"305\"><br></p><p data-start=\"141\" data-end=\"305\" id=\"isPasted\"><br></p>",
+  "tags": [
+   "KING OF TIME",
+   "HR"
+  ],
+  "courses": [
+   "KING OF TIME：全て"
+  ]
+ },
+ {
+  "id": 4776151,
+  "title": "粘着剤発注手順",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "4:37",
+  "dir": "vod/599/01K11YD0TXPEYD37532QQ5VBVT",
+  "name": "46c9bcfced62d6299e9d828b41ea0cd4",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤かんばん運用方法",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 4762996,
+  "title": "LINDAラミ気を使用してCTIテープで準備したサンプルをラミネートする方法（単層生地）",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "3:55",
+  "dir": "vod/599/01K0XQVT3M9M0BZGVT6866K7QV",
+  "name": "e9a233f2426a32fbb5e3c4be1dacd41e",
+  "desc": "<strong>この動画マニュアルでは、CTIテープを使用して粘着剤を生地に接着するためのサンプルのホットラミネート工程の手順を説明し、その後の評価用にサンプルを準備する方法を解説しています。<br id=\"isPasted\"><br>単層生地の場合の温度とラミ速度の仕様（一目でわかる）：<br><br>ラミ温度（ローラー用）：60℃<br>ローラーギャップ設定:<br>1回目: ＜1mm<br>2回目: ＜1mm<br>ラミ速度設定：9（3m/分の速度に相当）</strong>",
+  "tags": [],
+  "courses": [
+   "Linda Linda"
+  ]
+ },
+ {
+  "id": 4739565,
+  "title": "LINDAラミ気を使用してCTIテープで準備したサンプルをラミネートする方法（3層生地）",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "4:38",
+  "dir": "vod/599/01K0RK8WHZZ1ZPGD0QD6XRC81R",
+  "name": "cb6cc6ac6c87d4b88bd69836da1818f1",
+  "desc": "この動画マニュアルでは、CTIテープを使用して粘着剤を生地に接着するためのサンプルのホットラミネート工程の手順を説明し、その後の評価用にサンプルを準備する方法を解説しています。<br><br>3層生地の場合の温度とラミ速度の仕様（一目でわかる）：<br id=\"isPasted\"><br>ラミ温度（ローラー用）：110℃<br>ローラーギャップ設定:<br id=\"isPasted\">1回目: 2mm<br>2回目: ＜1mm<br>ラミ速度設定：9（3m/分の速度に相当）",
+  "tags": [],
+  "courses": [
+   "Linda Linda"
+  ]
+ },
+ {
+  "id": 4692404,
+  "title": "PRINTING GUIDE FOR HOME-WORKER LABELS",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:48",
+  "dir": "vod/599/01K095E2K8H7EEKTE0HSFFP5TF",
+  "name": "db6f05661640a8b62bbbc5cf806e480c",
+  "desc": null,
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 4449330,
+  "title": "ベロ付ウレタン紙管での巻き取り方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:19",
+  "dir": "vod/599/01JYDK4YA8K26Z4NDRZVB1GS9D",
+  "name": "3cf20d5582a3d11db1abc18c709d6a8a",
+  "desc": "★教育履歴<br id=\"isPasted\">20250625<br>参加者：永瀬 貴胤<br>　　　　劒 慶伍<br>　　　　ミン ココ<br>　　　　コハデ アデミル<br>　　　　ヤマネ ケビン<br>　　　　宮田 将成<br>　　　　アタッカ ダリル<br>　　　　室賀 拓<br>教育者：宇添 真一",
+  "tags": [
+   "ロール裁断工程"
+  ],
+  "courses": [
+   "ロール裁断工程：全て"
+  ]
+ },
+ {
+  "id": 3747521,
+  "title": "衣浦部品工業様向け製品：出荷作業手順書",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "➀かんばんを見て出荷準備をする。<img src=\"/img/599/1741846097606-IMG_6197.jpeg\" style=\"width: 285px;\" class=\"fr-fil fr-dib\"><br>②かんばんを逆向きに挿す<br><img src=\"/img/599/1741846176885-Photo_25-03-13-14-01-49.361.jpg\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><br>③かんばんを撮影して、グループチャット【衣浦カンバン出荷前確認用】にUPする。<br><img src=\"/img/599/1741850031504-IMG_3274_1.PNG\" style=\"width: 328px;\" class=\"fr-fil fr-dib\"><br>④かんばんの向きを正面に挿し替える。<img src=\"/img/599/1741846438245-Photo_25-03-13-14-02-55.273.jpg\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><br>⑤出荷準備完了⇒ラベルとカンバンを照合し<br>確認したという意味で、リアクションをする。<br><img src=\"/img/599/1741849628606-IMG_3274.PNG\" style=\"width: 300px;\" class=\"fr-fil fr-dib\">",
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 3748754,
+  "title": "TGロジ様：出荷準備作業手順書",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "​​​​​​​​​​​​納品書と製品、明示表、ラベルを照合して<br>レ点チェックをします。<br>​<img src=\"/img/599/1741850604084-TG%E3%83%AD%E3%82%B8.JPG\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><img src=\"/img/599/1741850611923-IMG_3273.jpeg\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><br>",
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 3522623,
+  "title": "NCカット機工程：459D加工手順",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:43",
+  "dir": "vod/599/01JKF3EFFD0W2MZSJW0VST6RZN",
+  "name": "812e5386efd3bfb1520fb6e59c883c33",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "NCカット機工程：全て"
+  ]
+ },
+ {
+  "id": 3538099,
+  "title": "Authenticatorの認証手順の問題でサインインできない場合の処置方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:55",
+  "dir": "vod/599/01JKQA1DM5YVY9C3AB9D2SGVJ3",
+  "name": "4768040a597488ebc72c7b3a156080ea",
+  "desc": "Authenticatorなどの多要素認証でうまくサインインできない場合は、管理者に連絡し『多要素認証の再登録を要求する』ことで多要素承認を初期化し、再度Authenticatorへの登録を行う事で多要素認証でのサインインを再構築することが出来ます。",
+  "tags": [
+   "Microsoft365"
+  ],
+  "courses": [
+   "Microsoft365：全て",
+   "管理センター"
+  ]
+ },
+ {
+  "id": 3325952,
+  "title": "インターネットや情報セキュリティ事故などが発生した場合の処置",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<h4 style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">タイトルのような事象が発生した場合、下記を記載して上長に速やかに報告してください。</h4>最終的に各事業部長が『【社内用】経営企本部』に完了までの進捗状況を報告します。<br><br><h4 style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\"><strong>1. 基本情報</strong></h4><ul style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><li><strong>報告者名</strong>:</li><li><strong>所属部署</strong>:</li><li><strong>発生日時</strong>:</li></ul><hr style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><h4 style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><strong>2. 現象</strong></h4><ul style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><li><strong>概要</strong>: （簡潔に問題の内容を記載）<ul><li>例：システムAが停止し、業務が一時中断。原因は不明。</li></ul></li><li><strong>影響範囲</strong>: （影響を受けた部署・人数・サービスなど）<ul><li>例：営業部全体、顧客対応に遅延発生。</li></ul></li></ul><hr style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><h4 style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><strong>3. 暫定対応</strong></h4><ul style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><li><strong>対応内容</strong>: （緊急対応で実施したことを簡潔に記載）<ul><li>例：システムAを再起動。影響範囲を調査中。</li></ul></li></ul><hr style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><h4 style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><strong>4. 原因（わかる範囲で記載）</strong></h4><ul style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><li><strong>一次原因</strong>:<ul><li>例：サーバのメモリ不足によりシステムが停止。</li></ul></li><li><strong>背景要因</strong>: （不明の場合は「調査中」と記載）<ul><li>例：メモリ不足が発生した理由を調査中。</li></ul></li></ul><hr style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><h4 style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><strong>5. 恒久対策</strong></h4><ul style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><li><strong>対策内容</strong>: （再発を防ぐために予定している対応策）<ul><li>例：サーバのメモリ増強、監視システムの設定変更を予定。</li></ul></li><li><strong>実施予定日</strong>:<ul><li>例：2023年10月25日</li></ul></li></ul><hr style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><h4 style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><strong>6. 完了確認</strong></h4><ul style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><li><strong>恒久対策の実施日</strong>:</li><li><strong>確認者</strong>:</li></ul>",
+  "tags": [],
+  "courses": [
+   "特殊な対応"
+  ]
+ },
+ {
+  "id": 3077272,
+  "title": "縫製機：下糸作成方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:43",
+  "dir": "vod/599/01JCQD0KH268Y8Y2P458HKR8SP",
+  "name": "866f224b9085c3cd85f5c7d17c5a4911",
+  "desc": null,
+  "tags": [
+   "縫製機"
+  ],
+  "courses": [
+   "縫製機：全て"
+  ]
+ },
+ {
+  "id": 2761822,
+  "title": "NCカット機工程：5A45X　作業手順",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "3:30",
+  "dir": "vod/599/1726470373606",
+  "name": "23a6ac2deaa873fd27bf2eb3a20c5abf",
+  "desc": null,
+  "tags": [
+   "NCカット機"
+  ],
+  "courses": [
+   "NCカット機工程：全て"
+  ]
+ },
+ {
+  "id": 2349534,
+  "title": "縫製機：巻き取り治具設置方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:11",
+  "dir": "vod/599/1718772779437",
+  "name": "565893a782207d244d09c5a8abe3fcae",
+  "desc": null,
+  "tags": [
+   "縫製機"
+  ],
+  "courses": [
+   "縫製機：全て"
+  ]
+ },
+ {
+  "id": 2623635,
+  "title": "サイボウズoffice：マイカー利用申請方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:04",
+  "dir": "vod/599/1724120841512",
+  "name": "dda2550bddfe710ed3ff37890f034b20",
+  "desc": null,
+  "tags": [
+   "サイボウズ"
+  ],
+  "courses": [
+   "サイボウズOffice：全て"
+  ]
+ },
+ {
+  "id": 1070735,
+  "title": "注文方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:30",
+  "dir": "vod/599/1679463539774",
+  "name": "c2bdd8f5a55560f38d54b92b1e63e4de",
+  "desc": null,
+  "tags": [
+   "Amazon Business"
+  ],
+  "courses": [
+   "Amazon Business：全て"
+  ]
+ },
+ {
+  "id": 2292631,
+  "title": "PDFファイルを添付する際、Acrobat cloudへアップロードしてリンクを作成する機能をオフにする方法",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<pre style=\" font-size: 14px; color: rgb(36, 36, 36);\" id=\"isPasted\"><span style=\" font-size: 14px;\">Outlookでpdfファイルを添付する際、Acrobat cloudへアップロードしてリンクを作成する機能をオフにする方法は以下の通りです。\n＜</span><span data-cwtag=\"https://www.perplexity.ai/\" style=\" font-size: 14px;\"><a href=\"https://www.perplexity.ai/\" title=\"https://www.perplexity.ai/\" target=\"_blank\" rel=\"noreferrer\" style=\" font-size: 14px; color: rgb(26, 80, 183);\">https://www.perplexity.ai/</a></span><span style=\" font-size: 14px;\">　での回答＞\n・Outlookの新規メッセージウィンドウを開きます。\n・「Acrobat」メニューから「設定」を選択します。\n・「PDF添付ファイルを自動的にクラウドにアップロードする」のチェックを外します。\n・「OK」をクリックして設定を保存します。\n・この設定を変更すれば、pdfファイルを添付した際にAcrobat cloudへアップロードされずに従来通り添付ファイルとしてメール本文に表示されるようになります。\n★Outlookの最新バージョンでは、添付ファイルをクラウドにアップロードしてリンクを作成する機能が標準で有効になっています。 \nしかし、上記の手順でこの機能をオフにすれば、pdfファイルの添付方法を従来の動作に戻すことができます。</span></pre>",
+  "tags": [
+   "Outlook"
+  ],
+  "courses": [
+   "Outlook：全て"
+  ]
+ },
+ {
+  "id": 1332586,
+  "title": "NCカメラ：加工・初物チェック",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:49",
+  "dir": "vod/599/1690266520340",
+  "name": "1d29e769752e954287c36202ddb6c2a7",
+  "desc": null,
+  "tags": [
+   "NCカメラ"
+  ],
+  "courses": [
+   "NCカメラ：全て"
+  ]
+ },
+ {
+  "id": 2265312,
+  "title": "GEN：品目マスタ新規登録",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:55",
+  "dir": "vod/599/1717131916976",
+  "name": "d7fdc5d87ffabb5468990df3be15b6dc",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 2224584,
+  "title": "850B RAIL 検査・梱包手順⑥生産および検査",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<span style=\"font-size: 24px;\"><strong>⑥生産および検査</strong></span><br>設備の始動ボタンを押して1サイクルの生産を開始する<br><br><img data-fr-image-pasted=\"true\" src=\"https://pw5ia4.tebiki.jp/img/599/1716279672211-1716279672211.png\" style=\"width: 436px;\" class=\"fr-fic fr-fil fr-dib\">上図：ピックアップ作業<br>1サイクルが終了すると自動で設備が停止する<br><br>設備が停止したら製品を1枚ずつ、裁断された位置から手前にずらす<br><br>裁断された全ての製品を手前にずらし終わったら設備の始動ボタンを押す<br><br>製品を3～4枚重ねて脱型し、検査台の上に表皮面を上にして置く<br><br>全ての脱型が完了したら検査を行う<br><br><br><br><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2023/07</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：マルチンス ジュランジール</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：西井 彩</span>",
+  "tags": [
+   "ALC-01工程"
+  ],
+  "courses": [
+   "ALC-01工程：全て",
+   "850B RAIL"
+  ]
+ },
+ {
+  "id": 2218516,
+  "title": "850B RAIL 検査・梱包手順⑤初品検査",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<strong><span style=\"font-size: 24px;\">⑤初品検査</span></strong><br><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><img src=\"/img/599/1716279672211-1716279672211.png\" style=\"width: 559px;\" class=\"fr-fic fr-fil fr-dib\"></span><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">上図：1サイクル裁断が終了した際の状態</span><br>1サイクルの裁断が終了したら設備が自動で停止、1サイクル分全ての製品を脱型する<br>表皮面を上にして検査台の上に置く<br><br><br><img src=\"/img/599/1716273688668-1716273688668.png\" style=\"width: 661px;\" id=\"isPasted\" class=\"fr-fic fr-dii\"><br>上図：姿ゲージ（青色）と生産した製品（初品）<br>生産した製品（初品）の上に姿ゲージを当てて<span style=\"color: rgb(41, 105, 176);\">形状があっている事</span>を確認する<br><br><br><img src=\"/img/599/1716273854572-1716273854572.png\" style=\"width: 656px;\" class=\"fr-fic fr-dii\"><br>上図：姿ゲージに添付されている表皮見本サンプル（オレンジ入り丸内）<br>姿ケージに添付されている表皮見本サンプルと生産した製品（初品）を見て合っているかを確認する<br><br>合っていれば生産を開始する<br><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2023/07</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：マルチンス ジュランジール</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：西井 彩</span>",
+  "tags": [
+   "ALC-01工程"
+  ],
+  "courses": [
+   "ALC-01工程：全て",
+   "850B RAIL"
+  ]
+ },
+ {
+  "id": 2217327,
+  "title": "850B RAIL 検査・梱包手順①生産準備",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<span style=\"font-size: 24px;\"><strong>①生産準備</strong></span><br>ALC-01始動方法（紙面）を参考に生産が行える準備をする<br><br><br><br>",
+  "tags": [
+   "ALC-01工程"
+  ],
+  "courses": [
+   "ALC-01工程：全て",
+   "850B RAIL"
+  ]
+ },
+ {
+  "id": 2258591,
+  "title": "名刺作成手順",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:03",
+  "dir": "vod/599/1717119254092",
+  "name": "60654145c8acd749b82199b33e1a20f7",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "その他：全て"
+  ]
+ },
+ {
+  "id": 2223390,
+  "title": "850B RAIL 検査・梱包手順④ラベル準備",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<span style=\"font-size: 24px;\"><strong>④ラベル準備</strong></span><br><img src=\"/img/599/1716272856084-1716272856084.png\" style=\"width: 682px;\" class=\"fr-fic fr-dii\"><br>上図：生産計画作業日報（生産部抜粋）<br><br><br><img src=\"/img/599/1716273024592-1716273024592.png\" style=\"width: 300px;\" class=\"fr-fic fr-dii\"><br>上図：ラベルプリンターとバーコードリーダー<br><br><br><span style=\"font-size: 16px;\"><img src=\"/img/599/1716515042988-1716515042988.png\" style=\"width: 300px;\" class=\"fr-fic fr-fil fr-dib\"></span><br><span style=\"font-size: 16px;\">上図：読み取り治具を使った読み取り方</span><br><span style=\"font-size: 16px;\"><span style=\"font-size: 16px;\" id=\"isPasted\">生産する製品のQRコードを読み取りラベルを1枚発行する</span></span><br><span style=\"font-size: 16px;\"><span style=\"font-size: 16px;\">QRコードを読み取る際に読み取り治具を使って、生産する品番の欄を読み取り治具の窓枠に当てる</span></span><span style=\"font-size: 16px;\"><span style=\"font-size: 16px;\">バーコードリーダーのトリガー（オレンジ色）を引いてQRコードを読み取るとラベルが自動で発行される</span></span><br><br><span style=\"font-size: 16px;\">もしスペア品がある場合はラベル内『加工日』の欄にスペア品の製造ロットを手書きで記載する</span><br><br><br><img src=\"/img/599/1716358559355-1716358559355.png\" style=\"width: 488px;\" class=\"fr-fic fr-fil fr-dib\">上図：発行したラベル（参考）<br><span style=\"font-size: 16px;\">発行したラベルは中材Aの左上の角に置く</span><br><br><br><span style=\"font-size: 16px;\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2023/07</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：マルチンス ジュランジール</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：西井 彩</span></span><br><br><span style=\"font-size: 16px;\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2024/05/21　バーコードスキャナでの発行に変更</span></span><br><span style=\"font-size: 16px;\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：マルチンス ジュランジール</span></span><br><span style=\"font-size: 16px;\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添 真一</span></span>",
+  "tags": [
+   "ALC-01工程"
+  ],
+  "courses": [
+   "ALC-01工程：全て",
+   "850B RAIL"
+  ]
+ },
+ {
+  "id": 2223182,
+  "title": "850B RAIL 検査・梱包手順②検査前準備",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<strong><span style=\"font-size: 24px;\">②検査前準備</span></strong><br>検査をする前に通い箱（蓋つき）、ゴムバンド付き中材A1枚、中材B1枚を1梱包分として、必要分準備する<br>50枚/ケースなので生産数に対して必要な分を計算して準備する。<br><br>例：生産予定で合計500枚生産する場合は500÷50＝10ケース準備する<br><br><br>生産は50枚、1ケース単位で行う<br><br>ゴムバンド付き中材Aおよび中材Bは通い箱（蓋つき）の中に入っている<br>ゴムバンド付き中材AおよびBを通い箱（蓋つき）から取り出し検査台の上に置く<br><br>通い箱（蓋つき）、ゴムバンド付き中材A、中材Bを取り出した際にホコリ・異物などが付着していたら除去すること<br><br><img src=\"/img/599/1716268447027-1716268447027.png\" style=\"width: 567px;\" class=\"fr-fic fr-fil fr-dib\">上図：通い箱（蓋つき）<br><span style=\"color: rgb(226, 80, 65);\"><strong>通い箱（蓋つき）に古いラベルが差さっている場合はラベルを除去、廃棄する</strong></span><br><strong><span style=\"color: rgb(226, 80, 65);\">★守らないと：品番や生産ロットが間違った製品を生産してしまう（過去トラ）</span></strong><br><br><br><br><img src=\"/img/599/1716269725120-1716269725120.png\" style=\"width: 519px;\" class=\"fr-fic fr-fil fr-dib\">上図：中材B（小さい中材、一番上に被せる中材）<br><br><br><img src=\"/img/599/1716269833023-1716269833023.png\" style=\"width: 515px;\" class=\"fr-fic fr-fil fr-dib\">上図：ゴムバンド付き中材A（大きい中材、一番下に敷く中材）<br><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2023/07</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：マルチンス ジュランジール</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：西井 彩</span><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2024/05/22　ラベル除去追記</span><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">受講者：マルチンス ジュランジール</span><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"></span><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：江﨑 弘朗</span>",
+  "tags": [
+   "ALC-01工程"
+  ],
+  "courses": [
+   "ALC-01工程：全て",
+   "850B RAIL"
+  ]
+ },
+ {
+  "id": 2218679,
+  "title": "850B RAIL 検査・梱包手順⑦梱包",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<span style=\"font-size: 24px;\"><strong>⑦梱包</strong></span><br><img src=\"/img/599/1716280612292-1716280612292.png\" style=\"width: 542px;\" class=\"fr-fic fr-fil fr-dib\">上図：数量カウント風景<br>50枚の生産及び検査が数量したら枚数をカウントする<br><br>数えるときに3枚を1カウントとする<br>これを16回カウントすると48枚になる<br>これに2枚足すと50枚になる<br><br><img src=\"/img/599/1716280758690-1716280758690.png\" style=\"width: 541px;\" class=\"fr-fic fr-fil fr-dib\">上図：外周と側面の検査風景<br>製品が外周と側面が欠けていたり、異物が付着していないかを目視確認する<br><br><br><img src=\"/img/599/1716280892872-1716280892872.png\" style=\"width: 550px;\" class=\"fr-fic fr-fil fr-dib\">上図：中材Bを製品の上に載せた状態<br>中材Bを製品の上に被せる<br>被せたらマジックテープで3ヶ所止める<br>（マジックテープの端と端を合わせて止める）<br><br><br><img src=\"/img/599/1716281002948-1716281002948.png\" style=\"width: 555px;\" class=\"fr-fic fr-fil fr-dib\">上図：通い箱に製品を入れた状態<br>通い箱に入れて蓋を閉じる<br><br><br><img src=\"/img/599/1716281093049-1716281093049.png\" style=\"width: 553px;\" class=\"fr-fic fr-fil fr-dib\">上図：添付したラベル<br>青丸箇所に印鑑を押す<br>スペア品を入れた最初の生産単位の場合は手書きでスペア品ロットが記載されている事を確認しラベルをラベル入れに差す<br><br>継続して同製品の生産が必要な場合は下記、②④⑥の順番で生産を繰り返す<br><a target=\"_blank\" rel=\"noopener noreferrer noopener noreferrer\" data-fr-linked=\"true\" href=\"https://pw5ia4.tebiki.jp/notes/2223182\" id=\"isPasted\" class=\"tebiki-link\">850B RAIL 検査・梱包手順②検査前準備</a><br><a target=\"_blank\" rel=\"noopener noreferrer noopener noreferrer noopener noreferrer\" data-fr-linked=\"true\" href=\"https://pw5ia4.tebiki.jp/notes/2223390\" id=\"isPasted\" class=\"tebiki-link\">850B RAIL 検査・梱包手順④ラベル準備</a><br><a target=\"_blank\" rel=\"noopener noreferrer noopener noreferrer noopener noreferrer noopener noreferrer\" data-fr-linked=\"true\" href=\"https://pw5ia4.tebiki.jp/courses/106629/play/2224584\" id=\"isPasted\" class=\"tebiki-link\">850B RAIL 検査・梱包手順⑥生産および検査</a><br><br><br>対象製品の生産が終了した場合は<a target=\"_blank\" rel=\"noopener noreferrer\" data-fr-linked=\"true\" href=\"https://pw5ia4.tebiki.jp/notes/2218742\" id=\"isPasted\" class=\"tebiki-link\">850B RAIL 検査・梱包手順⑧スペア品の返却</a>に進む<br><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2023/07</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：マルチンス ジュランジール</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：西井 彩</span>",
+  "tags": [],
+  "courses": [
+   "ALC-01工程：全て",
+   "850B RAIL"
+  ]
+ },
+ {
+  "id": 2218742,
+  "title": "850B RAIL 検査・梱包手順⑧スペア品の返却",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<span style=\"font-size: 24px;\"><strong>⑧スペア品の返却</strong></span><br><img src=\"/img/599/1716281857939-1716281857939.png\" style=\"width: 522px;\" class=\"fr-fic fr-fil fr-dib\">上図：スペア品保管棚<br>スペア品が残った際にはスペア品の板に残ったスペア品を載せる<br>ラベルを1枚発行し数量を手書きで修正してスペア品の板に添付し保管棚にもどす<br><br><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2023/07</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：マルチンス ジュランジール</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：西井 彩</span>",
+  "tags": [
+   "ALC-01工程"
+  ],
+  "courses": [
+   "ALC-01工程：全て",
+   "850B RAIL"
+  ]
+ },
+ {
+  "id": 2218303,
+  "title": "850B RAIL 検査・梱包手順③スペア品準備",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<span style=\"font-size: 24px;\" id=\"isPasted\"><strong>③スペア品準備</strong></span><br><span style=\"font-size: 16px;\"><img src=\"/img/599/1716271332901-1716271332901.png\" style=\"width: 443px;\" class=\"fr-fic fr-dii\"><br>上図：スペア品保管棚（閉扉状態）<strong><br></strong></span><br><br><span style=\"font-size: 16px;\"><strong><br></strong></span><img src=\"/img/599/1716271360757-1716271360757.png\" style=\"width: 383px;\" class=\"fr-fic fr-dii\"><br>上図：スペア品保管棚（開扉状態）<br>上部および左側のマジックテープ<span style=\"color: rgb(147, 101, 184);\">（紫丸部）</span>を外すことで開くことが出来る<br><br><br><img src=\"/img/599/1716271827301-1716271827301.png\" style=\"width: 652px;\" class=\"fr-fic fr-dii\">上図：スペア品棚上面図<br><br><br><img src=\"/img/599/1716271703341-1716271703341.png\" style=\"width: 658px;\" class=\"fr-fic fr-dii\"><span style=\"font-size: 16px;\">上図：スペア品の板</span><br><span style=\"font-size: 16px;\">スペア品が入っている棚から生産する製品をスペアの板ごと取り出して検査台の上に置く</span><br><br><br><span style=\"font-size: 16px;\"><img src=\"/img/599/1716272217711-1716272217711.png\" style=\"width: 555px;\" class=\"fr-fic fr-dii\"></span><br>上図：生産計画作業日報<br><br><span style=\"font-size: 16px;\"><img src=\"/img/599/1716271885607-1716271885607.png\" style=\"width: 360px;\" class=\"fr-fic fr-dii\"></span><br><span style=\"font-size: 16px;\">上図：スペア品の板の背番号記載位置</span><br><span style=\"font-size: 16px; color: rgb(226, 80, 65);\">スペアを取り出す際に生産計画/作業日報に記載されている生産する製品の背番号と、スペアの板に書かれている背番号が一致している事を確認して取り出す事</span><br>★守らないと：異品が混入してしまう<br><br><img src=\"/img/599/1716273549796-1716273549796.png\" style=\"width: 660px;\" class=\"fr-fic fr-dii\">上図：スペア品現物<br>表皮側（離型紙とは逆側）を上にして製品を検査台の上に置く<br><br><img src=\"/img/599/1716273688668-1716273688668.png\" style=\"width: 661px;\" class=\"fr-fic fr-dii\"><br>上図：姿ゲージ（青色）とスペア品<br>スペア品の上に姿ゲージを当てて<span style=\"color: rgb(41, 105, 176);\">形状があっている事</span>を確認する<br><br><br><img src=\"/img/599/1716273854572-1716273854572.png\" style=\"width: 656px;\" class=\"fr-fic fr-dii\"><br>上図：姿ゲージに添付されている表皮見本サンプル（オレンジ入り丸内）<br>姿ケージに添付されている表皮見本サンプルとスペア品を見て合っているかを確認する<br><br><img src=\"/img/599/1716274304675-1716274304675.png\" style=\"width: 575px;\" class=\"fr-fic fr-dii\"><br>上図：850B Rail検査基準書（紙面）<br>表皮側と離型紙側を検査基準書の項目に沿って検査する<br><br><img src=\"/img/599/1716274446151-1716274446151.png\" style=\"width: 725px;\" class=\"fr-fic fr-dii\"><br>上図：表皮側から見た図<br>製品の真ん中から円を描くように周辺視で見る（<span style=\"color: rgb(226, 80, 65);\">中心視で見るのはNG</span>）<br><span style=\"font-size: 10px;\">※参考：視野について</span><br><a target=\"_blank\" rel=\"noopener noreferrer\" data-fr-linked=\"true\" href=\"https://www.ortho-k.jp/information/736/#:~:text=%E7%9B%AE%E3%82%92%E5%8B%95%E3%81%8B%E3%81%95%E3%81%AA%E3%81%84%E3%81%A7%E4%B8%80%E7%82%B9%E3%82%92%E8%A6%8B%E3%82%8B%E5%9B%BA%E8%A6%96%E7%82%B9,%E3%81%AE%E5%88%A4%E5%88%A5%E3%81%AB%E3%81%AA%E3%82%8A%E3%81%BE%E3%81%99%E3%80%82\" id=\"isPasted\"><span style=\"font-size: 10px;\">https://www.ortho-k.jp/information/736/#:~:text=%E7%9B%AE%E3%82%92%E5%8B%95%E3%81%8B%E3%81%95%E3%81%AA%E3%81%84%E3%81%A7%E4%B8%80%E7%82%B9%E3%82%92%E8%A6%8B%E3%82%8B%E5%9B%BA%E8%A6%96%E7%82%B9,%E3%81%AE%E5%88%A4%E5%88%A5%E3%81%AB%E3%81%AA%E3%82%8A%E3%81%BE%E3%81%99%E3%80%82</span></a><br><br><br><img src=\"/img/599/1716278960224-1716278960224.png\" style=\"width: 708px;\" class=\"fr-fic fr-dii\"><br>上図：離型紙面から見た図裏返して離型紙面を中材Aの上に置く表皮と同じように製品の真ん中から円を描くように周辺視で見る（<span style=\"color: rgb(226, 80, 65);\">中心視で見るのはNG</span>）<br><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2023/07</span><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">受講者：マルチンス ジュランジール</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：西井 彩</span>",
+  "tags": [],
+  "courses": [
+   "850B RAIL"
+  ]
+ },
+ {
+  "id": 2221978,
+  "title": "KING OF TIME：位置情報許可方法(Android）",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "【Androidの場合】<br><span style=\"color: rgb(84, 172, 210);\">　OSの設定</span><br><span style=\"color: rgb(0, 0, 0);\">1.Androidの設定アプリを開いて、</span><br><span style=\"color: rgb(0, 0, 0);\">位置情報をタップして下さい。</span><br><span style=\"color: rgb(0, 0, 0);\"><img src=\"/img/599/1716356757093-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+133736.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"></span>2.位置情報の使用がオフになっている場合は、<br>オンにして下さい。<br><img src=\"/img/599/1716356765427-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+1337361.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><span style=\"background-color: rgb(255, 255, 255); color: rgb(226, 80, 65);\">chromeブラウザの設定</span><br><span style=\"background-color: rgb(255, 255, 255); color: rgb(0, 0, 0);\">1.chromeのブラウザの右上にあるその他</span><br><span style=\"background-color: rgb(255, 255, 255); color: rgb(0, 0, 0);\">アイコンをタップし、設定を開いて下さい。</span><br><img src=\"/img/599/1716356936195-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+133837.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><span style=\"background-color: rgb(255, 255, 255); color: rgb(0, 0, 0);\">2.詳細設定のサイトの設定をタップして下さい。</span><br><span style=\"background-color: rgb(255, 255, 255); color: rgb(0, 0, 0);\"><img src=\"/img/599/1716356966907-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+133857.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><null>3.権限の位置情報をタップして下さい。<br></null></span><img src=\"/img/599/1716357027881-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+1338578.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><br>4.位置情報がブロックされている場合は、<br>位置情報の利用を許可するように設定を<br>変更して下さい。<br><img src=\"/img/599/1716357130585-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+133913.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><span style=\"color: rgb(251, 160, 38);\">アプリの設定</span><br><span style=\"color: rgb(0, 0, 0);\">1.アプリ情報の権限をタップ</span><br><br><img src=\"/img/599/1716357348938-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+134112.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><br>2.位置情報をタップして、アプリの使用中のみ許可を<br>選択する。<br><img src=\"/img/599/1716357460336-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+134138.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><br><img src=\"/img/599/1716357466247-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+134155.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\">",
+  "tags": [
+   "KING OF TIME"
+  ],
+  "courses": [
+   "KING OF TIME：全て"
+  ]
+ },
+ {
+  "id": 2221726,
+  "title": "KING OF TIME:位置情報許可方法(iPhone)",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "【iPhoneの場合】<br><span style=\"color: rgb(251, 160, 38);\">&nbsp; &nbsp;OSの設定</span><br>1.ホーム画面からiOSの設定アプリを開いて下さい。<br><img src=\"/img/599/1716355044049-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+132401.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\">2.プライバシーとセキュリティをタップして下さい。<br><img src=\"/img/599/1716355066933-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+1324011.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><br>3.位置情報サービスをタップして下さい。<br><img src=\"/img/599/1716355205209-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+132504.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><br>4.位置情報サービスがオフになっている場合は、<br>オンに設定して下さい。<br><img src=\"/img/599/1716355272322-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+1325041.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><span style=\"color: rgb(0, 0, 0);\">5.位置情報の利用許可を</span><br><span style=\"color: rgb(0, 0, 0);\">「このAppの使用中」に変更し、「正確な位置情報」が</span><br><span style=\"color: rgb(0, 0, 0);\">オンになっているかを確認して下さい。</span><br><span style=\"color: rgb(0, 0, 0);\"><img src=\"/img/599/1716355596597-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+132736.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"><null><br></null></span><span style=\"color: rgb(65, 168, 95);\">Safariブラウザの設定</span><br><br><span style=\"color: rgb(0, 0, 0);\">1.Safariブラウザの検索ボックスの「ああ」</span><br><span style=\"color: rgb(0, 0, 0);\">と書かれたアイコンをタップし、Webサイトの</span><br><span style=\"color: rgb(0, 0, 0);\">設定<span style=\"color: rgb(0, 0, 0);\" id=\"isPasted\">を開いて下さい。<br></span><img src=\"/img/599/1716356358240-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+133241.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"></span>2.位置情報を開き、許可に設定して下さい。<br><img src=\"/img/599/1716356440871-%E3%82%B9%E3%82%AF%E3%83%AA%E3%83%BC%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%83%E3%83%88+2024-05-22+133305.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\">",
+  "tags": [
+   "KING OF TIME"
+  ],
+  "courses": [
+   "KING OF TIME：全て"
+  ]
+ },
+ {
+  "id": 2210746,
+  "title": "GEN：メールワイズからの受注登録方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:10",
+  "dir": "vod/599/1716183175504",
+  "name": "b893651e1e17d6611d542faa20ca80ea",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 2159424,
+  "title": "GEN：受注登録変更",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:53",
+  "dir": "vod/599/1715064606882",
+  "name": "80ad494bcbb1ee01ad82a9fda63e635d",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 1905429,
+  "title": "欠点表示",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "粘着加工にて発生した欠点（異物、スジ、糊抜け等）箇所には、下記の方法でセパレーター側に<br id=\"isPasted\">欠点表示をする。<br><br><img src=\"/img/599/1709019223989-1709019223988.png\" style=\"width: 647px;\" class=\"fr-fic fr-fil fr-dib\"><br>作業条件に客先指定がある場合はそれに準ずる。<br>客先指定は作業条件表を確認する。<br><br>※作業条件表記載場所<br><img src=\"/img/599/1709019856881-1709019856881.png\" style=\"width: 612px;\" class=\"fr-fic fr-fil fr-dib\"><br><br><a href=\"/img/599/1709019144643-%E7%A4%BE%E5%86%85%E5%93%81%E8%B3%AA%E8%A6%8F%E6%A0%BC%EF%BC%88%E6%AC%A0%E7%82%B9%E8%A1%A8%E7%A4%BA%E6%96%B9%E6%B3%95%EF%BC%89.pdf\" class=\"fr-file\">[添付ファイル]社内品質規格（欠点表示方法）.pdf</a><br><br><br><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2023年以前</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：永瀬 貴胤、劒 慶伍、大前 慶介、</span><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">深見 進一</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：宇添 真一</span><br><br>",
+  "tags": [
+   "圧着工程"
+  ],
+  "courses": [
+   "圧着工程：全て"
+  ]
+ },
+ {
+  "id": 1878289,
+  "title": "送り状作成：120D製品",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:33",
+  "dir": "vod/599/1708396926292",
+  "name": "7b8a3098188118c34f660dc479a23238",
+  "desc": null,
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 1857766,
+  "title": "ワンポイント確認票がある製品の確認方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:41",
+  "dir": "vod/599/1707891583185",
+  "name": "c3f0f877a9077576040f6dbd0a167e8d",
+  "desc": "<span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">★教育履歴</span><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2024/02/13</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：深見進一</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：江﨑 弘朗</span><br><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">●マニュアル承認</span><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">2024.02.14</span><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">江﨑 弘朗</span>",
+  "tags": [
+   "バーチカル裁断工程"
+  ],
+  "courses": []
+ },
+ {
+  "id": 1848743,
+  "title": "メーカー欠点除去",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "ポイント① ​<br>材料を治具にセットした時に巻の側面から、欠点テープの有無を確認する。<br><br><img src=\"/img/599/1707700328356-1707700328356.png\" style=\"width: 551px;\" class=\"fr-fic fr-fil fr-dib\"><br><br>ポイント② ​<br>台車に積み上げる時に意匠面を確認する。<br><img src=\"/img/599/1707700390759-1707700390759.png\" style=\"width: 579px;\" class=\"fr-fic fr-fil fr-dib\"><br><br><img src=\"/img/599/1707700445631-1707700445630.png\" style=\"width: 427px;\" class=\"fr-fic fr-fil fr-dib\"><br><p style=\"margin-top:0pt;margin-bottom:0pt;margin-left:0in;text-indent:0in;\" id=\"isPasted\"><span style='font-size:27px;font-family:\"BIZ UDPゴシック\";color:red;font-weight:bold;'>欠点がある部分は製品にしない</span></p><br>元データは下記リンク<br><a href=\"/img/599/1707700939492-%E3%83%AF%E3%83%B3%E3%83%9D%E3%82%A4%E3%83%B3%E3%83%88%E7%A2%BA%E8%AA%8D%E7%A5%A8%EF%BC%88%E6%AC%A0%E7%82%B9%E6%9C%89%E7%84%A1%E7%A2%BA%E8%AA%8D%EF%BC%89.pdf\" class=\"fr-file\">[添付ファイル]ワンポイント確認票（欠点有無確認）.pdf</a><br><br>★教育履歴<br id=\"isPasted\">20240206<br>受講者：深見進一<br>教育者：江﨑 弘朗<br><br>20220218<br>受講者：マルチンス・ジュランジール<br>教育者：中家 一浩",
+  "tags": [
+   "バーチカル裁断工程"
+  ],
+  "courses": [
+   "バーチカル裁断工程：全て",
+   "TKF/DIROAB*/1310X925"
+  ]
+ },
+ {
+  "id": 1848680,
+  "title": "巻き芯筋除去",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "ポイント①&nbsp;<br>材料先端部分の赤いテープから約40㎝の位置でカットする。<br id=\"isPasted\"><img src=\"/img/599/1707698874105-1707698874105.png\" style=\"width: 573px;\" class=\"fr-fic fr-fil fr-dib\"><br><br>ポイント②&nbsp;<br>最初にカットした製品に材料巻芯部のスジがない事を確認する。（巻毎に実施）<br><img src=\"/img/599/1707698954835-1707698954835.png\" style=\"width: 538px;\" class=\"fr-fic fr-fil fr-dib\"><span style='font-size:21px;font-family:\"BIZ UDPゴシック\";color:red;font-weight:bold;'>材料巻芯部のスジが入った製品は良品にしない</span><br><br><br>元ファイルは下記リンク<br><a href=\"/img/599/1707698471726-%E3%83%AF%E3%83%B3%E3%83%9D%E3%82%A4%E3%83%B3%E3%83%88%E7%A2%BA%E8%AA%8D%E7%A5%A8%EF%BC%88%E5%B7%BB%E8%8A%AF%E3%82%B9%E3%82%B8%E9%99%A4%E5%8E%BB%EF%BC%89.pdf\" class=\"fr-file\">[添付ファイル]ワンポイント確認票（巻芯スジ除去）.pdf</a><br><br><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">★教育履歴</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">20240206</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">受講者：深見進一</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：江﨑 弘朗</span><br><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">20220218</span><br><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\" id=\"isPasted\">受講者：マルチンス・ジュランジール</span><br style=\" color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\"><span style=\"color: rgb(0, 0, 0); font-size: 16px; background-color: rgb(255, 255, 255);\">教育者：中家 一浩</span></span>",
+  "tags": [
+   "バーチカル裁断工程"
+  ],
+  "courses": [
+   "TKF/DIROAB*/1310X925"
+  ]
+ },
+ {
+  "id": 1840981,
+  "title": "送り状作成：840Bアームレスト",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:22",
+  "dir": "vod/599/1707373088011",
+  "name": "d179abef085a3ce419566be838893e26",
+  "desc": null,
+  "tags": [],
+  "courses": []
+ },
+ {
+  "id": 1822032,
+  "title": "freee会計：購買申請方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:30",
+  "dir": "vod/599/1706837006871",
+  "name": "9de7d6c40bad8484ac27d8c2cece4af1",
+  "desc": null,
+  "tags": [
+   "freee会計"
+  ],
+  "courses": [
+   "freee会計：全て"
+  ]
+ },
+ {
+  "id": 1660329,
+  "title": "sasaki-mfg.co.jpアカウントを追加する方法（POP3）",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:44",
+  "dir": "vod/599/1701743671982",
+  "name": "8c4a61d2f6810148138b9afed99cb9d7",
+  "desc": null,
+  "tags": [
+   "Outlook"
+  ],
+  "courses": [
+   "Outlook：全て"
+  ]
+ },
+ {
+  "id": 1633081,
+  "title": "i-Reporter：作業者削除・追加方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:58",
+  "dir": "vod/599/1700716807472",
+  "name": "48c2638c0ca9e558649d69629e36d988",
+  "desc": null,
+  "tags": [
+   "i-Reporter"
+  ],
+  "courses": [
+   "i-Reporter：全て"
+  ]
+ },
+ {
+  "id": 1626566,
+  "title": "freee会計：稟議書申請方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:31",
+  "dir": "vod/599/1700547992474",
+  "name": "499f85087eddf773b379a46e61113d12",
+  "desc": null,
+  "tags": [
+   "freee会計"
+  ],
+  "courses": [
+   "freee会計：全て"
+  ]
+ },
+ {
+  "id": 1452372,
+  "title": "GEN：内職さん新規登録方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:44",
+  "dir": "vod/599/1694664558546",
+  "name": "aa2555c966b4f09c8dd71fce25adeab2",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 1450336,
+  "title": "GEN：入庫登録インポート方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:49",
+  "dir": "vod/599/1694660461698",
+  "name": "594ae9596fc80524e5c2dd097629ec64",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 632234,
+  "title": "衣浦部品工業様：かんばん手順",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:01",
+  "dir": "vod/599/1694495699902",
+  "name": "87334cddecde54834b0efba3d83a167e",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "衣浦部品工業様"
+  ]
+ },
+ {
+  "id": 632093,
+  "title": "衣浦部品工業様：材料引き取り場所",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:52",
+  "dir": "vod/599/1659598341793",
+  "name": "34f64b51ba32cb43420c6f8fd16b660d",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "衣浦部品工業様"
+  ]
+ },
+ {
+  "id": 632008,
+  "title": "衣浦部品工業様：材料引き取り納品書",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:11",
+  "dir": "vod/599/1659598069616",
+  "name": "f14f0c833a13fbe2309a1932105733c7",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "衣浦部品工業様"
+  ]
+ },
+ {
+  "id": 857468,
+  "title": "衣浦部品工業様：かんばん引き取りBOX",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:11",
+  "dir": "vod/599/1670224824172",
+  "name": "62325cd17be843310e19638ebe72580c",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "衣浦部品工業様"
+  ]
+ },
+ {
+  "id": 857447,
+  "title": "衣浦部品工業様：750製品納入と空箱置き場",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:08",
+  "dir": "vod/599/1670224764646",
+  "name": "ce63f204be10dae0fcfdd6495fa86db6",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "衣浦部品工業様"
+  ]
+ },
+ {
+  "id": 857424,
+  "title": "衣浦部品工業様：4B45X製品置き場",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:11",
+  "dir": "vod/599/1670224649809",
+  "name": "42cf2035bef563ce901852760972cfd3",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "衣浦部品工業様"
+  ]
+ },
+ {
+  "id": 857438,
+  "title": "衣浦部品工業様：かんばんBOX置き場",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:20",
+  "dir": "vod/599/1670224702795",
+  "name": "19728beec7301c6dd911c1764e6082c5",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "衣浦部品工業様"
+  ]
+ },
+ {
+  "id": 857404,
+  "title": "衣浦部品工業様：納入経路",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:19",
+  "dir": "vod/599/1694494268973",
+  "name": "e5203d2b5b5e814b073203f2bcde3dde",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "衣浦部品工業様"
+  ]
+ },
+ {
+  "id": 857360,
+  "title": "TGロジスティック様：入り方経路",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:22",
+  "dir": "vod/599/1694494646362",
+  "name": "d39359cb6acdf89194ba51418f838f1a",
+  "desc": null,
+  "tags": [],
+  "courses": [
+   "TGロジスティック様"
+  ]
+ },
+ {
+  "id": 1434306,
+  "title": "GEN：NFH実績インポート方法②",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:55",
+  "dir": "vod/599/1694071592171",
+  "name": "8354ed8c79c40ca7964b37bfbacfaccc",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 1434287,
+  "title": "GEN：NFH実績インポート方法①",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:10",
+  "dir": "vod/599/1694071168972",
+  "name": "ba70315d7f6669c3bd531988c74a164c",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 1430135,
+  "title": "おまかせAI OCR：豊通テック様出荷明細作成方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:09",
+  "dir": "vod/599/1694051379943",
+  "name": "40491902d9967ec7a568463be030b770",
+  "desc": null,
+  "tags": [
+   "おまかせAI OCR"
+  ],
+  "courses": [
+   "おまかせAI OCR：全て"
+  ]
+ },
+ {
+  "id": 1367372,
+  "title": "Amazon Business：届け先住所追加・変更方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:02",
+  "dir": "vod/599/1691561143552",
+  "name": "d8df79e788bdbf91cac3cbb0b904edc8",
+  "desc": null,
+  "tags": [
+   "Amazon Business"
+  ],
+  "courses": [
+   "Amazon Business：全て"
+  ]
+ },
+ {
+  "id": 1358385,
+  "title": "GEN：納品指示書出力方法(協成産業様)",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:04",
+  "dir": "vod/599/1691135099622",
+  "name": "3b7e350e213e8f7c8c8ebd8800f64076",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 1351806,
+  "title": "GEN：納品データExcel出力方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:32",
+  "dir": "vod/599/1690952044597",
+  "name": "7671c1e89b704329d25de44c01dd4ead",
+  "desc": "毎月2回、TQ1様の納品データExcelを出力しています。<br>1回目は7/1〜7/15まで<br>2回目は7/16〜7/31までになります。<br>それぞれのコードで出力していきます。<br>（1076，1086，1096，1029，1026）",
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 719068,
+  "title": "GEN：発注受入方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:51",
+  "dir": "vod/599/1664240903849",
+  "name": "3d505086feb5612b48ba298ede4a855a",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 987237,
+  "title": "GEN：納品登録方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:49",
+  "dir": "vod/599/1676352263568",
+  "name": "89bda7164864c357869f0acb2139025f",
+  "desc": null,
+  "tags": [
+   "GEN"
+  ],
+  "courses": [
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 1332351,
+  "title": "NCカメラ：材料セット",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:48",
+  "dir": "vod/599/1690264245986",
+  "name": "5b54f57127942d9c4352ed64c5848730",
+  "desc": null,
+  "tags": [
+   "NCカメラ"
+  ],
+  "courses": [
+   "NCカメラ：全て"
+  ]
+ },
+ {
+  "id": 1332176,
+  "title": "NCカメラ：電源オン",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:28",
+  "dir": "vod/599/1690263603687",
+  "name": "a1ea4b36adeacd4a1967e3e66259bf84",
+  "desc": null,
+  "tags": [
+   "NCカメラ"
+  ],
+  "courses": [
+   "NCカメラ：全て"
+  ]
+ },
+ {
+  "id": 1326232,
+  "title": "YouTube：全社朝礼動画アップロード方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:20",
+  "dir": "vod/599/1689926336875",
+  "name": "b48b7116e747c1f9e2ddb82b79c564aa",
+  "desc": null,
+  "tags": [
+   "Youtube"
+  ],
+  "courses": [
+   "Youtube：全て"
+  ]
+ },
+ {
+  "id": 1319152,
+  "title": "全体朝礼動画管理方法",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "全体朝礼を行った際、録画した動画をYoutubeにアップしています。<br>動画ファイルを受信したら『佐々木コーティング Youtubeチャンネル』にログインし、受信した動画をアップロードします。<br><br><a data-fr-linked=\"true\" href=\"https://pw5ia4.tebiki.jp/videos/1326232\" id=\"isPasted\" class=\"tebiki-link\">全社朝礼動画YouTubeアップロード方法</a><br><br><br>※『佐々木コーティング Youtubeチャンネル』へのログイン方法は管理部署に問合せしてください<br>　管理部署がわからない場合は上長に問合せしてください<br><br><br>アップロードする際にタイトルを下記のようにします。<br><br>『全体朝礼 20〇〇年〇〇月度』<br>〇〇に該当する年月を記載します。<br>また全体朝礼と年度（20〇〇年）の間に半角スペースを入れます』<br><br>アップロードが完了したらYoutubeに動画がアップされていることを確認し、元ファイルを削除します。",
+  "tags": [
+   "Youtube"
+  ],
+  "courses": [
+   "Youtube：全て"
+  ]
+ },
+ {
+  "id": 1307871,
+  "title": "新規アカウントにカスタムアプリ利用権限を付与する方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:09",
+  "dir": "vod/599/1689215335317",
+  "name": "f8683ce4d289dd854681fb1bfdcf2327",
+  "desc": null,
+  "tags": [
+   "サイボウズ"
+  ],
+  "courses": [
+   "サイボウズOffice：全て"
+  ]
+ },
+ {
+  "id": 1293690,
+  "title": "⑥縫製完了～転送",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:01",
+  "dir": "vod/599/1688630415707",
+  "name": "29315aca32882062e5262b6df5cfbdc4",
+  "desc": null,
+  "tags": [
+   "縫製機"
+  ],
+  "courses": [
+   "縫製機：全て"
+  ]
+ },
+ {
+  "id": 1293639,
+  "title": "⑤縫製開始",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:31",
+  "dir": "vod/599/1688629884402",
+  "name": "f2c4b3e4a577bc10429477a3fee789d7",
+  "desc": null,
+  "tags": [
+   "縫製機"
+  ],
+  "courses": [
+   "縫製機：全て"
+  ]
+ },
+ {
+  "id": 1293513,
+  "title": "④材料セット",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "3:01",
+  "dir": "vod/599/1688629322293",
+  "name": "3701454749181f2038f829fc9ebec508",
+  "desc": null,
+  "tags": [
+   "縫製機"
+  ],
+  "courses": [
+   "縫製機：全て"
+  ]
+ },
+ {
+  "id": 1293473,
+  "title": "③糸・クランプ確認",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:30",
+  "dir": "vod/599/1688628379622",
+  "name": "cce52f220e08c9f0a0954d889d0f591e",
+  "desc": null,
+  "tags": [
+   "縫製機"
+  ],
+  "courses": [
+   "縫製機：全て"
+  ]
+ },
+ {
+  "id": 1293336,
+  "title": "②初期設定",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:50",
+  "dir": "vod/599/1688626602363",
+  "name": "33746d542f3464f5e50fe222f5a7ec64",
+  "desc": null,
+  "tags": [
+   "縫製機"
+  ],
+  "courses": [
+   "縫製機：全て"
+  ]
+ },
+ {
+  "id": 1292958,
+  "title": "①起動",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:39",
+  "dir": "vod/599/1688622575997",
+  "name": "074639babd27d192b4ede0df53623a6c",
+  "desc": null,
+  "tags": [
+   "縫製機"
+  ],
+  "courses": [
+   "縫製機：全て"
+  ]
+ },
+ {
+  "id": 1275982,
+  "title": "在庫集計後の棚卸ファイルデータ処理方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:59",
+  "dir": "vod/599/1688001203435",
+  "name": "40bf23b585e012e4ecb8e0647385d6d1",
+  "desc": null,
+  "tags": [
+   "Excel"
+  ],
+  "courses": [
+   "Excel：全て"
+  ]
+ },
+ {
+  "id": 1208403,
+  "title": "表皮材バノック処理方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:55",
+  "dir": "vod/599/1685600434427",
+  "name": "a79cc0172d17f0b5546792ed90b766c7",
+  "desc": null,
+  "tags": [
+   "被着材料準備工程"
+  ],
+  "courses": [
+   "被着材料準備工程：全て"
+  ]
+ },
+ {
+  "id": 1230120,
+  "title": "NC-01工程：970B/850B　PANEL",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "3:09",
+  "dir": "vod/599/1686546690951",
+  "name": "08d656d0bf402942422edb67ef322693",
+  "desc": null,
+  "tags": [
+   "NC-01"
+  ],
+  "courses": [
+   "970B/850B　PANEL"
+  ]
+ },
+ {
+  "id": 1219502,
+  "title": "NFH日報CSVファイル更新方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:29",
+  "dir": "vod/599/1686115803573",
+  "name": "0edc8b55c5658ab15816136f7dd081c5",
+  "desc": "NFHの製造実績をGENにインポートする際にi-Reporterの実績CSVデータから加工データを吸い出して必要な情報を整理してCSVインポートファイルを作成する『NFH日報CSV』というスプレッドシート形式のファイルがあります。<br><br>新しく製品品番などが増えた場合、このファイルにも新しい品番情報を入力する必要があるため、その更新方法を説明します。",
+  "tags": [
+   "スプレッドシート",
+   "GEN"
+  ],
+  "courses": [
+   "スプレッドシート：全て",
+   "GEN：全て"
+  ]
+ },
+ {
+  "id": 1210897,
+  "title": "NCカット機工程：カッター刃交換",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "4:28",
+  "dir": "vod/599/1685694033104",
+  "name": "adfd278a9e80acf028f28f65c7616f1f",
+  "desc": null,
+  "tags": [
+   "NCカット機"
+  ],
+  "courses": []
+ },
+ {
+  "id": 1208541,
+  "title": "初物検査：初物チェック",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:54",
+  "dir": "vod/599/1685601822928",
+  "name": "f0bfb09d53e9062362725cb08ed9e8c9",
+  "desc": null,
+  "tags": [
+   "RLC工程"
+  ],
+  "courses": [
+   "初物検査",
+   "動画マニュアル"
+  ]
+ },
+ {
+  "id": 1210422,
+  "title": "終業作業：電源OFF",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:48",
+  "dir": "vod/599/1685673488795",
+  "name": "4db34a7ab5e8e6aadabeb1c5aa5c2c7d",
+  "desc": null,
+  "tags": [
+   "RLC工程"
+  ],
+  "courses": [
+   "終業作業",
+   "動画マニュアル"
+  ]
+ },
+ {
+  "id": 1208443,
+  "title": "作業準備：切り抜き",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:39",
+  "dir": "vod/599/1685601035376",
+  "name": "100b8076c922da8d33c7a9e8ed01b3f8",
+  "desc": null,
+  "tags": [
+   "RLC工程"
+  ],
+  "courses": [
+   "作業準備",
+   "動画マニュアル"
+  ]
+ },
+ {
+  "id": 1208390,
+  "title": "作業準備：データ設定",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:47",
+  "dir": "vod/599/1685600400148",
+  "name": "dd13fbb5f318d873ca9eda4dd1457598",
+  "desc": null,
+  "tags": [
+   "RLC工程"
+  ],
+  "courses": [
+   "作業準備",
+   "動画マニュアル"
+  ]
+ },
+ {
+  "id": 1207889,
+  "title": "作業準備：材料セット",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:40",
+  "dir": "vod/599/1685599083556",
+  "name": "4bdb706aee4f85f1ec832dbc8f1391cb",
+  "desc": null,
+  "tags": [
+   "RLC工程"
+  ],
+  "courses": [
+   "作業準備",
+   "動画マニュアル"
+  ]
+ },
+ {
+  "id": 1207742,
+  "title": "始動準備：本体起動",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:20",
+  "dir": "vod/599/1685593814033",
+  "name": "24fba8db2ca67490b5b748e48d74b537",
+  "desc": null,
+  "tags": [
+   "RLC工程"
+  ],
+  "courses": [
+   "始動準備",
+   "動画マニュアル"
+  ]
+ },
+ {
+  "id": 1206266,
+  "title": "始動準備：空気洗浄機起動",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:07",
+  "dir": "vod/599/1685593277369",
+  "name": "6c9ce60cbe6715cc141847ce1ceef1af",
+  "desc": null,
+  "tags": [
+   "RLC工程"
+  ],
+  "courses": [
+   "始動準備",
+   "動画マニュアル"
+  ]
+ },
+ {
+  "id": 1207716,
+  "title": "始動準備：冷却機起動",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:07",
+  "dir": "vod/599/1685593368612",
+  "name": "d10e5f3adb3f590e3aa7fa23a521773f",
+  "desc": null,
+  "tags": [
+   "RLC工程"
+  ],
+  "courses": [
+   "始動準備",
+   "動画マニュアル"
+  ]
+ },
+ {
+  "id": 1206231,
+  "title": "始動準備：コンプレッサー起動",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:19",
+  "dir": "vod/599/1685521612164",
+  "name": "741c512d1f2274e9edff499897f084d8",
+  "desc": null,
+  "tags": [
+   "RLC工程"
+  ],
+  "courses": [
+   "始動準備",
+   "動画マニュアル"
+  ]
+ },
+ {
+  "id": 1210463,
+  "title": "パソコン版Googleドライブで共有アイテムを開く方法",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<p class=\"tebiki-image-wrapper\"><img src=\"/img/599/1685673688455-%E3%83%91%E3%82%BD%E3%82%B3%E3%83%B3%E7%89%88Google%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96%E3%81%A7%E5%85%B1%E6%9C%89%E3%82%A2%E3%82%A4%E3%83%86%E3%83%A0%E3%82%92%E9%96%8B%E3%81%8F%E6%96%B9%E6%B3%95.png\" style=\"width: 713px;\" class=\"fr-fil fr-dib\"></p>",
+  "tags": [
+   "Gドライブ"
+  ],
+  "courses": [
+   "Gドライブ全て"
+  ]
+ },
+ {
+  "id": 1110520,
+  "title": "SRSヒートシール作業（概要）",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:41",
+  "dir": "vod/599/1681194978919",
+  "name": "152a4882718dccb9437891d4da2b32cb",
+  "desc": null,
+  "tags": [
+   "SRS転写"
+  ],
+  "courses": [
+   "SRSヒートシール工程：全て"
+  ]
+ },
+ {
+  "id": 1098563,
+  "title": "840Bドアトリム検査方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "3:39",
+  "dir": "vod/599/1680659658549",
+  "name": "de066245a51540f4332be619e22eba7f",
+  "desc": "74221-X1R16-C0　背番号SB01<br>74222-X1R00-C0　背番号SB02<br>74221-X1R16-E0　背番号SB03<br>74222-X1R00-E0　背番号SB04<br>74221-X1R17-B0　背番号SB05<br>74222-X1R01-B0　背番号SB06<br>74221-X1R17-E0　背番号SB07<br>74222-X1R01-E0　背番号SB08",
+  "tags": [
+   "検査"
+  ],
+  "courses": [
+   "内装品検査：全て"
+  ]
+ },
+ {
+  "id": 973674,
+  "title": "早退、遅刻申請方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:55",
+  "dir": "vod/599/1675839975673",
+  "name": "3ccc4cd90cdf8a8ca05abd55f31a8a19",
+  "desc": null,
+  "tags": [
+   "KING OF TIME"
+  ],
+  "courses": [
+   "KING OF TIME：全て"
+  ]
+ },
+ {
+  "id": 1071212,
+  "title": "早出、遅出申請方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:58",
+  "dir": "vod/599/1679469248922",
+  "name": "9dd720fc46943832ebd0339f97c3efe2",
+  "desc": null,
+  "tags": [
+   "KING OF TIME"
+  ],
+  "courses": [
+   "KING OF TIME：全て"
+  ]
+ },
+ {
+  "id": 1071264,
+  "title": "直行、直帰、直行直帰申請方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:51",
+  "dir": "vod/599/1679469480474",
+  "name": "76937312e4025176499e892a8d230c97",
+  "desc": null,
+  "tags": [
+   "KING OF TIME"
+  ],
+  "courses": [
+   "KING OF TIME：全て"
+  ]
+ },
+ {
+  "id": 588867,
+  "title": "個人申請画面立ち上げ方法（会社端末）",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:00",
+  "dir": "vod/599/1657259375889",
+  "name": "eed5ae4f800ffb19fabeab2f3f4226f2",
+  "desc": null,
+  "tags": [
+   "KING OF TIME"
+  ],
+  "courses": [
+   "KING OF TIME：全て"
+  ]
+ },
+ {
+  "id": 1063660,
+  "title": "打刻忘れ申請方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:49",
+  "dir": "vod/599/1679473026333",
+  "name": "ec1637eec80796e9aa5d1dacb9e34b2f",
+  "desc": null,
+  "tags": [
+   "KING OF TIME"
+  ],
+  "courses": [
+   "KING OF TIME：全て"
+  ]
+ },
+ {
+  "id": 1079981,
+  "title": "空ドラム缶へのビニールセット方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "3:08",
+  "dir": "vod/599/1679881268618",
+  "name": "e2e8958c7121ca61c9ef39a9fd4e7180",
+  "desc": null,
+  "tags": [
+   "粘着剤塗布工程"
+  ],
+  "courses": [
+   "粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 1071239,
+  "title": "読み取り位置ずれ修正方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:21",
+  "dir": "vod/599/1679469982871",
+  "name": "42c8634eebe89a5b1a393c504a66e3fd",
+  "desc": null,
+  "tags": [
+   "おまかせAI OCR"
+  ],
+  "courses": [
+   "おまかせAI OCR：全て"
+  ]
+ },
+ {
+  "id": 973120,
+  "title": "KING OF TIME：有給、欠勤申請方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:51",
+  "dir": "vod/599/1675838378190",
+  "name": "9138b1981fa4baefb84cc96a1b41d371",
+  "desc": null,
+  "tags": [
+   "KING OF TIME"
+  ],
+  "courses": [
+   "KING OF TIME：全て"
+  ]
+ },
+ {
+  "id": 1061158,
+  "title": "組織名変更方法（スマホ編）",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:33",
+  "dir": "vod/599/1678953634052",
+  "name": "81c82ecd6529d6c476458898ed8a8469",
+  "desc": null,
+  "tags": [
+   "Chatwork"
+  ],
+  "courses": [
+   "Chatwork：全て"
+  ]
+ },
+ {
+  "id": 1061153,
+  "title": "組織名変更方法（PC編）",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:24",
+  "dir": "vod/599/1678953587373",
+  "name": "cd7a5155e79c0fc1b3b480b10c975ee7",
+  "desc": null,
+  "tags": [
+   "Chatwork"
+  ],
+  "courses": [
+   "Chatwork：全て"
+  ]
+ },
+ {
+  "id": 1061134,
+  "title": "グループアイコン変更方法（PC編）",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:28",
+  "dir": "vod/599/1678953372651",
+  "name": "8534ab75e33768643828e968a153f9d7",
+  "desc": null,
+  "tags": [
+   "Chatwork"
+  ],
+  "courses": [
+   "Chatwork：全て"
+  ]
+ },
+ {
+  "id": 1061140,
+  "title": "プロフィール写真変更方法（PC編）",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:35",
+  "dir": "vod/599/1678953429507",
+  "name": "e1a3307e8e77dc2d0b5c4b40f1b60f97",
+  "desc": null,
+  "tags": [
+   "Chatwork"
+  ],
+  "courses": [
+   "Chatwork：全て"
+  ]
+ },
+ {
+  "id": 1061021,
+  "title": "就業規則",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "佐々木コーティングの就業規則は下記添付を参照してください。<br><a class=\"fr-file\" href=\"/img/599/1678952438924-2021%E5%B9%B45%E6%9C%881%E6%97%A5%E6%94%B9%E5%AE%9A-%E5%B0%B1%E6%A5%AD%E8%A6%8F%E5%89%87-%E6%A0%AA%E5%BC%8F%E4%BC%9A%E7%A4%BE%E4%BD%90%E3%80%85%E6%9C%A8%E3%82%B3%E3%83%BC%E3%83%86%E3%82%A3%E3%83%B3%E3%82%B0%EF%BC%88%E5%8A%B4%E5%9F%BA%E5%8F%97%E4%BB%98%E5%8D%B0%E6%B8%88%EF%BC%89.pdf\" target=\"_blank\">[添付ファイル]2021年5月1日改定-就業規則-株式会社佐々木コーティング（労基受付印済）.pdf</a><br><br><p class=\"tebiki-image-wrapper\"><img src=\"/img/599/1678952689310-sasakicoating+rogo-01.jpg\" style=\"width: 300px;\" class=\"fr-fil fr-dib\"></p>",
+  "tags": [
+   "規定"
+  ],
+  "courses": [
+   "会社規定"
+  ]
+ },
+ {
+  "id": 929533,
+  "title": "146696-8141：段ボール梱包",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:37",
+  "dir": "vod/599/1674092185196",
+  "name": "36a7c3947bf8572ef4d1e15e8a8c9ed3",
+  "desc": null,
+  "tags": [
+   "検査"
+  ],
+  "courses": [
+   "146696-8141"
+  ]
+ },
+ {
+  "id": 918556,
+  "title": "146696-8141：不適合品の処置",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:04",
+  "dir": "vod/599/1673585323640",
+  "name": "bbc13aeaf55e59a3c2de27a6ca328b00",
+  "desc": null,
+  "tags": [
+   "検査"
+  ],
+  "courses": [
+   "146696-8141"
+  ]
+ },
+ {
+  "id": 918652,
+  "title": "146696-8141：ビニール袋梱包方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:55",
+  "dir": "vod/599/1673586167033",
+  "name": "1a940b72316b1c1bd9f79d0e80701a0a",
+  "desc": null,
+  "tags": [
+   "検査"
+  ],
+  "courses": [
+   "146696-8141"
+  ]
+ },
+ {
+  "id": 918414,
+  "title": "146696-8141：検査",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:48",
+  "dir": "vod/599/1676357911816",
+  "name": "fd786d4fd55778a4a23416c8a144341a",
+  "desc": null,
+  "tags": [
+   "検査"
+  ],
+  "courses": [
+   "146696-8141"
+  ]
+ },
+ {
+  "id": 919141,
+  "title": "146696-7120：不適合品の処理",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:10",
+  "dir": "vod/599/1673591481814",
+  "name": "54a02e27d8399561bf208acf723fe528",
+  "desc": null,
+  "tags": [
+   "検査"
+  ],
+  "courses": [
+   "146696-7120"
+  ]
+ },
+ {
+  "id": 919151,
+  "title": "146696-7120：検査方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:35",
+  "dir": "vod/599/1673596647136",
+  "name": "071b529d186ab19933aced49a4090f28",
+  "desc": null,
+  "tags": [
+   "検査"
+  ],
+  "courses": [
+   "146696-7120"
+  ]
+ },
+ {
+  "id": 731947,
+  "title": "バーナー室主電源とエアドライヤー電源ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:40",
+  "dir": "vod/599/1664420162501",
+  "name": "251474bdec0e78ecdd0d2cc4aa764202",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 603468,
+  "title": "粘着剤かんばん運用方法①",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:15",
+  "dir": "vod/599/1658196734969",
+  "name": "6c4c0c500b41f6ef386584266c699d3b",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤かんばん運用方法",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 603483,
+  "title": "粘着剤かんばん運用方法②",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:17",
+  "dir": "vod/599/1658197840845",
+  "name": "5991bb10f7b65082d2fc39a2cd635c95",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤かんばん運用方法",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 603512,
+  "title": "粘着剤かんばん運用方法③",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:09",
+  "dir": "vod/599/1658198009881",
+  "name": "73b2e3631d659dee3361865ff90d74a2",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤かんばん運用方法",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 603516,
+  "title": "粘着剤かんばん運用方法④",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:09",
+  "dir": "vod/599/1658198160833",
+  "name": "809583a619e39b2e865034d09a9de779",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤かんばん運用方法",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 603533,
+  "title": "粘着剤かんばん運用方法⑤",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:07",
+  "dir": "vod/599/1658198942525",
+  "name": "5ec007c6323a2e4a0166924a8e541e36",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤かんばん運用方法",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 603541,
+  "title": "粘着剤かんばん運用方法⑥",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:09",
+  "dir": "vod/599/1658199443963",
+  "name": "21042d3adf301afbf41376628b683919",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤かんばん運用方法",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 603543,
+  "title": "粘着剤かんばん運用方法⑦",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:08",
+  "dir": "vod/599/1658199009718",
+  "name": "58319687631ae2f1bb2dcb64bb98067d",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤かんばん運用方法",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 587395,
+  "title": "企業・差出人登録方法②",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:15",
+  "dir": "vod/599/1657517373348",
+  "name": "70d38fd78238dbfab142648ee7843a2c",
+  "desc": null,
+  "tags": [
+   "メールワイズ"
+  ],
+  "courses": [
+   "メールワイズ：全て",
+   "企業・差出人の登録方法"
+  ]
+ },
+ {
+  "id": 585189,
+  "title": "企業・差出人の登録方法①",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "3:27",
+  "dir": "vod/599/1657519820709",
+  "name": "ee5315c14b593b6bc0811d022a65c4a1",
+  "desc": null,
+  "tags": [
+   "メールワイズ"
+  ],
+  "courses": [
+   "メールワイズ：全て",
+   "企業・差出人の登録方法"
+  ]
+ },
+ {
+  "id": 730221,
+  "title": "NV-M1.5t/#FW30",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:20",
+  "dir": "vod/599/1664346992971",
+  "name": "4919dc56458168330761fd8833a6b3e8",
+  "desc": "<br><br>★教育履歴<br>20220927<br>参加者：ラム・ティン、市原 芳樹<br><br>教育者：江﨑 弘朗",
+  "tags": [
+   "手貼り工程"
+  ],
+  "courses": []
+ },
+ {
+  "id": 731922,
+  "title": "攪拌機用コンプレッサー電源ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:34",
+  "dir": "vod/599/1664424882249",
+  "name": "80a5b7f3ae8bb102f334a080184e9080",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 730640,
+  "title": "溶剤脱臭装置ガス栓開く",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:12",
+  "dir": "vod/599/1664351757924",
+  "name": "0762c598552306b27a220472570e70b9",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 731936,
+  "title": "ぺーパーライザーガス栓開く",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:34",
+  "dir": "vod/599/1664418694706",
+  "name": "edaae662f30bb9e65cefc500cf890041",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 731954,
+  "title": "バーナー室コンプレッサー電源ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:13",
+  "dir": "vod/599/1664418865304",
+  "name": "c0c398fb3741a69162ba0c7e08ce6e1c",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 731958,
+  "title": "バーナー室ガス栓開く",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:08",
+  "dir": "vod/599/1664418922313",
+  "name": "2e3687d02193e131c010d58d1700dafd",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 730644,
+  "title": "塗工機主電源と電源ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:49",
+  "dir": "vod/599/1664427196679",
+  "name": "0e2d1986e223fc4147e1cc2e0008d5df",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 731964,
+  "title": "ドラムポンプ上昇",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:17",
+  "dir": "vod/599/1664428445565",
+  "name": "cdafbdeaf9fb2a1379a5db13db375682",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 743917,
+  "title": "KMV6-TR-1A2：プログラム設定方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:47",
+  "dir": "vod/599/1665020855739",
+  "name": "25bdf86210998b9ad9d75ab62fc2936a",
+  "desc": null,
+  "tags": [
+   "NC-01"
+  ],
+  "courses": [
+   "KMV6-TR-1A2"
+  ]
+ },
+ {
+  "id": 744537,
+  "title": "自動プレス電源、コンプレッサー電源ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:09",
+  "dir": "vod/599/1665031905497",
+  "name": "8ad927395b1fcf86c2c1b2ce9b22de45",
+  "desc": null,
+  "tags": [
+   "自動プレス"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 744354,
+  "title": "KMV6-TR-1A2：材料セット方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:39",
+  "dir": "vod/599/1665026857180",
+  "name": "de1e46f7f398b08ed9b5196042779f97",
+  "desc": null,
+  "tags": [
+   "NC-01"
+  ],
+  "courses": [
+   "KMV6-TR-1A2"
+  ]
+ },
+ {
+  "id": 744391,
+  "title": "KMV6-TR-1A2：裁断加工1工程目",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:03",
+  "dir": "vod/599/1665034019873",
+  "name": "3e2def9fb049b7af4aaca1b5b3ad8af7",
+  "desc": null,
+  "tags": [
+   "NC-01"
+  ],
+  "courses": [
+   "KMV6-TR-1A2"
+  ]
+ },
+ {
+  "id": 744628,
+  "title": "正直台設定",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:17",
+  "dir": "vod/599/1665034692191",
+  "name": "b5bb74bb7d2dcc386d7a5f00cc916e34",
+  "desc": null,
+  "tags": [
+   "自動プレス"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 746928,
+  "title": "tebikiの使い方",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:25",
+  "dir": "vod/599/1665115807019",
+  "name": "ca5335d809659a5a8d6d45d5b93b61c9",
+  "desc": null,
+  "tags": [
+   "tebiki"
+  ],
+  "courses": [
+   "tebiki：全て"
+  ]
+ },
+ {
+  "id": 747133,
+  "title": "マニュアル作成依頼方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:30",
+  "dir": "vod/599/1665119943818",
+  "name": "4990c7ef2a5cec8cb8c099b4056390a2",
+  "desc": null,
+  "tags": [
+   "tebiki"
+  ],
+  "courses": [
+   "tebiki：全て"
+  ]
+ },
+ {
+  "id": 747396,
+  "title": "アップロードする動画の保存方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:37",
+  "dir": "vod/599/1665119972843",
+  "name": "82126584ce6c4e335854d5327d73976b",
+  "desc": null,
+  "tags": [
+   "tebiki"
+  ],
+  "courses": [
+   "tebiki：全て"
+  ]
+ },
+ {
+  "id": 749361,
+  "title": "ペーパーライザーガス栓閉める",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:31",
+  "dir": "vod/599/1665365072278",
+  "name": "08c04b486301450deec16b5333aadb04",
+  "desc": null,
+  "tags": [
+   "終業作業"
+  ],
+  "courses": [
+   "終業作業"
+  ]
+ },
+ {
+  "id": 749561,
+  "title": "溶剤脱臭装置ガス栓閉める",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:16",
+  "dir": "vod/599/1665371971530",
+  "name": "e974ccdeccd1ea8daa41e2d2d920fc01",
+  "desc": null,
+  "tags": [
+   "終業作業"
+  ],
+  "courses": [
+   "終業作業"
+  ]
+ },
+ {
+  "id": 749572,
+  "title": "攪拌機用コンプレッサー電源OFF",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:34",
+  "dir": "vod/599/1665372080531",
+  "name": "11646c0bae392ab2b830555277edf40f",
+  "desc": null,
+  "tags": [
+   "終業作業"
+  ],
+  "courses": [
+   "終業作業"
+  ]
+ },
+ {
+  "id": 749582,
+  "title": "バーナー室ガス栓閉める",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:14",
+  "dir": "vod/599/1665372355219",
+  "name": "9eda58773192447ada07a54ee77e46fb",
+  "desc": null,
+  "tags": [
+   "終業作業"
+  ],
+  "courses": [
+   "終業作業"
+  ]
+ },
+ {
+  "id": 749596,
+  "title": "バーナー室コンプレッサー電源OFF",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:22",
+  "dir": "vod/599/1665372597729",
+  "name": "55b8a4e60e291fa5416981bb28214195",
+  "desc": null,
+  "tags": [
+   "終業作業"
+  ],
+  "courses": [
+   "終業作業"
+  ]
+ },
+ {
+  "id": 749612,
+  "title": "バーナー室主電源OFF",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:24",
+  "dir": "vod/599/1665372985678",
+  "name": "9be022197bfd6917822c0572e26bf508",
+  "desc": null,
+  "tags": [
+   "終業作業"
+  ],
+  "courses": [
+   "終業作業"
+  ]
+ },
+ {
+  "id": 731973,
+  "title": "コンマナイフロール間隙設定",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:01",
+  "dir": "vod/599/1664419042870",
+  "name": "071600b5b405ebb512d4ad2cec7e9199",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 794137,
+  "title": "NV-M1t両側両面テープ貼り合わせ",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:35",
+  "dir": "vod/599/1667259717445",
+  "name": "5281a4ee5e32cb90cc0f4a6a0f5d0e28",
+  "desc": null,
+  "tags": [
+   "手貼り工程"
+  ],
+  "courses": []
+ },
+ {
+  "id": 795425,
+  "title": "粘着工程作業週報・日報ファイル立ち上げ",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:09",
+  "dir": "vod/599/1667284625797",
+  "name": "0c48ee0ea39bdbd7951cebdd4c319ff7",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 795627,
+  "title": "ドラム攪拌機電源・局所排気装置電源ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:27",
+  "dir": "vod/599/1667286342945",
+  "name": "7d489dfbfffdac5214788f928b5fd765",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 748118,
+  "title": "コンマナイフロール上昇",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:25",
+  "dir": "vod/599/1665128777435",
+  "name": "51ffaa99d1fadb2a0f214e6351cf99a3",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 795716,
+  "title": "ウォータバス電源・攪拌室照明・換気扇の電源ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:33",
+  "dir": "vod/599/1667287699051",
+  "name": "47a13299a05f8b95dfeba8cbeddbee6b",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 795812,
+  "title": "工場換気扇の電源ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:26",
+  "dir": "vod/599/1667288645348",
+  "name": "20dae99c5a88de24ac78da871e13e921",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 795845,
+  "title": "バーナー室照明ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:18",
+  "dir": "vod/599/1667289547421",
+  "name": "19a96a9bb33094f20a20707b0977558b",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 795881,
+  "title": "ノートパソコン電源ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:17",
+  "dir": "vod/599/1667290575150",
+  "name": "ec6e3bbd96c39c64dbe4149138de8e57",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 795542,
+  "title": "塗工機・離型紙繰り出し・糊場の照明ON",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:46",
+  "dir": "vod/599/1667285317152",
+  "name": "759f286fdac8f39e049c9fd69247bfc3",
+  "desc": null,
+  "tags": [
+   "始動準備"
+  ],
+  "courses": [
+   "始動準備"
+  ]
+ },
+ {
+  "id": 683883,
+  "title": "粘着剤ドラム缶の工場への入庫",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:20",
+  "dir": "vod/599/1663054661082",
+  "name": "79b7e520060623859d99e1fa2b49ebb9",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：ドラム缶混合撹拌",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 706272,
+  "title": "ドラム缶準備",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:14",
+  "dir": "vod/599/1663228462256",
+  "name": "af71d1bf91a236465a4a2a17a9f77db7",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：ドラム缶混合撹拌",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 643570,
+  "title": "硬化剤準備",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:37",
+  "dir": "vod/599/1660279169952",
+  "name": "26d3cfd29200f98aafab823ef094b0cc",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：ドラム缶混合撹拌",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 677790,
+  "title": "ドラム缶粘着剤混合攪拌②",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:39",
+  "dir": "vod/599/1662512475318",
+  "name": "2bc4ab9c1d7a48acb116afee91a60c4e",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：ドラム缶混合撹拌",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 643574,
+  "title": "ドラム缶蓋とリングの保管",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:16",
+  "dir": "vod/599/1660280431658",
+  "name": "137ac87705a2894b35cefda82ab1f66d",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：ドラム缶混合撹拌",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 677350,
+  "title": "攪拌終了後ドラム缶移動",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:53",
+  "dir": "vod/599/1662096645926",
+  "name": "099f82abd15c2fb555420eef8b7cfa4b",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：ドラム缶混合撹拌",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 701428,
+  "title": "攪拌翼洗浄後の処置",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:56",
+  "dir": "vod/599/1663056755331",
+  "name": "d47a59b65cd675ee208e9616b3da3248",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：ドラム缶混合撹拌",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 804042,
+  "title": "調湿ありなし設定方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:33",
+  "dir": "vod/599/1667803963618",
+  "name": "2fcb6944719a4b94a33a51c96b64d8b9",
+  "desc": null,
+  "tags": [
+   "調湿工程"
+  ],
+  "courses": [
+   "調湿工程：全て"
+  ]
+ },
+ {
+  "id": 748083,
+  "title": "粘着塗工幅セット後の目視確認",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:20",
+  "dir": "vod/599/1665127824332",
+  "name": "c51744fcd698f910f14325ef2d0404c2",
+  "desc": null,
+  "tags": [
+   "粘着剤塗布工程"
+  ],
+  "courses": [
+   "粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 811426,
+  "title": "測長機設定方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:33",
+  "dir": "vod/599/1668063789570",
+  "name": "f5c1870c2be011c35666c65baf05c4ce",
+  "desc": null,
+  "tags": [
+   "離型紙投入工程"
+  ],
+  "courses": [
+   "離型紙投入工程：全て"
+  ]
+ },
+ {
+  "id": 821994,
+  "title": "WM6Y2R長時間停止した場合の処置",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:43",
+  "dir": "vod/599/1668579158503",
+  "name": "58017bc3805ec212b89fb005bc9af7fd",
+  "desc": "<p class=\"tebiki-image-wrapper\"><img src=\"/img/599/1668577996161-%E5%81%9C%E6%AD%A2.png\" style=\"width: 827px;\" class=\"fr-fil fr-dib\"></p>",
+  "tags": [
+   "圧着工程"
+  ],
+  "courses": [
+   "圧着工程：全て"
+  ]
+ },
+ {
+  "id": 821351,
+  "title": "ロール温調機起動方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:11",
+  "dir": "vod/599/1668582375306",
+  "name": "6709a027c0970aafb9b519a560d4b07a",
+  "desc": null,
+  "tags": [
+   "圧着工程"
+  ],
+  "courses": [
+   "始動準備",
+   "圧着工程：全て"
+  ]
+ },
+ {
+  "id": 821298,
+  "title": "WM6Y2Rナイフロール停止跡欠点表示",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:27",
+  "dir": "vod/599/1668577716975",
+  "name": "52181489a794ef4ac9c6f02052850eac",
+  "desc": "<br>★教育履歴<br>20221103<br>参加者：永瀬 貴胤、劔 慶伍<br>教育者：宇添 真一<br><br>",
+  "tags": [
+   "圧着工程"
+  ],
+  "courses": [
+   "圧着工程：全て"
+  ]
+ },
+ {
+  "id": 754257,
+  "title": "粘着塗布面の検視方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:59",
+  "dir": "vod/599/1665884687577",
+  "name": "0f7cf70ed06b78c9515c188ce8b2c528",
+  "desc": "<br>★教育履歴<br>20221019<br>参加者：市原 芳樹、ヨシナガ アキラ、マルチンス ジュランジール<br>教育者：江﨑 弘朗",
+  "tags": [
+   "被着材料投入工程"
+  ],
+  "courses": [
+   "被着材料投入工程：全て"
+  ]
+ },
+ {
+  "id": 822380,
+  "title": "ロール温調機温度設定方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:35",
+  "dir": "vod/599/1668748278123",
+  "name": "f023ca5c0d6190cb660a0bb87ba994e1",
+  "desc": null,
+  "tags": [
+   "圧着工程"
+  ],
+  "courses": [
+   "始動準備",
+   "圧着工程：全て"
+  ]
+ },
+ {
+  "id": 827802,
+  "title": "空酢酸エチルドラム缶の移動",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:31",
+  "dir": "vod/599/1668750381502",
+  "name": "0812689942326d1a0d47c73fac473306",
+  "desc": "<br><br>",
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：洗浄用酢酸エチルドラム缶交換",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 826998,
+  "title": "洗浄用酢酸エチル供給ポンプ取り外し",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:03",
+  "dir": "vod/599/1668750923005",
+  "name": "303d01b2225fbea374371853a0209a11",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：洗浄用酢酸エチルドラム缶交換",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 815672,
+  "title": "WM6Y2Rレザー加工停止地点の欠点表示",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:15",
+  "dir": "vod/599/1668408266503",
+  "name": "22a9c9fc0826c8e569a956d9b9083fb5",
+  "desc": "<br>★教育履歴<br>20221103<br>参加者：永瀬 貴胤、劔 慶伍、小口 正一<br>教育者：宇添 真一<br><br>",
+  "tags": [
+   "粘着剤塗布工程"
+  ],
+  "courses": [
+   "粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 744462,
+  "title": "KMV6-TR-1A2：裁断加工2工程目",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:58",
+  "dir": "vod/599/1665028873830",
+  "name": "d251ff5e56ba8f2455723b5d8ad77c8f",
+  "desc": null,
+  "tags": [
+   "NC-01"
+  ],
+  "courses": [
+   "KMV6-TR-1A2"
+  ]
+ },
+ {
+  "id": 827079,
+  "title": "粘洗浄用酢酸エチル供給ポンプ付け替え",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:40",
+  "dir": "vod/599/1669361921556",
+  "name": "67ef3aa62a0014fa75e860be638dc205",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：洗浄用酢酸エチルドラム缶交換",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 828100,
+  "title": "新しい洗浄用酢酸エチルドラムの設置",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:11",
+  "dir": "vod/599/1669362204361",
+  "name": "c3fb705f5ead390c4254d1edbcd41193",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：洗浄用酢酸エチルドラム缶交換",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 800388,
+  "title": "離型紙り切り替え方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:21",
+  "dir": "vod/599/1669613137137",
+  "name": "99a69ee7ae0396b95a8fa0e35632113c",
+  "desc": "動画のみ",
+  "tags": [
+   "離型紙投入工程"
+  ],
+  "courses": [
+   "離型紙投入工程：全て"
+  ]
+ },
+ {
+  "id": 724511,
+  "title": "粘着有効幅のセット",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:46",
+  "dir": "vod/599/1669619186493",
+  "name": "b3f468313f0653e3a3fb3b19c8a744cd",
+  "desc": "<br>★教育履歴<br>20221017※追加分<br>参加者：劒 慶伍、永瀬 貴胤、大前 慶介、小口 正一<br>教育者：江﨑 弘朗<br>20220927<br>参加者：劒 慶伍、永瀬 貴胤、大前 慶介、小口 正一<br>教育者：江﨑 弘朗<br><br>",
+  "tags": [
+   "粘着剤塗布工程"
+  ],
+  "courses": [
+   "粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 724916,
+  "title": "離形紙つなぎ目通過とバックロール確認",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:53",
+  "dir": "vod/599/1669621475714",
+  "name": "f73c91af04eee21d713cdcc575c4b672",
+  "desc": "<br>★教育履歴<br>20220927<br>参加者：劒 慶伍、永瀬 貴胤、大前 慶介、小口 正一<br>教育者：江﨑 弘朗",
+  "tags": [
+   "粘着剤塗布工程"
+  ],
+  "courses": [
+   "粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 844105,
+  "title": "単板材料投入",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:24",
+  "dir": "vod/599/1669623566584",
+  "name": "d2b67699a891945b486bbf3103259545",
+  "desc": null,
+  "tags": [
+   "被着材料投入工程"
+  ],
+  "courses": [
+   "被着材料投入工程：全て"
+  ]
+ },
+ {
+  "id": 844127,
+  "title": "コンベア速度変更方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:16",
+  "dir": "vod/599/1669623698144",
+  "name": "93518dcca5246319e9df381ad70e60d8",
+  "desc": null,
+  "tags": [
+   "被着材料投入工程"
+  ],
+  "courses": [
+   "被着材料投入工程：全て"
+  ]
+ },
+ {
+  "id": 848207,
+  "title": "単板積載",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:32",
+  "dir": "vod/599/1669783911260",
+  "name": "8e66699df5c0f6194e85a5100afb9a18",
+  "desc": null,
+  "tags": [
+   "梱包・積載工程"
+  ],
+  "courses": [
+   "梱包・積載工程：全て"
+  ]
+ },
+ {
+  "id": 848659,
+  "title": "裁断方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:35",
+  "dir": "vod/599/1669789078498",
+  "name": "14626845c462ad46fc607d9fac3e1b0b",
+  "desc": null,
+  "tags": [
+   "単板裁断工程"
+  ],
+  "courses": [
+   "単板裁断工程：全て"
+  ]
+ },
+ {
+  "id": 848148,
+  "title": "ロール梱包積載",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:23",
+  "dir": "vod/599/1669784094101",
+  "name": "3d34e4fbc00c0baa0152bc36e036aece",
+  "desc": null,
+  "tags": [
+   "梱包・積載工程"
+  ],
+  "courses": [
+   "梱包・積載工程：全て"
+  ]
+ },
+ {
+  "id": 849241,
+  "title": "ロール材投入",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:23",
+  "dir": "vod/599/1669794244729",
+  "name": "9a81cc3ad442d7cb8d333de41a2e855f",
+  "desc": null,
+  "tags": [
+   "被着材料投入工程"
+  ],
+  "courses": [
+   "被着材料投入工程：全て"
+  ]
+ },
+ {
+  "id": 656218,
+  "title": "ドラム缶粘着攪拌①",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "2:16",
+  "dir": "vod/599/1671242418645",
+  "name": "d4ecd0ec7a6957e2b40a225d0433844b",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：ドラム缶混合撹拌",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 1017133,
+  "title": "日別内装表皮工程内検査記録集計の修正方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:53",
+  "dir": "vod/599/1677549799521",
+  "name": "9d91c0a37ee07b3898f7c55c5803c585",
+  "desc": null,
+  "tags": [
+   "スプレッドシート"
+  ],
+  "courses": []
+ },
+ {
+  "id": 900327,
+  "title": "裁断方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:47",
+  "dir": "vod/599/1672117783025",
+  "name": "bcf590a605ab5644adb1c919bd7a366a",
+  "desc": null,
+  "tags": [
+   "インライン裁断工程"
+  ],
+  "courses": [
+   "インライン裁断工程：全て"
+  ]
+ },
+ {
+  "id": 900451,
+  "title": "裁断補助作業",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:52",
+  "dir": "vod/599/1672121435927",
+  "name": "4ba538ae500433cba037a732f8cc3bdf",
+  "desc": null,
+  "tags": [
+   "インライン裁断工程"
+  ],
+  "courses": [
+   "インライン裁断工程：全て"
+  ]
+ },
+ {
+  "id": 900684,
+  "title": "積載作業",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:47",
+  "dir": "vod/599/1672122816917",
+  "name": "58f17f5ff4ec234867ba7ec32585c656",
+  "desc": null,
+  "tags": [
+   "インライン裁断工程"
+  ],
+  "courses": [
+   "インライン裁断工程：全て"
+  ]
+ },
+ {
+  "id": 874522,
+  "title": "ロール裁断方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:37",
+  "dir": "vod/599/1672270522735",
+  "name": "0ea18bb1aac276764a094f7eb239dc6b",
+  "desc": null,
+  "tags": [
+   "ロール裁断工程"
+  ],
+  "courses": [
+   "ロール裁断工程：全て"
+  ]
+ },
+ {
+  "id": 903805,
+  "title": "巻き取り方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:26",
+  "dir": "vod/599/1672267205307",
+  "name": "8a4f9f3190ac2c23ec5e75ce7398a961",
+  "desc": null,
+  "tags": [
+   "ロール裁断工程"
+  ],
+  "courses": [
+   "巻き取り工程：全て"
+  ]
+ },
+ {
+  "id": 1017092,
+  "title": "過去の日別内装表皮工程内検査記録集計の修正方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:42",
+  "dir": "vod/599/1677549042193",
+  "name": "fc01cbd670107d4096ed1dc92600ada1",
+  "desc": null,
+  "tags": [
+   "スプレッドシート",
+   "検査"
+  ],
+  "courses": [
+   "スプレッドシート：全て",
+   "検査日報集計"
+  ]
+ },
+ {
+  "id": 676995,
+  "title": "粘着剤混攪拌翼の洗浄",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:45",
+  "dir": "vod/599/1671440484476",
+  "name": "55493ae9975d6ed5749f43e6e347ca1e",
+  "desc": null,
+  "tags": [
+   "粘着剤混合撹拌工程"
+  ],
+  "courses": [
+   "粘着剤混合撹拌工程：ドラム缶混合撹拌",
+   "粘着剤混合撹拌：全て"
+  ]
+ },
+ {
+  "id": 1060160,
+  "title": "勤怠管理方法",
+  "type": "Note",
+  "ev": 1,
+  "steps": 0,
+  "dur": "",
+  "dir": "",
+  "name": "",
+  "desc": "<img src=\"/img/599/1678945322949-logo.png\" style=\"width: 300px;\" class=\"fr-fil fr-dib\">勤怠管理はKING OF TIMEを利用しています。<br><br>使い方に関しては下記コースを参照してください。<br><a class=\"tebiki-link\" href=\"https://pw5ia4.tebiki.jp/courses?id=101213\">コース</a><br><br><hr><br>社内利用のKING OF TIME接続先は下記です。<br><a href=\"https://s3.kingtime.jp/admin/N34z7BJHUKxfu1KeH8nXxHhegmFTsu9F\">https://s3.kingtime.jp/admin/N34z7BJHUKxfu1KeH8nXxHhegmFTsu9F</a>",
+  "tags": [
+   "KING OF TIME"
+  ],
+  "courses": [
+   "勤怠管理"
+  ]
+ },
+ {
+  "id": 946454,
+  "title": "ドラム缶粘着剤の残量確認方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:45",
+  "dir": "vod/599/1674719145457",
+  "name": "32bbe782f1e780476f9e09afc736a47d",
+  "desc": "<br><br><br>★教育履歴<br>20230127<br>受講者：永瀬 貴胤、劒 慶伍<br>教育者：江<span style='color: rgb(0, 0, 0); font-family: 游ゴシック体, YuGothic, 游ゴシック, \"Yu Gothic\", メイリオ, sans-serif; font-size: 16px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 500; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; white-space: normal; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(255, 255, 255); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; display: inline !important; float: none;'>﨑</span> 弘朗<br><br>20230126<br>受講者：大前 慶介<br>教育者：江<span style='color: rgb(0, 0, 0); font-family: 游ゴシック体, YuGothic, 游ゴシック, \"Yu Gothic\", メイリオ, sans-serif; font-size: 16px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 500; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; white-space: normal; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(255, 255, 255); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; display: inline !important; float: none;'>﨑</span> 弘朗<br><br>",
+  "tags": [
+   "粘着剤塗布工程"
+  ],
+  "courses": [
+   "粘着剤塗布工程：全て"
+  ]
+ },
+ {
+  "id": 944137,
+  "title": "粘着工程オペレーターの異常発生時の処置方法",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "1:27",
+  "dir": "vod/599/1674637128122",
+  "name": "1da2dd45c3c909abc7768dfcab536adf",
+  "desc": "<br>★教育履歴<br>20230125<br>受講者：永瀬 貴胤、劔 慶伍、深見進一<br>教育者：江﨑 弘朗<br><br>20230118<br>受講者：永瀬 貴胤、劔 慶伍<br>教育者：江﨑 弘朗<br>※撹拌した粘着剤不足などの異常で量産速度を維持できない場合の処置を先行して指導",
+  "tags": [
+   "圧着工程"
+  ],
+  "courses": []
+ },
+ {
+  "id": 943600,
+  "title": "最終ドラム缶使用開始してからの確認頻度",
+  "type": "Video",
+  "ev": 1,
+  "steps": 0,
+  "dur": "0:34",
+  "dir": "vod/599/1674630395041",
+  "name": "4452d8c09c6a149794f930b7b32e3786",
+  "desc": "<br><br><br>★教育履歴<br>20230125<br>受講者：永瀬 貴胤、劔 慶伍、大前 慶介、小口 正一<br>教育者：江﨑 弘朗",
+  "tags": [
+   "粘着剤塗布工程"
+  ],
+  "courses": [
+   "粘着剤塗布工程：全て"
+  ]
+ }
+]
