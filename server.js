@@ -35178,7 +35178,7 @@ app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => 
           title: 1, description: 1, order: 1, status: 1, structure: 1,
           currentRevisionNumber: 1, lastRevisionId: 1,
           createdBy: 1, createdAt: 1, updatedAt: 1,
-          lastEditedBy: 1, lastEditedAt: 1, edit: 1,
+          lastEditedBy: 1, lastEditedAt: 1, edit: 1, assetSourceMap: 1,
           deployedRevisionId: 1, deployedRevisionNumber: 1, deployedRevisionName: 1,
           deployedAt: 1, deployedBy: 1,
           deployedVideoUrl: 1, deployedVideoStoragePath: 1, deployedVideoMimeType: 1, deployedVideoFileName: 1,
@@ -35197,10 +35197,27 @@ app.get('/api/video-manuals-studio/playlists/:id/projects', async (req, res) => 
       }
     ).sort({ order: 1, createdAt: 1 }).toArray();
 
-    res.json(projects.map((project) => ({
-      ...project,
-      tracksCount: vmssCountTracks(project),
-    })));
+    // Cards without a rendered project preview fall back to the first video clip's asset thumbnail / hover preview.
+    const coverUrlFor = (project) => {
+      const clips = (project.edit?.timeline?.tracks || []).flatMap((t) => t?.clips || []);
+      const first = clips.filter((c) => c?.asset?.type === 'video' && c.asset.src).sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0))[0];
+      return first ? (project.assetSourceMap?.[first.asset.src] || null) : null;
+    };
+    const needCover = projects.filter((p) => !p.previewThumbnailUrl && !p.previewUrl);
+    const coverUrls = [...new Set(needCover.map(coverUrlFor).filter(Boolean))];
+    const coverAssets = coverUrls.length
+      ? await db.collection(VMSS_ASSETS_COLLECTION).find({ playlistId, url: { $in: coverUrls } }, { projection: { url: 1, thumbnailUrl: 1, previewUrl: 1 } }).toArray()
+      : [];
+    const coverByUrl = new Map(coverAssets.map((a) => [a.url, a]));
+
+    res.json(projects.map(({ assetSourceMap, ...project }) => {
+      const cover = (!project.previewThumbnailUrl && !project.previewUrl) ? coverByUrl.get(coverUrlFor({ ...project, assetSourceMap })) : null;
+      return {
+        ...project,
+        ...(cover ? { previewThumbnailUrl: cover.thumbnailUrl || null, previewUrl: cover.previewUrl || null } : {}),
+        tracksCount: vmssCountTracks(project),
+      };
+    }));
   } catch (err) {
     console.error('❌ video-manuals-studio projects list error:', err);
     res.status(500).json({ error: err.message });
