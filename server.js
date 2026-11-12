@@ -36231,11 +36231,17 @@ function vmssApplyTagChange(current, { add, remove }) {
 app.get('/api/video-manuals-studio/tag-options', async (req, res) => {
   try {
     const db = client.db(VM_DB);
+    // (the Mongo client uses apiStrict, which does not allow `distinct`, so values are grouped with aggregate)
+    const distinctValues = async (collectionName, field, match = {}) => (await db.collection(collectionName).aggregate([
+      { $match: match },
+      { $unwind: `$${field}` },
+      { $group: { _id: `$${field}` } },
+    ]).toArray()).map((row) => row._id).filter((value) => typeof value === 'string');
     const [factoryNames, machineDocs, usedFactories, usedMachines] = await Promise.all([
-      db.collection('factoryDB').distinct('工場'),
+      distinctValues('factoryDB', '工場'),
       db.collection('setsubiDB').find({}, { projection: { name: 1, 工場: 1 } }).toArray(),
-      db.collection(VMSS_PROJECTS_COLLECTION).distinct('tags.factories', { deleted: { $ne: true } }),
-      db.collection(VMSS_PROJECTS_COLLECTION).distinct('tags.machines', { deleted: { $ne: true } }),
+      distinctValues(VMSS_PROJECTS_COLLECTION, 'tags.factories', { deleted: { $ne: true } }),
+      distinctValues(VMSS_PROJECTS_COLLECTION, 'tags.machines', { deleted: { $ne: true } }),
     ]);
     const factories = vmssCleanTagList([...factoryNames, ...usedFactories]).sort((a, b) => a.localeCompare(b, 'ja'));
     const machineFactory = new Map(machineDocs.filter((doc) => doc.name).map((doc) => [String(doc.name).trim(), doc.工場 || '']));
