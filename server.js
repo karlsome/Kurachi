@@ -35408,6 +35408,167 @@ app.post('/api/video-manuals-studio/playlists/:id/projects', async (req, res) =>
   }
 });
 
+// ---------------------------------------------------------------------------
+// Player translations (subtitles, step titles, step descriptions) via MyMemory.
+// Every translated string is stored permanently in MongoDB (collection videoManualShotstackTranslations),
+// keyed by source language + target language + hash of the source text, so MyMemory is never asked for the
+// same text twice (also shared between projects and survives edits: only changed text is translated again).
+// ---------------------------------------------------------------------------
+const VMSS_TRANSLATIONS_COLLECTION = 'videoManualShotstackTranslations';
+const VMSS_TRANSLATION_LANGS = ['ja', 'en', 'pt'];
+const VMSS_MYMEMORY_MAX_BYTES = 450; // MyMemory limit is 500 bytes per request
+const VMSS_MYMEMORY_CONCURRENCY = 4;
+const vmssTranslationJobs = new Map(); // `${projectId}|${lang}` -> in-flight promise (de-duplicates parallel requests)
+let vmssTranslationIndexReady = false;
+
+function vmssDetectTextLang(text) {
+  return /[぀-ヿ㐀-鿿ｦ-ﾟ]/.test(text) ? 'ja' : 'en';
+}
+
+function vmssHashText(text) {
+  return require('crypto').createHash('sha1').update(text).digest('hex');
+}
+
+// Splits long text on sentence/line boundaries so each piece stays under MyMemory's byte limit.
+function vmssChunkForMyMemory(text) {
+  if (Buffer.byteLength(text) <= VMSS_MYMEMORY_MAX_BYTES) return [text];
+  const pieces = text.split(/(?<=[.!?。！？\n])/);
+  const chunks = [];
+  let current = '';
+  const push = (piece) => {
+    if (current && Buffer.byteLength(current + piece) > VMSS_MYMEMORY_MAX_BYTES) { chunks.push(current); current = ''; }
+    current += piece;
+  };
+  for (const piece of pieces) {
+    if (Buffer.byteLength(piece) <= VMSS_MYMEMORY_MAX_BYTES) { push(piece); continue; }
+    for (const word of piece.split(/(?<=[\s、，,])/)) { // very long sentence: fall back to word / comma pieces
+      if (Buffer.byteLength(word) > VMSS_MYMEMORY_MAX_BYTES) {
+        for (const char of Array.from(word)) push(char);
+      } else push(word);
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+async function vmssMyMemoryTranslate(text, sourceLang, targetLang) {
+  const email = process.env.MYMEMORY_EMAIL || '';
+  const parts = [];
+  for (const chunk of vmssChunkForMyMemory(text)) {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=${sourceLang}|${targetLang}${email ? `&de=${encodeURIComponent(email)}` : ''}`;
+    const response = await fetch(url);
+    const data = await response.json().catch(() => ({}));
+    const translated = String(data?.responseData?.translatedText || '');
+    // Quota/other problems come back as 429 or as a "MYMEMORY WARNING" text; never store those.
+    if (Number(data?.responseStatus) !== 200 || !translated || /MYMEMORY WARNING|INVALID/i.test(translated)) {
+      const error = new Error(String(data?.responseDetails || translated || `MyMemory HTTP ${response.status}`).slice(0, 200));
+      error.quota = Number(data?.responseStatus) === 429 || /MYMEMORY WARNING|ALL AVAILABLE FREE/i.test(`${translated} ${data?.responseDetails || ''}`);
+      throw error;
+    }
+    parts.push(translated);
+  }
+  return parts.join(targetLang === 'ja' ? '' : ' ').trim();
+}
+
+async function vmssTranslateProject(db, project, targetLang) {
+  const collection = db.collection(VMSS_TRANSLATIONS_COLLECTION);
+  if (!vmssTranslationIndexReady) {
+    await collection.createIndex({ sourceLang: 1, targetLang: 1, hash: 1 }, { unique: true });
+    vmssTranslationIndexReady = true;
+  }
+
+  // 1) collect every string of the project (step title, step description, subtitle text)
+  const slots = []; // { stepId, field: 'title'|'description'|'cue', key, text }
+  for (const step of Array.isArray(project.steps) ? project.steps : []) {
+    const stepId = String(step.id);
+    if (String(step.title || '').trim()) slots.push({ stepId, field: 'title', text: String(step.title).trim() });
+    if (String(step.description || '').trim()) slots.push({ stepId, field: 'description', text: String(step.description).trim() });
+    (Array.isArray(step.subtitles) ? step.subtitles : []).forEach((cue, index) => {
+      if (String(cue?.text || '').trim()) slots.push({ stepId, field: 'cue', key: String(cue.id ?? index), text: String(cue.text).trim() });
+    });
+  }
+  slots.forEach((slot) => { slot.sourceLang = vmssDetectTextLang(slot.text); slot.hash = vmssHashText(slot.text); });
+
+  // 2) only text that is not already in the target language and has letters needs translating
+  const needed = new Map(); // `${sourceLang}|${hash}` -> { sourceLang, hash, text }
+  slots.forEach((slot) => {
+    slot.skip = slot.sourceLang === targetLang || !/[\p{L}]/u.test(slot.text);
+    if (!slot.skip) needed.set(`${slot.sourceLang}|${slot.hash}`, { sourceLang: slot.sourceLang, hash: slot.hash, text: slot.text });
+  });
+
+  // 3) what is already stored in MongoDB
+  const translated = new Map(); // key -> translated text
+  const keys = [...needed.values()];
+  if (keys.length) {
+    const rows = await collection.find({ targetLang, hash: { $in: keys.map((item) => item.hash) } }, { projection: { sourceLang: 1, hash: 1, translated: 1 } }).toArray();
+    rows.forEach((row) => translated.set(`${row.sourceLang}|${row.hash}`, row.translated));
+  }
+  const cachedCount = keys.filter((item) => translated.has(`${item.sourceLang}|${item.hash}`)).length;
+
+  // 4) ask MyMemory only for the rest, and store each result right away
+  const missing = keys.filter((item) => !translated.has(`${item.sourceLang}|${item.hash}`));
+  const stats = { strings: keys.length, cached: cachedCount, translated: 0, failed: 0 };
+  let quotaHit = false;
+  let cursor = 0;
+  async function worker() {
+    while (!quotaHit && cursor < missing.length) {
+      const item = missing[cursor++];
+      try {
+        const text = await vmssMyMemoryTranslate(item.text, item.sourceLang, targetLang);
+        const now = new Date();
+        await collection.updateOne(
+          { sourceLang: item.sourceLang, targetLang, hash: item.hash },
+          { $setOnInsert: { sourceLang: item.sourceLang, targetLang, hash: item.hash, text: item.text, translated: text, provider: 'mymemory', createdAt: now }, $set: { updatedAt: now } },
+          { upsert: true },
+        );
+        translated.set(`${item.sourceLang}|${item.hash}`, text);
+        stats.translated += 1;
+      } catch (error) {
+        stats.failed += 1;
+        if (error.quota) quotaHit = true;
+        console.warn('⚠️ video manual translation failed:', error.message);
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: VMSS_MYMEMORY_CONCURRENCY }, worker));
+
+  // 5) assemble the answer; text that could not be translated is simply left out (the player shows the original)
+  const steps = {};
+  slots.forEach((slot) => {
+    const value = slot.skip ? slot.text : translated.get(`${slot.sourceLang}|${slot.hash}`);
+    if (!value) return;
+    const entry = steps[slot.stepId] || (steps[slot.stepId] = { subtitles: {} });
+    if (slot.field === 'cue') entry.subtitles[slot.key] = value;
+    else entry[slot.field] = value;
+  });
+  return { lang: targetLang, steps, stats, incomplete: stats.failed > 0, quotaExceeded: quotaHit };
+}
+
+// get-or-create: returns the stored translation, translating (and storing) only what is missing.
+app.get('/api/video-manuals-studio/projects/:id/translations', async (req, res) => {
+  try {
+    const { username, role } = vmGetRequester(req);
+    const lang = String(req.query.lang || '').toLowerCase();
+    if (!VMSS_TRANSLATION_LANGS.includes(lang)) return res.status(400).json({ error: `lang must be one of ${VMSS_TRANSLATION_LANGS.join(', ')}` });
+    const db = client.db(VM_DB);
+    const project = await db.collection(VMSS_PROJECTS_COLLECTION).findOne({ _id: new ObjectId(req.params.id) });
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const playlist = await db.collection(VMSS_PLAYLISTS_COLLECTION).findOne({ _id: project.playlistId });
+    if (!playlist || !vmCanView(playlist, username, role)) return res.status(403).json({ error: 'No view access to this project' });
+
+    const jobKey = `${project._id}|${lang}|${project.updatedAt || ''}`;
+    let job = vmssTranslationJobs.get(jobKey);
+    if (!job) {
+      job = vmssTranslateProject(db, project, lang).finally(() => vmssTranslationJobs.delete(jobKey));
+      vmssTranslationJobs.set(jobKey, job);
+    }
+    res.json(await job);
+  } catch (err) {
+    console.error('❌ video-manuals-studio translations error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/video-manuals-studio/projects/:id', async (req, res) => {
   try {
     const { username, role } = vmGetRequester(req);
