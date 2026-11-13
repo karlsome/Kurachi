@@ -46341,8 +46341,13 @@ async function handleMaterialLotAnalytics(req, res) {
       hinban,
       seiban,
       worker,
-      search
+      search,
+      sortField,
+      sortDir
     } = params;
+
+    const pageSize = [10, 50, 100].includes(Number(params.pageSize)) ? Number(params.pageSize) : 10;
+    const requestedPage = Math.max(1, parseInt(params.page, 10) || 1);
 
     const db = client.db('submittedDB');
     const collection = db.collection('pressDB');
@@ -46711,21 +46716,55 @@ async function handleMaterialLotAnalytics(req, res) {
         images: [...labelImgs, ...defectImgs],
         runs: lot.runs.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '') || (b.createdAt || '').localeCompare(a.createdAt || ''))
       };
-    }).sort((a, b) => (b.latestDate || '').localeCompare(a.latestDate || '') || b.totalMeters - a.totalMeters);
+    });
+
+    // Server-side sort (all lots), then slice the requested page
+    const dirMul = String(sortDir) === 'asc' ? -1 : 1;
+    lots.sort((a, b) => {
+      let cmp = 0;
+      switch (sortField) {
+        case 'meters': cmp = (b.totalMeters || 0) - (a.totalMeters || 0); break;
+        case 'pieces': cmp = (b.totalPieces || 0) - (a.totalPieces || 0); break;
+        case 'runs': cmp = (b.runsCount || 0) - (a.runsCount || 0); break;
+        case 'lot': cmp = (a.lotNumber || '').localeCompare(b.lotNumber || ''); break;
+        case 'material': cmp = (a.materialSeiban || '').localeCompare(b.materialSeiban || ''); break;
+        default:
+          cmp = (b.latestDate || '').localeCompare(a.latestDate || '');
+          if (cmp === 0) cmp = (b.totalMeters || 0) - (a.totalMeters || 0);
+      }
+      return cmp * dirMul;
+    });
+
+    const totalLots = lots.length;
+    const totalPages = Math.max(1, Math.ceil(totalLots / pageSize));
+    const page = Math.min(requestedPage, totalPages);
+    const pageLots = lots.slice((page - 1) * pageSize, page * pageSize);
+    const pageLotKeys = new Set(pageLots.map(l => l.key));
+
+    const summaryMachines = new Set();
+    const summaryProducts = new Set();
+    lots.forEach(l => {
+      (l.machines || []).forEach(m => summaryMachines.add(m));
+      (l.products || []).forEach(p => { const k = p.hinban || p.seiban; if (k) summaryProducts.add(k); });
+    });
 
     res.json({
       success: true,
       summary: {
-        totalDistinctLots: lots.length,
+        totalDistinctLots: totalLots,
         totalMeters: Number(totalMetersOverall.toFixed(2)),
         totalShots: totalShotsOverall,
         totalPieces: totalPiecesOverall,
         totalPressRuns: records.length,
+        totalRuns: flatRuns.length,
+        totalMachines: summaryMachines.size,
+        totalProducts: summaryProducts.size,
         totalImagesCount: totalImagesCountOverall,
         totalDefectImagesCount: totalDefectImagesCountOverall
       },
-      lots,
-      runs: flatRuns.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '') || (b.createdAt || '').localeCompare(a.createdAt || '')),
+      pagination: { page, pageSize, totalLots, totalPages },
+      lots: pageLots,
+      runs: flatRuns.filter(r => pageLotKeys.has(`${r.materialSeiban || 'UNKNOWN'}__${r.lotNumber}`)).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeStart || '').localeCompare(a.timeStart || '') || (b.createdAt || '').localeCompare(a.createdAt || '')),
       filterOptions: {
         materialSeibans: Array.from(allMaterialSeibans).sort(),
         materialHinbans: Array.from(allMaterialHinbans).sort(),
