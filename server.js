@@ -13419,18 +13419,47 @@ app.get('/api/cycle-at-start', async (req, res) => {
 //   pieces = cycles x pcPerCycle (masterDB machineConfig, else root); NG = live totalNG from the machine state (pair: max, not sum)
 // An ESTIMATE: it stays 0 until the tablet reports the run, and is only valid for the current production day.
 // ============================================
+// Short TTL cache (shared by every client / drawer open) + in-flight de-dup, so a burst of requests computes once.
+const LIVE_PRODUCTION_TTL_MS = 5000;
+const liveProductionCache = new Map(); // key -> { at, promise }
+
 app.get('/api/planner/live-production', async (req, res) => {
     try {
         const { factory, date } = req.query;
         if (!factory || !date) return res.status(400).json({ success: false, error: 'factory and date are required' });
 
+        const cacheKey = `${factory}|${date}`;
+        const hit = liveProductionCache.get(cacheKey);
+        if (hit && Date.now() - hit.at < LIVE_PRODUCTION_TTL_MS) {
+            return res.json({ success: true, data: await hit.promise });
+        }
+        const promise = computeLiveProduction(factory, date);
+        liveProductionCache.set(cacheKey, { at: Date.now(), promise });
+        promise.catch(() => { if (liveProductionCache.get(cacheKey)?.promise === promise) liveProductionCache.delete(cacheKey); });
+        if (liveProductionCache.size > 50) {
+            for (const [k, v] of liveProductionCache) if (Date.now() - v.at > LIVE_PRODUCTION_TTL_MS * 4) liveProductionCache.delete(k);
+        }
+        res.json({ success: true, data: await promise });
+    } catch (error) {
+        console.error('Error computing live production:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+async function computeLiveProduction(factory, date) {
         const masterDb = client.db(DB_NAME);
         const submittedDb = client.db('submittedDB');
         // What each machine is running now = its latest tabletLogDB event today (survives server restarts, unlike the in-memory
         // machine state). A Reset / completed Submit means idle. Live NG still comes from the in-memory state when it has one.
-        const logs = await submittedDb.collection('tabletLogDB')
-            .find({ 工場: factory, Date: date })
-            .project({ Timestamp: 1, Action: 1, Status: 1, 背番号: 1, 設備: 1, SpecificMachine: 1, AdditionalData: 1, sessionID: 1 }).toArray();
+        const [logs, pressDocs] = await Promise.all([
+            submittedDb.collection('tabletLogDB')
+                .find({ 工場: factory, Date: date })
+                .project({ Timestamp: 1, Action: 1, Status: 1, 背番号: 1, 設備: 1, SpecificMachine: 1, AdditionalData: 1, sessionID: 1 }).toArray(),
+            // Submitted shots per machine today
+            submittedDb.collection('pressDB')
+                .find({ 工場: factory, Date: date })
+                .project({ 設備: 1, ショット数: 1, Lot_Details: 1 }).toArray(),
+        ]);
         logs.sort((a, b) => String(a.Timestamp || '').localeCompare(String(b.Timestamp || '')));
         const latestByMachine = new Map();
         logs.forEach((l) => {
@@ -13449,12 +13478,8 @@ app.get('/api/planner/live-production', async (req, res) => {
         const running = [...latestByMachine.entries()]
             .filter(([, v]) => !v.closed && v.sebanggo)
             .map(([id, v]) => [id, { sebanggo: v.sebanggo, sessionID: v.sessionID, totalNG: states.get(id)?.totalNG || 0 }]);
-        if (!running.length) return res.json({ success: true, data: { bySerial: {}, machines: [] } });
+        if (!running.length) return { bySerial: {}, machines: [] };
 
-        // Submitted shots per machine today
-        const pressDocs = await submittedDb.collection('pressDB')
-            .find({ 工場: factory, Date: date })
-            .project({ 設備: 1, ショット数: 1, Lot_Details: 1 }).toArray();
         const submittedShots = new Map();
         const addShots = (machine, n) => {
             const key = String(machine || '').trim().toUpperCase();
@@ -13468,9 +13493,22 @@ app.get('/api/planner/live-production', async (req, res) => {
         });
 
         const serials = [...new Set(running.map(([, st]) => st.sebanggo))];
-        const products = await masterDb.collection('masterDB')
-            .find({ 背番号: { $in: serials } })
-            .project({ 背番号: 1, 工場: 1, pcPerCycle: 1, machineConfig: 1 }).toArray();
+        const runningIds = running.map(([id]) => id);
+        // One query each instead of two awaits per running machine
+        const [products, cycDocs, startDocs] = await Promise.all([
+            masterDb.collection('masterDB')
+                .find({ 背番号: { $in: serials } })
+                .project({ 背番号: 1, 工場: 1, pcPerCycle: 1, machineConfig: 1 }).toArray(),
+            masterDb.collection('cycleCountDB')
+                .find({ factory, machine: { $in: [...new Set([...runningIds, ...runningIds.map((x) => x.toUpperCase())])] } }).toArray(),
+            masterDb.collection(CYCLE_AT_START_COLLECTION)
+                .find({ factory, machine: { $in: runningIds }, Date: date, 背番号: { $in: serials }, endedAt: { $exists: false } })
+                .sort({ startedAt: -1 }).toArray(),
+        ]);
+        const cycById = new Map();
+        cycDocs.forEach((d) => { const k = String(d.machine || '').toUpperCase(); if (!cycById.has(k)) cycById.set(k, d); });
+        const startByKey = new Map(); // sorted newest first, so the first one seen wins (same as findOne sort startedAt -1)
+        startDocs.forEach((d) => { const k = `${d.machine}|${d.背番号}`; if (!startByKey.has(k)) startByKey.set(k, d); });
         const productBySerial = new Map();
         products.forEach((p) => {
             const ex = productBySerial.get(p.背番号);
@@ -13479,8 +13517,7 @@ app.get('/api/planner/live-production', async (req, res) => {
 
         const machines = [];
         for (const [id, st] of running) {
-            const cyc = await masterDb.collection('cycleCountDB')
-                .findOne({ factory, machine: { $in: [id, id.toUpperCase()] } });
+            const cyc = cycById.get(id.toUpperCase());
             const counter = cyc && Number.isFinite(Number(cyc.cycle)) ? Number(cyc.cycle) : null;
             if (counter === null) continue;
             // cycleCountDB keeps the LAST count forever: a machine that has not cycled today still holds an old number
@@ -13493,8 +13530,7 @@ app.get('/api/planner/live-production', async (req, res) => {
 
             let cycles = null;
             let source = 'submitted-shots';
-            const startDoc = await masterDb.collection(CYCLE_AT_START_COLLECTION)
-                .findOne({ factory, machine: id, Date: date, 背番号: st.sebanggo, endedAt: { $exists: false } }, { sort: { startedAt: -1 } });
+            const startDoc = startByKey.get(`${id}|${st.sebanggo}`);
             if (startDoc && Number.isFinite(Number(startDoc.cycleAtStart)) && counter >= Number(startDoc.cycleAtStart)) {
                 cycles = counter - Number(startDoc.cycleAtStart);
                 source = 'cycleAtStart';
@@ -13521,12 +13557,8 @@ app.get('/api/planner/live-production', async (req, res) => {
         });
         Object.values(bySerial).forEach((e) => { e.good = Math.max(0, e.pieces - e.ng); });
 
-        res.json({ success: true, data: { bySerial, machines } });
-    } catch (error) {
-        console.error('Error computing live production:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
+        return { bySerial, machines };
+}
 
 // Broken-down machines stay broken until someone marks them repaired (like the legacy Freya Admin), so a day without its
 // own list inherits the list of the nearest EARLIER plan that has one. Read-only, returns only that field.
@@ -46922,6 +46954,26 @@ app.post('/api/ai/copilot', async (req, res) => {
     });
   }
 });
+
+// Indexes for the digital-twin / live-production queries (idempotent; runs in the background, never blocks startup).
+(async () => {
+  try {
+    await client.connect();
+    const sub = client.db('submittedDB');
+    const master = client.db(DB_NAME);
+    const specs = [
+      [sub.collection('tabletLogDB'), { 工場: 1, Date: 1 }],
+      [sub.collection('pressDB'), { 工場: 1, Date: 1 }],
+      [master.collection('cycleCountDB'), { factory: 1, machine: 1 }],
+      [master.collection(CYCLE_AT_START_COLLECTION), { factory: 1, machine: 1, Date: 1, 背番号: 1 }],
+    ];
+    for (const [col, key] of specs) {
+      await col.createIndex(key, { background: true }).catch((err) => console.warn('index create skipped:', col.collectionName, err.message));
+    }
+  } catch (err) {
+    console.warn('digital-twin index setup skipped:', err.message);
+  }
+})();
 
 app.listen(port, () => {
   console.log(`✅ Combined server is running at http://localhost:${port}`);
