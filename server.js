@@ -14725,7 +14725,13 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       const id = String(doc.machine || '').trim();
       if (!id) return;
       const m = ensureMachine(id);
-      const ts = parseDigitalTwinTimestamp(doc.timestamp, DIGITAL_TWIN_FACTORY_TIMEZONES[factory] || null);
+      let ts = parseDigitalTwinTimestamp(doc.timestamp, DIGITAL_TWIN_FACTORY_TIMEZONES[factory] || null);
+      // Some machine PCs in a JST factory still run on Pacific time (OZNC06 ~17h behind): read as JST the stamp looks
+      // like yesterday and the counter is dropped. If it only makes sense as Pacific (fresh, not in the future), use that.
+      if (ts !== null && ts < cutoffMs && !DIGITAL_TWIN_FACTORY_TIMEZONES[factory]) {
+        const alt = parseDigitalTwinTimestamp(doc.timestamp, 'America/Los_Angeles');
+        if (alt !== null && alt >= cutoffMs && alt <= nowMs + 5 * 60 * 1000) ts = alt;
+      }
       if (m.lastCycleMs !== null && ts !== null && ts < m.lastCycleMs) return;
       m.hasCycleSensor = true;
       m.cycleRaw = Number(doc.cycle) || 0;
@@ -15040,6 +15046,8 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         hinban: fallbackHinban,
         pcPerCycle: activePcPerCycle,
         pieces,
+        activePieces,
+        completedPieces: totalCompletedPieces,
         alertSince: m.stopCallAt || m.cncCancelAt || m.maintenanceAt || m.breakAt
           ? new Date(m.stopCallAt || m.cncCancelAt || m.maintenanceAt || m.breakAt).toISOString()
           : null,
@@ -15076,7 +15084,11 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
       r.pair.sharedCycles = r.hasCycleSensor && partner.hasCycleSensor
         ? (r.todayCycles || 0) + (partner.todayCycles || 0)
         : Math.max(r.todayCycles || 0, partner.todayCycles || 0);
-      r.pair.sharedPieces = Math.max(r.pieces ?? 0, partner.pieces ?? 0);
+      // Completed runs are already the pair total (same pressDB records on both machines); each machine has its own
+      // counter, so the in-progress pieces of BOTH machines add up on top (max() dropped one machine's counter).
+      r.pair.sharedPieces = r.hasCycleSensor && partner.hasCycleSensor && String(factory).toUpperCase() !== 'SCNA'
+        ? Math.max(r.completedPieces || 0, partner.completedPieces || 0) + (r.activePieces || 0) + (partner.activePieces || 0)
+        : Math.max(r.pieces ?? 0, partner.pieces ?? 0);
       r.pair.worker = r.worker || partner.worker;
       r.pair.sebanggo = r.sebanggo || partner.sebanggo;
       r.pair.completedRuns = r.completedRuns.length >= partner.completedRuns.length ? r.completedRuns : partner.completedRuns;
