@@ -14465,6 +14465,7 @@ function buildDigitalTwinTimelineSegments({
   currentStatus = 'off',
   dayStartMin = 480,
   dayEndMin = 1140,
+  extraBreaks = [],
 }) {
   const segments = [];
   const addSegment = (type, sMin, eMin, meta = {}) => {
@@ -14598,6 +14599,42 @@ function buildDigitalTwinTimelineSegments({
     });
   }
 
+  // Overlay breaks reported by the tablet (Break started / Break ended). pressDB.Break_Time_Data is usually empty,
+  // so without this the shift timeline shows lunch / tea breaks as running or idle.
+  if (extraBreaks.length) {
+    const existing = segments.filter((x) => x.type === 'break').map((x) => [x.startMin, x.endMin]);
+    const pieces = [];
+    extraBreaks.forEach(({ startMin, endMin }) => {
+      let parts = [[Math.max(startMin, minShiftStart), Math.min(endMin, maxShiftEnd)]];
+      existing.forEach(([es, ee]) => {
+        parts = parts.flatMap(([a, b]) => (ee <= a || es >= b ? [[a, b]] : [[a, Math.min(b, es)], [Math.max(a, ee), b]]))
+          .filter(([a, b]) => b > a);
+      });
+      parts.filter(([a, b]) => b > a).forEach((part) => pieces.push(part));
+    });
+    if (pieces.length) {
+      const carved = [];
+      segments.forEach((seg) => {
+        if (seg.type === 'break') { carved.push(seg); return; }
+        let remaining = [[seg.startMin, seg.endMin]];
+        pieces.forEach(([bs, be]) => {
+          remaining = remaining.flatMap(([a, b]) => (be <= a || bs >= b ? [[a, b]] : [[a, Math.min(b, bs)], [Math.max(a, be), b]]))
+            .filter(([a, b]) => b > a);
+        });
+        remaining.forEach(([a, b]) => carved.push({
+          ...seg, startMin: a, endMin: b, start: minutesToDigitalTwinTime(a), end: minutesToDigitalTwinTime(b), durationMin: b - a,
+        }));
+      });
+      pieces.forEach(([a, b]) => carved.push({
+        type: 'break', startMin: a, endMin: b, start: minutesToDigitalTwinTime(a), end: minutesToDigitalTwinTime(b),
+        durationMin: b - a, sebanggo: '', hinban: '', worker: '', pieces: 0, shots: 0, label: '休憩',
+      }));
+      carved.sort((x, y) => x.startMin - y.startMin);
+      segments.length = 0;
+      carved.forEach((seg) => segments.push(seg));
+    }
+  }
+
   const summary = {
     runningMin: 0,
     idleMin: 0,
@@ -14697,7 +14734,7 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         machines.set(id, {
           id, noOfHead: 1, tableLength: null, hasCycleSensor: false,
           cycleRaw: null, lastCycleMs: null,
-          stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null,
+          stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null, breakIntervals: [],
           lastLogMs: null, lastLogStatus: null, sessionEquipment: '',
           worker: '', sebanggo: '', hinban: '', sebanggoAt: 0, lotStartMs: 0,
           // Tablet session: 'Start time set' opens it, 'End time set' marks wrap-up, Submit/Reset closes it
@@ -14774,14 +14811,21 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         else if (action.startsWith('CNC Cancel Unlocked')) m.cncCancelAt = null;
         else if (action === 'Maintenance started') m.maintenanceAt = log.ms;
         else if (action === 'Maintenance ended') m.maintenanceAt = null;
-        else if (action === 'Break started') m.breakAt = log.ms;
-        else if (action === 'Break ended') m.breakAt = null;
+        else if (action === 'Break started') {
+          m.breakAt = log.ms;
+          if (!m.breakIntervals.some((b) => b.endMs === null)) m.breakIntervals.push({ startMs: log.ms, endMs: null });
+        } else if (action === 'Break ended') {
+          m.breakAt = null;
+          const open = m.breakIntervals.find((b) => b.endMs === null);
+          if (open) open.endMs = log.ms;
+        }
         else if (action === 'Start time set') {
           m.sessionStartMs = log.ms;
           m.endTimeSet = false;
         } else if (action === 'End time set') {
           if (m.sessionStartMs) m.endTimeSet = true;
         } else if (action === 'Submit button pressed' || action === 'Reset button pressed') {
+          m.breakIntervals.forEach((b) => { if (b.endMs === null) b.endMs = log.ms; });
           m.breakAt = null;
           m.maintenanceAt = null;
           m.sessionStartMs = null;
@@ -15006,6 +15050,10 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         currentStatus: status,
         dayStartMin: 480,
         dayEndMin: 1140,
+        extraBreaks: (m.breakIntervals || []).map((b) => {
+          const toMin = (ms) => { const d = new Date(ms + DIGITAL_TWIN_JST_OFFSET_MS); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
+          return { startMin: toMin(b.startMs), endMin: toMin(b.endMs ?? nowMs) };
+        }).filter((b) => b.endMin > b.startMin),
       });
 
       // Clean runs for frontend response
