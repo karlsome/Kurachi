@@ -14466,6 +14466,7 @@ function buildDigitalTwinTimelineSegments({
   dayStartMin = 480,
   dayEndMin = 1140,
   extraBreaks = [],
+  extraStops = [],
 }) {
   const segments = [];
   const addSegment = (type, sMin, eMin, meta = {}) => {
@@ -14635,6 +14636,41 @@ function buildDigitalTwinTimelineSegments({
     }
   }
 
+  // Overlay stop calls / CNC cancel locks (red) over everything except breaks and already-known stop segments.
+  if (extraStops.length) {
+    const protectedSpans = segments.filter((x) => x.type === 'break' || x.type === 'stopCall').map((x) => [x.startMin, x.endMin]);
+    const pieces = [];
+    extraStops.forEach(({ startMin, endMin }) => {
+      let parts = [[Math.max(startMin, minShiftStart), Math.min(endMin, maxShiftEnd)]].filter(([a, b]) => b > a);
+      protectedSpans.forEach(([es, ee]) => {
+        parts = parts.flatMap(([a, b]) => (ee <= a || es >= b ? [[a, b]] : [[a, Math.min(b, es)], [Math.max(a, ee), b]]))
+          .filter(([a, b]) => b > a);
+      });
+      parts.forEach((part) => pieces.push(part));
+    });
+    if (pieces.length) {
+      const carved = [];
+      segments.forEach((seg) => {
+        if (seg.type === 'break' || seg.type === 'stopCall') { carved.push(seg); return; }
+        let remaining = [[seg.startMin, seg.endMin]];
+        pieces.forEach(([bs, be]) => {
+          remaining = remaining.flatMap(([a, b]) => (be <= a || bs >= b ? [[a, b]] : [[a, Math.min(b, bs)], [Math.max(a, be), b]]))
+            .filter(([a, b]) => b > a);
+        });
+        remaining.forEach(([a, b]) => carved.push({
+          ...seg, startMin: a, endMin: b, start: minutesToDigitalTwinTime(a), end: minutesToDigitalTwinTime(b), durationMin: b - a,
+        }));
+      });
+      pieces.forEach(([a, b]) => carved.push({
+        type: 'stopCall', startMin: a, endMin: b, start: minutesToDigitalTwinTime(a), end: minutesToDigitalTwinTime(b),
+        durationMin: b - a, sebanggo: '', hinban: '', worker: '', pieces: 0, shots: 0, label: '呼出・停止',
+      }));
+      carved.sort((x, y) => x.startMin - y.startMin);
+      segments.length = 0;
+      carved.forEach((seg) => segments.push(seg));
+    }
+  }
+
   const summary = {
     runningMin: 0,
     idleMin: 0,
@@ -14734,7 +14770,7 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         machines.set(id, {
           id, noOfHead: 1, tableLength: null, hasCycleSensor: false,
           cycleRaw: null, lastCycleMs: null,
-          stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null, breakIntervals: [],
+          stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null, breakIntervals: [], stopIntervals: [],
           lastLogMs: null, lastLogStatus: null, sessionEquipment: '',
           worker: '', sebanggo: '', hinban: '', sebanggoAt: 0, lotStartMs: 0,
           // Tablet session: 'Start time set' opens it, 'End time set' marks wrap-up, Submit/Reset closes it
@@ -14801,14 +14837,18 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
           m.sebanggoAt = log.ms;
         }
 
-        if (action.startsWith('Stop call activated')) m.stopCallAt = log.ms;
+        // Stop intervals (stop call / CNC cancel lock) for the shift timeline: open on activation, close on unlock
+        const openStop = () => { if (!m.stopIntervals.some((b) => b.endMs === null)) m.stopIntervals.push({ startMs: log.ms, endMs: null }); };
+        const closeStop = () => m.stopIntervals.forEach((b) => { if (b.endMs === null) b.endMs = log.ms; });
+        if (action.startsWith('Stop call activated')) { m.stopCallAt = log.ms; openStop(); }
         else if (/^Stop call (unlocked|resolved|canceled)/.test(action)) {
           // The leader unlock (gatekeeper) also releases a CNC cancel lock.
           m.stopCallAt = null;
           m.cncCancelAt = null;
+          closeStop();
         }
-        else if (action.startsWith('CNC Cancel Button Detected')) m.cncCancelAt = log.ms;
-        else if (action.startsWith('CNC Cancel Unlocked')) m.cncCancelAt = null;
+        else if (action.startsWith('CNC Cancel Button Detected')) { m.cncCancelAt = log.ms; openStop(); }
+        else if (action.startsWith('CNC Cancel Unlocked')) { m.cncCancelAt = null; if (!m.stopCallAt) closeStop(); }
         else if (action === 'Maintenance started') m.maintenanceAt = log.ms;
         else if (action === 'Maintenance ended') m.maintenanceAt = null;
         else if (action === 'Break started') {
@@ -14826,6 +14866,7 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
           if (m.sessionStartMs) m.endTimeSet = true;
         } else if (action === 'Submit button pressed' || action === 'Reset button pressed') {
           m.breakIntervals.forEach((b) => { if (b.endMs === null) b.endMs = log.ms; });
+          m.stopIntervals.forEach((b) => { if (b.endMs === null) b.endMs = log.ms; });
           m.breakAt = null;
           m.maintenanceAt = null;
           m.sessionStartMs = null;
@@ -15051,6 +15092,10 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         dayStartMin: 480,
         dayEndMin: 1140,
         extraBreaks: (m.breakIntervals || []).map((b) => {
+          const toMin = (ms) => { const d = new Date(ms + DIGITAL_TWIN_JST_OFFSET_MS); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
+          return { startMin: toMin(b.startMs), endMin: toMin(b.endMs ?? nowMs) };
+        }).filter((b) => b.endMin > b.startMin),
+        extraStops: (m.stopIntervals || []).map((b) => {
           const toMin = (ms) => { const d = new Date(ms + DIGITAL_TWIN_JST_OFFSET_MS); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
           return { startMin: toMin(b.startMs), endMin: toMin(b.endMs ?? nowMs) };
         }).filter((b) => b.endMin > b.startMin),
