@@ -43390,11 +43390,10 @@ app.post('/api/pce/upload', async (req, res) => {
 
 // ==================== NC PROGRAMS (non-SCNA AOL cutters: PCE -> JSON points) ====================
 // One PCE per 背番号 per machine type (noOfHead + tableLength, e.g. "1h_12"), plus optional versions for one
-// specific machine (tolerances). The browser converts the PCE to points; we keep the original PCE in Firebase
-// Storage and the points in Mongo ncProgramsDB. A machine-type upload is also saved to Google Drive as
-// <背番号>_<type>.pce so the old Xiao send keeps working as the fallback.
+// specific machine (tolerances). The browser converts the PCE to points (Mongo ncProgramsDB); the PCE itself is
+// kept in Google Drive "freyaAdmin pce 2". The original "freyaAdmin pce" folder (used by the Xiao send) is not touched.
 // Tablet / listener pick for a machine: that machine's own version > its machine type > (none: Xiao send).
-// Replacing keeps the old document as inactive history (restore = make it active again).
+// Replacing keeps the old document as inactive history and moves its file to _history (restore moves it back).
 
 const NC_PROGRAMS_COLLECTION = "ncProgramsDB";
 const NC_AOL_MACHINE_RE = /^(OZNC\d+|NCC01)$/i;   // the only AOL cutters outside SCNA
@@ -43430,35 +43429,77 @@ function _ncPublic(doc) {
   return rest;
 }
 
-async function _ncSaveToDrive(sebanggo, machineType, buffer, overwrite) {
-  const folderId = process.env.GOOGLE_DRIVE_PCE_FOLDER_ID;
-  if (!folderId) throw new Error("GOOGLE_DRIVE_PCE_FOLDER_ID is not set");
-  const drive = _buildDriveClient();
-  const name = `${sebanggo}_${machineType}.pce`;
-  const found = await drive.files.list({
-    q: `name = '${name.replace(/'/g, "\\'")}' and '${folderId}' in parents and trashed = false`,
-    supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "files(id, name)",
-  });
-  const existing = (found.data.files || [])[0];
-  if (existing && !overwrite) return { conflict: true, name };
-  const body = new Readable(); body.push(buffer); body.push(null);
-  const media = { mimeType: "application/octet-stream", body };
-  const r = existing
-    ? await drive.files.update({ fileId: existing.id, media, supportsAllDrives: true, fields: "id,name" })
-    : await drive.files.create({ requestBody: { name, parents: [folderId] }, media, supportsAllDrives: true, fields: "id,name" });
-  return { conflict: false, name: r.data.name, id: r.data.id, replaced: !!existing };
-}
+// ---- Google Drive storage: "freyaAdmin pce 2" (the original "freyaAdmin pce" folder is never written) ----
+//   freyaAdmin pce 2/<背番号>_<type>.pce         machine-type program
+//   freyaAdmin pce 2/<machine>/<背番号>.pce      machine-specific version
+//   freyaAdmin pce 2/_history/<...>__<time>.pce  replaced / removed versions (restore moves them back)
+// The folder is GOOGLE_DRIVE_PCE2_FOLDER_ID, or a folder of that name created next to GOOGLE_DRIVE_PCE_FOLDER_ID.
+const NC_PCE2_FOLDER_NAME = "freyaAdmin pce 2";
+const NC_FOLDER_MIME = "application/vnd.google-apps.folder";
+let _ncRootFolderId = null;
+const _ncFolderCache = new Map();
 
-async function _ncDriveExists(sebanggo, machineType) {
-  const folderId = process.env.GOOGLE_DRIVE_PCE_FOLDER_ID;
-  if (!folderId) return false;
-  const drive = _buildDriveClient();
-  const name = `${sebanggo}_${machineType}.pce`;
+function _ncQ(s) { return String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
+
+async function _ncEnsureFolder(drive, parentId, name) {
+  const key = `${parentId}/${name}`;
+  if (_ncFolderCache.has(key)) return _ncFolderCache.get(key);
   const found = await drive.files.list({
-    q: `name = '${name.replace(/'/g, "\\'")}' and '${folderId}' in parents and trashed = false`,
+    q: `'${parentId}' in parents and mimeType = '${NC_FOLDER_MIME}' and name = '${_ncQ(name)}' and trashed = false`,
     supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "files(id)",
   });
-  return (found.data.files || []).length > 0;
+  let id = (found.data.files || [])[0]?.id;
+  if (!id) {
+    const r = await drive.files.create({ requestBody: { name, mimeType: NC_FOLDER_MIME, parents: [parentId] }, supportsAllDrives: true, fields: "id" });
+    id = r.data.id;
+  }
+  _ncFolderCache.set(key, id);
+  return id;
+}
+
+async function _ncRootFolder(drive) {
+  if (_ncRootFolderId) return _ncRootFolderId;
+  if (process.env.GOOGLE_DRIVE_PCE2_FOLDER_ID) return (_ncRootFolderId = process.env.GOOGLE_DRIVE_PCE2_FOLDER_ID);
+  const oldId = process.env.GOOGLE_DRIVE_PCE_FOLDER_ID;
+  if (!oldId) throw new Error("GOOGLE_DRIVE_PCE2_FOLDER_ID / GOOGLE_DRIVE_PCE_FOLDER_ID is not set");
+  const old = await drive.files.get({ fileId: oldId, supportsAllDrives: true, fields: "id,parents,driveId" });
+  const parent = (old.data.parents || [])[0] || old.data.driveId;
+  if (!parent) throw new Error("Could not find the folder that holds 'freyaAdmin pce'");
+  _ncRootFolderId = await _ncEnsureFolder(drive, parent, NC_PCE2_FOLDER_NAME);
+  return _ncRootFolderId;
+}
+
+function _ncSlotName(sebanggo, machineType, machine) { return machine ? `${sebanggo}.pce` : `${sebanggo}_${machineType}.pce`; }
+function _ncHistoryName(doc) {
+  const stamp = String(doc.uploadedAt || new Date().toISOString()).replace(/[:.]/g, "-");
+  return `${doc.背番号}_${doc.machine || doc.machineType}__${stamp}.pce`;
+}
+
+async function _ncSlotFolder(drive, machine) {
+  const root = await _ncRootFolder(drive);
+  return machine ? _ncEnsureFolder(drive, root, machine) : root;
+}
+
+async function _ncMove(drive, fileId, toFolderId, newName) {
+  const cur = await drive.files.get({ fileId, supportsAllDrives: true, fields: "parents" });
+  await drive.files.update({
+    fileId, supportsAllDrives: true, fields: "id",
+    addParents: toFolderId, removeParents: (cur.data.parents || []).join(","),
+    requestBody: newName ? { name: newName } : {},
+  });
+}
+
+// Files with the slot's name that are not the active program (e.g. put there by hand) go to _history too.
+async function _ncClearSlot(drive, folderId, name, keepId) {
+  const found = await drive.files.list({
+    q: `'${folderId}' in parents and name = '${_ncQ(name)}' and trashed = false`,
+    supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "files(id)",
+  });
+  const hist = await _ncEnsureFolder(drive, await _ncRootFolder(drive), "_history");
+  for (const f of found.data.files || []) {
+    if (f.id === keepId) continue;
+    await _ncMove(drive, f.id, hist, name.replace(/\.pce$/i, `__untracked_${Date.now()}.pce`));
+  }
 }
 
 // AOL machines grouped by machine type (admin cards). ?factory= limits to one 工場; when that leaves nothing,
@@ -43571,12 +43612,12 @@ app.get("/api/nc-programs/:id/points", async (req, res) => {
   }
 });
 
-// Upload / replace. Body: { sebanggo, machineType, machine?, fileName, pceBase64, points, layers?, uploadedBy, overwriteDrive? }
-// A machine-type upload whose Drive file already exists (e.g. from the PCE Files page) answers 409 driveConflict
-// before anything is saved, unless overwriteDrive is true.
+// Upload / replace. Body: { sebanggo, machineType, machine?, fileName, pceBase64, points, layers?, uploadedBy }
+// The PCE goes to Drive "freyaAdmin pce 2" (new file first, then the old one moves to _history, then the new one
+// takes the slot name), the points to Mongo.
 app.post("/api/nc-programs", async (req, res) => {
   try {
-    const { sebanggo, machineType, fileName, pceBase64, points, layers, uploadedBy, overwriteDrive } = req.body;
+    const { sebanggo, machineType, fileName, pceBase64, points, layers, uploadedBy } = req.body;
     const machine = req.body.machine ? String(req.body.machine).trim() : null;
     if (!sebanggo || !machineType || !fileName || !pceBase64) {
       return res.status(400).json({ error: "sebanggo, machineType, fileName and pceBase64 are required" });
@@ -43596,57 +43637,76 @@ app.post("/api/nc-programs", async (req, res) => {
       if (t !== machineType) return res.status(400).json({ error: `${machine} is machine type ${t}, not ${machineType}` });
     }
 
+    const programs = database.collection(NC_PROGRAMS_COLLECTION);
+    const drive = _buildDriveClient();
+    const folderId = await _ncSlotFolder(drive, machine);
+    const slotName = _ncSlotName(sebanggo, machineType, machine);
     const buffer = Buffer.from(String(pceBase64).split(",")[1] || pceBase64, "base64");
-    if (!machine && !overwriteDrive) {
-      const programs0 = database.collection(NC_PROGRAMS_COLLECTION);
-      const hasActive = await programs0.findOne({ 背番号: sebanggo, machineType, machine: null, isActive: true }, { projection: { _id: 1 } });
-      // Replacing our own file is expected; only warn when Drive has a file we did not put there.
-      if (!hasActive && await _ncDriveExists(sebanggo, machineType)) {
-        return res.status(409).json({ error: "Drive file already exists", driveConflict: `${sebanggo}_${machineType}.pce` });
-      }
-    }
 
-    const docId = new ObjectId();
-    const storagePath = `nc/${sebanggo}/${machine ? machine : machineType}/${docId}_${Date.now()}.pce`;
-    const file = admin.storage().bucket().file(storagePath);
-    await file.save(buffer, {
-      metadata: { contentType: "application/octet-stream", metadata: { firebaseStorageDownloadTokens: "masterDBToken69" } },
-      public: true,
+    const body = new Readable(); body.push(buffer); body.push(null);
+    const created = await drive.files.create({
+      requestBody: { name: `${slotName}.uploading`, parents: [folderId] },
+      media: { mimeType: "application/octet-stream", body }, supportsAllDrives: true, fields: "id",
     });
-    const pceURL = `https://storage.googleapis.com/${file.bucket.name}/${encodeURIComponent(file.name)}?alt=media&token=masterDBToken69`;
+    const driveFileId = created.data.id;
 
     const nowIso = new Date().toISOString();
+    const docId = new ObjectId();
+    const slot = { 背番号: sebanggo, machineType, machine, isActive: true };
+    const hist = await _ncEnsureFolder(drive, await _ncRootFolder(drive), "_history");
+    for (const old of await programs.find(slot, { projection: { points: 0 } }).toArray()) {
+      const histName = _ncHistoryName(old);
+      if (old.driveFileId) {
+        try { await _ncMove(drive, old.driveFileId, hist, histName); }
+        catch (e) { console.warn("NC program: could not move old version to _history:", e.message); }
+      }
+      await programs.updateOne({ _id: old._id }, { $set: { isActive: false, replacedAt: nowIso, replacedBy: docId, updatedAt: nowIso, driveName: histName, drivePath: `_history/${histName}` } });
+    }
+    await _ncClearSlot(drive, folderId, slotName, driveFileId);
+    await drive.files.update({ fileId: driveFileId, supportsAllDrives: true, requestBody: { name: slotName }, fields: "id" });
+
     const cleanPoints = points.map((p, i) => ({
       index: i, flag: Number(p.flag), layer: Number(p.layer), x: Number(p.x), y: Number(p.y),
       value: p.value === undefined ? 1.0 : Number(p.value),
     }));
-    const programs = database.collection(NC_PROGRAMS_COLLECTION);
-    const displayName = machine ? `${sebanggo} (${machine})` : `${sebanggo}_${machineType}`;
     const doc = {
       _id: docId, 背番号: sebanggo, 品番: item.品番 || "", 工場: item.工場 || "",
-      machineType, machine, displayName, fileName: String(fileName), sourceType: "pce",
-      pceURL, storagePath, points: cleanPoints, pointCount: cleanPoints.length,
+      machineType, machine, displayName: machine ? `${sebanggo} (${machine})` : `${sebanggo}_${machineType}`,
+      fileName: String(fileName), sourceType: "pce",
+      driveFileId, driveName: slotName, drivePath: machine ? `${machine}/${slotName}` : slotName,
+      points: cleanPoints, pointCount: cleanPoints.length,
       layers: Array.isArray(layers) ? layers.map(Number).filter(Number.isFinite) : [...new Set(cleanPoints.map(p => p.layer))],
       uploadedBy: uploadedBy || "admin", uploadedAt: nowIso, updatedAt: nowIso, isActive: true,
     };
-
-    let drive = null;
-    if (!machine) {
-      try { drive = await _ncSaveToDrive(sebanggo, machineType, buffer, true); doc.driveFileName = drive.name; doc.driveSavedAt = nowIso; }
-      catch (e) { drive = { error: e.message }; doc.driveError = e.message; console.error("❌ NC program Drive save failed:", e.message); }
-    }
-
-    const slot = { 背番号: sebanggo, machineType, machine, isActive: true };
-    await programs.updateMany(slot, { $set: { isActive: false, replacedAt: nowIso, replacedBy: docId, updatedAt: nowIso } });
     await programs.insertOne(doc);
-    res.status(201).json({ success: true, program: _ncPublic(doc), drive });
+    res.status(201).json({ success: true, program: _ncPublic(doc) });
   } catch (error) {
     console.error("❌ Error uploading NC program:", error);
     res.status(500).json({ error: "Failed to upload NC program", details: error.message });
   }
 });
 
-// Make an older version active again (machine-type versions are also written back to Drive)
+// The PCE file of a program (any version) from Drive
+app.get("/api/nc-programs/:id/pce", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const doc = await client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION).findOne(
+      { _id: new ObjectId(req.params.id) }, { projection: { driveFileId: 1, 背番号: 1, machineType: 1, machine: 1, uploadedAt: 1 } });
+    if (!doc || !doc.driveFileId) return res.status(404).json({ error: "PCE file not found" });
+    const drive = _buildDriveClient();
+    const r = await drive.files.get({ fileId: doc.driveFileId, alt: "media", supportsAllDrives: true }, { responseType: "stream" });
+    const name = doc.machine ? `${doc.背番号}_${doc.machine}.pce` : `${doc.背番号}_${doc.machineType}.pce`;
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename="${name.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    r.data.on("error", () => { try { res.end(); } catch (e) { } }).pipe(res);
+  } catch (error) {
+    console.error("❌ Error downloading NC program PCE:", error.message);
+    if (!res.headersSent) res.status(500).json({ error: "Failed to download PCE", details: error.message });
+  }
+});
+
+// Make an older version active again: the current one moves to _history, this one moves back into the slot.
 app.post("/api/nc-programs/:id/restore", async (req, res) => {
   try {
     if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
@@ -43654,35 +43714,51 @@ app.post("/api/nc-programs/:id/restore", async (req, res) => {
     const programs = client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION);
     const doc = await programs.findOne({ _id: new ObjectId(req.params.id) }, { projection: { points: 0 } });
     if (!doc) return res.status(404).json({ error: "Program not found" });
+    if (doc.isActive) return res.json({ success: true });
+    if (!doc.driveFileId) return res.status(400).json({ error: "This version has no Drive file" });
+    const drive = _buildDriveClient();
     const nowIso = new Date().toISOString();
-    let drive = null;
-    if (!doc.machine && doc.storagePath) {
-      try {
-        const [buf] = await admin.storage().bucket().file(doc.storagePath).download();
-        drive = await _ncSaveToDrive(doc.背番号, doc.machineType, buf, true);
-      } catch (e) { drive = { error: e.message }; }
+    const hist = await _ncEnsureFolder(drive, await _ncRootFolder(drive), "_history");
+    const folderId = await _ncSlotFolder(drive, doc.machine || null);
+    const slotName = _ncSlotName(doc.背番号, doc.machineType, doc.machine);
+    for (const cur of await programs.find({ 背番号: doc.背番号, machineType: doc.machineType, machine: doc.machine || null, isActive: true }, { projection: { points: 0 } }).toArray()) {
+      const histName = _ncHistoryName(cur);
+      if (cur.driveFileId) { try { await _ncMove(drive, cur.driveFileId, hist, histName); } catch (e) { console.warn("NC restore: move to _history failed:", e.message); } }
+      await programs.updateOne({ _id: cur._id }, { $set: { isActive: false, replacedAt: nowIso, replacedBy: doc._id, updatedAt: nowIso, driveName: histName, drivePath: `_history/${histName}` } });
     }
-    await programs.updateMany({ 背番号: doc.背番号, machineType: doc.machineType, machine: doc.machine || null, isActive: true, _id: { $ne: doc._id } },
-      { $set: { isActive: false, replacedAt: nowIso, replacedBy: doc._id, updatedAt: nowIso } });
-    await programs.updateOne({ _id: doc._id }, { $set: { isActive: true, restoredAt: nowIso, updatedAt: nowIso, restoredBy: req.body?.user || "admin" }, $unset: { replacedAt: "", replacedBy: "", removedAt: "" } });
-    res.json({ success: true, drive });
+    await _ncClearSlot(drive, folderId, slotName, doc.driveFileId);
+    await _ncMove(drive, doc.driveFileId, folderId, slotName);
+    await programs.updateOne({ _id: doc._id }, {
+      $set: { isActive: true, restoredAt: nowIso, updatedAt: nowIso, restoredBy: req.body?.user || "admin", driveName: slotName, drivePath: doc.machine ? `${doc.machine}/${slotName}` : slotName },
+      $unset: { replacedAt: "", replacedBy: "", removedAt: "", removedBy: "" },
+    });
+    res.json({ success: true });
   } catch (error) {
+    console.error("❌ Error restoring NC program:", error);
     res.status(500).json({ error: "Failed to restore NC program", details: error.message });
   }
 });
 
-// Remove (deactivate) a version. The Drive file is left as it is.
+// Remove a version: deactivated in Mongo, its file moves to _history (it can be restored).
 app.delete("/api/nc-programs/:id", async (req, res) => {
   try {
     if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
     await client.connect();
+    const programs = client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION);
+    const doc = await programs.findOne({ _id: new ObjectId(req.params.id), isActive: true }, { projection: { points: 0 } });
+    if (!doc) return res.status(404).json({ error: "Program not found" });
     const nowIso = new Date().toISOString();
-    const r = await client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION).updateOne(
-      { _id: new ObjectId(req.params.id), isActive: true },
-      { $set: { isActive: false, removedAt: nowIso, updatedAt: nowIso, removedBy: req.query.user || "admin" } });
-    if (!r.matchedCount) return res.status(404).json({ error: "Program not found" });
+    const set = { isActive: false, removedAt: nowIso, updatedAt: nowIso, removedBy: req.query.user || "admin" };
+    if (doc.driveFileId) {
+      const drive = _buildDriveClient();
+      const histName = _ncHistoryName(doc);
+      await _ncMove(drive, doc.driveFileId, await _ncEnsureFolder(drive, await _ncRootFolder(drive), "_history"), histName);
+      set.driveName = histName; set.drivePath = `_history/${histName}`;
+    }
+    await programs.updateOne({ _id: doc._id }, { $set: set });
     res.json({ success: true });
   } catch (error) {
+    console.error("❌ Error removing NC program:", error);
     res.status(500).json({ error: "Failed to remove NC program", details: error.message });
   }
 });
