@@ -43470,9 +43470,20 @@ async function _ncRootFolder(drive) {
 }
 
 function _ncSlotName(sebanggo, machineType, machine) { return machine ? `${sebanggo}.pce` : `${sebanggo}_${machineType}.pce`; }
+// The uploaded file's own name, safe for a Drive / Windows file name ("VKY01 final.pce" -> "VKY01 final.pce")
+function _ncSafeOriginal(name) {
+  const base = String(name || "").split(/[\\/]/).pop().replace(/\.pce$/i, "")
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").replace(/\s+/g, " ").trim().slice(0, 80);
+  return base ? `${base}.pce` : "";
+}
+// _history/<背番号>_<type or machine>__<upload time>__<original name>.pce
 function _ncHistoryName(doc) {
-  const stamp = String(doc.uploadedAt || new Date().toISOString()).replace(/[:.]/g, "-");
-  return `${doc.背番号}_${doc.machine || doc.machineType}__${stamp}.pce`;
+  const stamp = String(doc.uploadedAt || new Date().toISOString()).replace(/\.\d+Z$/, "").replace(/[:.]/g, "-");
+  const original = _ncSafeOriginal(doc.fileName);
+  return `${doc.背番号}_${doc.machine || doc.machineType}__${stamp}${original ? `__${original}` : ".pce"}`;
+}
+function _ncDescription(fileName, uploadedBy, iso) {
+  return `Original: ${fileName || "?"} · by ${uploadedBy || "admin"} · ${iso}`;
 }
 
 async function _ncSlotFolder(drive, machine) {
@@ -43620,7 +43631,9 @@ async function _ncSaveProgram(database, drive, { item, sebanggo, machineType, ma
   const slotName = _ncSlotName(sebanggo, machineType, machine);
   const body = new Readable(); body.push(buffer); body.push(null);
   const created = await drive.files.create({
-    requestBody: { name: `${slotName}.uploading`, parents: [folderId] },
+    // The slot name stays fixed (the listener opens it by name); the uploaded file's name is kept in the
+    // Drive description (Details panel), in Mongo fileName and in the _history name.
+    requestBody: { name: `${slotName}.uploading`, parents: [folderId], description: _ncDescription(fileName, uploadedBy, new Date().toISOString()) },
     media: { mimeType: "application/octet-stream", body }, supportsAllDrives: true, fields: "id",
   });
   const driveFileId = created.data.id;
@@ -43756,11 +43769,13 @@ app.get("/api/nc-programs/:id/pce", async (req, res) => {
     if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
     await client.connect();
     const doc = await client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION).findOne(
-      { _id: new ObjectId(req.params.id) }, { projection: { driveFileId: 1, 背番号: 1, machineType: 1, machine: 1, uploadedAt: 1 } });
+      { _id: new ObjectId(req.params.id) }, { projection: { driveFileId: 1, 背番号: 1, machineType: 1, machine: 1, uploadedAt: 1, fileName: 1 } });
     if (!doc || !doc.driveFileId) return res.status(404).json({ error: "PCE file not found" });
     const drive = _buildDriveClient();
     const r = await drive.files.get({ fileId: doc.driveFileId, alt: "media", supportsAllDrives: true }, { responseType: "stream" });
-    const name = doc.machine ? `${doc.背番号}_${doc.machine}.pce` : `${doc.背番号}_${doc.machineType}.pce`;
+    // ?as=slot -> the Drive name (1GD_1h_12.pce); default -> the name it was uploaded with
+    const slotDownload = doc.machine ? `${doc.背番号}_${doc.machine}.pce` : `${doc.背番号}_${doc.machineType}.pce`;
+    const name = req.query.as === "slot" ? slotDownload : (_ncSafeOriginal(doc.fileName) || slotDownload);
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("Content-Disposition", `attachment; filename="${name.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}`);
     r.data.on("error", () => { try { res.end(); } catch (e) { } }).pipe(res);
