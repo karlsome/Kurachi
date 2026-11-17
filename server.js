@@ -43612,9 +43612,56 @@ app.get("/api/nc-programs/:id/points", async (req, res) => {
   }
 });
 
-// Upload / replace. Body: { sebanggo, machineType, machine?, fileName, pceBase64, points, layers?, uploadedBy }
-// The PCE goes to Drive "freyaAdmin pce 2" (new file first, then the old one moves to _history, then the new one
-// takes the slot name), the points to Mongo.
+// Saves one program into its slot (背番号 + machineType [+ machine]): the new file is written first, then the
+// active one moves to _history, then the new one takes the slot name. Returns the new document (no points).
+async function _ncSaveProgram(database, drive, { item, sebanggo, machineType, machine, fileName, buffer, points, layers, uploadedBy }) {
+  const programs = database.collection(NC_PROGRAMS_COLLECTION);
+  const folderId = await _ncSlotFolder(drive, machine);
+  const slotName = _ncSlotName(sebanggo, machineType, machine);
+  const body = new Readable(); body.push(buffer); body.push(null);
+  const created = await drive.files.create({
+    requestBody: { name: `${slotName}.uploading`, parents: [folderId] },
+    media: { mimeType: "application/octet-stream", body }, supportsAllDrives: true, fields: "id",
+  });
+  const driveFileId = created.data.id;
+
+  const nowIso = new Date().toISOString();
+  const docId = new ObjectId();
+  const hist = await _ncEnsureFolder(drive, await _ncRootFolder(drive), "_history");
+  for (const old of await programs.find({ 背番号: sebanggo, machineType, machine, isActive: true }, { projection: { points: 0 } }).toArray()) {
+    const histName = _ncHistoryName(old);
+    if (old.driveFileId) {
+      try { await _ncMove(drive, old.driveFileId, hist, histName); }
+      catch (e) { console.warn("NC program: could not move old version to _history:", e.message); }
+    }
+    await programs.updateOne({ _id: old._id }, { $set: { isActive: false, replacedAt: nowIso, replacedBy: docId, updatedAt: nowIso, driveName: histName, drivePath: `_history/${histName}` } });
+  }
+  await _ncClearSlot(drive, folderId, slotName, driveFileId);
+  await drive.files.update({ fileId: driveFileId, supportsAllDrives: true, requestBody: { name: slotName }, fields: "id" });
+
+  const cleanPoints = points.map((p, i) => ({
+    index: i, flag: Number(p.flag), layer: Number(p.layer), x: Number(p.x), y: Number(p.y),
+    value: p.value === undefined ? 1.0 : Number(p.value),
+  }));
+  const doc = {
+    _id: docId, 背番号: sebanggo, 品番: item.品番 || "", 工場: item.工場 || "",
+    machineType, machine, displayName: machine ? `${sebanggo} (${machine})` : `${sebanggo}_${machineType}`,
+    fileName: String(fileName), sourceType: "pce",
+    driveFileId, driveName: slotName, drivePath: machine ? `${machine}/${slotName}` : slotName,
+    points: cleanPoints, pointCount: cleanPoints.length,
+    layers: Array.isArray(layers) ? layers.map(Number).filter(Number.isFinite) : [...new Set(cleanPoints.map(p => p.layer))],
+    uploadedBy: uploadedBy || "admin", uploadedAt: nowIso, updatedAt: nowIso, isActive: true,
+  };
+  await programs.insertOne(doc);
+  return _ncPublic(doc);
+}
+
+async function _ncFindItem(database, sebanggo) {
+  return await database.collection("masterDB").findOne({ 背番号: sebanggo, 工場: { $ne: "SCNA" } })
+    || await database.collection("masterDB").findOne({ 背番号: sebanggo });
+}
+
+// Upload / replace one slot. Body: { sebanggo, machineType, machine?, fileName, pceBase64, points, layers?, uploadedBy }
 app.post("/api/nc-programs", async (req, res) => {
   try {
     const { sebanggo, machineType, fileName, pceBase64, points, layers, uploadedBy } = req.body;
@@ -43629,60 +43676,77 @@ app.post("/api/nc-programs", async (req, res) => {
 
     await client.connect();
     const database = client.db(DB_NAME);
-    const item = await database.collection("masterDB").findOne({ 背番号: sebanggo, 工場: { $ne: "SCNA" } })
-      || await database.collection("masterDB").findOne({ 背番号: sebanggo });
+    const item = await _ncFindItem(database, sebanggo);
     if (!item) return res.status(400).json({ error: `背番号 ${sebanggo} not found in masterDB` });
     if (machine) {
       const t = await _ncMachineType(database, machine);
       if (t !== machineType) return res.status(400).json({ error: `${machine} is machine type ${t}, not ${machineType}` });
     }
-
-    const programs = database.collection(NC_PROGRAMS_COLLECTION);
-    const drive = _buildDriveClient();
-    const folderId = await _ncSlotFolder(drive, machine);
-    const slotName = _ncSlotName(sebanggo, machineType, machine);
     const buffer = Buffer.from(String(pceBase64).split(",")[1] || pceBase64, "base64");
-
-    const body = new Readable(); body.push(buffer); body.push(null);
-    const created = await drive.files.create({
-      requestBody: { name: `${slotName}.uploading`, parents: [folderId] },
-      media: { mimeType: "application/octet-stream", body }, supportsAllDrives: true, fields: "id",
-    });
-    const driveFileId = created.data.id;
-
-    const nowIso = new Date().toISOString();
-    const docId = new ObjectId();
-    const slot = { 背番号: sebanggo, machineType, machine, isActive: true };
-    const hist = await _ncEnsureFolder(drive, await _ncRootFolder(drive), "_history");
-    for (const old of await programs.find(slot, { projection: { points: 0 } }).toArray()) {
-      const histName = _ncHistoryName(old);
-      if (old.driveFileId) {
-        try { await _ncMove(drive, old.driveFileId, hist, histName); }
-        catch (e) { console.warn("NC program: could not move old version to _history:", e.message); }
-      }
-      await programs.updateOne({ _id: old._id }, { $set: { isActive: false, replacedAt: nowIso, replacedBy: docId, updatedAt: nowIso, driveName: histName, drivePath: `_history/${histName}` } });
-    }
-    await _ncClearSlot(drive, folderId, slotName, driveFileId);
-    await drive.files.update({ fileId: driveFileId, supportsAllDrives: true, requestBody: { name: slotName }, fields: "id" });
-
-    const cleanPoints = points.map((p, i) => ({
-      index: i, flag: Number(p.flag), layer: Number(p.layer), x: Number(p.x), y: Number(p.y),
-      value: p.value === undefined ? 1.0 : Number(p.value),
-    }));
-    const doc = {
-      _id: docId, 背番号: sebanggo, 品番: item.品番 || "", 工場: item.工場 || "",
-      machineType, machine, displayName: machine ? `${sebanggo} (${machine})` : `${sebanggo}_${machineType}`,
-      fileName: String(fileName), sourceType: "pce",
-      driveFileId, driveName: slotName, drivePath: machine ? `${machine}/${slotName}` : slotName,
-      points: cleanPoints, pointCount: cleanPoints.length,
-      layers: Array.isArray(layers) ? layers.map(Number).filter(Number.isFinite) : [...new Set(cleanPoints.map(p => p.layer))],
-      uploadedBy: uploadedBy || "admin", uploadedAt: nowIso, updatedAt: nowIso, isActive: true,
-    };
-    await programs.insertOne(doc);
-    res.status(201).json({ success: true, program: _ncPublic(doc) });
+    const program = await _ncSaveProgram(database, _buildDriveClient(), { item, sebanggo, machineType, machine, fileName, buffer, points, layers, uploadedBy });
+    res.status(201).json({ success: true, program });
   } catch (error) {
     console.error("❌ Error uploading NC program:", error);
     res.status(500).json({ error: "Failed to upload NC program", details: error.message });
+  }
+});
+
+// One PCE for many items x machine types (PCE Files tab). Body:
+//   { entries: [{ code: <背番号>, suffix: <machineType> }], fileName, pceBase64, points, layers?, uploadedBy,
+//     overwrite: [<slot file names to replace>] }
+// Slots that already hold a program answer 409 { conflicts: [<file name>] } until each one is listed in overwrite
+// (replace: the old file moves to _history) or left out by the client (skip).
+app.post("/api/nc-programs/bulk", async (req, res) => {
+  try {
+    const { entries, fileName, pceBase64, points, layers, uploadedBy } = req.body;
+    const overwrite = Array.isArray(req.body.overwrite) ? req.body.overwrite : [];
+    if (!Array.isArray(entries) || !entries.length || !fileName || !pceBase64) {
+      return res.status(400).json({ error: "entries, fileName and pceBase64 are required" });
+    }
+    const pointsError = _validateScnaNcPoints(points);
+    if (pointsError) return res.status(400).json({ error: pointsError });
+    const slots = [];
+    const seen = new Set();
+    for (const e of entries) {
+      const sebanggo = String(e.code || e.sebanggo || "").trim();
+      const machineType = String(e.suffix || e.machineType || "").trim();
+      if (!sebanggo || !NC_TYPE_RE.test(machineType)) return res.status(400).json({ error: `invalid entry ${JSON.stringify(e)}` });
+      const name = _ncSlotName(sebanggo, machineType, null);
+      if (!seen.has(name)) { seen.add(name); slots.push({ sebanggo, machineType, name }); }
+    }
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const programs = database.collection(NC_PROGRAMS_COLLECTION);
+    const conflicts = [];
+    for (const s of slots) {
+      const cur = await programs.findOne({ 背番号: s.sebanggo, machineType: s.machineType, machine: null, isActive: true }, { projection: { _id: 1 } });
+      if (cur) conflicts.push(s.name);
+    }
+    const unresolved = conflicts.filter(n => !overwrite.includes(n));
+    if (unresolved.length && !req.body.skipConflicts) {
+      return res.status(409).json({ error: "Programs already exist", conflicts: unresolved });
+    }
+
+    const drive = _buildDriveClient();
+    const buffer = Buffer.from(String(pceBase64).split(",")[1] || pceBase64, "base64");
+    const results = [];
+    for (const s of slots) {
+      if (conflicts.includes(s.name) && !overwrite.includes(s.name)) { results.push({ ...s, status: "skipped" }); continue; }
+      try {
+        const item = await _ncFindItem(database, s.sebanggo);
+        if (!item) { results.push({ ...s, status: "error", error: `背番号 ${s.sebanggo} not found` }); continue; }
+        const program = await _ncSaveProgram(database, drive, { item, sebanggo: s.sebanggo, machineType: s.machineType, machine: null, fileName, buffer, points, layers, uploadedBy });
+        results.push({ ...s, status: conflicts.includes(s.name) ? "replaced" : "created", id: program._id, drivePath: program.drivePath });
+      } catch (err) {
+        console.error(`❌ NC bulk upload failed for ${s.name}:`, err.message);
+        results.push({ ...s, status: "error", error: err.message });
+      }
+    }
+    res.json({ success: results.every(r => r.status !== "error"), results });
+  } catch (error) {
+    console.error("❌ Error in NC bulk upload:", error);
+    res.status(500).json({ error: "Failed to upload NC programs", details: error.message });
   }
 });
 
