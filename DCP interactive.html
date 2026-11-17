@@ -5898,6 +5898,10 @@
         if (new URLSearchParams(location.search).get('filter') === 'SCNA') document.write('<script src="DCP interactive SCNA.js?v=bt1"><\/script>');
     </script>
     <script src="DCP interactive backend.js"></script>
+    <script>
+        // NC add-on (AOL cutters outside SCNA: JSON send to machine + live cycle count). It stays idle on other machines.
+        if (new URLSearchParams(location.search).get('filter') !== 'SCNA') document.write('<script src="DCP interactive NC.js?v=nc1"><\/script>');
+    </script>
     <script src="html5-qrcode.min.js"></script>
 
     <!-- ===== Phase 1 interactive behaviors (runs after backend) ===== -->
