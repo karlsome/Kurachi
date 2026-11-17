@@ -43388,6 +43388,307 @@ app.post('/api/pce/upload', async (req, res) => {
   }
 });
 
+// ==================== NC PROGRAMS (non-SCNA AOL cutters: PCE -> JSON points) ====================
+// One PCE per 背番号 per machine type (noOfHead + tableLength, e.g. "1h_12"), plus optional versions for one
+// specific machine (tolerances). The browser converts the PCE to points; we keep the original PCE in Firebase
+// Storage and the points in Mongo ncProgramsDB. A machine-type upload is also saved to Google Drive as
+// <背番号>_<type>.pce so the old Xiao send keeps working as the fallback.
+// Tablet / listener pick for a machine: that machine's own version > its machine type > (none: Xiao send).
+// Replacing keeps the old document as inactive history (restore = make it active again).
+
+const NC_PROGRAMS_COLLECTION = "ncProgramsDB";
+const NC_AOL_MACHINE_RE = /^(OZNC\d+|NCC01)$/i;   // the only AOL cutters outside SCNA
+const NC_TYPE_RE = /^\d+h_\d{2}$/;
+
+function _ncIsAolMachine(name) { return NC_AOL_MACHINE_RE.test(String(name || "").trim()); }
+
+// Same rule as the listener's get_machine_suffix(): "<noOfHead>h_<first 2 digits of tableLength>", default 1h_12
+function _ncTypeFromRecord(rec) {
+  if (!rec) return null;
+  const heads = String(rec.noOfHead ?? "").trim();
+  const len = String(rec.tableLength ?? "").trim();
+  if (!heads && !len) return null;
+  return `${heads || "1"}h_${(len || "1200").slice(0, 2)}`;
+}
+
+async function _ncMachineType(database, machine) {
+  const setsubi = database.collection("setsubiDB");
+  const rec = await setsubi.findOne({ name: machine });
+  let type = _ncTypeFromRecord(rec);
+  if (!type && rec && String(rec.name || "").includes(",")) {
+    for (const m of String(rec.name).split(",").map(s => s.trim()).filter(Boolean)) {
+      type = _ncTypeFromRecord(await setsubi.findOne({ name: m }));
+      if (type) break;
+    }
+  }
+  return type || "1h_12";
+}
+
+function _ncPublic(doc) {
+  if (!doc) return null;
+  const { points, ...rest } = doc;
+  return rest;
+}
+
+async function _ncSaveToDrive(sebanggo, machineType, buffer, overwrite) {
+  const folderId = process.env.GOOGLE_DRIVE_PCE_FOLDER_ID;
+  if (!folderId) throw new Error("GOOGLE_DRIVE_PCE_FOLDER_ID is not set");
+  const drive = _buildDriveClient();
+  const name = `${sebanggo}_${machineType}.pce`;
+  const found = await drive.files.list({
+    q: `name = '${name.replace(/'/g, "\\'")}' and '${folderId}' in parents and trashed = false`,
+    supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "files(id, name)",
+  });
+  const existing = (found.data.files || [])[0];
+  if (existing && !overwrite) return { conflict: true, name };
+  const body = new Readable(); body.push(buffer); body.push(null);
+  const media = { mimeType: "application/octet-stream", body };
+  const r = existing
+    ? await drive.files.update({ fileId: existing.id, media, supportsAllDrives: true, fields: "id,name" })
+    : await drive.files.create({ requestBody: { name, parents: [folderId] }, media, supportsAllDrives: true, fields: "id,name" });
+  return { conflict: false, name: r.data.name, id: r.data.id, replaced: !!existing };
+}
+
+async function _ncDriveExists(sebanggo, machineType) {
+  const folderId = process.env.GOOGLE_DRIVE_PCE_FOLDER_ID;
+  if (!folderId) return false;
+  const drive = _buildDriveClient();
+  const name = `${sebanggo}_${machineType}.pce`;
+  const found = await drive.files.list({
+    q: `name = '${name.replace(/'/g, "\\'")}' and '${folderId}' in parents and trashed = false`,
+    supportsAllDrives: true, includeItemsFromAllDrives: true, fields: "files(id)",
+  });
+  return (found.data.files || []).length > 0;
+}
+
+// AOL machines grouped by machine type (admin cards). ?factory= limits to one 工場; when that leaves nothing,
+// every AOL machine is returned with allFactories: true.
+app.get("/api/nc-programs/machine-types", async (req, res) => {
+  try {
+    await client.connect();
+    const rows = await client.db(DB_NAME).collection("setsubiDB")
+      .find({}, { projection: { name: 1, 工場: 1, noOfHead: 1, tableLength: 1 } }).toArray();
+    const aol = rows.filter(r => _ncIsAolMachine(r.name));
+    const factory = String(req.query.factory || "").trim();
+    let list = factory ? aol.filter(r => String(r.工場 || "").trim() === factory) : aol;
+    const allFactories = !!factory && list.length === 0;
+    if (allFactories) list = aol;
+    const groups = new Map();
+    list.forEach(r => {
+      const type = _ncTypeFromRecord(r) || "1h_12";
+      if (!groups.has(type)) {
+        const [h, l] = type.split("h_");
+        groups.set(type, { machineType: type, heads: Number(h) || 1, tableLength: String(r.tableLength || `${l}00`), machines: [] });
+      }
+      groups.get(type).machines.push({ name: String(r.name).trim(), 工場: r.工場 || "" });
+    });
+    const out = [...groups.values()]
+      .map(g => ({ ...g, machines: g.machines.sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true })) }))
+      .sort((a, b) => a.heads - b.heads || String(a.tableLength).localeCompare(String(b.tableLength), "ja", { numeric: true }));
+    res.json({ factory, allFactories, types: out });
+  } catch (error) {
+    console.error("❌ Error listing NC machine types:", error);
+    res.status(500).json({ error: "Failed to list machine types", details: error.message });
+  }
+});
+
+// Active programs of one 背番号 (no points)
+app.get("/api/nc-programs/by-sebanggo/:sebanggo", async (req, res) => {
+  try {
+    await client.connect();
+    const list = await client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION)
+      .find({ 背番号: req.params.sebanggo, isActive: true }).project({ points: 0 })
+      .sort({ machineType: 1, machine: 1 }).toArray();
+    res.json(list);
+  } catch (error) {
+    console.error("❌ Error listing NC programs:", error);
+    res.status(500).json({ error: "Failed to list NC programs", details: error.message });
+  }
+});
+
+// Which 背番号 have programs (admin table badge)
+app.get("/api/nc-programs/counts", async (req, res) => {
+  try {
+    await client.connect();
+    const rows = await client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION).aggregate([
+      { $match: { isActive: true } }, { $group: { _id: "$背番号", count: { $sum: 1 } } },
+    ]).toArray();
+    res.json(Object.fromEntries(rows.map(r => [r._id, r.count])));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to count NC programs", details: error.message });
+  }
+});
+
+// Version history of one slot (?sebanggo=&machineType=&machine= ; no machine = the machine-type file)
+app.get("/api/nc-programs/history", async (req, res) => {
+  try {
+    const { sebanggo, machineType } = req.query;
+    if (!sebanggo || !machineType) return res.status(400).json({ error: "sebanggo and machineType are required" });
+    await client.connect();
+    const list = await client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION)
+      .find({ 背番号: sebanggo, machineType, machine: req.query.machine || null }).project({ points: 0 })
+      .sort({ uploadedAt: -1 }).limit(50).toArray();
+    res.json(list);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to load history", details: error.message });
+  }
+});
+
+// What a tablet should send to one machine: { machine, machineType, aol, source: "machine"|"type"|null, program }
+app.get("/api/nc-programs/resolve", async (req, res) => {
+  try {
+    const sebanggo = String(req.query.sebanggo || "").trim();
+    const machine = String(req.query.machine || "").trim();
+    if (!sebanggo || !machine) return res.status(400).json({ error: "sebanggo and machine are required" });
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const machineType = await _ncMachineType(database, machine);
+    const programs = database.collection(NC_PROGRAMS_COLLECTION);
+    const own = await programs.findOne({ 背番号: sebanggo, machine, isActive: true }, { projection: { points: 0 }, sort: { uploadedAt: -1 } });
+    const typed = own ? null : await programs.findOne({ 背番号: sebanggo, machineType, machine: null, isActive: true }, { projection: { points: 0 }, sort: { uploadedAt: -1 } });
+    const program = own || typed;
+    res.json({ sebanggo, machine, machineType, aol: _ncIsAolMachine(machine), source: own ? "machine" : typed ? "type" : null, program: program || null });
+  } catch (error) {
+    console.error("❌ Error resolving NC program:", error);
+    res.status(500).json({ error: "Failed to resolve NC program", details: error.message });
+  }
+});
+
+// Points (listener + admin JSON download). Inactive versions only with ?any=1 (admin history download).
+app.get("/api/nc-programs/:id/points", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const q = { _id: new ObjectId(req.params.id) };
+    if (req.query.any !== "1") q.isActive = true;
+    const doc = await client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION).findOne(q,
+      { projection: { displayName: 1, 背番号: 1, machineType: 1, machine: 1, fileName: 1, points: 1 } });
+    if (!doc) return res.status(404).json({ error: "Program not found" });
+    res.json({ id: doc._id, 背番号: doc.背番号, displayName: doc.displayName, machineType: doc.machineType, machine: doc.machine, fileName: doc.fileName, points: doc.points });
+  } catch (error) {
+    console.error("❌ Error fetching NC program points:", error);
+    res.status(500).json({ error: "Failed to fetch NC program", details: error.message });
+  }
+});
+
+// Upload / replace. Body: { sebanggo, machineType, machine?, fileName, pceBase64, points, layers?, uploadedBy, overwriteDrive? }
+// A machine-type upload whose Drive file already exists (e.g. from the PCE Files page) answers 409 driveConflict
+// before anything is saved, unless overwriteDrive is true.
+app.post("/api/nc-programs", async (req, res) => {
+  try {
+    const { sebanggo, machineType, fileName, pceBase64, points, layers, uploadedBy, overwriteDrive } = req.body;
+    const machine = req.body.machine ? String(req.body.machine).trim() : null;
+    if (!sebanggo || !machineType || !fileName || !pceBase64) {
+      return res.status(400).json({ error: "sebanggo, machineType, fileName and pceBase64 are required" });
+    }
+    if (!NC_TYPE_RE.test(machineType)) return res.status(400).json({ error: `invalid machineType ${machineType}` });
+    if (machine && !_ncIsAolMachine(machine)) return res.status(400).json({ error: `${machine} is not an AOL machine` });
+    const pointsError = _validateScnaNcPoints(points);
+    if (pointsError) return res.status(400).json({ error: pointsError });
+
+    await client.connect();
+    const database = client.db(DB_NAME);
+    const item = await database.collection("masterDB").findOne({ 背番号: sebanggo, 工場: { $ne: "SCNA" } })
+      || await database.collection("masterDB").findOne({ 背番号: sebanggo });
+    if (!item) return res.status(400).json({ error: `背番号 ${sebanggo} not found in masterDB` });
+    if (machine) {
+      const t = await _ncMachineType(database, machine);
+      if (t !== machineType) return res.status(400).json({ error: `${machine} is machine type ${t}, not ${machineType}` });
+    }
+
+    const buffer = Buffer.from(String(pceBase64).split(",")[1] || pceBase64, "base64");
+    if (!machine && !overwriteDrive) {
+      const programs0 = database.collection(NC_PROGRAMS_COLLECTION);
+      const hasActive = await programs0.findOne({ 背番号: sebanggo, machineType, machine: null, isActive: true }, { projection: { _id: 1 } });
+      // Replacing our own file is expected; only warn when Drive has a file we did not put there.
+      if (!hasActive && await _ncDriveExists(sebanggo, machineType)) {
+        return res.status(409).json({ error: "Drive file already exists", driveConflict: `${sebanggo}_${machineType}.pce` });
+      }
+    }
+
+    const docId = new ObjectId();
+    const storagePath = `nc/${sebanggo}/${machine ? machine : machineType}/${docId}_${Date.now()}.pce`;
+    const file = admin.storage().bucket().file(storagePath);
+    await file.save(buffer, {
+      metadata: { contentType: "application/octet-stream", metadata: { firebaseStorageDownloadTokens: "masterDBToken69" } },
+      public: true,
+    });
+    const pceURL = `https://storage.googleapis.com/${file.bucket.name}/${encodeURIComponent(file.name)}?alt=media&token=masterDBToken69`;
+
+    const nowIso = new Date().toISOString();
+    const cleanPoints = points.map((p, i) => ({
+      index: i, flag: Number(p.flag), layer: Number(p.layer), x: Number(p.x), y: Number(p.y),
+      value: p.value === undefined ? 1.0 : Number(p.value),
+    }));
+    const programs = database.collection(NC_PROGRAMS_COLLECTION);
+    const displayName = machine ? `${sebanggo} (${machine})` : `${sebanggo}_${machineType}`;
+    const doc = {
+      _id: docId, 背番号: sebanggo, 品番: item.品番 || "", 工場: item.工場 || "",
+      machineType, machine, displayName, fileName: String(fileName), sourceType: "pce",
+      pceURL, storagePath, points: cleanPoints, pointCount: cleanPoints.length,
+      layers: Array.isArray(layers) ? layers.map(Number).filter(Number.isFinite) : [...new Set(cleanPoints.map(p => p.layer))],
+      uploadedBy: uploadedBy || "admin", uploadedAt: nowIso, updatedAt: nowIso, isActive: true,
+    };
+
+    let drive = null;
+    if (!machine) {
+      try { drive = await _ncSaveToDrive(sebanggo, machineType, buffer, true); doc.driveFileName = drive.name; doc.driveSavedAt = nowIso; }
+      catch (e) { drive = { error: e.message }; doc.driveError = e.message; console.error("❌ NC program Drive save failed:", e.message); }
+    }
+
+    const slot = { 背番号: sebanggo, machineType, machine, isActive: true };
+    await programs.updateMany(slot, { $set: { isActive: false, replacedAt: nowIso, replacedBy: docId, updatedAt: nowIso } });
+    await programs.insertOne(doc);
+    res.status(201).json({ success: true, program: _ncPublic(doc), drive });
+  } catch (error) {
+    console.error("❌ Error uploading NC program:", error);
+    res.status(500).json({ error: "Failed to upload NC program", details: error.message });
+  }
+});
+
+// Make an older version active again (machine-type versions are also written back to Drive)
+app.post("/api/nc-programs/:id/restore", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const programs = client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION);
+    const doc = await programs.findOne({ _id: new ObjectId(req.params.id) }, { projection: { points: 0 } });
+    if (!doc) return res.status(404).json({ error: "Program not found" });
+    const nowIso = new Date().toISOString();
+    let drive = null;
+    if (!doc.machine && doc.storagePath) {
+      try {
+        const [buf] = await admin.storage().bucket().file(doc.storagePath).download();
+        drive = await _ncSaveToDrive(doc.背番号, doc.machineType, buf, true);
+      } catch (e) { drive = { error: e.message }; }
+    }
+    await programs.updateMany({ 背番号: doc.背番号, machineType: doc.machineType, machine: doc.machine || null, isActive: true, _id: { $ne: doc._id } },
+      { $set: { isActive: false, replacedAt: nowIso, replacedBy: doc._id, updatedAt: nowIso } });
+    await programs.updateOne({ _id: doc._id }, { $set: { isActive: true, restoredAt: nowIso, updatedAt: nowIso, restoredBy: req.body?.user || "admin" }, $unset: { replacedAt: "", replacedBy: "", removedAt: "" } });
+    res.json({ success: true, drive });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to restore NC program", details: error.message });
+  }
+});
+
+// Remove (deactivate) a version. The Drive file is left as it is.
+app.delete("/api/nc-programs/:id", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Program not found" });
+    await client.connect();
+    const nowIso = new Date().toISOString();
+    const r = await client.db(DB_NAME).collection(NC_PROGRAMS_COLLECTION).updateOne(
+      { _id: new ObjectId(req.params.id), isActive: true },
+      { $set: { isActive: false, removedAt: nowIso, updatedAt: nowIso, removedBy: req.query.user || "admin" } });
+    if (!r.matchedCount) return res.status(404).json({ error: "Program not found" });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to remove NC program", details: error.message });
+  }
+});
+
+// ==================== END NC PROGRAMS ====================
+
 // ── Prototype (試作) Registration (Google Drive + MongoDB) ───────────────────
 const _shisakuSubfolderCache = new Map();
 
