@@ -442,7 +442,8 @@ function buildBrotherPrintFields(item, rollIndex, totalRolls) {
         copies: 1,
         text_品番: textHinban,
         text_背番号: textSebangou,
-        text_収容数: String(currentRoll),
+        // 収容数 = overall schedule position (#N in 生産実績・投入履歴), not the per-品番 roll index
+        text_収容数: String(getTablet1OrderIndex(item, currentRoll)),
         text_color: color,
         text_品名: hinmei,
         text_location: shippingDest ? `${shippingDest}へ` : '',
