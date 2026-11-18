@@ -3,16 +3,35 @@
  * Logic for First Factory Nippo (第一工場 日報) Tablet UI
  */
 
-//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.20:3000";
+//const serverURL = "http://192.168.0.148:3000";
+
+// The production day runs until 02:00 the next morning (JST): at 01:30 it is still yesterday's list.
+// The server closes the finished day at the same hour (unfinished rolls -> 除外 未処理).
+const DAY_CUTOFF_HOUR = 2;
 
 function getTodayDateString() {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return new Date(Date.now() - DAY_CUTOFF_HOUR * 3600000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+}
+
+// At 02:00 move a tablet that is showing the day that just ended to the new day, without a reload.
+// A date picked by hand (any other day) is left alone. Also runs on load, so a tab reopened
+// after 02:00 starts on the new day.
+function startWorkDayWatcher(switchTo, canSwitch = () => true) {
+    const KEY = 'firstkojo_nippo_workday';
+    const check = () => {
+        const today = getTodayDateString();
+        const last = sessionStorage.getItem(KEY) || today;
+        if (today !== last && state.selectedDate === last) {
+            if (!canSwitch()) return; // busy (pop-up open) -> try again in 30s
+            switchTo(today);
+            showToast(`日付が変わりました: ${today} の生産リストを表示します`, 'info', 6000);
+        }
+        sessionStorage.setItem(KEY, today);
+    };
+    check();
+    setInterval(check, 30000);
 }
 
 const savedInitialTab = localStorage.getItem('firstkojo_nippo_main_tab');
@@ -20,8 +39,53 @@ const initialTabIndex = (savedInitialTab !== null && !isNaN(parseInt(savedInitia
     ? parseInt(savedInitialTab, 10)
     : 0;
 
+// Worker roles (each role can hold multiple names)
+const WORKER_ROLES = [
+    { key: 'feeding', ja: '投入', en: 'Feeding' },
+    { key: 'operator', ja: 'オペレーター', en: 'Operator' },
+    { key: 'support', ja: 'サポート', en: 'Support' },
+    { key: 'cutter', ja: 'カッター', en: 'Cutter' },
+    { key: 'unloader', ja: '取り出し', en: 'Unloader' }
+];
+
+function emptyWorkerRoles() {
+    const roles = {};
+    WORKER_ROLES.forEach(r => { roles[r.key] = []; });
+    return roles;
+}
+
+function loadWorkerRoles() {
+    const roles = emptyWorkerRoles();
+    try {
+        const saved = JSON.parse(localStorage.getItem('firstkojo_nippo_worker_roles') || 'null');
+        if (saved && typeof saved === 'object') {
+            WORKER_ROLES.forEach(r => {
+                if (Array.isArray(saved[r.key])) roles[r.key] = saved[r.key].filter(Boolean);
+            });
+        }
+    } catch { }
+    return roles;
+}
+
+// Combined display name of everyone across all roles (used where a single worker string is expected)
+function summarizeWorkerRoles(roles) {
+    const seen = [];
+    WORKER_ROLES.forEach(r => (roles[r.key] || []).forEach(n => { if (!seen.includes(n)) seen.push(n); }));
+    return seen.join('・');
+}
+
+const initialWorkerRoles = loadWorkerRoles();
+
 const state = {
-    workerName: localStorage.getItem('firstkojo_nippo_worker_name') || null,
+    // Logged in only once roles have been set up (older single-name logins must pick roles again)
+    workerName: (localStorage.getItem('firstkojo_nippo_worker_name') && summarizeWorkerRoles(initialWorkerRoles))
+        ? summarizeWorkerRoles(initialWorkerRoles)
+        : null,
+    workerRoles: initialWorkerRoles,
+    activeWorkerRole: null,
+    // 段替え / setup timers for the selected date, keyed by setup groupId (setup_<id>)
+    setupRecords: {},
+    setupModalMinimized: true, // a setup still running after reload shows as the pinned bar
     machineName: null,
     filterName: "第一工場",
 
@@ -113,12 +177,112 @@ function initWorker() {
     if (state.workerName) {
         if (welcomeBack) welcomeBack.classList.add('active');
         if (newWorker) newWorker.classList.remove('active');
-        if (confirmName) confirmName.textContent = state.workerName;
+        if (confirmName) renderWorkerRolesSummary(confirmName);
     } else {
         if (welcomeBack) welcomeBack.classList.remove('active');
         if (newWorker) newWorker.classList.add('active');
+        renderWorkerRoleEditor();
     }
     updateTabLocks();
+}
+
+function getWorkerRolesPayload() {
+    const roles = {};
+    WORKER_ROLES.forEach(r => { roles[r.key] = [...(state.workerRoles[r.key] || [])]; });
+    return roles;
+}
+
+function persistWorkerRoles() {
+    localStorage.setItem('firstkojo_nippo_worker_roles', JSON.stringify(state.workerRoles));
+}
+
+function roleLabelHtml(role, idx) {
+    return `<div class="worker-role-label">${idx + 1}. ${escapeHtml(role.ja)}<small>${escapeHtml(role.en)}</small></div>`;
+}
+
+function workerChipsHtml(names) {
+    return names.length
+        ? names.map(n => `<span class="worker-role-chip" style="padding-right: 12px;">${escapeHtml(n)}</span>`).join('')
+        : '<span class="worker-role-empty">未選択 (None)</span>';
+}
+
+function renderWorkerRolesSummary(container) {
+    container.innerHTML = WORKER_ROLES.map((role, idx) =>
+        `<div class="worker-role-row">${roleLabelHtml(role, idx)}<div class="worker-role-chips">${workerChipsHtml(state.workerRoles[role.key] || [])}</div></div>`
+    ).join('');
+}
+
+function renderWorkerRoleEditor() {
+    const container = document.getElementById('workerRolesContainer');
+    if (!container) return;
+    container.innerHTML = '';
+
+    WORKER_ROLES.forEach((role, idx) => {
+        const row = document.createElement('div');
+        row.className = 'worker-role-row';
+        row.innerHTML = roleLabelHtml(role, idx);
+
+        const chips = document.createElement('div');
+        chips.className = 'worker-role-chips';
+        const names = state.workerRoles[role.key] || [];
+        if (names.length === 0) chips.innerHTML = workerChipsHtml([]);
+        names.forEach(name => {
+            const chip = document.createElement('span');
+            chip.className = 'worker-role-chip';
+            chip.textContent = name;
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.textContent = '×';
+            del.title = '削除 (Remove)';
+            del.onclick = () => removeWorkerFromRole(role.key, name);
+            chip.appendChild(del);
+            chips.appendChild(chip);
+        });
+        row.appendChild(chips);
+
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'worker-role-add';
+        addBtn.textContent = '＋ 追加';
+        addBtn.onclick = () => openWorkerModalForRole(role.key);
+        row.appendChild(addBtn);
+
+        container.appendChild(row);
+    });
+}
+
+function openWorkerModalForRole(roleKey) {
+    state.activeWorkerRole = roleKey;
+    const role = WORKER_ROLES.find(r => r.key === roleKey);
+    const title = document.getElementById('workerModalTitle');
+    if (title && role) title.textContent = `${role.ja} (${role.en})`;
+    const manualRow = document.getElementById('manualEntryRow');
+    if (manualRow) manualRow.style.display = 'none';
+    renderWorkerNames();
+    const modal = document.getElementById('workerNameModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeWorkerModal() {
+    const modal = document.getElementById('workerNameModal');
+    if (modal) modal.style.display = 'none';
+    state.activeWorkerRole = null;
+    renderWorkerRoleEditor();
+}
+
+function addWorkerToRole(roleKey, name) {
+    const clean = String(name || '').trim();
+    if (!roleKey || !clean) return;
+    const list = state.workerRoles[roleKey] || (state.workerRoles[roleKey] = []);
+    if (!list.includes(clean)) list.push(clean);
+    saveRecentWorker(clean);
+    persistWorkerRoles();
+}
+
+function removeWorkerFromRole(roleKey, name) {
+    state.workerRoles[roleKey] = (state.workerRoles[roleKey] || []).filter(n => n !== name);
+    persistWorkerRoles();
+    renderWorkerRoleEditor();
 }
 
 async function fetchWorkersFromMongoDB() {
@@ -157,7 +321,7 @@ function saveRecentWorker(name) {
     let recent = getRecentWorkers();
     recent = recent.filter(w => w !== name);
     recent.unshift(name);
-    if (recent.length > 5) recent.pop();
+    if (recent.length > 10) recent.pop();
     localStorage.setItem('firstkojo_recent_workers', JSON.stringify(recent));
 }
 
@@ -199,6 +363,10 @@ function renderWorkerNames() {
     if (!container) return;
     container.innerHTML = '';
 
+    const selectedNames = state.workerRoles[state.activeWorkerRole] || [];
+    const selectedEl = document.getElementById('workerModalSelected');
+    if (selectedEl) selectedEl.innerHTML = workerChipsHtml(selectedNames);
+
     const recentWorkers = getRecentWorkers();
 
     if (recentWorkers.length > 0) {
@@ -218,7 +386,7 @@ function renderWorkerNames() {
 
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = 'worker-name-btn';
+            btn.className = 'worker-name-btn' + (selectedNames.includes(name) ? ' selected' : '');
             btn.textContent = name;
             btn.onclick = () => selectWorkerName(name);
 
@@ -258,7 +426,7 @@ function renderWorkerNames() {
         grouped[letter].forEach(name => {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = 'worker-name-btn';
+            btn.className = 'worker-name-btn' + (selectedNames.includes(name) ? ' selected' : '');
             btn.textContent = name;
             btn.onclick = () => selectWorkerName(name);
             grid.appendChild(btn);
@@ -269,27 +437,30 @@ function renderWorkerNames() {
     });
 }
 
+// Toggle a name in the role currently being edited (modal stays open for multiple picks)
 function selectWorkerName(name) {
-    state.workerName = name;
-    localStorage.setItem('firstkojo_nippo_worker_name', name);
-    const input = document.getElementById("workerInput");
-    if (input) input.value = name;
-    saveRecentWorker(name);
-
-    const modal = document.getElementById('workerNameModal');
-    if (modal) modal.style.display = 'none';
-
-    initWorker();
-    switchMainTab(1); // Jump to List tab
+    const roleKey = state.activeWorkerRole;
+    if (!roleKey) return;
+    if ((state.workerRoles[roleKey] || []).includes(name)) {
+        state.workerRoles[roleKey] = state.workerRoles[roleKey].filter(n => n !== name);
+        persistWorkerRoles();
+    } else {
+        addWorkerToRole(roleKey, name);
+    }
+    renderWorkerNames();
 }
 
 function proceedFromStep0() {
-    const val = document.getElementById("workerInput")?.value;
-    if (!val) {
-        alert("作業者を選択してください。(Please select a worker first.)");
+    const summary = summarizeWorkerRoles(state.workerRoles);
+    if (!summary) {
+        alert("作業者を選択してください。(Please select at least one worker.)");
         return;
     }
-    selectWorkerName(val);
+    state.workerName = summary;
+    localStorage.setItem('firstkojo_nippo_worker_name', summary);
+    persistWorkerRoles();
+    initWorker();
+    switchMainTab(1); // Jump to List tab
 }
 
 function confirmWorkerName() {
@@ -297,12 +468,11 @@ function confirmWorkerName() {
     switchMainTab(1); // Jump to List tab
 }
 
+// Go back to the role editor; current names stay filled in so they can be adjusted
 function changeWorkerName() {
     state.workerName = null;
     localStorage.removeItem('firstkojo_nippo_worker_name');
     localStorage.setItem('firstkojo_nippo_main_tab', '0');
-    const input = document.getElementById("workerInput");
-    if (input) input.value = '';
     initWorker();
     switchMainTab(0);
 }
@@ -428,6 +598,8 @@ async function fetchDailySchedule(dateStr) {
 
     state.selectedDate = dateStr;
     sessionStorage.setItem('firstkojo_nippo_date', dateStr);
+    state.setupRecords = {};
+    updateSetupTimerUI();
 
     fetchProductionQueue();
     setupProductionSSE();
@@ -543,6 +715,15 @@ async function fetchProductionStatus(dateStr) {
             localStorage.setItem(storageKey, JSON.stringify(stored));
             console.log(`🌐 Synced ${data.records.length} production record(s) from server for ${dateStr}`);
         }
+        if (data.success && Array.isArray(data.excludedRolls) && dateStr === state.selectedDate) {
+            state.excludesChanged = applyServerExcludes(data.excludedRolls) || state.excludesChanged;
+        }
+        if (data.success && Array.isArray(data.setupRecords) && dateStr === state.selectedDate) {
+            const map = {};
+            data.setupRecords.forEach(rec => { if (rec.setupId) map[rec.setupId] = rec; });
+            state.setupRecords = map;
+            updateSetupTimerUI();
+        }
     } catch (err) {
         console.warn('Could not fetch server production status:', err);
     }
@@ -558,6 +739,7 @@ async function syncProductionStatusToServer(group, patch) {
             date: state.selectedDate,
             machine: state.machineName || 'PSA2',
             worker: state.workerName || '',
+            workerRoles: getWorkerRolesPayload(),
             hinban: group.hinban,
             hinmei: group.hinmei || '',
             kizai: group.kizai || '',
@@ -624,8 +806,12 @@ function groupScheduledItems(items) {
             return;
         }
 
-        // Hinban item: group consecutive items with the same hinban
-        if (currentGroup && currentGroup.type === 'hinban' && currentGroup.hinban === item.hinban) {
+        // Hinban item: group consecutive items with the same hinban.
+        // item.groupId (fixed by the server once the list is edited) keeps two moved groups of the same
+        // hinban apart and keeps the id stable when the group changes position.
+        if (currentGroup && currentGroup.type === 'hinban' && currentGroup.hinban === item.hinban &&
+            (!item.groupId || item.groupId === currentGroup.groupId) &&
+            (item.sourceDate || '') === (currentGroup.items[0].sourceDate || '')) {
             currentGroup.items.push(item);
             currentGroup.totalDuration += Number(item.duration) || 0;
             currentGroup.totalMeters += Number(item.meters) || 0;
@@ -633,7 +819,7 @@ function groupScheduledItems(items) {
         } else {
             currentGroup = {
                 type: 'hinban',
-                groupId: `group_${item.hinban}_${idx}`,
+                groupId: item.groupId || `group_${item.hinban}_${idx}`,
                 hinban: item.hinban,
                 hinmei: item.hinmei || '',
                 kizai: item.kizai || '',
@@ -1153,11 +1339,139 @@ function updateRollMeters(itemId, newMeters, gIdx, rIdx) {
     updateCardSummaryChip(gIdx);
 }
 
+// Payload describing one roll for the excluded-rolls API (freyaAdmin2 reads it)
+function buildExcludedRollPayload(itemId, item, group) {
+    return {
+        itemId,
+        groupId: group?.groupId || item?.groupId || '',
+        rollIndex: Number(item?.rollIndex) || null,
+        totalRolls: Number(item?.totalRolls) || Number(group?.items?.length) || null,
+        orderIndex: Number(item?.orderIndex) || null,
+        hinban: item?.hinban || group?.hinban || '',
+        kizai: item?.kizai || group?.kizai || '',
+        machine: state.machineName || 'PSA2',
+        worker: state.workerName || ''
+    };
+}
+
+function findRollForItemId(itemId, gIdx, rIdx) {
+    const groups = state.currentGroups || [];
+    const direct = groups[gIdx]?.items?.[rIdx];
+    if (direct && getItemKey(direct, gIdx, rIdx) === itemId) return { item: direct, group: groups[gIdx] };
+    for (let g = 0; g < groups.length; g++) {
+        const items = groups[g].items || [];
+        for (let r = 0; r < items.length; r++) {
+            if (getItemKey(items[r], g, r) === itemId) return { item: items[r], group: groups[g] };
+        }
+    }
+    return { item: null, group: null };
+}
+
+// Server is the source of truth for excludes, so every tablet shows the same 除外 state.
+// - on the server            -> excluded here too
+// - here, synced, not on server -> restored on another tablet -> clear it
+// - here, never synced       -> offline / pre-sync exclude -> kept and pushed by syncExcludedRollsForDate
+function applyServerExcludes(serverRolls) {
+    const serverIds = new Set((serverRolls || []).map(r => String(r.itemId)));
+    const edits = getItemEdits();
+    let changed = false;
+
+    const autoIds = new Set((serverRolls || []).filter(r => r.autoClosed).map(r => String(r.itemId)));
+    serverIds.forEach(id => {
+        const e = edits[id] || {};
+        const auto = autoIds.has(id);
+        if (e.isExcluded !== true || e.excludeSynced !== true || !!e.autoClosed !== auto) {
+            setItemEdit(id, { isExcluded: true, excludeSynced: true, autoClosed: auto });
+            changed = true;
+        }
+    });
+    Object.keys(edits).forEach(id => {
+        const e = edits[id];
+        if (e && e.isExcluded === true && e.excludeSynced === true && !serverIds.has(id)) {
+            setItemEdit(id, { isExcluded: false, autoClosed: false });
+            changed = true;
+        }
+    });
+    return changed;
+}
+
+// Another tablet excluded / restored a roll -> refresh from the server and redraw
+async function refreshExcludesFromServer({ onlyIfChanged = false } = {}) {
+    if (!state.selectedDate) return;
+    state.excludesChanged = false;
+    await fetchProductionStatus(state.selectedDate);
+    if (onlyIfChanged && !state.excludesChanged) return;
+    await fetchProductionQueue(); // fed rolls closed / reopened by the day close live in the queue docs
+    if (state.scheduledItems && state.scheduledItems.length > 0) {
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+    }
+    renderHistoryList();
+    updateHistoryBadges();
+}
+
+// Safety net if a live (SSE) update was missed: re-check every 30s while the tablet is visible
+setInterval(() => {
+    if (document.visibilityState === 'visible' && state.workerName) {
+        refreshExcludesFromServer({ onlyIfChanged: true });
+    }
+}, 30000);
+
+// Tell the server a roll was excluded / restored so freyaAdmin2 stops showing it as pending
+async function syncRollExcludeToServer(itemId, item, group, excluded) {
+    if (!itemId || !state.selectedDate) return;
+    // Not confirmed by the server yet -> pushed again on the next schedule load
+    setItemEdit(itemId, { excludeSynced: false });
+    try {
+        const res = await fetch(`${serverURL}/api/production/roll-exclude`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: state.selectedDate, excluded, ...buildExcludedRollPayload(itemId, item, group) })
+        });
+        if (res.ok) setItemEdit(itemId, { excludeSynced: true });
+    } catch (err) {
+        console.warn('Could not sync roll exclude to server:', err);
+    }
+}
+
+// On schedule load, push every roll this tablet has marked excluded for the date (once per date per page load)
+const excludeSyncedDates = new Set();
+function syncExcludedRollsForDate(groups) {
+    const date = state.selectedDate;
+    if (!date || excludeSyncedDates.has(date) || !Array.isArray(groups) || groups.length === 0) return;
+    excludeSyncedDates.add(date);
+
+    const rolls = [];
+    groups.forEach((group, gIdx) => {
+        (group.items || []).forEach((item, rIdx) => {
+            const key = getItemKey(item, gIdx, rIdx);
+            const raw = getItemEdits()[key] || {};
+            if (raw.isExcluded === true && raw.excludeSynced !== true) rolls.push(buildExcludedRollPayload(key, item, group));
+        });
+    });
+    if (rolls.length === 0) return;
+
+    fetch(`${serverURL}/api/production/roll-exclude/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, rolls })
+    }).then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (date === state.selectedDate) rolls.forEach(r => setItemEdit(r.itemId, { excludeSynced: true }));
+        console.log(`🚫 Synced ${rolls.length} excluded roll(s) to server for ${date}`);
+    })
+        .catch(err => {
+            excludeSyncedDates.delete(date);
+            console.warn('Could not sync excluded rolls:', err);
+        });
+}
+
 function toggleRollItemExclude(itemId, gIdx, rIdx, event) {
     if (event) event.stopPropagation();
     const edit = getItemEdit(itemId);
     const newExcluded = !edit.isExcluded;
     setItemEdit(itemId, { isExcluded: newExcluded });
+    const { item, group } = findRollForItemId(itemId, gIdx, rIdx);
+    syncRollExcludeToServer(itemId, item, group, newExcluded);
     renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
     updateHistoryBadges();
 }
@@ -1224,7 +1538,7 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
         if (edit.photoBase64 && (!photoUrl || !photoUrl.startsWith('http'))) {
             try {
                 photoUrl = await uploadLabelPhotoToServer(edit.photoBase64, lotNoVal, item.hinban);
-                setItemEdit(itemId, { photoUrl: photoUrl });
+                setItemEdit(itemId, { photoUrl: photoUrl, photoThumbUrl: state.lastPhotoThumbUrl || '' });
             } catch (err) {
                 console.warn('Photo upload failed, using base64:', err);
                 photoUrl = edit.photoBase64;
@@ -1235,6 +1549,7 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
             date: state.selectedDate,
             machine: state.machineName || 'PSA2',
             worker: state.workerName || '作業者',
+            workerRoles: getWorkerRolesPayload(),
             groupId: group?.groupId || item.groupId || item.id,
             itemId: itemId,
             orderIndex: item.orderIndex || (rIdx + 1),
@@ -1255,7 +1570,8 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
             rawMaterialQR: edit.qrScanned || '',
             rawMaterialLength: String(edit.meters || item.meters || ''),
             manufacturerUid: '',
-            photoUrl: photoUrl || ''
+            photoUrl: photoUrl || '',
+            imageThumbUrl: (getItemEdits()[itemId] || {}).photoThumbUrl || ''
         };
 
         const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
@@ -1359,7 +1675,7 @@ async function enqueueBatchGroup(gIdx, event) {
             if (edit.photoBase64 && (!photoUrl || !photoUrl.startsWith('http'))) {
                 try {
                     photoUrl = await uploadLabelPhotoToServer(edit.photoBase64, lotNoVal, item.hinban);
-                    setItemEdit(itemId, { photoUrl: photoUrl });
+                    setItemEdit(itemId, { photoUrl: photoUrl, photoThumbUrl: state.lastPhotoThumbUrl || '' });
                 } catch (err) {
                     photoUrl = edit.photoBase64;
                 }
@@ -1369,6 +1685,7 @@ async function enqueueBatchGroup(gIdx, event) {
                 date: state.selectedDate,
                 machine: state.machineName || 'PSA2',
                 worker: state.workerName || '作業者',
+                workerRoles: getWorkerRolesPayload(),
                 groupId: group.groupId,
                 hinban: item.hinban || '',
                 hinmei: item.hinmei || '',
@@ -1386,7 +1703,8 @@ async function enqueueBatchGroup(gIdx, event) {
                 rawMaterialQR: '',
                 rawMaterialLength: String(edit.meters || item.meters || ''),
                 manufacturerUid: '',
-                photoUrl: photoUrl || ''
+                photoUrl: photoUrl || '',
+                imageThumbUrl: (getItemEdits()[itemId] || {}).photoThumbUrl || ''
             };
 
             const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
@@ -1512,15 +1830,16 @@ function isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx) {
             return true;
         }
 
-        // 3. Exact groupId + rollIndex match
+        // 3. Exact groupId + rollIndex match (groupId stays fixed when groups move)
         if (targetGroupId && doc.groupId && doc.groupId === targetGroupId) {
             if (Number(doc.rollIndex) === targetRollIdx) {
                 return true;
             }
         }
 
-        // 4. Exact orderIndex match
-        if (targetOrderIdx && Number(doc.orderIndex) === targetOrderIdx) {
+        // 4. Exact orderIndex match - only for old records without a roll id: after a reorder the
+        // # numbers are renumbered, so matching by number could hide a roll that was never fed
+        if (!(doc.itemId && rollItem.id) && targetOrderIdx && Number(doc.orderIndex) === targetOrderIdx) {
             return true;
         }
 
@@ -1943,6 +2262,7 @@ function renderScheduleList(items, startTimeStr) {
 
     const groups = groupScheduledItems(items);
     state.currentGroups = groups;
+    syncExcludedRollsForDate(groups);
 
     if (state.listViewMode === 'table') {
         container.innerHTML = renderScheduleTableView(groups, items);
@@ -1957,15 +2277,39 @@ function renderScheduleList(items, startTimeStr) {
 
         if (group.type === 'setup') {
             const setupItem = group.items[0];
-            html += `
-                <div class="schedule-setup-row" data-id="${setupItem.id}">
+            const setupRec = state.setupRecords[group.groupId];
+            // Ended setups move to the History tab
+            if (setupRec && setupRec.status === 'done') return;
+            const setupName = escapeHtml(getSetupDisplayName(setupItem));
+
+            if (setupRec && setupRec.status === 'running') {
+                html += `
+                <div class="schedule-setup-row is-running" data-id="${setupItem.id}" onclick="openSetupTimerModal()">
                     <div class="schedule-setup-left">
                         <span class="setup-tag-pill">#${setupItem.orderIndex} 段替</span>
-                        <span class="setup-title-text">${setupItem.name || '段替え'}</span>
+                        <span class="setup-title-text">${setupName}</span>
+                        <span class="setup-running-pill">⏱ 実行中 <span data-setup-elapsed="${escapeHtml(group.groupId)}">--:--</span></span>
                     </div>
-                    <div class="setup-time-text">${setupItem.startTime} - ${setupItem.endTime} (${setupItem.duration} 分)</div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="setup-time-text">開始 ${escapeHtml(setupRec.startTime || '')} ・ 予定 ${setupItem.duration} 分</div>
+                        <button type="button" class="setup-action-btn is-end" onclick="event.stopPropagation(); endSetupPrompt()">■ 終了</button>
+                    </div>
                 </div>
             `;
+            } else {
+                html += `
+                <div class="schedule-setup-row is-startable is-reorderable" data-id="${setupItem.id}" data-group-id="${escapeHtml(group.groupId)}" onclick="startSetupPrompt(${gIdx})" title="タップして開始・長押しで並べ替え (Tap to start, hold to reorder)">
+                    <div class="schedule-setup-left">
+                        <span class="setup-tag-pill">#${setupItem.orderIndex} 段替</span>
+                        <span class="setup-title-text">${setupName}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="setup-time-text">${setupItem.startTime} - ${setupItem.endTime} (${setupItem.duration} 分)</div>
+                        <button type="button" class="setup-action-btn" onclick="event.stopPropagation(); startSetupPrompt(${gIdx})">▶ 開始</button>
+                    </div>
+                </div>
+            `;
+            }
         } else {
             // Check remaining items that have not been enqueued yet across all tablets
             const remainingItems = group.items.filter((rollItem, rIdx) => {
@@ -1974,6 +2318,16 @@ function renderScheduleList(items, startTimeStr) {
 
             // When all items in a card are enqueued, the card disappears from the List tab!
             if (remainingItems.length === 0) {
+                return;
+            }
+
+            // Same when every roll left is excluded (group = completed + excluded).
+            // The whole card goes away at once; excluded rolls are restored from the History tab.
+            const allLeftExcluded = group.items.every((rollItem, rIdx) =>
+                isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx) ||
+                getItemEdit(getItemKey(rollItem, gIdx, rIdx), rollItem).isExcluded
+            );
+            if (allLeftExcluded) {
                 return;
             }
 
@@ -2030,7 +2384,7 @@ function renderScheduleList(items, startTimeStr) {
             const isExpanded = state.expandedGroups && state.expandedGroups.has(group.groupId);
 
             html += `
-                <div class="batch-group-card ${isGroupTinted ? 'group-tinted' : ''} ${isExpanded ? 'is-expanded' : ''}" 
+ <div class="batch-group-card ${isGroupTinted ? 'group-tinted' : ''} ${isExpanded ? 'is-expanded' : ''} ${remainingItems.length === group.items.length ? 'is-reorderable' : ''}" 
                      data-group-id="${group.groupId}" 
                      data-group-idx="${gIdx}"
                      data-total-rolls="${remainingItems.length}">
@@ -2039,7 +2393,12 @@ function renderScheduleList(items, startTimeStr) {
                         <div class="batch-header-left">
                             <span class="batch-order-range">${orderRangeText}</span>
                             <div class="batch-title-and-meta">
-                                <div class="batch-hinban-title">${kizaiCode}</div>
+                                <div class="batch-hinban-title">${kizaiCode}${(() => {
+                                    // Rolls added in freyaAdmin2 from another date's plan: "11/20分"
+                                    const src = group.items[0]?.sourceDate;
+                                    if (!src || src === state.selectedDate) return '';
+                                    return ` <span class="source-date-tag" title="${escapeHtml(src)} の計画から追加">${Number(src.slice(5, 7))}/${Number(src.slice(8, 10))}分</span>`;
+                                })()}</div>
                                 <div class="batch-chips-row">
                                     <span class="batch-time-text">${group.startTime} - ${group.endTime}</span>
                                     ${destText}
@@ -4942,8 +5301,19 @@ function updateManualDisplays() {
         }
     }
 
+    const ai = state.labelAi || {};
+    [['socho', sochoEl], ['shiki', shikiEl], ['bicho', bichoEl], ['lot', lotEl]].forEach(([key, el]) => {
+        const card = el && el.closest('.feed-numpad-field');
+        if (!card) return;
+        card.classList.toggle('ai-filled', !!(ai.filled && ai.filled[key]) && String(ai.filled[key]) === String(labelAiFieldValue(key)));
+        card.classList.toggle('ai-busy', ai.status === 'busy');
+    });
+
     const proceedBtn = document.getElementById('btnManualProceedPhoto');
     if (proceedBtn) {
+        proceedBtn.textContent = state.currentModalPhoto
+            ? (_t('fk_btn_confirm_enqueue') || '確認してキューに追加 →')
+            : (_t('fk_btn_proceed_photo') || '写真撮影へ進む →');
         if (!v.isValid) {
             proceedBtn.classList.add('is-incomplete');
             proceedBtn.title = `未入力の項目があります: ${v.missing.map(m => m.name).join(', ')}`;
@@ -5052,20 +5422,295 @@ function materialKeypadConfirm() {
     closeMaterialKeypad();
 }
 
+// ==================== Photo first: AI reads the label ====================
+// Flow: take the label photo -> the server's AI (Gemini Flash-Lite) reads 総長 / S引長 / 実長 / 基材コード / date
+// -> values fill in (marked "AI") -> worker checks / fixes them -> 確認してキューに追加.
+// The QR code in the photo is decoded on the tablet and sent along; the AI uses it only for values whose
+// printed text it cannot read. Any failure (no budget, timeout, offline) leaves the fields for manual entry.
+const LABEL_AI_FIELDS = { socho: '総長', shiki: 'S引長', bicho: '実長', lot: '日付' };
+
+function resetLabelAiState() {
+    state.currentModalPhoto = null;
+    state.labelAi = { status: 'idle', reqId: (state.labelAi?.reqId || 0) + 1, filled: {}, result: null };
+    const strip = document.getElementById('feedPhotoStrip');
+    if (strip) strip.style.display = 'none';
+    const status = document.getElementById('feedAiStatus');
+    if (status) { status.className = 'label-ai-status'; status.textContent = ''; }
+    const retry = document.getElementById('feedAiRetryBtn');
+    if (retry) retry.style.display = 'none';
+}
+
+function labelAiFieldValue(key) {
+    if (key === 'socho') return state.currentModalSocho;
+    if (key === 'shiki') return state.currentModalShiki;
+    if (key === 'bicho') return state.currentModalBicho;
+    if (key === 'lot') return state.currentModalLotNo;
+    return '';
+}
+
+function setLabelAiFieldValue(key, value) {
+    if (key === 'socho') state.currentModalSocho = value;
+    else if (key === 'shiki') state.currentModalShiki = value;
+    else if (key === 'bicho') state.currentModalBicho = value;
+    else if (key === 'lot') state.currentModalLotNo = value;
+}
+
+function startLabelPhoto() {
+    const fileInput = document.getElementById('modalRollCameraInput');
+    if (!fileInput || !state.currentModalRollContext) return;
+    state.cameraMode = 'photoFirst';
+    fileInput.click();
+}
+
+function openLabelPhotoPreview() {
+    if (state.currentModalPhoto) openPhotoEnlarged(state.currentModalPhoto);
+}
+
+function onLabelPhotoTaken(base64) {
+    if (!state.currentModalRollContext) return;
+    state.currentModalPhoto = base64;
+    const thumb = document.getElementById('feedPhotoThumb');
+    if (thumb) thumb.src = base64;
+    const strip = document.getElementById('feedPhotoStrip');
+    if (strip) strip.style.display = 'flex';
+    switchFeedModalView('manual');
+    runLabelAi();
+}
+
+function setLabelAiStatus(kind, text) {
+    const el = document.getElementById('feedAiStatus');
+    if (el) {
+        el.className = `label-ai-status is-${kind}`;
+        el.innerHTML = (kind === 'busy' ? '<span class="label-ai-spinner"></span>' : '') + `<span>${escapeHtmlLabelAi(text)}</span>`;
+    }
+    const retry = document.getElementById('feedAiRetryBtn');
+    if (retry) retry.style.display = (kind === 'error' || kind === 'warn-retry') ? 'inline' : 'none';
+    if (kind === 'warn-retry' && el) el.className = 'label-ai-status is-warn';
+}
+
+function escapeHtmlLabelAi(str) {
+    return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function loadImageForLabelAi(base64) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = base64;
+    });
+}
+
+// Smaller JPEG for the AI (long edge 1456px keeps the label text sharp and the request small)
+function downscaleForLabelAi(img, maxEdge = 1456, quality = 0.8) {
+    const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * scale);
+    c.height = Math.round(img.naturalHeight * scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', quality);
+}
+
+let jsQRLoading = null;
+function loadJsQR() {
+    if (window.jsQR) return Promise.resolve(window.jsQR);
+    if (!jsQRLoading) {
+        jsQRLoading = new Promise((resolve, reject) => {
+            const sc = document.createElement('script');
+            sc.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+            sc.onload = () => resolve(window.jsQR);
+            sc.onerror = () => { jsQRLoading = null; reject(new Error('jsQR load failed')); };
+            document.head.appendChild(sc);
+        });
+    }
+    return jsQRLoading;
+}
+
+// Decode the label's QR code from the photo: the browser's BarcodeDetector when present, else jsQR
+async function decodeLabelQR(img) {
+    try {
+        if ('BarcodeDetector' in window) {
+            const det = new window.BarcodeDetector({ formats: ['qr_code'] });
+            const found = await det.detect(img);
+            if (found && found[0] && found[0].rawValue) return found[0].rawValue;
+        }
+    } catch (e) { /* fall through to jsQR */ }
+    try {
+        const jsQR = await loadJsQR();
+        const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * scale);
+        c.height = Math.round(img.naturalHeight * scale);
+        const g = c.getContext('2d');
+        g.drawImage(img, 0, 0, c.width, c.height);
+        const data = g.getImageData(0, 0, c.width, c.height);
+        const code = jsQR(data.data, c.width, c.height, { inversionAttempts: 'attemptBoth' });
+        return code && code.data ? code.data : '';
+    } catch (e) {
+        return '';
+    }
+}
+
+// Values in the QR, read with the format the tablets learned for this material (index of each field).
+// Only fields the format actually maps are returned, so an unmapped field never looks "read".
+function parseLabelQRWithLearnedFormat(kizai, qrText) {
+    if (!qrText) return null;
+    try {
+        const pattern = findLearnedPatternForKizai(kizai, qrText);
+        if (!pattern) return null;
+        const parsed = parseBarcodeWithLearnedPattern(pattern, qrText);
+        if (!parsed) return null;
+        const m = pattern.mapping || {};
+        const has = (i) => i !== null && i !== undefined;
+        const out = {};
+        if (has(m.sochoIndex) && parsed.socho !== '' && !isNaN(Number(parsed.socho))) out.totalLength = Number(parsed.socho);
+        if (has(m.shikiIndex) && parsed.shiki !== '' && !isNaN(Number(parsed.shiki))) out.sDrawLength = Number(parsed.shiki);
+        if (has(m.bichoIndex) && parsed.bicho !== '' && parsed.bicho !== null && !isNaN(Number(parsed.bicho))) out.netLength = Number(parsed.bicho);
+        if ((m.lotSlice || has(m.lotIndex)) && parsed.lotNo && /^\d{4}-\d{2}-\d{2}$/.test(parsed.lotNo)) out.date = parsed.lotNo;
+        return Object.keys(out).length ? out : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function runLabelAi() {
+    const ctx = state.currentModalRollContext;
+    const photo = state.currentModalPhoto;
+    if (!ctx || !photo) return;
+    const reqId = (state.labelAi?.reqId || 0) + 1;
+    // Values on screen when the AI starts: fields the worker changes meanwhile are left alone
+    const before = { socho: state.currentModalSocho, shiki: state.currentModalShiki, bicho: state.currentModalBicho, lot: state.currentModalLotNo };
+    state.labelAi = { status: 'busy', reqId, filled: {}, result: null, before };
+    setLabelAiStatus('busy', _t('fk_ai_reading') || '画像を処理中…（このまま手動入力もできます）');
+    updateManualDisplays();
+
+    if (!navigator.onLine) {
+        finishLabelAi(reqId, { success: false, kind: 'offline' });
+        return;
+    }
+
+    let result;
+    try {
+        const img = await loadImageForLabelAi(photo);
+        const [qrText, small] = await Promise.all([decodeLabelQR(img), Promise.resolve(downscaleForLabelAi(img))]);
+        if (qrText && !state.currentModalRawQR) state.currentModalRawQR = qrText;
+        const kizaiHint = ctx.item?.kizai || ctx.group?.kizai || '';
+        const qrParsed = parseLabelQRWithLearnedFormat(kizaiHint || state.currentModalHinban, qrText);
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 30000);
+        try {
+            const res = await fetch(`${serverURL}/api/production/label-read`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: small, qrText, qrParsed, kizaiHint }),
+                signal: ctrl.signal
+            });
+            result = await res.json().catch(() => ({ success: false, kind: res.status === 429 ? 'quota' : 'error' }));
+            if (!res.ok && result.success !== false) result = { success: false, kind: res.status === 429 ? 'quota' : 'error' };
+            result.qrText = qrText;
+            result.qrParsed = qrParsed;
+        } finally {
+            clearTimeout(timer);
+        }
+    } catch (err) {
+        result = { success: false, kind: err && err.name === 'AbortError' ? 'timeout' : (navigator.onLine ? 'error' : 'offline'), error: err && err.message };
+    }
+    finishLabelAi(reqId, result);
+}
+
+function finishLabelAi(reqId, result) {
+    // Ignore answers for an older photo or a closed / different roll
+    if (!state.labelAi || state.labelAi.reqId !== reqId || !state.currentModalRollContext || !state.currentModalPhoto) return;
+    const before = state.labelAi.before || {};
+    state.labelAi.result = result;
+
+    if (!result || !result.success) {
+        state.labelAi.status = 'failed';
+        const kind = result && result.kind;
+        if (kind === 'quota') setLabelAiStatus('error', _t('fk_ai_quota') || '画像処理の利用上限に達しました。手動で入力してください');
+        else if (kind === 'auth') setLabelAiStatus('error', _t('fk_ai_auth') || '画像処理が設定されていません。手動で入力してください');
+        else if (kind === 'timeout') setLabelAiStatus('error', _t('fk_ai_timeout') || '画像処理の応答がありません。手動で入力するか再試行してください');
+        else if (kind === 'offline') setLabelAiStatus('error', _t('fk_ai_offline') || 'オフラインのため画像処理できません。手動で入力してください');
+        else setLabelAiStatus('error', _t('fk_ai_failed') || '画像処理に失敗しました。手動で入力するか再試行してください');
+        updateManualDisplays();
+        return;
+    }
+
+    const v = { ...(result.values || {}) };
+    const qp = result.qrParsed || {};
+    [['totalLength', 'totalLengthSource'], ['sDrawLength', 'sDrawLengthSource'], ['netLength', 'netLengthSource'], ['date', 'dateSource']].forEach(([k, srcKey]) => {
+        if ((v[k] === null || v[k] === undefined || v[k] === '') && qp[k] !== undefined && qp[k] !== null && qp[k] !== '') {
+            v[k] = qp[k];
+            v[srcKey] = 'qr';
+        }
+    });
+    const num = (x) => (x === null || x === undefined || x === '' || isNaN(Number(x))) ? null : Number(x);
+    const read = { socho: num(v.totalLength), shiki: num(v.sDrawLength), bicho: num(v.netLength), lot: v.date ? normalizeDateStringToISO(v.date) : null };
+    const filled = {};
+    const missing = [];
+    Object.keys(read).forEach(key => {
+        const untouched = String(labelAiFieldValue(key) ?? '') === String(before[key] ?? '');
+        if (read[key] !== null && read[key] !== '') {
+            if (untouched) {
+                setLabelAiFieldValue(key, String(read[key]));
+                filled[key] = String(read[key]);
+            }
+        } else {
+            missing.push(LABEL_AI_FIELDS[key]);
+            // Don't leave a planned / default value looking "checked" when the label could not be read
+            if (untouched && (key === 'shiki' || key === 'bicho')) setLabelAiFieldValue(key, '');
+        }
+    });
+    state.labelAi.status = 'done';
+    state.labelAi.filled = filled;
+    saveCurrentModalManualEdits();
+
+    const usedQr = ['totalLengthSource', 'sDrawLengthSource', 'netLengthSource', 'dateSource'].some(k => v[k] === 'qr');
+    const qrNote = usedQr ? ' ' + (_t('fk_ai_qr_used') || '（一部QRから）') : '';
+    let msg = missing.length
+        ? (_t('fk_ai_partial') || '読み取れなかった項目: {fields} — タップして入力してください').replace('{fields}', missing.join('・'))
+        : (_t('fk_ai_done') || '画像処理完了 — 数値が正しいか確認してください');
+    msg += qrNote;
+
+    // Label's base code vs the planned material (e.g. HM26 vs HM26/〇確（310D ﾓﾙﾄA）)
+    const planned = String(state.currentModalRollContext.item?.kizai || state.currentModalRollContext.group?.kizai || '').toUpperCase().replace(/\s/g, '');
+    const code = String(v.baseCode || '').toUpperCase().replace(/\s/g, '');
+    if (code && planned && !planned.includes(code)) {
+        msg += '\n⚠ ' + (_t('fk_ai_code_mismatch') || 'ラベルの基材コード「{label}」が予定「{planned}」と一致しません')
+            .replace('{label}', v.baseCode).replace('{planned}', state.currentModalRollContext.item?.kizai || state.currentModalRollContext.group?.kizai || '');
+    }
+    setLabelAiStatus(missing.length || msg.includes('⚠') ? 'warn' : 'ok', msg);
+    updateManualDisplays();
+}
+
+// What the AI read, saved with the roll next to the values the worker confirmed
+function buildLabelReadRecord() {
+    const ai = state.labelAi;
+    if (!ai || !ai.result) return null;
+    const r = ai.result;
+    return {
+        at: new Date().toISOString(),
+        success: !!r.success,
+        kind: r.success ? 'ok' : (r.kind || 'error'),
+        model: r.model || '',
+        ms: r.ms || 0,
+        usedQr: !!r.usedQr,
+        qrText: r.qrText ? String(r.qrText).slice(0, 500) : '',
+        values: r.values || null,
+        changedByWorker: r.success ? Object.keys(ai.filled || {}).filter(k => String(labelAiFieldValue(k)) !== String(ai.filled[k])) : []
+    };
+}
+
 function proceedToCameraFromManual() {
+    if (state.labelAi && state.labelAi.status === 'busy') {
+        showToast('⏳ ' + (_t('fk_ai_wait') || '画像を処理中です。完了まで少しお待ちください'), 'info', 2200);
+        return;
+    }
     const validation = validateModalRequiredFields();
     if (!validation.isValid) {
         const missingNames = validation.missing.map(m => `・${m.name}`).join('\n');
         const alertMsg = _t('fk_missing_fields_prompt') || '以下の必須項目が未入力です。各項目をタップして入力・確認してください：';
         alert(`${alertMsg}\n\n${missingNames}`);
-        return;
-    }
-
-    const socho = parseFloat(state.currentModalSocho);
-    const bicho = parseFloat(state.currentModalBicho);
-    if (!isNaN(socho) && !isNaN(bicho) && socho < bicho) {
-        const shorterMsg = _t('fk_socho_shorter_bicho') || `総長（${socho} m）が美長（${bicho} m）より短くなっています。\n数値を再確認してください。`;
-        alert(shorterMsg);
         return;
     }
 
@@ -5088,6 +5733,14 @@ function proceedToCameraFromManual() {
     }
 
     saveCurrentModalManualEdits();
+    if (state.currentModalPhoto && ctx) {
+        // Photo-first flow: the label photo is already taken
+        const photo = state.currentModalPhoto;
+        const labelRead = buildLabelReadRecord();
+        if (labelRead) setItemEdit(ctx.itemId, { labelRead });
+        savePhotoAndEnqueue(ctx, photo);
+        return;
+    }
     triggerNativeCameraForModal();
 }
 
@@ -5195,15 +5848,10 @@ function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
     state.currentModalLotNo = normalizeDateStringToISO(edit.lotNo || '');
     state.currentModalRawQR = edit.rawQR || '';
     state.currentModalCustomSlices = {};
+    resetLabelAiState();
 
-    // Check if this material is registered as NO QR
-    const learnedPattern = findLearnedPatternForKizai(kizai);
-    if (learnedPattern && learnedPattern.hasQR === false) {
-        switchFeedModalView('manual');
-        showToast(`ℹ️ 「${kizai}」はQRなし登録基材です（手動入力モード）`, 'info', 2200);
-    } else {
-        switchFeedModalView('scan');
-    }
+    // Photo first: the label photo is read by AI (the USB QR scanner still works on this view)
+    switchFeedModalView('scan');
 
     const badge = document.getElementById('feedScannerLiveBadge');
     if (badge) {
@@ -5304,6 +5952,7 @@ function closeMaterialFeedModal() {
     state.currentModalRollContext = null;
     state.currentFeedItem = null;
     state.currentFeedGroup = null;
+    resetLabelAiState();
 }
 
 function hideMaterialFeedModal() {
@@ -5605,6 +6254,33 @@ async function processBackgroundPhotoQueue() {
     isUploadingPhotos = false;
 }
 
+// Small JPEG for list thumbnails (made from the local photo, so no cross-site image read is needed)
+function makePhotoThumbnail(base64, maxSize = 160, quality = 0.7) {
+    return new Promise(resolve => {
+        if (!base64 || !String(base64).startsWith('data:image')) return resolve('');
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.max(1, Math.round(img.width * scale));
+                canvas.height = Math.max(1, Math.round(img.height * scale));
+                canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL('image/jpeg', quality));
+            } catch (e) {
+                resolve('');
+            }
+        };
+        img.onerror = () => resolve('');
+        img.src = base64;
+    });
+}
+
+// Thumbnail URL for list views; full photo only as fallback
+function getThumbUrl(doc, edit) {
+    return (doc && doc.imageThumbUrl) || (edit && edit.photoThumbUrl) || (doc && (doc.imageUrl || doc.photoUrl)) || (edit && edit.photoUrl) || '';
+}
+
 async function uploadLabelPhotoToServer(base64, lotNo, hinban, itemId) {
     if (!base64) return '';
     const targetDate = state.selectedDate || new Date().toISOString().slice(0, 10);
@@ -5617,6 +6293,7 @@ async function uploadLabelPhotoToServer(base64, lotNo, hinban, itemId) {
 
     const payload = {
         base64: base64,
+        thumbBase64: await makePhotoThumbnail(base64),
         filePath: filePath,
         date: targetDate,
         machine: targetMachine,
@@ -5635,8 +6312,9 @@ async function uploadLabelPhotoToServer(base64, lotNo, hinban, itemId) {
     if (!res.ok) throw new Error(`Upload failed HTTP ${res.status}`);
     const data = await res.json();
     const publicUrl = data.url || data.photoUrl || data.imageUrl || '';
+    state.lastPhotoThumbUrl = data.thumbUrl || '';
     if (publicUrl && itemId) {
-        setItemEdit(itemId, { photoUrl: publicUrl, hasPhoto: true });
+        setItemEdit(itemId, { photoUrl: publicUrl, photoThumbUrl: data.thumbUrl || '', hasPhoto: true });
         try {
             await firstKojoPhotoDB.updatePhoto(itemId, { photoUrl: publicUrl, status: 'uploaded' });
         } catch (e) { }
@@ -5653,6 +6331,7 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
 
     let attempts = record.uploadAttempts || 0;
     let uploadedUrl = null;
+    let uploadedThumbUrl = '';
 
     for (let i = attempts; i < maxRetries; i++) {
         try {
@@ -5666,6 +6345,7 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
 
             const payload = {
                 base64: record.base64,
+                thumbBase64: await makePhotoThumbnail(record.base64),
                 filePath: filePath,
                 date: targetDate,
                 machine: targetMachine,
@@ -5688,6 +6368,7 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
             const data = await res.json();
             if (data.success && (data.url || data.imageUrl || data.photoUrl)) {
                 uploadedUrl = data.url || data.imageUrl || data.photoUrl;
+                uploadedThumbUrl = data.thumbUrl || '';
                 break;
             } else {
                 throw new Error(data.error || 'No URL returned');
@@ -5708,7 +6389,7 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
             status: 'uploaded',
             photoUrl: uploadedUrl
         });
-        setItemEdit(itemId, { photoUrl: uploadedUrl, hasPhoto: true });
+        setItemEdit(itemId, { photoUrl: uploadedUrl, photoThumbUrl: uploadedThumbUrl, hasPhoto: true });
         console.log(`✅ Background upload finished for ${itemId}: ${uploadedUrl}`);
     } else {
         await firstKojoPhotoDB.updatePhoto(itemId, { status: 'failed' });
@@ -5726,6 +6407,7 @@ function triggerNativeCameraForModal() {
     }
     const fileInput = document.getElementById('modalRollCameraInput');
     if (fileInput) {
+        state.cameraMode = 'legacy';
         fileInput.click();
     }
 }
@@ -5741,6 +6423,8 @@ function handleModalRollCameraCapture(event) {
 
         const ctx = state.currentModalRollContext;
         if (!ctx) return;
+        const photoFirst = state.cameraMode === 'photoFirst';
+        const proceed = () => photoFirst ? onLabelPhotoTaken(base64) : savePhotoAndEnqueue(ctx, base64);
 
         // 1. Run blur detection
         const blurResult = await detectBlur(base64, 60);
@@ -5748,15 +6432,15 @@ function handleModalRollCameraCapture(event) {
             showBlurWarning(blurResult.score,
                 () => {
                     // User chose Retake -> re-trigger camera
-                    triggerNativeCameraForModal();
+                    if (photoFirst) startLabelPhoto(); else triggerNativeCameraForModal();
                 },
                 () => {
                     // User chose Ignore -> proceed
-                    savePhotoAndEnqueue(ctx, base64);
+                    proceed();
                 }
             );
         } else {
-            savePhotoAndEnqueue(ctx, base64);
+            proceed();
         }
     };
     reader.readAsDataURL(file);
@@ -5998,6 +6682,7 @@ async function submitModalRollToQueue() {
             date: state.selectedDate,
             machine: state.machineName || 'PSA2',
             worker: state.workerName || '作業者',
+            workerRoles: getWorkerRolesPayload(),
             groupId: group?.groupId || item.groupId || item.id,
             itemId: itemId,
             orderIndex: item.orderIndex || (rIdx + 1),
@@ -6021,7 +6706,9 @@ async function submitModalRollToQueue() {
             rawMaterialQR: rawQRVal,
             rawMaterialLength: String(bichoVal),
             manufacturerUid: '',
-            imageUrl: photoUrl || ''
+            imageUrl: photoUrl || '',
+            imageThumbUrl: (getItemEdits()[itemId] || {}).photoThumbUrl || '',
+            labelRead: (getItemEdits()[itemId] || {}).labelRead || undefined
         };
 
         console.log('Enqueueing single roll to queue:', enqueuePayload);
@@ -6120,6 +6807,8 @@ function excludeCurrentModalRoll() {
     const newExcluded = !edit.isExcluded;
 
     setItemEdit(itemId, { isExcluded: newExcluded });
+    const found = findRollForItemId(itemId, ctx.gIdx, rIdx);
+    syncRollExcludeToServer(itemId, item || found.item, ctx.group || found.group, newExcluded);
     closeMaterialFeedModal();
 
     showToast(newExcluded ? `Roll #${item.rollIndex || (rIdx + 1)} を除外しました（履歴タブで復帰可能）` : `Roll #${item.rollIndex || (rIdx + 1)} を復帰しました`, 'info', 2500);
@@ -6284,7 +6973,7 @@ function renderStagingQueue() {
         const kizaiCode = getScheduleDisplayName(activeItem);
         const activeImg = activeItem.imageUrl || activeItem.photoUrl;
         const photoThumb = activeImg
-            ? `<img class="queue-flat-thumb" src="${activeImg}" alt="" loading="lazy" decoding="async" data-item-id="${activeItem.itemId || activeItem._id}" data-src="${activeImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${activeImg}', '${activeItem.itemId || activeItem._id}')" onclick="openPhotoEnlarged('${activeImg}')" title="クリックで拡大">`
+            ? `<img class="queue-flat-thumb" src="${getThumbUrl(activeItem, getItemEdits()[activeItem.itemId] || null) || activeImg}" alt="" loading="lazy" decoding="async" data-item-id="${activeItem.itemId || activeItem._id}" data-src="${activeImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${activeImg}', '${activeItem.itemId || activeItem._id}')" onclick="openPhotoEnlarged('${activeImg}')" title="クリックで拡大">`
             : `<div class="queue-flat-thumb-placeholder">写真なし</div>`;
         const currentRoll = activeItem.currentRollIndex || activeItem.rollIndex || 1;
         const totalRolls = activeItem.totalRolls || 1;
@@ -6302,6 +6991,13 @@ function renderStagingQueue() {
             }
         }
         const orderDisplay = orderIdx ? `#${orderIdx}` : `#${activeItem.rollIndex || 1}`;
+        // First roll of a run is auto-activated on enqueue while the machine is still being prepared
+        const needsStartConfirm = activeItem.startedBy === 'enqueue' && activeItem.startConfirmed !== true;
+        const startNote = needsStartConfirm
+            ? `<div class="queue-start-note">⏸ 準備中 — 機械の準備ができたら「生産開始」を押してください (Preparing — press Start when ready)</div>`
+            : (activeItem.startConfirmed === true && (activeItem.startEpoch || activeItem.actualStartTime)
+                ? `<div style="font-size: 0.78rem; color: #059669; font-weight: 700; margin-top: 3px;">▶ 開始 ${fmtJstTime(activeItem.startEpoch) || activeItem.actualStartTime}</div>`
+                : '');
 
         rowsHTML += `
             <div class="queue-flat-row is-active" data-queue-id="${activeItem._id}">
@@ -6318,9 +7014,14 @@ function renderStagingQueue() {
                             <span>${_t('fk_lot_label')}<strong>${activeItem.lotNo || '-'}</strong></span>
                             ${activeItem.shippingDest ? `<span>• ${_t('fk_shipping_dest')}<strong>${activeItem.shippingDest}</strong></span>` : ''}
                         </div>
+                        ${startNote}
                     </div>
                 </div>
                 <div class="queue-flat-right" onclick="event.stopPropagation()">
+                    ${needsStartConfirm ? `
+                    <button type="button" class="btn-staging-action btn-confirm-start" onclick="confirmFirstRollStart('${activeItem._id}')" title="準備が終わったら押してください (Press when the machine is ready)">
+                        ▶ 生産開始 (Start)
+                    </button>` : ''}
                     <button type="button" class="btn-staging-action btn-staging-advance" onclick="advanceQueueItemPrompt('${activeItem._id}')" title="${_t('fk_btn_advance')}">
                         ${_t('fk_btn_advance')}
                     </button>
@@ -6334,7 +7035,7 @@ function renderStagingQueue() {
         const kizaiCode = getScheduleDisplayName(item);
         const queuedImg = item.imageUrl || item.photoUrl;
         const photoThumb = queuedImg
-            ? `<img class="queue-flat-thumb" src="${queuedImg}" alt="" loading="lazy" decoding="async" data-item-id="${item.itemId || item._id}" data-src="${queuedImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${queuedImg}', '${item.itemId || item._id}')" onclick="openPhotoEnlarged('${queuedImg}')" title="クリックで拡大">`
+            ? `<img class="queue-flat-thumb" src="${getThumbUrl(item, getItemEdits()[item.itemId] || null) || queuedImg}" alt="" loading="lazy" decoding="async" data-item-id="${item.itemId || item._id}" data-src="${queuedImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${queuedImg}', '${item.itemId || item._id}')" onclick="openPhotoEnlarged('${queuedImg}')" title="クリックで拡大">`
             : `<div class="queue-flat-thumb-placeholder">${_t('no_photos_yet')}</div>`;
         const posNum = activeItem ? (qIdx + 2) : (qIdx + 1);
 
@@ -6385,6 +7086,31 @@ function renderStagingQueue() {
 
     queueContainer.innerHTML = rowsHTML;
     initQueueDragAndDrop();
+}
+
+// Re-stamp the real production start of the first roll (after 準備 / machine setup)
+async function confirmFirstRollStart(queueId) {
+    if (!queueId) return;
+    const okStart = await appConfirm('生産を開始しますか？', '開始時刻を確認してください。押し忘れた場合は実際の時刻に変更できます。\n(Check the start time. Change it if production started earlier.)', {
+        icon: '▶️', tone: 'brand', okLabel: '▶ 生産開始 (Start)', cancelLabel: 'キャンセル',
+        fields: [{ key: 'start', label: '開始時刻 (Start time)', epoch: Date.now() }],
+        validate: (v) => validateNotFuture(v.start, '開始時刻')
+    });
+    if (!okStart) return;
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/confirm-start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ _id: queueId, startEpoch: okStart.start, worker: state.workerName || '' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        showToast(`生産開始を記録しました (${data.item?.actualStartTime || ''})`, 'success', 2500);
+        await fetchProductionQueue();
+    } catch (err) {
+        console.error('Could not confirm start:', err);
+        showToast(`開始の記録に失敗しました: ${err.message}`, 'error', 3500);
+    }
 }
 
 // -----------------------------------------------------
@@ -6896,8 +7622,9 @@ function renderHistoryTableView() {
             itemId: doc.itemId || doc._id || doc.id,
             mongoId: doc._id,
             orderIndex: Number(orderIndex) || (qIdx + 1),
-            startTime: doc.actualStartTime || matchedSched?.startTime || '',
-            endTime: doc.actualEndTime || matchedSched?.endTime || '',
+            // Timestamps formatted in JST first: the stored HH:MM text was written in UTC by older servers
+            startTime: fmtJstTime(doc.startEpoch || doc.startedAt) || doc.actualStartTime || matchedSched?.startTime || '',
+            endTime: fmtJstTime(doc.endEpoch || doc.completedAt) || doc.actualEndTime || matchedSched?.endTime || '',
             completedAt: doc.completedAt || doc.createdAt || '',
             shippingDest: (matchedSched && matchedSched.shippingDest) || info.shippingDest || doc.shippingDest || '—',
             kizai: (matchedSched && matchedSched.kizai) || info.kizai || doc.kizai || doc.hinban || '材料',
@@ -6959,7 +7686,7 @@ function renderHistoryTableView() {
         } else if (item.completedAt) {
             const d = new Date(item.completedAt);
             if (!isNaN(d.getTime())) {
-                timeDisplay = `<strong>${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</strong>`;
+                timeDisplay = `<strong>${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })}</strong>`;
             }
         }
 
@@ -6981,7 +7708,7 @@ function renderHistoryTableView() {
 
     const firstTime = historyItems.find(it => it.startTime)?.startTime || '';
     const lastTime = [...historyItems].reverse().find(it => it.endTime)?.endTime || '';
-    const timeSpan = (firstTime && lastTime) ? `${firstTime} ～ ${lastTime}` : (historyItems[0]?.completedAt ? new Date(historyItems[0].completedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '本日');
+    const timeSpan = (firstTime && lastTime) ? `${firstTime} ～ ${lastTime}` : (historyItems[0]?.completedAt ? fmtJstTime(historyItems[0].completedAt) : '本日');
 
     const totalProdFormatted = `${totalMeters > 0 ? `${totalMeters.toLocaleString()} m` : ''}${totalMeters > 0 && totalPieces > 0 ? ' / ' : ''}${totalPieces > 0 ? `${totalPieces.toLocaleString()} 枚` : ''}${totalMeters > 0 ? ` (${(totalMeters * 100).toLocaleString()} cm)` : ''}`;
 
@@ -7035,6 +7762,145 @@ function updateHistoryBadges() {
 
     if (enqueuedBadge) enqueuedBadge.textContent = `${_t('fk_status_completed')}: ${completedCount} ${_t('fk_unit_items')}`;
     if (excludedBadge) excludedBadge.textContent = `${_t('fk_status_excluded')}: ${excludedCount} ${_t('fk_unit_items')}`;
+}
+
+// -----------------------------------------------------
+// History 詳細 pop-up: full production record of one roll
+// -----------------------------------------------------
+function fmtJstTime(value, withSeconds = false) {
+    if (value === undefined || value === null || value === '') return '';
+    const raw = value && value.$date ? value.$date : value;
+    const d = typeof raw === 'number' || /^\d+$/.test(String(raw)) ? new Date(Number(raw)) : new Date(raw);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', ...(withSeconds ? { second: '2-digit' } : {}) });
+}
+
+function openHistoryDetailModal(itemId, event) {
+    if (event) event.stopPropagation();
+    const it = state.historyItemsById?.[String(itemId)];
+    if (!it) return;
+    const doc = it.rawDoc || {};
+    const isLocalExcluded = !doc._id && it.type === 'excluded';
+
+    const val = (v, unit = '') => (v === undefined || v === null || v === '') ? '—' : `${escapeHtml(v)}${unit}`;
+    const row = (label, value) => `<div class="hd-row"><span class="hd-label">${label}</span><span class="hd-value">${value}</span></div>`;
+
+    const start = fmtJstTime(doc.startEpoch || doc.startedAt, true) || doc.actualStartTime || '';
+    const end = fmtJstTime(doc.endEpoch || doc.completedAt, true) || doc.actualEndTime || '';
+    const fedAt = fmtJstTime(doc.createdAt, true);
+    const duration = doc.actualDurationMins != null ? `${doc.actualDurationMins} 分` : '';
+
+    const statusLabel = {
+        completed: '✅ 完了 (Completed)',
+        'in-progress': '▶ 生産中 (In progress)',
+        active: '▶ 生産中 (In progress)',
+        queue: '⏳ 待機中 (Queued)',
+        queued: '⏳ 待機中 (Queued)',
+        excluded: '⛔ 除外 (Excluded)',
+        scrapped: '⛔ 破棄 (Scrapped)',
+        skipped: '⏭ スキップ (Skipped)'
+    }[it.status] || escapeHtml(it.status || '');
+
+    const prints = Array.isArray(doc.printHistory) ? doc.printHistory : [];
+    const printsHTML = prints.length
+        ? prints.map((p, i) => {
+            const ok = !p.manualAdvance && p.printSuccess !== false;
+            const badge = p.manualAdvance
+                ? '<span class="hd-badge warn">手動進行 (印刷なし)</span>'
+                : ok ? '<span class="hd-badge ok">印刷OK</span>' : '<span class="hd-badge ng">印刷失敗</span>';
+            return `<div class="hd-print">
+                <span class="hd-print-no">#${i + 1}</span>
+                ${badge}
+                <span>${escapeHtml(fmtJstTime(p.timestamp, true) || p.timeStr || '—')}</span>
+                <span>${p.lotNo ? `ロット ${escapeHtml(p.lotNo)}` : ''}</span>
+                <span class="hd-muted">${p.worker ? `担当 ${escapeHtml(p.worker)}` : ''}</span>
+                ${p.reason ? `<span class="hd-muted">${escapeHtml(p.reason)}</span>` : ''}
+            </div>`;
+        }).join('')
+        : '<div class="hd-muted">印刷記録なし (No print record)</div>';
+
+    const roles = doc.workerRoles && typeof doc.workerRoles === 'object' ? doc.workerRoles : null;
+    const rolesHTML = roles && WORKER_ROLES.some(r => (roles[r.key] || []).length)
+        ? WORKER_ROLES.map((r, i) => row(`${i + 1}. ${r.ja}`, (roles[r.key] || []).length ? roles[r.key].map(n => escapeHtml(n)).join('・') : '—')).join('')
+        : '';
+
+    const t = doc.temperatures || {};
+    const hasTemps = doc.temperatures || doc.ovenTemp1 != null;
+    const temp = (k) => val(doc[k] ?? t[k], '°C');
+
+    const photo = doc.imageUrl || doc.photoUrl || it.photoUrl || '';
+
+    const body = `
+        <div class="hd-head">
+            ${photo ? `<img class="hd-photo" src="${escapeHtml(it.thumbUrl || photo)}" alt="" onclick="openPhotoEnlarged('${escapeHtml(photo)}')" title="タップで拡大">` : '<div class="hd-photo hd-photo-empty">写真なし</div>'}
+            <div class="hd-head-text">
+                <div class="hd-title"><span class="roll-sub-badge">#${escapeHtml(it.orderIndex || '')}</span> ${escapeHtml(it.kizai || doc.kizai || doc.hinban || '')}</div>
+                <div class="hd-sub">${escapeHtml(doc.hinban || '')}${doc.rollIndex ? ` ・ Roll ${escapeHtml(doc.rollIndex)} / ${escapeHtml(doc.totalRolls || '?')}` : ''}${doc.uniqueID ? ` ・ ID <strong>${escapeHtml(doc.uniqueID)}</strong>` : ''}</div>
+                <div class="hd-status">${statusLabel}${doc.finishedEarly ? ' <span class="hd-badge warn">早期終了</span>' : ''}${doc.startEdited ? ' <span class="hd-badge edit">✎ 開始修正済</span>' : ''}</div>
+            </div>
+        </div>
+
+        <div class="hd-time">
+            <div><div class="hd-label">開始 (Start)</div><div class="hd-time-value">${start || '—'}</div></div>
+            <div class="hd-time-arrow">→</div>
+            <div><div class="hd-label">終了 (End)</div><div class="hd-time-value">${end || '—'}</div></div>
+            <div><div class="hd-label">時間 (Duration)</div><div class="hd-time-value">${duration || '—'}</div></div>
+        </div>
+
+        <div class="hd-section">印刷 (Label printing)</div>
+        ${printsHTML}
+
+        <div class="hd-section">スキャン・入力値 (Scanned & entered)</div>
+        ${row('ロット番号', val(doc.lotNo || it.lotNo))}
+        ${row('材料QR', `<span class="hd-qr">${val(doc.rawMaterialQR || doc.qrScanned)}</span>`)}
+        ${row('総長', val(doc.socho, ' m'))}
+        ${row('S引長', val(doc.shiki, ' m'))}
+        ${row('実長', val(doc.bicho ?? doc.meters, ' m'))}
+        ${row('実巻長 (完了時)', val(doc.meters ?? doc.rollMeters, ' m'))}
+
+        <div class="hd-section">作業者 (Workers)</div>
+        ${row('投入登録 (タブレット1)', `${val(doc.feederWorker || doc.worker)}${fedAt ? ` <span class="hd-muted">${fedAt}</span>` : ''}`)}
+        ${row('包装・印刷 (タブレット2)', val(doc.wrapperWorker))}
+        ${rolesHTML}
+
+        ${hasTemps ? `
+        <div class="hd-section">開始時温度 (Start temperatures)</div>
+        ${row('炉温 1 / 2 / 3', `${temp('ovenTemp1')} / ${temp('ovenTemp2')} / ${temp('ovenTemp3')}`)}
+        ${row('周囲温度 / 湿度', `${temp('ambientTemp')} / ${val(doc.ambientHumidity ?? t.ambientHumidity, '%')}`)}
+        ` : ''}
+
+        ${isLocalExcluded ? '<div class="hd-muted" style="margin-top: 10px;">※ 投入前に除外された巻きです (Excluded before feeding — no production record)</div>' : ''}
+    `;
+
+    let overlay = document.getElementById('historyDetailOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'historyDetailOverlay';
+        overlay.className = 'hd-overlay';
+        document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `
+        <div class="hd-card" role="dialog" aria-modal="true">
+            <div class="hd-card-header">
+                <span>生産詳細 (Production details)</span>
+                <button type="button" class="hd-close" onclick="closeHistoryDetailModal()" aria-label="閉じる">✕</button>
+            </div>
+            <div class="hd-card-body">${body}</div>
+            <div class="hd-card-footer">
+                <button type="button" class="btn btn-primary btn-full" onclick="closeHistoryDetailModal()">閉じる (Close)</button>
+            </div>
+        </div>
+    `;
+    overlay.style.display = 'flex';
+    overlay.onclick = (e) => { if (e.target === overlay) closeHistoryDetailModal(); };
+}
+
+function closeHistoryDetailModal() {
+    const overlay = document.getElementById('historyDetailOverlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+        overlay.innerHTML = '';
+    }
 }
 
 function previewHistoryItem(itemId, event) {
@@ -7139,6 +8005,7 @@ function renderHistoryList() {
             meters: doc.bicho || doc.rollMeters || doc.meters || 0,
             lotNo: doc.lotNo || '',
             photoUrl: doc.imageUrl || doc.photoUrl || '',
+            thumbUrl: getThumbUrl(doc, getItemEdits()[doc.itemId] || null),
             rawDoc: doc
         });
     });
@@ -7162,9 +8029,16 @@ function renderHistoryList() {
                 meters: e.bicho || e.meters || matchedSched?.meters || 0,
                 lotNo: e.lotNo || '',
                 photoUrl: e.photoUrl || e.photoBase64 || '',
+                thumbUrl: e.photoThumbUrl || e.photoUrl || '',
                 rawDoc: e
             });
         }
+    });
+
+    // 3. Ended 段替え / setup timers
+    Object.values(state.setupRecords || {}).forEach(rec => {
+        if (!rec || rec.status !== 'done') return;
+        items.push({ itemId: rec.setupId, type: 'setup', status: 'done', orderIndex: Number(rec.orderIndex) || 0, rawDoc: rec });
     });
 
     // Sort by order index ascending so the order sequence (#1, #2, #3...) is preserved
@@ -7172,6 +8046,7 @@ function renderHistoryList() {
 
     const filter = state.historyFilter || 'all';
     const filtered = items.filter(it => {
+        if (it.type === 'setup') return filter === 'all';
         if (filter === 'enqueued') return it.type === 'enqueued';
         if (filter === 'excluded') return it.type === 'excluded';
         return true;
@@ -7186,15 +8061,24 @@ function renderHistoryList() {
         return;
     }
 
+    // Keep the rendered items so the 詳細 pop-up can read the full record
+    state.historyItemsById = {};
+    filtered.forEach(it => { if (it.itemId) state.historyItemsById[String(it.itemId)] = it; });
+
     let html = '';
     filtered.forEach(it => {
+        if (it.type === 'setup') {
+            html += renderSetupHistoryRow(it.rawDoc);
+            return;
+        }
         const isExcluded = (it.status === 'excluded' || it.type === 'excluded');
 
         let statusTagHTML = '';
         let actionHTML = '';
 
         if (it.status === 'completed') {
-            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #EEF2FF; color: #4338CA; border: 1px solid #C7D2FE; font-weight: 700;">${_t('fk_status_completed')}</span>`;
+            // No pill next to the meters: "Completed" is already shown before the Details button
+            statusTagHTML = '';
             actionHTML = `<span style="font-size: 0.8rem; color: #4338CA; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;">${_t('fk_status_completed')}</span>`;
         } else if (it.status === 'active' || it.status === 'in-progress') {
             statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-weight: 700;">${_t('fk_status_in_progress')}</span>`;
@@ -7203,7 +8087,10 @@ function renderHistoryList() {
             statusTagHTML = `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">スキップ</span>`;
             actionHTML = `<span style="font-size: 0.8rem; color: #6B7280; font-weight: 600; padding-right: 4px;">スキップ</span>`;
         } else if (isExcluded) {
-            statusTagHTML = `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">${_t('fk_status_excluded')}</span>`;
+            const autoClosed = it.rawDoc?.autoClosed || getItemEdits()[it.itemId]?.autoClosed;
+            statusTagHTML = autoClosed
+                ? `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;" title="02:00 の日付変更で未処理のため自動で除外">未処理 (自動)</span>`
+                : `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">${_t('fk_status_excluded')}</span>`;
             actionHTML = `<button type="button" class="btn-roll-exclude is-excluded" onclick="restoreExcludedItem('${it.itemId}', event)" title="${_t('fk_btn_restore')}">${_t('fk_btn_restore')}</button>`;
         } else {
             statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-weight: 700;">${_t('fk_status_queued')}</span>`;
@@ -7215,7 +8102,7 @@ function renderHistoryList() {
                 <div class="roll-row-left" style="display: flex; align-items: center; gap: 10px;">
                     <span class="roll-sub-badge">#${it.orderIndex}</span>
                     ${it.photoUrl ? `
-                        <img class="history-thumb-mini" src="${it.photoUrl}" alt="" loading="lazy" decoding="async" data-item-id="${it.itemId || it.mongoId || ''}" data-src="${it.photoUrl}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${it.photoUrl}', '${it.itemId || it.mongoId || ''}')" onclick="event.stopPropagation(); openPhotoEnlarged('${it.photoUrl}')" title="タップして拡大" style="width: 34px; height: 34px; border-radius: 6px; object-fit: cover; border: 1px solid #E5E7EB; cursor: pointer; flex-shrink: 0; background: #F3F4F6; transition: opacity 0.25s ease;">
+                        <img class="history-thumb-mini" src="${it.thumbUrl || it.photoUrl}" alt="" loading="lazy" decoding="async" width="34" height="34" data-item-id="${it.itemId || it.mongoId || ''}" data-src="${it.photoUrl}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${it.photoUrl}', '${it.itemId || it.mongoId || ''}')" onclick="event.stopPropagation(); openPhotoEnlarged('${it.photoUrl}')" title="タップして拡大" style="width: 34px; height: 34px; border-radius: 6px; object-fit: cover; border: 1px solid #E5E7EB; cursor: pointer; flex-shrink: 0; background: #F3F4F6; transition: opacity 0.25s ease;">
                     ` : `
                         <div style="width: 34px; height: 34px; border-radius: 6px; background: #F3F4F6; border: 1px dashed #D1D5DB; display: flex; align-items: center; justify-content: center; color: #9CA3AF; font-size: 0.65rem; flex-shrink: 0;">-</div>
                     `}
@@ -7226,7 +8113,7 @@ function renderHistoryList() {
 
                 <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
                     ${actionHTML}
-                    <button type="button" class="btn-detail-secondary" onclick="previewHistoryItem('${it.itemId}', event)" title="${_t('fk_btn_detail')}">
+                    <button type="button" class="btn-detail-secondary" onclick="openHistoryDetailModal('${it.itemId}', event)" title="${_t('fk_btn_detail')}">
                         ${_t('fk_btn_detail')}
                     </button>
                 </div>
@@ -7240,10 +8127,424 @@ function renderHistoryList() {
 function restoreExcludedItem(itemId, event) {
     if (event) event.stopPropagation();
     setItemEdit(itemId, { isExcluded: false });
+    const { item, group } = findRollForItemId(itemId);
+    syncRollExcludeToServer(itemId, item, group, false);
     renderHistoryList();
     renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
     showToast('項目を生産一覧に復帰させました', 'success', 2500);
 }
+
+// -----------------------------------------------------
+// In-app confirm / notice pop-up (replaces browser confirm()/alert() for setup & start)
+// appConfirm resolves true/false; appNotice resolves when closed.
+// -----------------------------------------------------
+// Epoch for HH:MM on the selected schedule date (tablet local time = JST)
+function epochFromHM(h, m) {
+    const [y, mo, d] = (state.selectedDate || getTodayDateString()).split('-').map(Number);
+    // 00:00–01:59 belongs to the same production day but falls on the next calendar day
+    return new Date(y, mo - 1, d + (h < DAY_CUTOFF_HOUR ? 1 : 0), h, m, 0, 0).getTime();
+}
+
+function hmFromEpoch(epoch) {
+    const d = new Date(Number(epoch) || Date.now());
+    return { h: d.getHours(), m: d.getMinutes() };
+}
+
+function fmtHM(epoch) {
+    const { h, m } = hmFromEpoch(epoch);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+// fields: [{ key, label, epoch }] -> big hour/minute steppers. validate(values) returns an error string or ''.
+// Resolves false on cancel, true on OK (no fields) or { key: epoch } (with fields).
+function appDialog({ title, message, icon = '❓', tone = 'brand', okLabel = 'はい (Yes)', cancelLabel = 'いいえ (No)', showCancel = true, fields = [], validate = null }) {
+    return new Promise(resolve => {
+        let overlay = document.getElementById('appDialogOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'appDialogOverlay';
+            overlay.className = 'app-dialog-overlay';
+            document.body.appendChild(overlay);
+        }
+
+        const values = {};
+        fields.forEach(f => { values[f.key] = hmFromEpoch(f.epoch); });
+
+        const fieldHTML = fields.map(f => `
+            <div class="app-time-field" data-field="${f.key}">
+                <div class="app-time-label">${escapeHtml(f.label)}</div>
+                <div class="app-time-row">
+                    <div class="app-time-unit">
+                        <button type="button" data-step="${f.key}:h:1">▲</button>
+                        <div class="app-time-value" data-show="${f.key}:h"></div>
+                        <button type="button" data-step="${f.key}:h:-1">▼</button>
+                    </div>
+                    <div class="app-time-colon">:</div>
+                    <div class="app-time-unit">
+                        <button type="button" data-step="${f.key}:m:1">▲</button>
+                        <div class="app-time-value" data-show="${f.key}:m"></div>
+                        <button type="button" data-step="${f.key}:m:-1">▼</button>
+                    </div>
+                </div>
+                <div class="app-time-quick">
+                    <button type="button" data-quick="${f.key}:-10">−10分</button>
+                    <button type="button" data-quick="${f.key}:-5">−5分</button>
+                    <button type="button" data-quick="${f.key}:-1">−1分</button>
+                    <button type="button" data-quick="${f.key}:now">今 (Now)</button>
+                </div>
+            </div>
+        `).join('');
+
+        overlay.innerHTML = `
+            <div class="app-dialog-card tone-${tone}" role="dialog" aria-modal="true">
+                <div class="app-dialog-icon">${icon}</div>
+                <div class="app-dialog-title">${escapeHtml(title || '')}</div>
+                <div class="app-dialog-message">${escapeHtml(message || '').replace(/\n/g, '<br>')}</div>
+                ${fieldHTML ? `<div class="app-time-fields">${fieldHTML}</div>` : ''}
+                <div class="app-dialog-error" data-error></div>
+                <div class="app-dialog-actions">
+                    ${showCancel ? `<button type="button" class="btn btn-secondary" data-dialog="cancel">${escapeHtml(cancelLabel)}</button>` : ''}
+                    <button type="button" class="btn app-dialog-ok" data-dialog="ok">${escapeHtml(okLabel)}</button>
+                </div>
+            </div>
+        `;
+        overlay.style.display = 'flex';
+
+        const epochs = () => {
+            const out = {};
+            Object.keys(values).forEach(k => { out[k] = epochFromHM(values[k].h, values[k].m); });
+            return out;
+        };
+        const errEl = overlay.querySelector('[data-error]');
+        const refresh = () => {
+            Object.keys(values).forEach(k => {
+                overlay.querySelector(`[data-show="${k}:h"]`).textContent = String(values[k].h).padStart(2, '0');
+                overlay.querySelector(`[data-show="${k}:m"]`).textContent = String(values[k].m).padStart(2, '0');
+            });
+            const msg = validate && fields.length ? validate(epochs()) : '';
+            errEl.textContent = msg || '';
+            overlay.querySelector('[data-dialog="ok"]').disabled = Boolean(msg);
+        };
+        overlay.querySelectorAll('[data-step]').forEach(btn => {
+            btn.onclick = () => {
+                const [k, unit, dir] = btn.dataset.step.split(':');
+                const v = values[k];
+                if (unit === 'h') v.h = (v.h + Number(dir) + 24) % 24;
+                else v.m = (v.m + Number(dir) + 60) % 60;
+                refresh();
+            };
+        });
+        overlay.querySelectorAll('[data-quick]').forEach(btn => {
+            btn.onclick = () => {
+                const [k, amount] = btn.dataset.quick.split(':');
+                const base = amount === 'now' ? Date.now() : epochFromHM(values[k].h, values[k].m) + Number(amount) * 60000;
+                values[k] = hmFromEpoch(base);
+                refresh();
+            };
+        });
+        refresh();
+
+        const close = (result) => {
+            overlay.style.display = 'none';
+            overlay.innerHTML = '';
+            resolve(result);
+        };
+        overlay.querySelector('[data-dialog="ok"]').onclick = () => {
+            if (!fields.length) return close(true);
+            const vals = epochs();
+            const msg = validate ? validate(vals) : '';
+            if (msg) { errEl.textContent = msg; return; }
+            close(vals);
+        };
+        const cancelBtn = overlay.querySelector('[data-dialog="cancel"]');
+        if (cancelBtn) cancelBtn.onclick = () => close(false);
+        overlay.onclick = (e) => { if (e.target === overlay && showCancel) close(false); };
+    });
+}
+
+// Shared checks for operator-entered times
+function validateNotFuture(epoch, label) {
+    if (epoch > Date.now() + 60000) return `${label}に未来の時刻は設定できません`;
+    return '';
+}
+
+function appConfirm(title, message, options = {}) {
+    return appDialog({ title, message, ...options });
+}
+
+function appNotice(title, message, options = {}) {
+    return appDialog({ title, message, icon: '⚠️', tone: 'warn', okLabel: 'OK', showCancel: false, ...options });
+}
+
+// -----------------------------------------------------
+// 段替え / Setup timers (start & end from the List tab)
+// -----------------------------------------------------
+function getSetupDisplayName(setupItem) {
+    if (!setupItem) return '段替え';
+    const base = setupItem.name || '段替え';
+    return setupItem.comment ? `${base} ${setupItem.comment}` : base;
+}
+
+function getRunningSetup() {
+    return Object.values(state.setupRecords || {}).find(r => r && r.status === 'running') || null;
+}
+
+function formatElapsed(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = total % 60;
+    const mm = String(m).padStart(2, '0');
+    const ss = String(sec).padStart(2, '0');
+    return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+async function refreshSetupRecords() {
+    if (!state.selectedDate) return;
+    await fetchProductionStatus(state.selectedDate);
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+    renderHistoryList();
+}
+
+async function startSetupPrompt(gIdx) {
+    const group = state.currentGroups?.[gIdx];
+    if (!group || group.type !== 'setup') return;
+    const setupItem = group.items[0];
+    const name = getSetupDisplayName(setupItem);
+
+    const running = getRunningSetup();
+    if (running && running.setupId !== group.groupId) {
+        await appNotice('段替え実行中', `「${running.name || '段替え'}」が実行中です。先に終了してください。\n(Another setup is running. End it first.)`);
+        openSetupTimerModal();
+        return;
+    }
+    if (running && running.setupId === group.groupId) {
+        openSetupTimerModal();
+        return;
+    }
+    const okStart = await appConfirm(`#${setupItem.orderIndex} 「${name}」を開始しますか？`, `開始時刻を確認してください。押し忘れた場合は実際の時刻に変更できます。\n(Check the start time. Change it if you started earlier.)`, {
+        icon: '▶️', tone: 'amber', okLabel: '▶ 開始する (Start)', cancelLabel: 'キャンセル',
+        fields: [{ key: 'start', label: '開始時刻 (Start time)', epoch: Date.now() }],
+        validate: (v) => validateNotFuture(v.start, '開始時刻')
+    });
+    if (!okStart) return;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/setup/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: state.selectedDate,
+                machine: state.machineName || 'PSA2',
+                setupId: group.groupId,
+                orderIndex: setupItem.orderIndex,
+                name,
+                plannedMins: Number(setupItem.duration) || 0,
+                startEpoch: okStart.start,
+                worker: state.workerName || '',
+                workerRoles: getWorkerRolesPayload()
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+
+        state.setupRecords = { ...state.setupRecords, [group.groupId]: data.record };
+        state.setupModalMinimized = false;
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        updateSetupTimerUI();
+    } catch (err) {
+        console.error('Could not start setup:', err);
+        await appNotice('開始できませんでした', err.message);
+        return;
+    }
+}
+
+async function endSetupPrompt() {
+    const running = getRunningSetup();
+    if (!running) return;
+    const startEpoch = Number(running.startEpoch) || Date.now();
+    const okEnd = await appConfirm(`${running.orderIndex ? `#${running.orderIndex} ` : ''}「${running.name || '段替え'}」を終了しますか？`, `開始 ${running.startTime || fmtHM(startEpoch)}。終了を押し忘れた場合は実際の終了時刻に変更できます。\n(Change the end time if you finished earlier.)`, {
+        icon: '■', tone: 'danger', okLabel: '■ 終了する (End)', cancelLabel: 'キャンセル',
+        fields: [{ key: 'end', label: '終了時刻 (End time)', epoch: Date.now() }],
+        validate: (v) => validateNotFuture(v.end, '終了時刻') || (v.end <= startEpoch ? `終了時刻は開始 ${fmtHM(startEpoch)} より後にしてください` : '')
+    });
+    if (!okEnd) return;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/setup/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: state.selectedDate, setupId: running.setupId, endEpoch: okEnd.end, worker: state.workerName || '' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+
+        state.setupRecords = { ...state.setupRecords, [running.setupId]: data.record };
+        updateSetupTimerUI();
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        renderHistoryList();
+        showToast(`「${running.name || '段替え'}」終了 (${data.record.durationMins} 分)`, 'success', 3000);
+
+        // Ending the setup is when production really starts for a roll already waiting in the queue
+        const waiting = (state.stagingQueue || []).find(q =>
+            q && (q.status === 'in-progress' || q.status === 'active') && q.startedBy === 'enqueue' && q.startConfirmed !== true
+        );
+        if (waiting) {
+            try {
+                await fetch(`${serverURL}/api/production/queue/confirm-start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ _id: waiting._id, startEpoch: data.record.endEpoch, worker: state.workerName || '' })
+                });
+                await fetchProductionQueue();
+            } catch (e) {
+                console.warn('Could not auto-confirm roll start after setup:', e);
+            }
+        }
+    } catch (err) {
+        console.error('Could not end setup:', err);
+        await appNotice('終了できませんでした', err.message);
+    }
+}
+
+async function editSetupTimes(setupId, event) {
+    if (event) event.stopPropagation();
+    const id = setupId || getRunningSetup()?.setupId;
+    const rec = state.setupRecords?.[id];
+    if (!rec) return;
+    const isDone = rec.status === 'done';
+    const fields = [{ key: 'start', label: '開始時刻 (Start time)', epoch: rec.startEpoch }];
+    if (isDone) fields.push({ key: 'end', label: '終了時刻 (End time)', epoch: rec.endEpoch });
+
+    const result = await appConfirm(`${rec.orderIndex ? `#${rec.orderIndex} ` : ''}「${rec.name || '段替え'}」の時刻修正`, isDone ? '実際の開始・終了時刻に修正してください。(Correct the real start / end time.)' : '実際の開始時刻に修正してください。(Correct the real start time.)', {
+        icon: '✎', tone: 'amber', okLabel: '保存 (Save)', cancelLabel: 'キャンセル',
+        fields,
+        validate: (v) => validateNotFuture(v.start, '開始時刻') ||
+            (isDone ? (validateNotFuture(v.end, '終了時刻') || (v.end <= v.start ? '終了時刻は開始時刻より後にしてください' : '')) : '')
+    });
+    if (!result) return;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/setup/edit-times`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: state.selectedDate, setupId: id, startEpoch: result.start, endEpoch: result.end, worker: state.workerName || '' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        state.setupRecords = { ...state.setupRecords, [id]: data.record };
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        renderHistoryList();
+        updateSetupTimerUI();
+        showToast('時刻を修正しました', 'success', 2500);
+    } catch (err) {
+        await appNotice('修正できませんでした', err.message);
+    }
+}
+
+async function undoSetupEnd(setupId, event) {
+    if (event) event.stopPropagation();
+    const rec = state.setupRecords?.[setupId];
+    if (!rec) return;
+    const okUndo = await appConfirm(`「${rec.name || '段替え'}」の終了を取り消しますか？`, '実行中に戻します。開始時刻はそのままです。\n(Undo the end and resume the timer.)', { icon: '↩️', tone: 'amber', okLabel: '元に戻す (Undo)', cancelLabel: 'キャンセル' });
+    if (!okUndo) return;
+    try {
+        const res = await fetch(`${serverURL}/api/production/setup/undo`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: state.selectedDate, setupId })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        state.setupRecords = { ...state.setupRecords, [setupId]: data.record };
+        state.setupModalMinimized = true;
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        renderHistoryList();
+        updateSetupTimerUI();
+    } catch (err) {
+        await appNotice('取り消しできませんでした', err.message);
+    }
+}
+
+function renderSetupHistoryRow(rec) {
+    const planned = Number(rec.plannedMins) || 0;
+    const actual = Number(rec.durationMins) || 0;
+    const over = planned > 0 && actual > planned;
+    const diffText = planned > 0 ? (over ? `+${actual - planned}分 超過` : `予定内 (${planned}分)`) : '';
+    return `
+        <div class="batch-roll-row setup-history-row">
+            <div class="roll-row-left" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <span class="roll-sub-badge">#${escapeHtml(rec.orderIndex || '-')}</span>
+                <span class="setup-tag-pill">段替</span>
+                <span class="history-item-hinban" style="font-weight: 700; color: #0F172A; font-size: 0.95rem;">${escapeHtml(rec.name || '段替え')}</span>
+                <span style="font-size: 0.85rem; color: #475569; font-weight: 600;">${escapeHtml(rec.startTime || '')} 〜 ${escapeHtml(rec.endTime || '')}</span>
+                <span class="tag-pill" style="font-size: 0.8rem; padding: 2px 8px; font-weight: 800; ${over ? 'background:#FEE2E2; color:#B91C1C; border:1px solid #FCA5A5;' : 'background:#ECFDF5; color:#047857; border:1px solid #A7F3D0;'}">${actual} 分</span>
+                ${diffText ? `<span style="font-size: 0.78rem; font-weight: 700; color: ${over ? '#B91C1C' : '#047857'};">${diffText}</span>` : ''}
+                ${(rec.startEdited || rec.endEdited) ? `<span class="setup-edited-mark" title="時刻が修正されています">✎ 修正済</span>` : ''}
+            </div>
+            <div class="roll-row-right" style="display: flex; gap: 6px; align-items: center;">
+                <button type="button" class="btn-detail-secondary" onclick="editSetupTimes('${escapeHtml(rec.setupId)}', event)" title="開始・終了時刻を修正 (Edit times)">✎ 時刻修正</button>
+                <button type="button" class="btn-roll-exclude is-excluded" onclick="undoSetupEnd('${escapeHtml(rec.setupId)}', event)" title="終了を取り消す (Undo end)">元に戻す</button>
+            </div>
+        </div>
+    `;
+}
+
+function openSetupTimerModal() {
+    if (!getRunningSetup()) return;
+    state.setupModalMinimized = false;
+    updateSetupTimerUI();
+}
+
+function minimizeSetupTimerModal() {
+    state.setupModalMinimized = true;
+    updateSetupTimerUI();
+}
+
+// Drives the big pop-up, the pinned bar and the elapsed text on the List row (called every second)
+function updateSetupTimerUI() {
+    const running = getRunningSetup();
+    const modal = document.getElementById('setupTimerModal');
+    const bar = document.getElementById('setupTimerBar');
+
+    if (!running) {
+        if (modal) modal.style.display = 'none';
+        if (bar) bar.style.display = 'none';
+        document.body.classList.remove('has-setup-timer-bar');
+        return;
+    }
+
+    const elapsedMs = Date.now() - (Number(running.startEpoch) || Date.now());
+    const elapsedText = formatElapsed(elapsedMs);
+    const planned = Number(running.plannedMins) || 0;
+    const overMins = planned > 0 ? Math.floor(elapsedMs / 60000) - planned : 0;
+    const isOver = planned > 0 && elapsedMs > planned * 60000;
+    const overText = isOver ? `+${Math.max(1, overMins)}分 超過` : (planned > 0 ? `予定 ${planned} 分` : '');
+
+    document.querySelectorAll('[data-setup-elapsed]').forEach(el => { el.textContent = elapsedText; });
+
+    if (modal) {
+        modal.style.display = state.setupModalMinimized ? 'none' : 'flex';
+        modal.classList.toggle('is-over', isOver);
+        const nameEl = document.getElementById('setupTimerName');
+        const timeEl = document.getElementById('setupTimerElapsed');
+        const metaEl = document.getElementById('setupTimerMeta');
+        if (nameEl) {
+            nameEl.innerHTML = `${running.orderIndex ? `<span class="setup-timer-order">#${escapeHtml(running.orderIndex)}</span>` : ''}${escapeHtml(running.name || '段替え')}`;
+        }
+        if (timeEl) timeEl.textContent = elapsedText;
+        if (metaEl) metaEl.textContent = `開始 ${running.startTime || ''}${overText ? ` ・ ${overText}` : ''}`;
+    }
+    if (bar) {
+        bar.style.display = state.setupModalMinimized ? 'flex' : 'none';
+        bar.classList.toggle('is-over', isOver);
+        const barText = document.getElementById('setupTimerBarText');
+        if (barText) barText.textContent = `⏱ ${running.orderIndex ? `#${running.orderIndex} ` : ''}${running.name || '段替え'} 実行中 ${elapsedText}${isOver ? ` (${overText})` : ''}`;
+    }
+    document.body.classList.toggle('has-setup-timer-bar', state.setupModalMinimized);
+}
+
+setInterval(updateSetupTimerUI, 1000);
 
 // --- SSE Realtime Synchronization ---
 let productionEventSource = null;
@@ -7278,8 +8579,290 @@ function setupProductionSSE() {
     }
 }
 
+// -----------------------------------------------------
+// List tab: workers reorder groups (hold & drag) and add tasks (＋ button).
+// Saved to the shared schedule (freyaAdmin2 sees it). Every save carries the schedule revision,
+// so a stale tablet or admin page gets 409 instead of overwriting someone else's change.
+// Only groups that have not started can move; # numbers follow the new order.
+// -----------------------------------------------------
+function scheduleMonthDate(dateStr = state.selectedDate) {
+    return { month: dateStr.slice(0, 7), date: Number(dateStr.slice(8, 10)) };
+}
+
+// Re-read the day's list without the loading skeleton (after a move / add, or another device's change)
+async function reloadScheduleQuietly() {
+    if (state.reorderDrag) { state.scheduleReloadPending = true; return; }
+    const dateStr = state.selectedDate;
+    if (!dateStr) return;
+    try {
+        const { month, date } = scheduleMonthDate(dateStr);
+        const res = await fetch(`${serverURL}/api/production/schedule/daily?month=${encodeURIComponent(month)}&date=${date}`);
+        const data = await res.json();
+        if (!data.success || !data.schedule || dateStr !== state.selectedDate) return;
+        state.dailySchedule = data.schedule;
+        const startTime = data.schedule.startTime || '08:00';
+        state.scheduledItems = computeTimeSchedule(data.schedule.scheduleOrder || [], startTime);
+        renderScheduleList(state.scheduledItems, startTime);
+    } catch (err) {
+        console.warn('Could not reload schedule:', err);
+    }
+}
+
+async function postScheduleEdit(path, body) {
+    const { month, date } = scheduleMonthDate();
+    const res = await fetch(`${serverURL}/api/production/schedule/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month, date, baseRevision: state.dailySchedule?.revision || 0, worker: state.workerName || '', ...body })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409) {
+        await reloadScheduleQuietly();
+        const by = data.lastChangedBy ? `\n(${data.lastChangedBy.name || ''} ${data.lastChangedBy.source === 'admin' ? '管理者' : 'タブレット'})` : '';
+        await appNotice('リストが更新されました', `他の端末でリストが変更されたため、最新の内容を読み込みました。もう一度操作してください。${by}\n(The list was changed elsewhere and has been reloaded. Please try again.)`);
+        return null;
+    }
+    if (!res.ok || !data.success) {
+        await appNotice('保存できませんでした', data.error || `HTTP ${res.status}`);
+        return null;
+    }
+    if (state.dailySchedule) state.dailySchedule.revision = data.revision;
+    return data;
+}
+
+// The group that should be processed next = first group that has not started (still movable)
+function getNextUnstartedGroupId() {
+    const el = document.querySelector('#scheduleListContainer .is-reorderable[data-group-id]');
+    return el ? el.dataset.groupId : null;
+}
+
+// ---- hold & drag ----
+const REORDER_HOLD_MS = 450;
+
+function getScrollParent(el) {
+    let p = el && el.parentElement;
+    while (p && p !== document.body) {
+        const oy = getComputedStyle(p).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight) return p;
+        p = p.parentElement;
+    }
+    return document.scrollingElement || document.documentElement;
+}
+
+function setupScheduleReorder() {
+    const container = document.getElementById('scheduleListContainer');
+    if (!container || container.dataset.reorderReady) return;
+    container.dataset.reorderReady = '1';
+
+    let hold = null;
+
+    container.addEventListener('pointerdown', (e) => {
+        if (state.listViewMode === 'table' || e.button > 0) return;
+        const card = e.target.closest('.is-reorderable[data-group-id]');
+        if (!card || e.target.closest('button, input, select, textarea, a, .batch-roll-row')) return;
+        hold = { card, x: e.clientX, y: e.clientY, pointerId: e.pointerId, timer: setTimeout(() => beginReorderDrag(card, e.clientX, e.clientY), REORDER_HOLD_MS) };
+    });
+    const cancelHold = () => { if (hold) { clearTimeout(hold.timer); hold = null; } };
+    container.addEventListener('pointermove', (e) => {
+        if (hold && !state.reorderDrag && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 10) cancelHold(); // it's a scroll
+    });
+    container.addEventListener('pointerup', cancelHold);
+    container.addEventListener('pointercancel', () => { if (!state.reorderDrag) cancelHold(); });
+    container.addEventListener('contextmenu', (e) => { if (hold || state.reorderDrag) e.preventDefault(); });
+
+    // While dragging: block page scrolling and follow the finger
+    document.addEventListener('touchmove', (e) => { if (state.reorderDrag) e.preventDefault(); }, { passive: false });
+    const onMove = (x, y) => { if (state.reorderDrag) moveReorderDrag(x, y); };
+    document.addEventListener('pointermove', (e) => onMove(e.clientX, e.clientY));
+    document.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (t) onMove(t.clientX, t.clientY); }, { passive: false });
+    const onEnd = () => { cancelHold(); if (state.reorderDrag) endReorderDrag(); };
+    document.addEventListener('pointerup', onEnd);
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('touchcancel', onEnd);
+}
+
+function beginReorderDrag(card, x, y) {
+    const container = document.getElementById('scheduleListContainer');
+    if (!container || !card.isConnected) return;
+    const rect = card.getBoundingClientRect();
+    const ghost = card.cloneNode(true);
+    ghost.classList.add('reorder-ghost');
+    ghost.removeAttribute('onclick');
+    Object.assign(ghost.style, { width: `${rect.width}px`, left: `${rect.left}px`, top: `${rect.top}px` });
+    document.body.appendChild(ghost);
+    card.classList.add('reorder-source');
+
+    const marker = document.createElement('div');
+    marker.className = 'reorder-marker';
+    container.appendChild(marker);
+
+    state.reorderDrag = { card, ghost, marker, offsetY: y - rect.top, scroller: getScrollParent(container), beforeGroupId: undefined, lastY: y };
+    document.body.classList.add('is-reordering');
+    if (navigator.vibrate) navigator.vibrate(25);
+    moveReorderDrag(x, y);
+
+    // The tap that started the hold must not open/start the card
+    const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+    document.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', swallow, { capture: true }), 800);
+}
+
+function moveReorderDrag(x, y) {
+    const d = state.reorderDrag;
+    d.lastY = y;
+    d.ghost.style.top = `${y - d.offsetY}px`;
+
+    // Auto-scroll near the top / bottom edge
+    const sr = d.scroller === document.scrollingElement ? { top: 0, bottom: window.innerHeight } : d.scroller.getBoundingClientRect();
+    if (y < sr.top + 70) d.scroller.scrollTop -= 14;
+    else if (y > sr.bottom - 70) d.scroller.scrollTop += 14;
+
+    // Drop slot: before the first movable card whose middle is below the finger
+    const container = document.getElementById('scheduleListContainer');
+    const cards = [...container.querySelectorAll('.is-reorderable[data-group-id]')].filter(c => c !== d.card);
+    let before = null;
+    for (const c of cards) {
+        const r = c.getBoundingClientRect();
+        if (y < r.top + r.height / 2) { before = c; break; }
+    }
+    d.beforeGroupId = before ? before.dataset.groupId : null;
+
+    const cRect = container.getBoundingClientRect();
+    let markerY;
+    if (before) markerY = before.getBoundingClientRect().top - 5;
+    else if (cards.length) markerY = cards[cards.length - 1].getBoundingClientRect().bottom + 3;
+    else markerY = d.card.getBoundingClientRect().bottom + 3;
+    d.marker.style.top = `${markerY - cRect.top + container.scrollTop}px`;
+}
+
+async function endReorderDrag() {
+    const d = state.reorderDrag;
+    state.reorderDrag = null;
+    document.body.classList.remove('is-reordering');
+    d.ghost.remove();
+    d.marker.remove();
+    d.card.classList.remove('reorder-source');
+
+    const groupId = d.card.dataset.groupId;
+    // Dropped where it already was?
+    const all = [...document.querySelectorAll('#scheduleListContainer .is-reorderable[data-group-id]')];
+    const nextAfterSelf = all[all.indexOf(d.card) + 1];
+    const unchanged = d.beforeGroupId === undefined || d.beforeGroupId === (nextAfterSelf ? nextAfterSelf.dataset.groupId : null);
+
+    if (!unchanged) {
+        d.card.classList.add('reorder-saving');
+        const ok = await postScheduleEdit('move-group', { groupId, beforeGroupId: d.beforeGroupId });
+        if (ok) showToast('並べ替えました (Reordered)', 'success', 2000);
+        await reloadScheduleQuietly();
+    }
+    if (state.scheduleReloadPending) {
+        state.scheduleReloadPending = false;
+        reloadScheduleQuietly();
+    }
+}
+
+// ---- ＋ add task ----
+const FALLBACK_TASK_PRESETS = [
+    { name: '段取り', duration: 15 }, { name: '段替え', duration: 15 }, { name: '乾燥温度設定', duration: 15 },
+    { name: 'ロール温度設定', duration: 15 }, { name: '試作', duration: 30 }, { name: '紙替', duration: 15 }
+];
+
+async function openAddTaskModal() {
+    if (!state.dailySchedule) {
+        await appNotice('リストがありません', 'この日の生産リストがないため追加できません。\n(No production list for this day.)');
+        return;
+    }
+    let presets = FALLBACK_TASK_PRESETS;
+    try {
+        const res = await fetch(`${serverURL}/api/production/setup-presets`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.presets) && data.presets.length) presets = data.presets;
+    } catch (e) { /* offline: built-in list */ }
+
+    let overlay = document.getElementById('addTaskOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'addTaskOverlay';
+        overlay.className = 'hd-overlay';
+        document.body.appendChild(overlay);
+    }
+    const tile = (p, i) => `
+        <div class="add-task-tile">
+            <span class="add-task-name">${escapeHtml(p.name)}</span>
+            <input type="number" class="add-task-min" id="addTaskMin${i}" value="${Number(p.duration) || 0}" min="0" max="600" inputmode="numeric"><span class="add-task-unit">分</span>
+            <button type="button" class="add-task-go" onclick="submitAddTask(${i})" aria-label="追加">追加 →</button>
+        </div>`;
+    overlay.innerHTML = `
+        <div class="hd-card" role="dialog" aria-modal="true" style="max-width: 720px;">
+            <div class="hd-card-header">
+                <span>＋ 作業を追加 (Add task)</span>
+                <button type="button" class="hd-close" onclick="closeAddTaskModal()" aria-label="閉じる">✕</button>
+            </div>
+            <div class="hd-card-body">
+                <div class="add-task-note">次に行う作業として、開始前の最初のグループの前に追加されます。<br>(Added as the next item, before the first group that has not started.)</div>
+                <div class="add-task-grid">
+                    ${presets.map(tile).join('')}
+                    <div class="add-task-tile is-custom">
+                        <input type="text" class="add-task-custom-name" id="addTaskCustomName" placeholder="その他 (名前を入力)" maxlength="40">
+                        <input type="number" class="add-task-min" id="addTaskMinCustom" value="15" min="0" max="600" inputmode="numeric"><span class="add-task-unit">分</span>
+                        <button type="button" class="add-task-go" onclick="submitAddTask('custom')" aria-label="追加">追加 →</button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    state.addTaskPresets = presets;
+    overlay.style.display = 'flex';
+    overlay.onclick = (e) => { if (e.target === overlay) closeAddTaskModal(); };
+}
+
+function closeAddTaskModal() {
+    const overlay = document.getElementById('addTaskOverlay');
+    if (overlay) { overlay.style.display = 'none'; overlay.innerHTML = ''; }
+}
+
+async function submitAddTask(which) {
+    let name, duration;
+    if (which === 'custom') {
+        name = (document.getElementById('addTaskCustomName')?.value || '').trim();
+        duration = Number(document.getElementById('addTaskMinCustom')?.value) || 0;
+        if (!name) { showToast('名前を入力してください', 'warning', 2500); return; }
+    } else {
+        const p = state.addTaskPresets?.[which];
+        if (!p) return;
+        name = p.name;
+        duration = Number(document.getElementById(`addTaskMin${which}`)?.value) || 0;
+    }
+    closeAddTaskModal();
+
+    const data = await postScheduleEdit('insert-task', { name, duration, beforeGroupId: getNextUnstartedGroupId() });
+    if (!data) return;
+    await reloadScheduleQuietly();
+    showToast(`「${name}」を追加しました`, 'success', 2500);
+
+    // Ask to start it now (same start pop-up as tapping the task in the list)
+    const gIdx = (state.currentGroups || []).findIndex(g => g.groupId === data.setupId);
+    if (gIdx >= 0) startSetupPrompt(gIdx);
+}
+
+function updateAddTaskFab() {
+    const fab = document.getElementById('addTaskFab');
+    if (fab) fab.style.display = state.currentMainTab === 1 && state.dailySchedule ? 'flex' : 'none';
+}
+
 function handleProductionSSEEvent(data) {
     console.log('⚡ Received SSE event:', data.type, data);
+    if (data.type === 'setup_update') {
+        refreshSetupRecords();
+        return;
+    }
+    if (data.type === 'exclude_update') {
+        refreshExcludesFromServer();
+        return;
+    }
+    if (data.type === 'schedule_update') {
+        reloadScheduleQuietly();
+        return;
+    }
     if (data.type === 'queue_updated' || data.type === 'queue_scrapped' || data.type === 'roll_advanced' || data.type === 'queue_roll_printed') {
         fetchProductionQueue();
     } else if (data.type === 'print_log') {
@@ -7378,8 +8961,39 @@ document.addEventListener('DOMContentLoaded', () => {
     setupDateControls();
     fetchWorkersFromMongoDB();
 
+    // 02:00 day change: switch to the new production day without a reload.
+    // Waits while a pop-up is open or a 段替え timer is still running on the old day.
+    let initialFetchDone = false;
+    startWorkDayWatcher(
+        (newDate) => {
+            if (initialFetchDone) fetchDailySchedule(newDate);
+            else { state.selectedDate = newDate; sessionStorage.setItem('firstkojo_nippo_date', newDate); }
+        },
+        () => {
+            const popupOpen = [...document.querySelectorAll('.modal, #appDialogOverlay, #historyDetailOverlay, #setupTimerModal')]
+                .some(el => getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden');
+            return !popupOpen && !(typeof getRunningSetup === 'function' && getRunningSetup());
+        }
+    );
+
     // Initial schedule fetch for the selected date
     fetchDailySchedule(state.selectedDate);
+    initialFetchDone = true;
+
+    // List tab: hold a card to reorder, ＋ to add a task
+    setupScheduleReorder();
+    if (!document.getElementById('addTaskFab')) {
+        const fab = document.createElement('button');
+        fab.type = 'button';
+        fab.id = 'addTaskFab';
+        fab.className = 'add-task-fab';
+        fab.title = '作業を追加 (Add task)';
+        fab.setAttribute('aria-label', '作業を追加');
+        fab.textContent = '＋';
+        fab.onclick = openAddTaskModal;
+        document.body.appendChild(fab);
+    }
+    setInterval(updateAddTaskFab, 1000);
 
     // Initialize USB Barcode Scanner Listener
     setupUSBScannerListener();
@@ -7396,42 +9010,30 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btn) btn.textContent = '▼';
     }
 
-    // Worker input modal events
-    const workerInputEl = document.getElementById('workerInput');
-    const workerModal = document.getElementById('workerNameModal');
-
-    const openWorkerModal = (e) => {
-        if (workerInputEl && workerInputEl.readOnly) {
-            e.preventDefault();
-            renderWorkerNames();
-            if (workerModal) workerModal.style.display = 'flex';
-        }
-    };
-
-    if (workerInputEl) {
-        workerInputEl.addEventListener('click', openWorkerModal);
-        workerInputEl.addEventListener('focus', openWorkerModal);
-        workerInputEl.addEventListener('touchstart', openWorkerModal);
-        workerInputEl.addEventListener('blur', (e) => {
-            e.target.readOnly = true;
-        });
-    }
-
+    // Worker role modal events
     const closeWorkerModalBtn = document.getElementById('closeWorkerModal');
-    if (closeWorkerModalBtn) {
-        closeWorkerModalBtn.addEventListener('click', () => {
-            if (workerModal) workerModal.style.display = 'none';
-        });
-    }
+    if (closeWorkerModalBtn) closeWorkerModalBtn.addEventListener('click', closeWorkerModal);
 
     const manualEntryBtn = document.getElementById('manualEntryBtn');
-    if (manualEntryBtn) {
+    const manualRow = document.getElementById('manualEntryRow');
+    const manualInput = document.getElementById('manualWorkerInput');
+    const manualAddBtn = document.getElementById('manualWorkerAddBtn');
+    if (manualEntryBtn && manualRow) {
         manualEntryBtn.addEventListener('click', () => {
-            if (workerInputEl) {
-                workerInputEl.readOnly = false;
-                workerInputEl.focus();
-            }
-            if (workerModal) workerModal.style.display = 'none';
+            manualRow.style.display = 'flex';
+            if (manualInput) manualInput.focus();
+        });
+    }
+    const addManualWorker = () => {
+        if (!manualInput || !manualInput.value.trim()) return;
+        addWorkerToRole(state.activeWorkerRole, manualInput.value);
+        manualInput.value = '';
+        renderWorkerNames();
+    };
+    if (manualAddBtn) manualAddBtn.addEventListener('click', addManualWorker);
+    if (manualInput) {
+        manualInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); addManualWorker(); }
         });
     }
 

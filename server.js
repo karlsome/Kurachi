@@ -45073,10 +45073,430 @@ app.get('/api/production/status', async (req, res) => {
     }
 
     const records = await productionCollection.find(query).toArray();
-    res.json({ success: true, records });
+    const excludedRolls = await submittedDb.collection('firstFactoryExcludedRolls').find({ date }).toArray();
+    const setupRecords = await submittedDb.collection('firstFactorySetupLog').find(machine ? { date, machine } : { date }).toArray();
+    res.json({ success: true, records, excludedRolls, setupRecords });
   } catch (error) {
     console.error('❌ Error in GET /api/production/status:', error);
     res.status(500).json({ error: 'Failed to fetch production status' });
+  }
+});
+
+// 第一工場 worker roles: { feeding, operator, support, cutter, unloader } -> arrays of names
+function sanitizeWorkerRoles(roles) {
+  const keys = ['feeding', 'operator', 'support', 'cutter', 'unloader'];
+  const out = {};
+  keys.forEach(k => {
+    const list = roles && Array.isArray(roles[k]) ? roles[k] : [];
+    out[k] = list.map(n => String(n || '').trim()).filter(Boolean);
+  });
+  return out;
+}
+
+// -----------------------------------------------------
+// 第一工場: rolls excluded (除外) on the firstKojoNippo tablet.
+// One doc per excluded roll; restoring deletes it. freyaAdmin2 reads these via
+// GET /api/production/status (excludedRolls) to mark the roll red and close the group.
+// -----------------------------------------------------
+function buildExcludedRollDoc(date, r) {
+  return {
+    date,
+    itemId: String(r.itemId),
+    groupId: r.groupId || '',
+    rollIndex: Number(r.rollIndex) || null,
+    totalRolls: Number(r.totalRolls) || null,
+    orderIndex: Number(r.orderIndex) || null,
+    hinban: r.hinban || '',
+    kizai: r.kizai || '',
+    machine: r.machine || 'PSA2',
+    worker: r.worker || ''
+  };
+}
+
+app.post('/api/production/roll-exclude', async (req, res) => {
+  try {
+    const { date, itemId, excluded } = req.body || {};
+    if (!date || !itemId) {
+      return res.status(400).json({ error: 'date and itemId are required' });
+    }
+    const col = client.db('submittedDB').collection('firstFactoryExcludedRolls');
+    const filter = { date, itemId: String(itemId) };
+
+    if (excluded === false) {
+      await col.deleteOne(filter);
+      // A fed roll closed by the 02:00 day close goes back to the status it had
+      await reopenAutoClosedRoll(date, String(itemId));
+    } else {
+      await col.updateOne(
+        filter,
+        { $set: { ...buildExcludedRollDoc(date, req.body), updatedAt: new Date() }, $setOnInsert: { excludedAt: new Date() } },
+        { upsert: true }
+      );
+    }
+
+    broadcastProductionEvent({ type: 'exclude_update', date, itemId: String(itemId), excluded: excluded !== false });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/roll-exclude:', error);
+    res.status(500).json({ error: 'Failed to update excluded roll' });
+  }
+});
+
+// Bulk upsert of rolls the tablet already has marked as excluded (catches excludes made offline / before this existed)
+app.post('/api/production/roll-exclude/sync', async (req, res) => {
+  try {
+    const { date, rolls } = req.body || {};
+    if (!date || !Array.isArray(rolls)) {
+      return res.status(400).json({ error: 'date and rolls[] are required' });
+    }
+    const valid = rolls.filter(r => r && r.itemId);
+    if (valid.length > 0) {
+      const col = client.db('submittedDB').collection('firstFactoryExcludedRolls');
+      await col.bulkWrite(valid.map(r => ({
+        updateOne: {
+          filter: { date, itemId: String(r.itemId) },
+          update: { $set: { ...buildExcludedRollDoc(date, r), updatedAt: new Date() }, $setOnInsert: { excludedAt: new Date() } },
+          upsert: true
+        }
+      })));
+      broadcastProductionEvent({ type: 'exclude_update', date });
+    }
+    res.json({ success: true, count: valid.length });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/roll-exclude/sync:', error);
+    res.status(500).json({ error: 'Failed to sync excluded rolls' });
+  }
+});
+
+// -----------------------------------------------------
+// 第一工場: day close at 02:00 JST.
+// The work day runs until 02:00 the next morning. Once it is over, every roll of that day's
+// schedule that was not finished is marked 除外 with autoClosed=true ("未処理 (自動)"):
+//  - never fed      -> a firstFactoryExcludedRolls doc (same as a manual 除外 on the tablet)
+//  - fed, unfinished -> production/queue doc status 'excluded' (old status kept in autoClosedFrom)
+//                       + a firstFactoryExcludedRolls doc so freyaAdmin2 shows it red
+// Restoring on the tablet undoes both. Only the day that just ended is closed (never older days),
+// once per day, guarded by a firstFactoryDayClose doc so several server instances don't double-run.
+// -----------------------------------------------------
+const FF_DAY_CUTOFF_HOUR = 2;
+
+function jstDateString(epoch) {
+  return new Date(epoch).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }); // YYYY-MM-DD
+}
+function ffCurrentWorkDay(now = Date.now()) {
+  return jstDateString(now - FF_DAY_CUTOFF_HOUR * 3600000);
+}
+function ffPrevDay(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return jstDateString(Date.UTC(y, m - 1, d, 3) - 24 * 3600000); // 12:00 JST of the previous day
+}
+
+async function reopenAutoClosedRoll(date, itemId) {
+  const db = client.db('submittedDB');
+  let reopened = 0;
+  for (const name of ['firstFactoryProduction', 'firstFactoryQueue']) {
+    const col = db.collection(name);
+    const docs = await col.find({ date, itemId, status: 'excluded', autoClosed: true }).toArray();
+    for (const doc of docs) {
+      await col.updateOne(
+        { _id: doc._id },
+        { $set: { status: doc.autoClosedFrom || 'queue', updatedAt: new Date() }, $unset: { autoClosed: '', autoClosedFrom: '', autoClosedAt: '' } }
+      );
+      reopened += 1;
+    }
+  }
+  if (reopened) broadcastProductionEvent({ type: 'queue_updated', date });
+  return reopened;
+}
+
+async function closeFirstFactoryDay(date, { force = false } = {}) {
+  const db = client.db('submittedDB');
+  if (!force) {
+    const claim = await db.collection('firstFactoryDayClose').updateOne(
+      { date },
+      { $setOnInsert: { date, startedAt: new Date() } },
+      { upsert: true }
+    );
+    if (!claim.upsertedCount) return null; // already closed (or another instance is doing it)
+  }
+
+  const [y, m, d] = date.split('-');
+  const schedule = await db.collection('firstFactorySchedule').findOne({ type: 'dailySchedule', month: `${y}-${m}`, date: Number(d) });
+  const rolls = (schedule?.scheduleOrder || [])
+    .map((item, idx) => ({ ...item, orderIndex: idx + 1 }))
+    .filter(item => item.type !== 'setup' && item.id);
+
+  const prodCol = db.collection('firstFactoryProduction');
+  const queueCol = db.collection('firstFactoryQueue');
+  const exclCol = db.collection('firstFactoryExcludedRolls');
+
+  const prodDocs = await prodCol.find({ date }).toArray();
+  const prodByItem = new Map();
+  prodDocs.forEach(doc => { if (doc.itemId) prodByItem.set(String(doc.itemId), doc); });
+  const alreadyExcluded = new Set((await exclCol.find({ date }).project({ itemId: 1 }).toArray()).map(x => String(x.itemId)));
+
+  const now = new Date();
+  const OPEN = ['queue', 'queued', 'in-progress', 'active', 'pending'];
+  const exclOps = [];
+  let neverFed = 0, unfinished = 0;
+
+  for (const item of rolls) {
+    const itemId = String(item.id);
+    const doc = prodByItem.get(itemId);
+    if (doc && !OPEN.includes(doc.status)) continue; // completed / excluded / scrapped / skipped
+    if (!doc && alreadyExcluded.has(itemId)) continue;
+
+    if (doc) {
+      const patch = { $set: { status: 'excluded', autoClosed: true, autoClosedFrom: doc.status, autoClosedAt: now, updatedAt: now } };
+      await prodCol.updateMany({ date, itemId, status: { $in: OPEN } }, patch);
+      await queueCol.updateMany({ date, itemId, status: { $in: OPEN } }, patch);
+      unfinished += 1;
+    } else {
+      neverFed += 1;
+    }
+    exclOps.push({
+      updateOne: {
+        filter: { date, itemId },
+        update: {
+          $set: {
+            ...buildExcludedRollDoc(date, {
+              itemId,
+              groupId: doc?.groupId || '',
+              rollIndex: item.rollIndex,
+              totalRolls: item.totalRolls,
+              orderIndex: doc?.orderIndex || item.orderIndex,
+              hinban: item.hinban,
+              kizai: item.kizai || doc?.kizai || '',
+              machine: doc?.machine || 'PSA2',
+              worker: ''
+            }),
+            autoClosed: true,
+            reason: '未処理 (日付変更 02:00 自動)',
+            updatedAt: now
+          },
+          $setOnInsert: { excludedAt: now }
+        },
+        upsert: true
+      }
+    });
+  }
+
+  if (exclOps.length) await exclCol.bulkWrite(exclOps);
+  await db.collection('firstFactoryDayClose').updateOne(
+    { date },
+    { $set: { closedAt: new Date(), neverFed, unfinished, scheduledRolls: rolls.length } },
+    { upsert: true }
+  );
+  if (exclOps.length) {
+    broadcastProductionEvent({ type: 'exclude_update', date });
+    broadcastProductionEvent({ type: 'queue_updated', date });
+  }
+  console.log(`🌙 第一工場 day close ${date}: ${neverFed} never fed + ${unfinished} unfinished roll(s) -> 除外 (未処理)`);
+  return { date, neverFed, unfinished };
+}
+
+// Every minute: close the work day that just ended (also catches up after a restart)
+async function runFirstFactoryDayCloseCheck() {
+  try {
+    if (!client) return;
+    await closeFirstFactoryDay(ffPrevDay(ffCurrentWorkDay()));
+  } catch (err) {
+    console.warn('⚠️ 第一工場 day close failed:', err.message);
+  }
+}
+setTimeout(runFirstFactoryDayCloseCheck, 30000);
+setInterval(runFirstFactoryDayCloseCheck, 60000);
+
+// Manual trigger / re-run (e.g. after restoring by mistake): POST { date, force }
+app.post('/api/production/day-close', async (req, res) => {
+  try {
+    const { date, force } = req.body || {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+    if (date >= ffCurrentWorkDay()) return res.status(400).json({ error: '当日の生産日はまだ締められません' });
+    const result = await closeFirstFactoryDay(date, { force: !!force });
+    res.json({ success: true, result: result || 'already closed' });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/day-close:', error);
+    res.status(500).json({ error: 'Failed to close day' });
+  }
+});
+
+// -----------------------------------------------------
+// 第一工場: 段替え / setup / task timers started & ended from the firstKojoNippo List tab.
+// Kept out of firstFactoryProduction so a running setup never looks like an active roll.
+// One doc per (date, setupId); setupId = the schedule's setup groupId (setup_<id>).
+// -----------------------------------------------------
+function jstTime(epoch) {
+  return new Date(epoch).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
+}
+
+// Operator-entered time (forgot to press 開始/終了). Must be a real epoch, not in the future
+// (1 min clock tolerance) and within the last 24h. Returns null if not provided.
+function parseEditedEpoch(value, label) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`${label}が不正です`);
+  const now = Date.now();
+  if (n > now + 60000) throw new Error(`${label}に未来の時刻は設定できません`);
+  if (n < now - 24 * 3600000) throw new Error(`${label}は24時間以内にしてください`);
+  return n;
+}
+const isTimeEdited = (epoch, pressedAt) => Math.abs(epoch - pressedAt) > 60000;
+
+app.post('/api/production/setup/start', async (req, res) => {
+  try {
+    const { date, machine, setupId, orderIndex, name, plannedMins, worker, workerRoles } = req.body || {};
+    if (!date || !setupId) return res.status(400).json({ error: 'date and setupId are required' });
+    const targetMachine = machine || 'PSA2';
+    const col = client.db('submittedDB').collection('firstFactorySetupLog');
+
+    const other = await col.findOne({ date, machine: targetMachine, status: 'running', setupId: { $ne: setupId } });
+    if (other) {
+      return res.status(409).json({ error: `「${other.name || '段替え'}」が実行中です。先に終了してください。`, running: other });
+    }
+
+    const pressedAt = Date.now();
+    let now;
+    try {
+      now = parseEditedEpoch(req.body.startEpoch, '開始時刻') || pressedAt;
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+    const doc = {
+      date,
+      machine: targetMachine,
+      setupId,
+      orderIndex: Number(orderIndex) || null,
+      name: name || '段替え',
+      plannedMins: Number(plannedMins) || 0,
+      status: 'running',
+      startEpoch: now,
+      startTime: jstTime(now),
+      endEpoch: null,
+      endTime: null,
+      durationMins: null,
+      startedBy: worker || '',
+      endedBy: '',
+      workerRoles: sanitizeWorkerRoles(workerRoles),
+      startEdited: isTimeEdited(now, pressedAt),
+      endEdited: false,
+      startPressedAt: pressedAt,
+      updatedAt: new Date()
+    };
+    await col.updateOne({ date, setupId }, { $set: doc, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+    broadcastProductionEvent({ type: 'setup_update', date, setupId, status: 'running' });
+    res.json({ success: true, record: doc });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/setup/start:', error);
+    res.status(500).json({ error: 'Failed to start setup' });
+  }
+});
+
+app.post('/api/production/setup/end', async (req, res) => {
+  try {
+    const { date, setupId, worker } = req.body || {};
+    if (!date || !setupId) return res.status(400).json({ error: 'date and setupId are required' });
+    const col = client.db('submittedDB').collection('firstFactorySetupLog');
+    const rec = await col.findOne({ date, setupId });
+    if (!rec) return res.status(404).json({ error: 'Setup not started' });
+
+    const pressedAt = Date.now();
+    let now;
+    try {
+      now = parseEditedEpoch(req.body.endEpoch, '終了時刻') || pressedAt;
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+    if (rec.startEpoch && now <= rec.startEpoch) {
+      return res.status(400).json({ error: '終了時刻は開始時刻より後にしてください' });
+    }
+    const update = {
+      status: 'done',
+      endEpoch: now,
+      endTime: jstTime(now),
+      durationMins: Math.max(1, Math.round((now - (rec.startEpoch || now)) / 60000)),
+      endedBy: worker || '',
+      endEdited: isTimeEdited(now, pressedAt),
+      endPressedAt: pressedAt,
+      updatedAt: new Date()
+    };
+    await col.updateOne({ _id: rec._id }, { $set: update });
+    broadcastProductionEvent({ type: 'setup_update', date, setupId, status: 'done' });
+    res.json({ success: true, record: { ...rec, ...update } });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/setup/end:', error);
+    res.status(500).json({ error: 'Failed to end setup' });
+  }
+});
+
+// Correct start/end of a setup afterwards (running: start only). Every change is kept in timeEdits.
+app.post('/api/production/setup/edit-times', async (req, res) => {
+  try {
+    const { date, setupId, worker } = req.body || {};
+    if (!date || !setupId) return res.status(400).json({ error: 'date and setupId are required' });
+    const col = client.db('submittedDB').collection('firstFactorySetupLog');
+    const rec = await col.findOne({ date, setupId });
+    if (!rec) return res.status(404).json({ error: 'Setup not found' });
+
+    let newStart, newEnd;
+    try {
+      newStart = parseEditedEpoch(req.body.startEpoch, '開始時刻') ?? rec.startEpoch;
+      newEnd = rec.status === 'done' ? (parseEditedEpoch(req.body.endEpoch, '終了時刻') ?? rec.endEpoch) : null;
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+    if (newEnd && newEnd <= newStart) {
+      return res.status(400).json({ error: '終了時刻は開始時刻より後にしてください' });
+    }
+
+    const update = {
+      startEpoch: newStart,
+      startTime: jstTime(newStart),
+      startEdited: rec.startEdited || newStart !== rec.startEpoch,
+      updatedAt: new Date()
+    };
+    if (rec.status === 'done') {
+      update.endEpoch = newEnd;
+      update.endTime = jstTime(newEnd);
+      update.durationMins = Math.max(1, Math.round((newEnd - newStart) / 60000));
+      update.endEdited = rec.endEdited || newEnd !== rec.endEpoch;
+    }
+    const edit = {
+      at: new Date(),
+      by: worker || '',
+      from: { startEpoch: rec.startEpoch || null, endEpoch: rec.endEpoch || null },
+      to: { startEpoch: newStart, endEpoch: rec.status === 'done' ? newEnd : null }
+    };
+    await col.updateOne({ _id: rec._id }, { $set: update, $push: { timeEdits: edit } });
+    broadcastProductionEvent({ type: 'setup_update', date, setupId, status: rec.status });
+    res.json({ success: true, record: { ...rec, ...update, timeEdits: [...(rec.timeEdits || []), edit] } });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/setup/edit-times:', error);
+    res.status(500).json({ error: 'Failed to edit setup times' });
+  }
+});
+
+// Undo an accidental 終了: back to running with the original start time
+app.post('/api/production/setup/undo', async (req, res) => {
+  try {
+    const { date, setupId } = req.body || {};
+    if (!date || !setupId) return res.status(400).json({ error: 'date and setupId are required' });
+    const col = client.db('submittedDB').collection('firstFactorySetupLog');
+    const rec = await col.findOne({ date, setupId });
+    if (!rec) return res.status(404).json({ error: 'Setup not found' });
+
+    const other = await col.findOne({ date, machine: rec.machine, status: 'running', setupId: { $ne: setupId } });
+    if (other) {
+      return res.status(409).json({ error: `「${other.name || '段替え'}」が実行中です。先に終了してください。` });
+    }
+
+    const update = { status: 'running', endEpoch: null, endTime: null, durationMins: null, endedBy: '', updatedAt: new Date() };
+    await col.updateOne({ _id: rec._id }, { $set: update });
+    broadcastProductionEvent({ type: 'setup_update', date, setupId, status: 'running' });
+    res.json({ success: true, record: { ...rec, ...update } });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/setup/undo:', error);
+    res.status(500).json({ error: 'Failed to undo setup end' });
   }
 });
 
@@ -45088,6 +45508,7 @@ app.post('/api/production/status', async (req, res) => {
       date,
       machine,
       worker,
+      workerRoles,
       hinban,
       hinmei,
       kizai,
@@ -45119,6 +45540,7 @@ app.post('/api/production/status', async (req, res) => {
         date,
         machine: machine || 'PSA2',
         worker: worker || '',
+        workerRoles: sanitizeWorkerRoles(workerRoles),
         hinban: hinban || '',
         hinmei: hinmei || '',
         kizai: kizai || '',
@@ -45197,7 +45619,7 @@ app.post('/api/production/print-log', async (req, res) => {
       worker: worker || '',
       machine: machine || 'PSA2',
       timestamp: timestamp || new Date().toISOString(),
-      timeStr: timeStr || new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+      timeStr: timeStr || new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
       createdAt: new Date()
     };
 
@@ -45399,6 +45821,22 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
 
     console.log(`📸 Uploaded first factory label photo: ${publicUrl}`);
 
+    // Small thumbnail made by the tablet (lists show this instead of the full photo)
+    let thumbUrl = '';
+    if (req.body.thumbBase64) {
+      try {
+        const thumbPath = filePath.replace(/\.jpg$/i, '') + '_thumb.jpg';
+        const thumbBuffer = Buffer.from(String(req.body.thumbBase64).replace(/^data:image\/\w+;base64,/, ''), 'base64');
+        await uploadToFirebaseWithRetry(bucket.file(thumbPath), thumbBuffer, {
+          metadata: { contentType: 'image/jpeg', cacheControl: 'public, max-age=31536000', metadata: { firebaseStorageDownloadTokens: downloadToken } },
+          validation: false
+        });
+        thumbUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(thumbPath)}?alt=media&token=${downloadToken}`;
+      } catch (thumbErr) {
+        console.warn('⚠️ Could not upload label photo thumbnail:', thumbErr.message);
+      }
+    }
+
     // If an item in firstFactoryQueue is associated, update its photoUrl in MongoDB
     try {
       const db = client.db('submittedDB');
@@ -45416,7 +45854,7 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
       }
 
       if (updateFilter) {
-        const updateDoc = { $set: { imageUrl: publicUrl, updatedAt: new Date() } };
+        const updateDoc = { $set: { imageUrl: publicUrl, ...(thumbUrl ? { imageThumbUrl: thumbUrl } : {}), updatedAt: new Date() } };
         const updateResult = await queueCol.updateMany(updateFilter, updateDoc);
         let prodModified = 0;
         try {
@@ -45439,6 +45877,7 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
       success: true,
       url: publicUrl,
       imageUrl: publicUrl,
+      thumbUrl,
       filePath
     });
   } catch (error) {
@@ -45591,6 +46030,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       date,
       machine,
       worker,
+      workerRoles,
       groupId,
       itemId,
       orderIndex,
@@ -45613,10 +46053,12 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       manufacturerUid,
       photoUrl,
       imageUrl,
+      imageThumbUrl,
       status,
       socho,
       shiki,
-      bicho
+      bicho,
+      labelRead
     } = req.body;
 
     const finalImageUrl = imageUrl || photoUrl || '';
@@ -45651,7 +46093,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
         console.log(`⚠️ Item already enqueued [${existingItem.hinban || existingItem.groupId}] (Roll #${existingItem.rollIndex}, Order #${existingItem.orderIndex}) -> returning existing _id: ${existingItem._id}`);
         // If imageUrl was missing and is now provided, update it
         if (finalImageUrl && (!existingItem.imageUrl && !existingItem.photoUrl)) {
-          const photoPatch = { imageUrl: finalImageUrl, updatedAt: new Date() };
+          const photoPatch = { imageUrl: finalImageUrl, ...(imageThumbUrl ? { imageThumbUrl } : {}), updatedAt: new Date() };
           await productionCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
           await queueCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
         }
@@ -45695,7 +46137,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
     const finalStatus = (status && status !== 'queue' && status !== 'queued')
       ? status
       : (activeItem ? 'queue' : 'in-progress');
-    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
 
     // Generate guaranteed unique 6-character Base62 uniqueID
     const uniqueID = await getNextRollUniqueID(db);
@@ -45706,6 +46148,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       uniqueID,
       worker: worker || '',
       feederWorker: worker || '',
+      workerRoles: sanitizeWorkerRoles(workerRoles),
       wrapperWorker: '',
       groupId: groupId || '',
       itemId: itemId || '',
@@ -45732,6 +46175,8 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       rawMaterialLength: rawMaterialLength || '',
       manufacturerUid: manufacturerUid || '',
       imageUrl: finalImageUrl,
+      imageThumbUrl: imageThumbUrl || '',
+      ...(labelRead && typeof labelRead === 'object' ? { labelRead } : {}),
       queuePosition,
       status: finalStatus,
       createdAt: new Date(),
@@ -45743,6 +46188,11 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       newItem.startedAt = new Date();
       newItem.actualStartTime = timeNow;
       newItem.startEpoch = Date.now();
+      // Became active just by being fed into an empty queue (shift start / after a gap).
+      // The machine is usually still being prepared, so the tablet shows a 生産開始 button
+      // that re-stamps the real start via /api/production/queue/confirm-start.
+      newItem.startedBy = 'enqueue';
+      newItem.startConfirmed = false;
     }
 
     // Insert into submittedDB.firstFactoryProduction
@@ -45788,6 +46238,58 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
 });
 
 // Advance roll / lot (from in-progress to completed, and activate next queue item)
+// 第一工場: operator presses 生産開始 on the first roll of a run -> real start time
+app.post('/api/production/queue/confirm-start', async (req, res) => {
+  try {
+    const { _id, worker } = req.body || {};
+    if (!_id) return res.status(400).json({ error: '_id is required' });
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    let filter;
+    try { filter = { _id: new ObjectId(_id) }; } catch { filter = { _id }; }
+
+    const item = await productionCol.findOne(filter) || await queueCol.findOne(filter);
+    if (!item) return res.status(404).json({ error: 'Queue item not found' });
+    if (item.status !== 'in-progress' && item.status !== 'active') {
+      return res.status(409).json({ error: 'Roll is not in progress' });
+    }
+
+    const pressedAt = Date.now();
+    let now;
+    try {
+      now = parseEditedEpoch(req.body.startEpoch, '開始時刻') || pressedAt;
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+    const update = {
+      startedAt: new Date(now),
+      startEpoch: now,
+      startEdited: isTimeEdited(now, pressedAt),
+      startPressedAt: pressedAt,
+      actualStartTime: new Date(now).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
+      startConfirmed: true,
+      startConfirmedBy: worker || '',
+      // keep the original auto-start for reference
+      autoStartEpoch: item.autoStartEpoch || item.startEpoch || null,
+      updatedAt: new Date()
+    };
+    await productionCol.updateOne({ _id: item._id }, { $set: update });
+    await queueCol.updateOne({ _id: item._id }, { $set: update });
+
+    broadcastProductionEvent({ type: 'queue_updated', date: item.date, machine: item.machine, _id: item._id, status: item.status });
+    broadcastProductionEvent({ type: 'schedule_update', date: item.date });
+
+    console.log(`▶️ Confirmed real start for [${item.hinban || item.groupId}] Roll #${item.rollIndex} at ${update.actualStartTime} by ${worker || '?'}`);
+    res.json({ success: true, item: { ...item, ...update } });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/confirm-start:', error);
+    res.status(500).json({ error: 'Failed to confirm start' });
+  }
+});
+
 app.post('/api/production/queue/advance', async (req, res) => {
   try {
     const {
@@ -45844,7 +46346,7 @@ app.post('/api/production/queue/advance', async (req, res) => {
     const targetDate = item.date || date;
     const targetMachine = item.machine || machine;
     const targetWorker = worker || item.wrapperWorker || item.worker || '';
-    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
 
     // Mark current item completed
     const completionUpdate = {
@@ -46011,7 +46513,7 @@ app.post('/api/production/queue/temperature-snapshot', async (req, res) => {
       return res.status(404).json({ error: 'Queue item not found' });
     }
 
-    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
     const updateDoc = {
       updatedAt: new Date()
     };
@@ -46147,7 +46649,7 @@ app.post('/api/production/queue/skip', async (req, res) => {
                 totalRolls: nextItem.totalRolls,
                 totalMeters: nextItem.totalMeters,
                 status: 'in-progress',
-                actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+                actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
                 startEpoch: Date.now(),
                 updatedAt: new Date()
               },
@@ -46262,7 +46764,7 @@ app.post('/api/production/queue/finish-early', async (req, res) => {
         status: 'completed',
         actualRollsProduced: rollsProduced,
         finishedEarly: true,
-        actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
         endEpoch: Date.now(),
         updatedAt: new Date()
       };
@@ -46311,7 +46813,7 @@ app.post('/api/production/queue/finish-early', async (req, res) => {
               totalRolls: nextItem.totalRolls,
               totalMeters: nextItem.totalMeters,
               status: 'in-progress',
-              actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+              actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
               startEpoch: Date.now(),
               updatedAt: new Date()
             },
@@ -46537,7 +47039,7 @@ app.post('/api/production/queue/select', async (req, res) => {
             totalRolls: item.totalRolls,
             totalMeters: item.totalMeters,
             status: 'in-progress',
-            actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+            actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
             startEpoch: Date.now(),
             updatedAt: new Date()
           },
@@ -46778,22 +47280,56 @@ app.get('/api/production/schedule', async (req, res) => {
   }
 });
 
+// -----------------------------------------------------
+// 第一工場 daily schedule: shared by freyaAdmin2 (admin plans) and the firstKojoNippo tablet
+// (workers reorder groups / add tasks). `revision` goes up on every save; a save made from an
+// older revision gets 409 so neither side silently overwrites the other.
+// Hinban groups get a fixed `groupId` on their rolls: production records link to it, so it must not
+// change when groups move (it used to be derived from the position: group_<hinban>_<index>).
+// -----------------------------------------------------
+function stampScheduleGroupIds(order) {
+  let cur = null;
+  (order || []).forEach((item, idx) => {
+    if (!item || item.type === 'setup') { cur = null; return; }
+    // Rolls of the same 品番 taken from another date's plan (sourceDate) form their own group
+    const src = item.sourceDate || '';
+    const joins = cur && cur.hinban === item.hinban && cur.src === src && (!item.groupId || item.groupId === cur.groupId);
+    if (!joins) cur = { hinban: item.hinban, src, groupId: item.groupId || `group_${item.hinban}_${idx}` };
+    item.groupId = cur.groupId;
+  });
+  return order;
+}
+const scheduleGroupKey = (item) => (item.type === 'setup' ? `setup_${item.id}` : item.groupId);
+
+function scheduleDateString(month, date) {
+  return `${month}-${String(Number(date)).padStart(2, '0')}`;
+}
+
 app.post('/api/production/schedule', async (req, res) => {
   try {
-    const { scheduleOrder, startTime, month, date, scheduledBy } = req.body;
+    const { scheduleOrder, startTime, month, date, scheduledBy, baseRevision, force } = req.body;
     if (!month || date === undefined) {
       return res.status(400).json({ success: false, message: 'month and date are required' });
     }
 
     const submittedDb = client.db('submittedDB');
     const scheduleCollection = submittedDb.collection('firstFactorySchedule');
+    const filter = { type: 'dailySchedule', month, date: Number(date) };
+    const existing = await scheduleCollection.findOne(filter, { projection: { revision: 1, lastChangedBy: 1 } });
+    const currentRevision = existing?.revision || 0;
+
+    if (!force && baseRevision !== undefined && baseRevision !== null && Number(baseRevision) !== currentRevision) {
+      return res.status(409).json({ success: false, conflict: true, revision: currentRevision, lastChangedBy: existing?.lastChangedBy || null, message: 'Schedule was changed by someone else' });
+    }
 
     const updateFields = {
       type: 'dailySchedule',
       month,
       date: Number(date),
-      scheduleOrder,
+      scheduleOrder: stampScheduleGroupIds(Array.isArray(scheduleOrder) ? scheduleOrder : []),
       startTime,
+      revision: currentRevision + 1,
+      lastChangedBy: { name: scheduledBy || 'Admin', source: 'admin', action: 'save', at: new Date() },
       updatedAt: new Date()
     };
 
@@ -46801,16 +47337,295 @@ app.post('/api/production/schedule', async (req, res) => {
       updateFields.scheduledBy = scheduledBy;
     }
 
-    await scheduleCollection.updateOne(
-      { type: 'dailySchedule', month, date: Number(date) },
-      { $set: updateFields },
-      { upsert: true }
-    );
+    await scheduleCollection.updateOne(filter, { $set: updateFields }, { upsert: true });
 
-    res.json({ success: true, message: 'Schedule saved successfully' });
+    broadcastProductionEvent({ type: 'schedule_update', date: scheduleDateString(month, date), revision: currentRevision + 1, source: 'admin' });
+    res.json({ success: true, message: 'Schedule saved successfully', revision: currentRevision + 1 });
   } catch (error) {
     console.error('Error saving schedule:', error);
     res.status(500).json({ error: 'Failed to save schedule' });
+  }
+});
+
+// Which daily lists use the Excel plan of `date`: rolls with sourceDate = date on other days,
+// plus the date's own list (rolls without sourceDate). freyaAdmin2 hides those from Available.
+// ==================== 第一工場: AI label reading (Tablet 1 photo-first) ====================
+// The tablet sends the label photo (downscaled) plus the QR text it decoded from that photo, if any.
+// Gemini Flash-Lite reads the printed values; a value whose print is unreadable may come from the QR text.
+const FF_LABEL_MODEL = process.env.FF_LABEL_MODEL || 'gemini-3.5-flash-lite';
+const FF_LABEL_TIMEOUT_MS = 20000;
+let ffLabelAi = null;
+
+function ffLabelErrorKind(err) {
+  const status = Number(err?.status || err?.code || 0);
+  const msg = String(err?.message || '');
+  if (status === 429 || /RESOURCE_EXHAUSTED|quota|exhausted|billing|spend(ing)? (cap|limit)|prepay|credit/i.test(msg)) return 'quota';
+  if (status === 401 || status === 403 || /API key|PERMISSION_DENIED/i.test(msg)) return 'auth';
+  if (/timeout|timed out|aborted/i.test(msg)) return 'timeout';
+  return 'error';
+}
+
+function qrPromptPart(qr, qrParsed) {
+  const names = { totalLength: '総長', sDrawLength: 'S引長', netLength: '実長', date: '年月日' };
+  const known = qrParsed && typeof qrParsed === 'object'
+    ? Object.keys(names).filter(k => qrParsed[k] !== undefined && qrParsed[k] !== null && qrParsed[k] !== '').map(k => `${names[k]} (${k}) = ${qrParsed[k]}`)
+    : [];
+  if (known.length) {
+    return 'Read the printed text first (source "text"). The QR code on this label was decoded with the format learned for this material and gives:\n'
+      + known.join('\n')
+      + '\nOnly for a field whose printed value is unreadable or missing, use the QR value above for that same field (source "qr").';
+  }
+  if (qr) {
+    return `The QR code on this label was decoded by a QR reader. Its raw content is:\n<qr>${qr}</qr>\n`
+      + 'Read the printed text first (source "text"). Numbers in the QR usually have no labels, so do NOT assign a QR number to a field unless the QR content itself clearly names that field. When unsure, return null for that field.';
+  }
+  return 'No QR content is available, so read only the printed text.';
+}
+
+app.post('/api/production/label-read', async (req, res) => {
+  const started = Date.now();
+  try {
+    const { image, qrText, qrParsed, kizaiHint } = req.body || {};
+    if (!image || typeof image !== 'string') return res.status(400).json({ success: false, kind: 'error', error: 'image (base64) is required' });
+    if (!process.env.GEMINI_API_KEY) return res.status(503).json({ success: false, kind: 'auth', error: 'GEMINI_API_KEY is not configured' });
+
+    const { GoogleGenAI, Type } = require('@google/genai');
+    if (!ffLabelAi) ffLabelAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const data = image.replace(/^data:image\/\w+;base64,/, '');
+    const qr = typeof qrText === 'string' ? qrText.slice(0, 2000) : '';
+
+    const SRC = { type: Type.STRING, enum: ['text', 'qr', 'none'] };
+    const schema = {
+      type: Type.OBJECT,
+      properties: {
+        totalLength: { type: Type.NUMBER, nullable: true, description: '総長 in metres' },
+        totalLengthSource: SRC,
+        sDrawLength: { type: Type.NUMBER, nullable: true, description: 'S引長 / S引き長 in metres (0 when printed as 0.0)' },
+        sDrawLengthSource: SRC,
+        netLength: { type: Type.NUMBER, nullable: true, description: '実長 / 美長 / 純長 in metres' },
+        netLengthSource: SRC,
+        baseCode: { type: Type.STRING, nullable: true, description: 'Large printed material code, usually near the bottom (e.g. HM26)' },
+        baseCodeSource: SRC,
+        lotNo: { type: Type.STRING, nullable: true, description: 'ロット number' },
+        lotNoSource: SRC,
+        date: { type: Type.STRING, nullable: true, description: '年月日 / production date as YYYY-MM-DD' },
+        dateSource: SRC,
+        notes: { type: Type.STRING, nullable: true, description: 'Short note on anything unreadable' }
+      },
+      required: ['totalLength', 'totalLengthSource', 'sDrawLength', 'sDrawLengthSource', 'netLength', 'netLengthSource',
+        'baseCode', 'baseCodeSource', 'lotNo', 'lotNoSource', 'date', 'dateSource']
+    };
+    const prompt = [
+      'This photo shows a material roll label from a Japanese factory. Read the values printed on the label exactly as printed.',
+      'Do not calculate or guess values. If a value is not printed or cannot be read, use null with source "none".',
+      qrPromptPart(qr, qrParsed),
+      kizaiHint ? `The material expected for this roll is "${String(kizaiHint).slice(0, 80)}" (for context only; report what the label says).` : ''
+    ].filter(Boolean).join('\n\n');
+
+    const call = ffLabelAi.models.generateContent({
+      model: FF_LABEL_MODEL,
+      contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data } }, { text: prompt }] }],
+      config: { responseMimeType: 'application/json', responseSchema: schema }
+    });
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('AI label read timed out')), FF_LABEL_TIMEOUT_MS));
+    const r = await Promise.race([call, timeout]);
+
+    let values;
+    try { values = JSON.parse(r.text); } catch (e) { throw new Error('AI returned an unreadable answer'); }
+    if (values.date) {
+      const m = String(values.date).match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+      values.date = m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : values.date;
+    }
+    const usage = r.usageMetadata || {};
+    res.json({
+      success: true,
+      model: FF_LABEL_MODEL,
+      ms: Date.now() - started,
+      usedQr: !!qr,
+      values,
+      tokens: { input: usage.promptTokenCount || 0, output: (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0) }
+    });
+  } catch (err) {
+    const kind = ffLabelErrorKind(err);
+    console.error(`❌ label-read failed (${kind}):`, err.message);
+    res.status(kind === 'quota' ? 429 : 502).json({ success: false, kind, error: err.message, ms: Date.now() - started });
+  }
+});
+
+app.get('/api/production/schedule/by-source', async (req, res) => {
+  try {
+    // ?month=YYYY-MM: every list holding rolls taken from that month's plan on another day
+    // (freyaAdmin2's Excel sync report checks them against the new sheet)
+    if (req.query.month) {
+      const month = String(req.query.month);
+      if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month (YYYY-MM) is required' });
+      const docs = await client.db('submittedDB').collection('firstFactorySchedule').find(
+        { type: 'dailySchedule', 'scheduleOrder.sourceDate': { $regex: `^${month}-` } },
+        { projection: { month: 1, date: 1, scheduleOrder: 1 } }
+      ).toArray();
+      const usage = docs.map(doc => {
+        const dateStr = scheduleDateString(doc.month, doc.date);
+        const rolls = (doc.scheduleOrder || [])
+          .filter(i => i && i.type !== 'setup' && i.hinban && i.sourceDate && i.sourceDate.startsWith(`${month}-`) && i.sourceDate !== dateStr)
+          .map(i => ({ hinban: i.hinban, sourceDate: i.sourceDate, meters: Number(i.meters) || 0 }));
+        return { dateStr, rolls };
+      }).filter(u => u.rolls.length);
+      return res.json({ success: true, usage });
+    }
+
+    const date = String(req.query.date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+    const month = date.slice(0, 7);
+    const day = Number(date.slice(8, 10));
+    const docs = await client.db('submittedDB').collection('firstFactorySchedule').find(
+      { type: 'dailySchedule', $or: [{ 'scheduleOrder.sourceDate': date }, { month, date: day }] },
+      { projection: { month: 1, date: 1, scheduleOrder: 1 } }
+    ).toArray();
+    const usage = docs.map(doc => {
+      const dateStr = scheduleDateString(doc.month, doc.date);
+      const hinbans = [...new Set((doc.scheduleOrder || [])
+        .filter(i => i && i.type !== 'setup' && i.hinban && (i.sourceDate ? i.sourceDate === date : dateStr === date))
+        .map(i => i.hinban))];
+      return { dateStr, hinbans };
+    }).filter(u => u.hinbans.length);
+    res.json({ success: true, usage });
+  } catch (error) {
+    console.error('❌ Error in GET /api/production/schedule/by-source:', error);
+    res.status(500).json({ error: 'Failed to read schedule usage' });
+  }
+});
+
+// Tablet edits: move one group, or add a task (段替え, 紙替, …) before a group.
+async function applyTabletScheduleEdit(req, res, edit) {
+  const { month, date, baseRevision, worker } = req.body || {};
+  if (!month || date === undefined) return res.status(400).json({ error: 'month and date are required' });
+  const db = client.db('submittedDB');
+  const col = db.collection('firstFactorySchedule');
+  const filter = { type: 'dailySchedule', month, date: Number(date) };
+  const doc = await col.findOne(filter);
+  if (!doc || !Array.isArray(doc.scheduleOrder)) return res.status(404).json({ error: 'この日のスケジュールがありません' });
+  const currentRevision = doc.revision || 0;
+  if (baseRevision !== undefined && baseRevision !== null && Number(baseRevision) !== currentRevision) {
+    return res.status(409).json({ conflict: true, revision: currentRevision, lastChangedBy: doc.lastChangedBy || null, error: 'リストが他の端末で更新されました' });
+  }
+
+  const order = stampScheduleGroupIds(doc.scheduleOrder.map(i => ({ ...i })));
+  const dateStr = scheduleDateString(month, date);
+  let result;
+  try {
+    result = await edit(order, dateStr, db);
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+
+  const lastChangedBy = { name: worker || '作業者', source: 'tablet', action: result.action, detail: result.detail, at: new Date() };
+  const upd = await col.updateOne(
+    { ...filter, $or: [{ revision: currentRevision }, ...(currentRevision === 0 ? [{ revision: { $exists: false } }] : [])] },
+    { $set: { scheduleOrder: result.order, revision: currentRevision + 1, lastChangedBy, updatedAt: new Date() }, $push: { changeLog: { $each: [lastChangedBy], $slice: -100 } } }
+  );
+  if (!upd.matchedCount) return res.status(409).json({ conflict: true, error: 'リストが他の端末で更新されました' });
+
+  broadcastProductionEvent({ type: 'schedule_update', date: dateStr, revision: currentRevision + 1, source: 'tablet' });
+  res.json({ success: true, revision: currentRevision + 1, ...(result.response || {}) });
+}
+
+async function isScheduleGroupStarted(db, dateStr, items) {
+  const first = items[0];
+  if (first.type === 'setup') {
+    return !!(await db.collection('firstFactorySetupLog').findOne({ date: dateStr, setupId: `setup_${first.id}` }));
+  }
+  const ids = items.map(i => String(i.id)).filter(Boolean);
+  return !!(await db.collection('firstFactoryProduction').findOne({ date: dateStr, itemId: { $in: ids }, status: { $nin: ['cancelled', 'deleted'] } }));
+}
+
+app.post('/api/production/schedule/move-group', async (req, res) => {
+  try {
+    const { groupId, beforeGroupId } = req.body || {};
+    if (!groupId || groupId === beforeGroupId) return res.status(400).json({ error: 'groupId is required' });
+    await applyTabletScheduleEdit(req, res, async (order, dateStr, db) => {
+      const moving = order.filter(i => scheduleGroupKey(i) === groupId);
+      if (!moving.length) throw new Error('移動するグループが見つかりません');
+      if (await isScheduleGroupStarted(db, dateStr, moving)) throw new Error('開始済みのグループは移動できません');
+      const rest = order.filter(i => scheduleGroupKey(i) !== groupId);
+      let at = beforeGroupId ? rest.findIndex(i => scheduleGroupKey(i) === beforeGroupId) : rest.length;
+      if (at < 0) throw new Error('移動先が見つかりません');
+      rest.splice(at, 0, ...moving);
+      const label = moving[0].type === 'setup' ? moving[0].name : (moving[0].kizai || moving[0].hinban);
+      return { order: rest, action: 'move', detail: `${label} を移動` };
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/schedule/move-group:', error);
+    res.status(500).json({ error: 'Failed to move group' });
+  }
+});
+
+app.post('/api/production/schedule/insert-task', async (req, res) => {
+  try {
+    const { name, duration, comment, beforeGroupId, worker } = req.body || {};
+    const taskName = String(name || '').trim().slice(0, 40);
+    if (!taskName) return res.status(400).json({ error: 'name is required' });
+    await applyTabletScheduleEdit(req, res, async (order) => {
+      const item = {
+        id: `${Date.now()}${Math.random().toString(36).slice(2, 7)}`,
+        type: 'setup',
+        name: taskName,
+        duration: Math.max(0, Math.min(600, Number(duration) || 0)),
+        comment: String(comment || '').slice(0, 200),
+        addedBy: worker || '作業者',
+        addedFrom: 'tablet',
+        addedAt: new Date()
+      };
+      let at = beforeGroupId ? order.findIndex(i => scheduleGroupKey(i) === beforeGroupId) : order.length;
+      if (at < 0) at = order.length;
+      order.splice(at, 0, item);
+      return { order, action: 'insert', detail: `${taskName} を追加`, response: { item, setupId: `setup_${item.id}` } };
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/schedule/insert-task:', error);
+    res.status(500).json({ error: 'Failed to insert task' });
+  }
+});
+
+// 段替え / setup task presets: one list for freyaAdmin2 and the tablets (minutes per task)
+const FF_SETUP_PRESETS = [
+  { name: '段取り', defaultTime: 15 },
+  { name: '段替え', defaultTime: 15 },
+  { name: '乾燥温度設定', defaultTime: 15 },
+  { name: 'ロール温度設定', defaultTime: 15 },
+  { name: '試作', defaultTime: 30 },
+  { name: '紙替', defaultTime: 15 },
+];
+app.get('/api/production/setup-presets', async (req, res) => {
+  try {
+    const doc = await client.db('submittedDB').collection('firstFactorySettings').findOne({ _id: 'setupPresets' });
+    const times = doc?.times || {};
+    res.json({
+      success: true,
+      saved: !!doc,
+      times,
+      presets: FF_SETUP_PRESETS.map(p => ({ name: p.name, duration: times[p.name] !== undefined ? Number(times[p.name]) : p.defaultTime }))
+    });
+  } catch (error) {
+    console.error('❌ Error in GET /api/production/setup-presets:', error);
+    res.status(500).json({ error: 'Failed to load setup presets' });
+  }
+});
+app.post('/api/production/setup-presets', async (req, res) => {
+  try {
+    const input = (req.body && req.body.times) || {};
+    const times = {};
+    FF_SETUP_PRESETS.forEach(p => {
+      if (input[p.name] !== undefined) times[p.name] = Math.max(0, Math.min(600, Number(input[p.name]) || 0));
+    });
+    await client.db('submittedDB').collection('firstFactorySettings').updateOne(
+      { _id: 'setupPresets' },
+      { $set: Object.fromEntries(Object.entries(times).map(([k, v]) => [`times.${k}`, v])), $currentDate: { updatedAt: true } },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/setup-presets:', error);
+    res.status(500).json({ error: 'Failed to save setup presets' });
   }
 });
 

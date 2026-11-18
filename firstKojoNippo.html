@@ -658,6 +658,490 @@
             text-align: center;
         }
 
+        .source-date-tag { display: inline-block; vertical-align: middle; margin-left: 6px; padding: 1px 7px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; background: #F5F3FF; color: #6D28D9; border: 1px solid #DDD6FE; }
+
+        /* ---------------- List: hold-to-reorder + ＋ add task ---------------- */
+        #scheduleListContainer { position: relative; }
+        .is-reorderable { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+        body.is-reordering, body.is-reordering * { -webkit-user-select: none; user-select: none; cursor: grabbing !important; }
+        .reorder-ghost {
+            position: fixed !important;
+            z-index: 10050 !important;
+            pointer-events: none;
+            margin: 0 !important;
+            opacity: 1;
+            background: #FFFFFF !important;
+            transform: scale(1.02);
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.28);
+            border-radius: 14px;
+            outline: 3px solid #6366F1;
+        }
+        .reorder-source { opacity: 0.25; }
+        .reorder-saving { opacity: 0.5; pointer-events: none; }
+        .reorder-marker {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 4px;
+            border-radius: 4px;
+            background: #6366F1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+            z-index: 5;
+            pointer-events: none;
+        }
+        .add-task-fab {
+            position: fixed;
+            right: 22px;
+            bottom: 96px;
+            z-index: 900;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: none;
+            background: #4F46E5;
+            color: #FFFFFF;
+            font-size: 2rem;
+            font-weight: 700;
+            line-height: 1;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 24px rgba(79, 70, 229, 0.4);
+            cursor: pointer;
+        }
+        .add-task-fab:active { transform: scale(0.94); }
+        .add-task-note { font-size: 0.85rem; color: #64748B; margin-bottom: 12px; line-height: 1.5; }
+        .add-task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+        .add-task-tile { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid #E2E8F0; border-radius: 12px; background: #FFFFFF; }
+        .add-task-tile.is-custom { border-style: dashed; }
+        .add-task-name { flex: 1; font-weight: 800; color: #0F172A; font-size: 1rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .add-task-custom-name { flex: 1; min-width: 0; height: 44px; padding: 0 10px; border: 1px solid #CBD5E1; border-radius: 8px; font-size: 1rem; }
+        .add-task-min { width: 64px; height: 44px; padding: 0 8px; border: 1px solid #CBD5E1; border-radius: 8px; font-size: 1.05rem; font-weight: 700; text-align: center; }
+        .add-task-unit { color: #64748B; font-weight: 600; font-size: 0.9rem; }
+        .add-task-go { height: 44px; padding: 0 14px; border-radius: 8px; border: none; background: #4F46E5; color: #FFFFFF; font-weight: 800; cursor: pointer; white-space: nowrap; }
+
+        /* ---------------- History 詳細 pop-up ---------------- */
+        /* enlarged photo must open above the 詳細 pop-up */
+        #imagePreviewModal { z-index: 10070 !important; }
+
+        .hd-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10060;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            background: rgba(16, 24, 40, 0.55);
+        }
+        .hd-card {
+            width: 100%;
+            max-width: 640px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            background: #FFFFFF;
+            border-radius: 18px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+        }
+        .hd-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            border-bottom: 1px solid #E5E7EB;
+            font-weight: 800;
+            font-size: 1.05rem;
+            color: #0F172A;
+        }
+        .hd-close { width: 40px; height: 40px; border-radius: 10px; border: 1px solid #E5E7EB; background: #FFFFFF; font-size: 1rem; cursor: pointer; }
+        .hd-card-body { padding: 16px 18px; overflow-y: auto; }
+        .hd-card-footer { padding: 12px 18px; border-top: 1px solid #E5E7EB; }
+        .hd-head { display: flex; gap: 14px; align-items: flex-start; }
+        .hd-photo { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; border: 1px solid #E5E7EB; flex-shrink: 0; cursor: zoom-in; background: #F3F4F6; }
+        .hd-photo-empty { display: flex; align-items: center; justify-content: center; color: #9CA3AF; font-size: 0.8rem; cursor: default; }
+        .hd-head-text { min-width: 0; }
+        .hd-title { font-size: 1.15rem; font-weight: 800; color: #0F172A; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .hd-sub { font-size: 0.88rem; color: #475569; margin-top: 4px; }
+        .hd-status { margin-top: 6px; font-size: 0.9rem; font-weight: 700; color: #0F172A; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+        .hd-time {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr 1fr;
+            align-items: center;
+            gap: 10px;
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            text-align: center;
+        }
+        .hd-time-value { font-size: 1.35rem; font-weight: 800; color: #0F172A; font-variant-numeric: tabular-nums; }
+        .hd-time-arrow { font-size: 1.3rem; color: #94A3B8; font-weight: 800; }
+        .hd-section { margin: 16px 0 6px; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; color: #64748B; text-transform: uppercase; }
+        .hd-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid #F1F5F9; font-size: 0.92rem; }
+        .hd-label { color: #64748B; font-weight: 600; font-size: 0.85rem; }
+        .hd-value { color: #0F172A; font-weight: 700; text-align: right; min-width: 0; }
+        .hd-qr { font-family: ui-monospace, monospace; font-size: 0.8rem; word-break: break-all; }
+        .hd-muted { color: #94A3B8; font-weight: 600; font-size: 0.85rem; }
+        .hd-print { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 7px 0; border-bottom: 1px solid #F1F5F9; font-size: 0.9rem; font-weight: 600; color: #0F172A; }
+        .hd-print-no { color: #64748B; font-weight: 800; }
+        .hd-badge { font-size: 0.75rem; font-weight: 800; border-radius: 6px; padding: 2px 8px; border: 1px solid; }
+        .hd-badge.ok { background: #ECFDF5; color: #047857; border-color: #A7F3D0; }
+        .hd-badge.ng { background: #FEF2F2; color: #B91C1C; border-color: #FCA5A5; }
+        .hd-badge.warn { background: #FFFBEB; color: #B45309; border-color: #FCD34D; }
+        .hd-badge.edit { background: #F5F3FF; color: #6D28D9; border-color: #DDD6FE; }
+
+        /* ---------------- In-app confirm dialog ---------------- */
+        .app-dialog-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10100;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(16, 24, 40, 0.55);
+        }
+        .app-dialog-card {
+            width: 100%;
+            max-width: 460px;
+            background: #FFFFFF;
+            border-radius: 18px;
+            border-top: 6px solid var(--brand, #10B981);
+            padding: 26px 22px 20px;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+        }
+        .app-dialog-card.tone-amber { border-top-color: #F59E0B; }
+        .app-dialog-card.tone-danger { border-top-color: #DC2626; }
+        .app-dialog-card.tone-warn { border-top-color: #F59E0B; }
+        .app-dialog-icon { font-size: 2.2rem; line-height: 1; }
+        .app-dialog-title { font-size: 1.3rem; font-weight: 800; color: #0F172A; margin-top: 10px; }
+        .app-dialog-message { font-size: 0.98rem; color: #475569; margin-top: 8px; line-height: 1.6; }
+        .app-dialog-actions { display: flex; gap: 12px; margin-top: 22px; }
+        .app-dialog-actions .btn { flex: 1; min-height: 54px; font-size: 1.02rem; font-weight: 800; }
+        .app-dialog-ok { background: var(--brand, #10B981) !important; border-color: var(--brand, #10B981) !important; color: #FFFFFF !important; }
+        .tone-amber .app-dialog-ok, .tone-warn .app-dialog-ok { background: #F59E0B !important; border-color: #F59E0B !important; }
+        .tone-danger .app-dialog-ok { background: #DC2626 !important; border-color: #DC2626 !important; }
+
+        /* ---------------- 段替え / Setup timer ---------------- */
+        .schedule-setup-row.is-startable { cursor: pointer; }
+        .schedule-setup-row.is-startable:active { transform: scale(0.995); }
+        .schedule-setup-row.is-running {
+            cursor: pointer;
+            border-color: #F59E0B !important;
+            background: #FFFBEB !important;
+            box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+        }
+
+        .setup-running-pill {
+            font-size: 0.8rem;
+            font-weight: 800;
+            color: #B45309;
+            background: #FEF3C7;
+            border: 1px solid #FCD34D;
+            border-radius: 999px;
+            padding: 2px 10px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .setup-action-btn {
+            min-height: 40px;
+            padding: 0 16px;
+            border-radius: 10px;
+            border: 1px solid #F59E0B;
+            background: #FFFFFF;
+            color: #B45309;
+            font-weight: 800;
+            font-size: 0.9rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .setup-action-btn.is-end {
+            background: #DC2626;
+            border-color: #DC2626;
+            color: #FFFFFF;
+        }
+
+        .setup-timer-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 10050;
+            background: rgba(16, 24, 40, 0.55);
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .setup-timer-card {
+            width: 100%;
+            max-width: 560px;
+            background: #FFFBEB;
+            border: 3px solid #F59E0B;
+            border-radius: 20px;
+            padding: 28px 24px 22px;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+        }
+
+        .setup-timer-eyebrow { font-size: 0.9rem; font-weight: 800; color: #B45309; letter-spacing: 0.04em; }
+        .setup-timer-name { font-size: 1.6rem; font-weight: 800; color: #0F172A; margin-top: 6px; }
+        .setup-timer-elapsed {
+            font-size: 5.5rem;
+            line-height: 1.05;
+            font-weight: 800;
+            color: #B45309;
+            margin: 14px 0 6px;
+            font-variant-numeric: tabular-nums;
+        }
+        .setup-timer-edit {
+            margin-top: 10px;
+            min-height: 40px;
+            padding: 0 16px;
+            border-radius: 10px;
+            border: 1px dashed #B45309;
+            background: transparent;
+            color: #B45309;
+            font-weight: 800;
+            font-size: 0.92rem;
+            cursor: pointer;
+        }
+        .setup-edited-mark {
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: #7C3AED;
+            background: #F5F3FF;
+            border: 1px solid #DDD6FE;
+            border-radius: 6px;
+            padding: 1px 7px;
+        }
+
+        /* Time picker inside the in-app pop-up */
+        .app-time-fields { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; margin-top: 16px; }
+        .app-time-field { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 14px; padding: 10px 14px 12px; }
+        .app-time-label { font-size: 0.85rem; font-weight: 800; color: #334155; margin-bottom: 6px; }
+        .app-time-row { display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .app-time-unit { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .app-time-unit button {
+            width: 64px;
+            height: 40px;
+            border-radius: 10px;
+            border: 1px solid #CBD5E1;
+            background: #FFFFFF;
+            font-size: 1rem;
+            color: #334155;
+            cursor: pointer;
+        }
+        .app-time-unit button:active { background: #E2E8F0; }
+        .app-time-value { font-size: 2.4rem; font-weight: 800; color: #0F172A; font-variant-numeric: tabular-nums; line-height: 1.1; }
+        .app-time-colon { font-size: 2.2rem; font-weight: 800; color: #0F172A; padding-bottom: 4px; }
+        .app-time-quick { display: flex; gap: 6px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+        .app-time-quick button {
+            min-height: 34px;
+            padding: 0 10px;
+            border-radius: 8px;
+            border: 1px solid #CBD5E1;
+            background: #FFFFFF;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #334155;
+            cursor: pointer;
+        }
+        .app-dialog-error { min-height: 1.3em; margin-top: 10px; font-size: 0.9rem; font-weight: 700; color: #DC2626; }
+        .app-dialog-ok:disabled { opacity: 0.45; cursor: not-allowed; }
+
+        .setup-timer-order {
+            display: inline-block;
+            margin-right: 10px;
+            padding: 2px 12px;
+            border-radius: 10px;
+            background: #E2E8F0;
+            color: #0F172A;
+            font-size: 1.3rem;
+            vertical-align: middle;
+        }
+        .setup-timer-meta { font-size: 1rem; font-weight: 700; color: #475569; min-height: 1.4em; }
+        .setup-timer-actions { display: flex; gap: 12px; margin-top: 22px; }
+        .setup-timer-actions .btn { flex: 1; min-height: 56px; font-size: 1.05rem; }
+        .setup-timer-end-btn { background: #DC2626 !important; border-color: #DC2626 !important; color: #FFFFFF !important; font-weight: 800; }
+
+        .setup-timer-modal.is-over .setup-timer-card { background: #FEF2F2; border-color: #DC2626; }
+        .setup-timer-modal.is-over .setup-timer-elapsed,
+        .setup-timer-modal.is-over .setup-timer-eyebrow { color: #DC2626; }
+        .setup-timer-modal.is-over .setup-timer-meta { color: #B91C1C; }
+
+        .setup-timer-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10040;
+            min-height: 56px;
+            padding: 6px 12px 6px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: #F59E0B;
+            color: #FFFFFF;
+            font-size: 1.05rem;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+            cursor: pointer;
+        }
+        .setup-timer-bar.is-over { background: #DC2626; animation: setupBarBlink 1.2s ease-in-out infinite; }
+        @keyframes setupBarBlink { 50% { filter: brightness(1.15); } }
+
+        .setup-timer-bar-end {
+            min-height: 42px;
+            padding: 0 18px;
+            border-radius: 10px;
+            border: 2px solid #FFFFFF;
+            background: rgba(255, 255, 255, 0.15);
+            color: #FFFFFF;
+            font-weight: 800;
+            font-size: 0.95rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .setup-history-row { background: #FFFBEB !important; border-color: #FDE68A !important; }
+
+        .btn-confirm-start {
+            background: #10B981 !important;
+            border-color: #10B981 !important;
+            color: #FFFFFF !important;
+            font-weight: 800;
+            animation: confirmStartPulse 1.6s ease-in-out infinite;
+        }
+
+        @keyframes confirmStartPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+            50% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+        }
+
+        .queue-start-note {
+            margin-top: 4px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #B45309;
+            background: #FEF3C7;
+            border: 1px solid #FCD34D;
+            border-radius: 6px;
+            padding: 3px 8px;
+            display: inline-block;
+        }
+
+        .worker-name-btn.selected {
+            background: var(--blue);
+            border-color: var(--blue);
+            color: #FFFFFF;
+        }
+
+        /* Worker roles (投入 / オペレーター / サポート / カッター / 取り出し) */
+        .worker-roles-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .worker-role-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid var(--border-strong);
+            border-radius: 12px;
+            background: #F9FAFB;
+        }
+
+        .worker-role-label {
+            flex: 0 0 150px;
+            font-weight: 800;
+            font-size: 0.95rem;
+            color: var(--text-main);
+            line-height: 1.25;
+        }
+
+        .worker-role-label small {
+            display: block;
+            font-weight: 600;
+            font-size: 0.75rem;
+            color: var(--text-soft);
+        }
+
+        .worker-role-chips {
+            flex: 1;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            min-height: 36px;
+            align-items: center;
+        }
+
+        .worker-role-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 6px 6px 12px;
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            color: #1E3A8A;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+
+        .worker-role-chip button {
+            width: 22px;
+            height: 22px;
+            border: none;
+            border-radius: 50%;
+            background: #DBEAFE;
+            color: #1E3A8A;
+            font-weight: 800;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .worker-role-empty {
+            color: var(--text-soft);
+            font-size: 0.85rem;
+        }
+
+        .worker-role-add {
+            flex: 0 0 auto;
+            min-height: 40px;
+            padding: 0 14px;
+            border: 1px dashed var(--blue);
+            border-radius: 10px;
+            background: #FFFFFF;
+            color: var(--blue);
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .worker-roles-summary {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .worker-roles-summary .worker-role-row {
+            padding: 8px 12px;
+        }
+
+        @media (max-width: 520px) {
+            .worker-role-row { flex-wrap: wrap; }
+            .worker-role-label { flex-basis: 100%; }
+        }
+
         .worker-name-btn:hover {
             background: var(--bg-subtle);
             border-color: var(--blue);
@@ -3552,6 +4036,23 @@
             color: #DC2626 !important;
         }
 
+        /* Photo-first label reading (AI) */
+        .label-photo-btn { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 22px 34px; border: none; border-radius: 14px; background: var(--brand, #2563EB); color: #fff; font-size: 1.15rem; font-weight: 800; cursor: pointer; box-shadow: 0 4px 12px rgba(37,99,235,0.25); }
+        .label-photo-btn:active { transform: scale(0.98); }
+        .label-ai-strip { display: flex; gap: 12px; align-items: center; padding: 10px; margin-bottom: 10px; border: 1.5px solid var(--border, #E5E7EB); border-radius: 10px; background: #F9FAFB; }
+        .label-ai-thumb { width: 64px; height: 84px; object-fit: cover; border-radius: 6px; border: 1px solid #E5E7EB; background: #fff; cursor: zoom-in; flex-shrink: 0; }
+        .label-ai-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+        .label-ai-status { font-size: 0.86rem; font-weight: 700; line-height: 1.35; display: flex; align-items: flex-start; gap: 6px; white-space: pre-line; }
+        .label-ai-status.is-busy { color: #1D4ED8; }
+        .label-ai-status.is-ok { color: #047857; }
+        .label-ai-status.is-warn { color: #B45309; }
+        .label-ai-status.is-error { color: #B91C1C; }
+        .label-ai-spinner { width: 14px; height: 14px; margin-top: 2px; border: 2px solid #BFDBFE; border-top-color: #1D4ED8; border-radius: 50%; animation: labelAiSpin 0.8s linear infinite; flex-shrink: 0; }
+        @keyframes labelAiSpin { to { transform: rotate(360deg); } }
+        .label-ai-actions { display: flex; gap: 14px; }
+        .label-ai-link { background: none; border: none; padding: 0; font-size: 0.82rem; font-weight: 700; color: var(--brand, #2563EB); text-decoration: underline; cursor: pointer; }
+        .feed-numpad-field.ai-filled { position: relative; }
+        .feed-numpad-field.ai-busy .feed-numpad-field-val { opacity: 0.45; }
         .feed-numpad-field.is-filled {
             border-color: #A7F3D0;
         }
@@ -4205,7 +4706,7 @@
         }
 
         .app-toast {
-            pointer-events: auto;
+            pointer-events: none; /* taps pass through to buttons underneath (e.g. pop-up 保存) */
             background: #1E293B;
             color: #FFFFFF;
             padding: 12px 20px;
@@ -4317,8 +4818,8 @@
                         <h2 style="color: var(--brand);">作業者確認 (Worker Setup)</h2>
                         <p style="font-size: 1.05rem; color: var(--text-main); margin: 0; text-align: center; line-height: 1.5;">
                             現在の作業者:<br>
-                            <strong id="confirmUserName" style="color: var(--brand); font-size: 1.35rem; display: block; margin: 8px 0;"></strong>
                         </p>
+                        <div id="confirmUserName" class="worker-roles-summary"></div>
                         <div style="display: flex; gap: 10px; width: 100%; margin-top: 10px;">
                             <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="changeWorkerName()">変更 (Change)</button>
                             <button type="button" class="btn btn-primary" style="flex: 2;" onclick="confirmWorkerName()">確認 (Yes)</button>
@@ -4329,9 +4830,7 @@
                     <div id="newWorkerContainer">
                         <h2>作業者選択 (Worker Setup)</h2>
                         <div style="width: 100%;">
-                            <input list="machine-operator-suggestions" class="tap-field"
-                                id="workerInput" name="workerInput"
-                                placeholder="作業者を選択... (Select Worker)" required readonly>
+                            <div id="workerRolesContainer" class="worker-roles-list"></div>
                             <datalist id="machine-operator-suggestions"></datalist>
                         </div>
                         <button type="button" class="btn btn-primary btn-full" onclick="proceedFromStep0()">次へ (Next)</button>
@@ -4477,18 +4976,45 @@
         </div>
     </div>
 
+    <!-- 段替え / Setup timer: big pop-up -->
+    <div id="setupTimerModal" class="setup-timer-modal" style="display: none;">
+        <div class="setup-timer-card">
+            <div class="setup-timer-eyebrow">⏱ 段替え実行中 (Setup running)</div>
+            <div class="setup-timer-name" id="setupTimerName">段替え</div>
+            <div class="setup-timer-elapsed" id="setupTimerElapsed">00:00</div>
+            <div class="setup-timer-meta" id="setupTimerMeta"></div>
+            <button type="button" class="setup-timer-edit" onclick="editSetupTimes()">✎ 開始時刻を修正 (Edit start time)</button>
+            <div class="setup-timer-actions">
+                <button type="button" class="btn btn-secondary" onclick="minimizeSetupTimerModal()">最小化 (Minimize)</button>
+                <button type="button" class="btn setup-timer-end-btn" onclick="endSetupPrompt()">■ 終了 (End)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 段替え / Setup timer: pinned bar (shown on every tab while minimized) -->
+    <div id="setupTimerBar" class="setup-timer-bar" style="display: none;" onclick="openSetupTimerModal()">
+        <span id="setupTimerBarText">⏱ 段替え 実行中</span>
+        <button type="button" class="setup-timer-bar-end" onclick="event.stopPropagation(); endSetupPrompt()">■ 終了</button>
+    </div>
+
     <!-- Worker Select Modal -->
     <div id="workerNameModal" class="modal">
         <div>
-            <h2 style="text-align: center; margin-bottom: 20px;">作業者名 (Worker Name)</h2>
+            <h2 id="workerModalTitle" style="text-align: center; margin-bottom: 6px;">作業者名 (Worker Name)</h2>
+            <p style="text-align: center; margin: 0 0 14px; font-size: 0.85rem; color: var(--text-soft);">タップで追加/解除 (Tap to add / remove) ・ 複数選択可 (Multiple OK)</p>
+            <div id="workerModalSelected" class="worker-role-chips" style="justify-content: center; margin-bottom: 12px;"></div>
             <div class="worker-names-container" id="workerNamesContainer" style="max-height: 50vh; overflow-y: auto;">
                 <!-- dynamic -->
             </div>
             <button type="button" class="btn btn-secondary btn-full" id="manualEntryBtn" style="margin-top: 15px;">
                 手動入力 (Manual Entry)
             </button>
-            <button type="button" class="btn btn-alert btn-full" id="closeWorkerModal" style="margin-top: 10px;">
-                閉じる (Close)
+            <div id="manualEntryRow" style="display: none; gap: 8px; margin-top: 10px;">
+                <input type="text" id="manualWorkerInput" class="tap-field" placeholder="名前を入力 (Type name)" style="flex: 1; background-image: none;">
+                <button type="button" class="btn btn-primary" id="manualWorkerAddBtn">追加 (Add)</button>
+            </div>
+            <button type="button" class="btn btn-primary btn-full" id="closeWorkerModal" style="margin-top: 10px;">
+                完了 (Done)
             </button>
         </div>
     </div>
@@ -4526,14 +5052,14 @@
                 <button type="button" class="feed-modal-close-btn" onclick="closeMaterialFeedModal()" title="閉じる">✕</button>
             </div>
 
-            <!-- VIEW 1: Scan Mode (Default - ONLY SCAN UI) -->
+            <!-- VIEW 1: Photo first (AI reads the label). The USB QR scanner still works here. -->
             <div id="feedScanView" class="feed-view-pane">
                 <div class="feed-scan-box">
-                    <div class="feed-qr-icon-wrap">
-                        <svg viewBox="0 0 24 24" width="44" height="44" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M7 17h.01"/><path d="M17 17h.01"/><path d="M7 7h.01"/><path d="M17 7h.01"/></svg>
-                    </div>
-                    <div class="feed-scan-prompt" data-i18n="fk_feed_scan_prompt">QRコードをスキャンしてください</div>
-                    <div class="feed-scan-detail" data-i18n="fk_feed_scan_detail">材料ラベルのQRコードをスキャナーで読み取ってください</div>
+                    <button type="button" class="label-photo-btn" onclick="startLabelPhoto()">
+                        <svg viewBox="0 0 24 24" width="46" height="46" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                        <span data-i18n="fk_label_photo_btn">ラベルを撮影</span>
+                    </button>
+                    <div class="feed-scan-detail" data-i18n="fk_label_photo_detail">撮影するとラベルの数値を自動で読み取ります（QRスキャナーも使用できます）</div>
                     <div id="feedScannerLiveBadge" class="feed-scanner-badge" data-i18n="fk_scanner_ready">🟢 スキャナー待機中</div>
                 </div>
 
@@ -4551,6 +5077,17 @@
 
             <!-- VIEW 2: Manual Input Mode (Shown when 手動入力 is pressed) -->
             <div id="feedManualView" class="feed-view-pane" style="display: none;">
+                <!-- Label photo + AI reading status (photo-first flow) -->
+                <div id="feedPhotoStrip" class="label-ai-strip" style="display: none;">
+                    <img id="feedPhotoThumb" class="label-ai-thumb" alt="" onclick="openLabelPhotoPreview()">
+                    <div class="label-ai-body">
+                        <div id="feedAiStatus" class="label-ai-status"></div>
+                        <div class="label-ai-actions">
+                            <button type="button" id="feedAiRetryBtn" class="label-ai-link" onclick="runLabelAi()" style="display: none;" data-i18n="fk_ai_retry">再試行</button>
+                            <button type="button" class="label-ai-link" onclick="startLabelPhoto()" data-i18n="fk_label_retake">撮り直す</button>
+                        </div>
+                    </div>
+                </div>
                 <p class="feed-manual-instruct" data-i18n="fk_feed_manual_instruct">項目をタップして数値を入力・確認してください</p>
 
                 <div class="feed-manual-fields-wrap">
@@ -4606,7 +5143,7 @@
                 </div>
 
                 <div class="feed-simple-footer">
-                    <button type="button" class="btn-cancel-flat" onclick="switchFeedModalView('scan')" data-i18n="fk_btn_back_scan">← スキャンに戻る</button>
+                    <button type="button" class="btn-cancel-flat" onclick="switchFeedModalView('scan')" data-i18n="fk_btn_back_photo">← 撮影に戻る</button>
                     <button type="button" class="btn-submit-enqueue-flat" id="btnManualProceedPhoto" onclick="proceedToCameraFromManual()" data-i18n="fk_btn_proceed_photo">写真撮影へ進む →</button>
                 </div>
             </div>

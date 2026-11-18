@@ -4,9 +4,9 @@
  */
 
 // Determine backend server URL
-//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.20:3000";
+//const serverURL = "http://192.168.0.20:3000";
 
 // -----------------------------------------------------
 // KEYENCE TR-W1000 Mini PC IP Resolution & Temperature Snapshot
@@ -157,8 +157,11 @@ async function saveRollTemperatureSnapshot(item, temperatures, setInProgress = f
 // -----------------------------------------------------
 // Date & Time Helpers
 // -----------------------------------------------------
+// Production day runs until 02:00 the next morning (JST), same as Tablet 1 and the server day close
+const DAY_CUTOFF_HOUR = 2;
+
 function getTodayDateString() {
-    const now = new Date();
+    const now = new Date(Date.now() - DAY_CUTOFF_HOUR * 3600000);
     try {
         const parts = new Intl.DateTimeFormat('ja-JP', {
             year: 'numeric',
@@ -177,6 +180,15 @@ function getTodayDateString() {
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const d = String(now.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
+}
+
+// HH:MM in JST from an epoch / ISO date ('' if missing)
+function jstHM(value) {
+    if (value === undefined || value === null || value === '') return '';
+    const raw = value && value.$date ? value.$date : value;
+    const d = typeof raw === 'number' || /^\d+$/.test(String(raw)) ? new Date(Number(raw)) : new Date(raw);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit' });
 }
 
 function shiftDateString(dateStr, offsetDays) {
@@ -442,7 +454,8 @@ function buildBrotherPrintFields(item, rollIndex, totalRolls) {
         copies: 1,
         text_品番: textHinban,
         text_背番号: textSebangou,
-        text_収容数: String(currentRoll),
+        // 収容数 = overall schedule position (#N in 生産実績・投入履歴), not the per-品番 roll index
+        text_収容数: String(getTablet1OrderIndex(item, currentRoll)),
         text_color: color,
         text_品名: hinmei,
         text_location: shippingDest ? `${shippingDest}へ` : '',
@@ -710,7 +723,7 @@ async function loadDailyScheduleForTablet2(dateStr) {
                     if (it.hinban) itemsMap.set(it.hinban, displayCode);
                     if (it.id) itemsMap.set(it.id, displayCode);
                     if (it.orderIndex !== undefined) itemsByOrder.set(Number(it.orderIndex), displayCode);
-                    itemsMap.set(`group_${it.hinban}_${idx}`, displayCode);
+                    itemsMap.set(it.groupId || `group_${it.hinban}_${idx}`, displayCode);
                 }
             });
         }
@@ -1406,8 +1419,9 @@ function renderHistoryTableView() {
             itemId: doc.itemId || doc._id || doc.queueId || String(qIdx + 1),
             mongoId: doc._id,
             orderIndex: Number(orderIndex) || (qIdx + 1),
-            startTime: doc.actualStartTime || matchedSched?.startTime || '',
-            endTime: doc.actualEndTime || matchedSched?.endTime || '',
+            // Timestamps formatted in JST first: the stored HH:MM text was written in UTC by older servers
+            startTime: jstHM(doc.startEpoch || doc.startedAt) || doc.actualStartTime || matchedSched?.startTime || '',
+            endTime: jstHM(doc.endEpoch || doc.completedAt) || doc.actualEndTime || matchedSched?.endTime || '',
             completedAt: doc.completedAt || doc.updatedAt || doc.createdAt || '',
             shippingDest: (matchedSched && matchedSched.shippingDest) || doc.shippingDest || '—',
             kizai: kizaiName,
@@ -2456,9 +2470,28 @@ function changeSelectedDate(newDate) {
 // -----------------------------------------------------
 // Bootstrapping
 // -----------------------------------------------------
+// At 02:00 move from the day that just ended to the new day (only if the tablet was on that day,
+// not on a date picked by hand). Waits while printing or a pop-up is open. Also runs on load.
+function startWorkDayWatcher() {
+    const KEY = 'firstkojo2_workday';
+    const check = () => {
+        const today = getTodayDateString();
+        const last = sessionStorage.getItem(KEY) || today;
+        if (today !== last && state.selectedDate === last) {
+            if (state.isPrinting || document.querySelector('.modal.open')) return; // retry in 30s
+            changeSelectedDate(today);
+            showToast(`日付が変わりました: ${today} の生産を表示します`, 'info', 6000);
+        }
+        sessionStorage.setItem(KEY, today);
+    };
+    check();
+    setInterval(check, 30000);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 firstKojoNippo2 initialized (Tablet 2 Wrapping & Label Printing)');
     parseUrlParams();
+    startWorkDayWatcher();
     setupEventListeners();
     // Always fetch fresh Mini PC IP from Google Sheets on page load / reload
     resolvePsaMiniPcIP(true);
