@@ -44741,7 +44741,7 @@ app.post('/api/production/print-log', async (req, res) => {
       worker: worker || '',
       machine: machine || 'PSA2',
       timestamp: timestamp || new Date().toISOString(),
-      timeStr: timeStr || new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+      timeStr: timeStr || new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
       createdAt: new Date()
     };
 
@@ -45239,7 +45239,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
     const finalStatus = (status && status !== 'queue' && status !== 'queued')
       ? status
       : (activeItem ? 'queue' : 'in-progress');
-    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
 
     // Generate guaranteed unique 6-character Base62 uniqueID
     const uniqueID = await getNextRollUniqueID(db);
@@ -45388,7 +45388,7 @@ app.post('/api/production/queue/advance', async (req, res) => {
     const targetDate = item.date || date;
     const targetMachine = item.machine || machine;
     const targetWorker = worker || item.wrapperWorker || item.worker || '';
-    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
 
     // Mark current item completed
     const completionUpdate = {
@@ -45555,7 +45555,7 @@ app.post('/api/production/queue/temperature-snapshot', async (req, res) => {
       return res.status(404).json({ error: 'Queue item not found' });
     }
 
-    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const timeNow = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
     const updateDoc = {
       updatedAt: new Date()
     };
@@ -45691,7 +45691,7 @@ app.post('/api/production/queue/skip', async (req, res) => {
                 totalRolls: nextItem.totalRolls,
                 totalMeters: nextItem.totalMeters,
                 status: 'in-progress',
-                actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+                actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
                 startEpoch: Date.now(),
                 updatedAt: new Date()
               },
@@ -45806,7 +45806,7 @@ app.post('/api/production/queue/finish-early', async (req, res) => {
         status: 'completed',
         actualRollsProduced: rollsProduced,
         finishedEarly: true,
-        actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+        actualEndTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
         endEpoch: Date.now(),
         updatedAt: new Date()
       };
@@ -45855,7 +45855,7 @@ app.post('/api/production/queue/finish-early', async (req, res) => {
               totalRolls: nextItem.totalRolls,
               totalMeters: nextItem.totalMeters,
               status: 'in-progress',
-              actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+              actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
               startEpoch: Date.now(),
               updatedAt: new Date()
             },
@@ -46081,7 +46081,7 @@ app.post('/api/production/queue/select', async (req, res) => {
             totalRolls: item.totalRolls,
             totalMeters: item.totalMeters,
             status: 'in-progress',
-            actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+            actualStartTime: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
             startEpoch: Date.now(),
             updatedAt: new Date()
           },
