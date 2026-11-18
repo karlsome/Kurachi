@@ -7345,6 +7345,145 @@ function updateHistoryBadges() {
     if (excludedBadge) excludedBadge.textContent = `${_t('fk_status_excluded')}: ${excludedCount} ${_t('fk_unit_items')}`;
 }
 
+// -----------------------------------------------------
+// History 詳細 pop-up: full production record of one roll
+// -----------------------------------------------------
+function fmtJstTime(value, withSeconds = false) {
+    if (value === undefined || value === null || value === '') return '';
+    const raw = value && value.$date ? value.$date : value;
+    const d = typeof raw === 'number' || /^\d+$/.test(String(raw)) ? new Date(Number(raw)) : new Date(raw);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', ...(withSeconds ? { second: '2-digit' } : {}) });
+}
+
+function openHistoryDetailModal(itemId, event) {
+    if (event) event.stopPropagation();
+    const it = state.historyItemsById?.[String(itemId)];
+    if (!it) return;
+    const doc = it.rawDoc || {};
+    const isLocalExcluded = !doc._id && it.type === 'excluded';
+
+    const val = (v, unit = '') => (v === undefined || v === null || v === '') ? '—' : `${escapeHtml(v)}${unit}`;
+    const row = (label, value) => `<div class="hd-row"><span class="hd-label">${label}</span><span class="hd-value">${value}</span></div>`;
+
+    const start = fmtJstTime(doc.startEpoch || doc.startedAt, true) || doc.actualStartTime || '';
+    const end = fmtJstTime(doc.endEpoch || doc.completedAt, true) || doc.actualEndTime || '';
+    const fedAt = fmtJstTime(doc.createdAt, true);
+    const duration = doc.actualDurationMins != null ? `${doc.actualDurationMins} 分` : '';
+
+    const statusLabel = {
+        completed: '✅ 完了 (Completed)',
+        'in-progress': '▶ 生産中 (In progress)',
+        active: '▶ 生産中 (In progress)',
+        queue: '⏳ 待機中 (Queued)',
+        queued: '⏳ 待機中 (Queued)',
+        excluded: '⛔ 除外 (Excluded)',
+        scrapped: '⛔ 破棄 (Scrapped)',
+        skipped: '⏭ スキップ (Skipped)'
+    }[it.status] || escapeHtml(it.status || '');
+
+    const prints = Array.isArray(doc.printHistory) ? doc.printHistory : [];
+    const printsHTML = prints.length
+        ? prints.map((p, i) => {
+            const ok = !p.manualAdvance && p.printSuccess !== false;
+            const badge = p.manualAdvance
+                ? '<span class="hd-badge warn">手動進行 (印刷なし)</span>'
+                : ok ? '<span class="hd-badge ok">印刷OK</span>' : '<span class="hd-badge ng">印刷失敗</span>';
+            return `<div class="hd-print">
+                <span class="hd-print-no">#${i + 1}</span>
+                ${badge}
+                <span>${escapeHtml(fmtJstTime(p.timestamp, true) || p.timeStr || '—')}</span>
+                <span>${p.lotNo ? `ロット ${escapeHtml(p.lotNo)}` : ''}</span>
+                <span class="hd-muted">${p.worker ? `担当 ${escapeHtml(p.worker)}` : ''}</span>
+                ${p.reason ? `<span class="hd-muted">${escapeHtml(p.reason)}</span>` : ''}
+            </div>`;
+        }).join('')
+        : '<div class="hd-muted">印刷記録なし (No print record)</div>';
+
+    const roles = doc.workerRoles && typeof doc.workerRoles === 'object' ? doc.workerRoles : null;
+    const rolesHTML = roles && WORKER_ROLES.some(r => (roles[r.key] || []).length)
+        ? WORKER_ROLES.map((r, i) => row(`${i + 1}. ${r.ja}`, (roles[r.key] || []).length ? roles[r.key].map(n => escapeHtml(n)).join('・') : '—')).join('')
+        : '';
+
+    const t = doc.temperatures || {};
+    const hasTemps = doc.temperatures || doc.ovenTemp1 != null;
+    const temp = (k) => val(doc[k] ?? t[k], '°C');
+
+    const photo = doc.imageUrl || doc.photoUrl || it.photoUrl || '';
+
+    const body = `
+        <div class="hd-head">
+            ${photo ? `<img class="hd-photo" src="${escapeHtml(photo)}" alt="" onclick="openPhotoEnlarged('${escapeHtml(photo)}')" title="タップで拡大">` : '<div class="hd-photo hd-photo-empty">写真なし</div>'}
+            <div class="hd-head-text">
+                <div class="hd-title"><span class="roll-sub-badge">#${escapeHtml(it.orderIndex || '')}</span> ${escapeHtml(it.kizai || doc.kizai || doc.hinban || '')}</div>
+                <div class="hd-sub">${escapeHtml(doc.hinban || '')}${doc.rollIndex ? ` ・ Roll ${escapeHtml(doc.rollIndex)} / ${escapeHtml(doc.totalRolls || '?')}` : ''}${doc.uniqueID ? ` ・ ID <strong>${escapeHtml(doc.uniqueID)}</strong>` : ''}</div>
+                <div class="hd-status">${statusLabel}${doc.finishedEarly ? ' <span class="hd-badge warn">早期終了</span>' : ''}${doc.startEdited ? ' <span class="hd-badge edit">✎ 開始修正済</span>' : ''}</div>
+            </div>
+        </div>
+
+        <div class="hd-time">
+            <div><div class="hd-label">開始 (Start)</div><div class="hd-time-value">${start || '—'}</div></div>
+            <div class="hd-time-arrow">→</div>
+            <div><div class="hd-label">終了 (End)</div><div class="hd-time-value">${end || '—'}</div></div>
+            <div><div class="hd-label">時間 (Duration)</div><div class="hd-time-value">${duration || '—'}</div></div>
+        </div>
+
+        <div class="hd-section">印刷 (Label printing)</div>
+        ${printsHTML}
+
+        <div class="hd-section">スキャン・入力値 (Scanned & entered)</div>
+        ${row('ロット番号', val(doc.lotNo || it.lotNo))}
+        ${row('材料QR', `<span class="hd-qr">${val(doc.rawMaterialQR || doc.qrScanned)}</span>`)}
+        ${row('総長', val(doc.socho, ' m'))}
+        ${row('S引長', val(doc.shiki, ' m'))}
+        ${row('実長', val(doc.bicho ?? doc.meters, ' m'))}
+        ${row('実巻長 (完了時)', val(doc.meters ?? doc.rollMeters, ' m'))}
+
+        <div class="hd-section">作業者 (Workers)</div>
+        ${row('投入登録 (タブレット1)', `${val(doc.feederWorker || doc.worker)}${fedAt ? ` <span class="hd-muted">${fedAt}</span>` : ''}`)}
+        ${row('包装・印刷 (タブレット2)', val(doc.wrapperWorker))}
+        ${rolesHTML}
+
+        ${hasTemps ? `
+        <div class="hd-section">開始時温度 (Start temperatures)</div>
+        ${row('炉温 1 / 2 / 3', `${temp('ovenTemp1')} / ${temp('ovenTemp2')} / ${temp('ovenTemp3')}`)}
+        ${row('周囲温度 / 湿度', `${temp('ambientTemp')} / ${val(doc.ambientHumidity ?? t.ambientHumidity, '%')}`)}
+        ` : ''}
+
+        ${isLocalExcluded ? '<div class="hd-muted" style="margin-top: 10px;">※ 投入前に除外された巻きです (Excluded before feeding — no production record)</div>' : ''}
+    `;
+
+    let overlay = document.getElementById('historyDetailOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'historyDetailOverlay';
+        overlay.className = 'hd-overlay';
+        document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `
+        <div class="hd-card" role="dialog" aria-modal="true">
+            <div class="hd-card-header">
+                <span>生産詳細 (Production details)</span>
+                <button type="button" class="hd-close" onclick="closeHistoryDetailModal()" aria-label="閉じる">✕</button>
+            </div>
+            <div class="hd-card-body">${body}</div>
+            <div class="hd-card-footer">
+                <button type="button" class="btn btn-primary btn-full" onclick="closeHistoryDetailModal()">閉じる (Close)</button>
+            </div>
+        </div>
+    `;
+    overlay.style.display = 'flex';
+    overlay.onclick = (e) => { if (e.target === overlay) closeHistoryDetailModal(); };
+}
+
+function closeHistoryDetailModal() {
+    const overlay = document.getElementById('historyDetailOverlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+        overlay.innerHTML = '';
+    }
+}
+
 function previewHistoryItem(itemId, event) {
     if (event) event.stopPropagation();
     const edits = getItemEdits();
@@ -7501,6 +7640,10 @@ function renderHistoryList() {
         return;
     }
 
+    // Keep the rendered items so the 詳細 pop-up can read the full record
+    state.historyItemsById = {};
+    filtered.forEach(it => { if (it.itemId) state.historyItemsById[String(it.itemId)] = it; });
+
     let html = '';
     filtered.forEach(it => {
         if (it.type === 'setup') {
@@ -7546,7 +7689,7 @@ function renderHistoryList() {
 
                 <div class="roll-row-right" onclick="event.stopPropagation()" style="display: flex; gap: 6px; align-items: center;">
                     ${actionHTML}
-                    <button type="button" class="btn-detail-secondary" onclick="previewHistoryItem('${it.itemId}', event)" title="${_t('fk_btn_detail')}">
+                    <button type="button" class="btn-detail-secondary" onclick="openHistoryDetailModal('${it.itemId}', event)" title="${_t('fk_btn_detail')}">
                         ${_t('fk_btn_detail')}
                     </button>
                 </div>

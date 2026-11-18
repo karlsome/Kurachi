@@ -658,6 +658,79 @@
             text-align: center;
         }
 
+        /* ---------------- History 詳細 pop-up ---------------- */
+        /* enlarged photo must open above the 詳細 pop-up */
+        #imagePreviewModal { z-index: 10070 !important; }
+
+        .hd-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10060;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            background: rgba(16, 24, 40, 0.55);
+        }
+        .hd-card {
+            width: 100%;
+            max-width: 640px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            background: #FFFFFF;
+            border-radius: 18px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+        }
+        .hd-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            border-bottom: 1px solid #E5E7EB;
+            font-weight: 800;
+            font-size: 1.05rem;
+            color: #0F172A;
+        }
+        .hd-close { width: 40px; height: 40px; border-radius: 10px; border: 1px solid #E5E7EB; background: #FFFFFF; font-size: 1rem; cursor: pointer; }
+        .hd-card-body { padding: 16px 18px; overflow-y: auto; }
+        .hd-card-footer { padding: 12px 18px; border-top: 1px solid #E5E7EB; }
+        .hd-head { display: flex; gap: 14px; align-items: flex-start; }
+        .hd-photo { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; border: 1px solid #E5E7EB; flex-shrink: 0; cursor: zoom-in; background: #F3F4F6; }
+        .hd-photo-empty { display: flex; align-items: center; justify-content: center; color: #9CA3AF; font-size: 0.8rem; cursor: default; }
+        .hd-head-text { min-width: 0; }
+        .hd-title { font-size: 1.15rem; font-weight: 800; color: #0F172A; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .hd-sub { font-size: 0.88rem; color: #475569; margin-top: 4px; }
+        .hd-status { margin-top: 6px; font-size: 0.9rem; font-weight: 700; color: #0F172A; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+        .hd-time {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr 1fr;
+            align-items: center;
+            gap: 10px;
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            text-align: center;
+        }
+        .hd-time-value { font-size: 1.35rem; font-weight: 800; color: #0F172A; font-variant-numeric: tabular-nums; }
+        .hd-time-arrow { font-size: 1.3rem; color: #94A3B8; font-weight: 800; }
+        .hd-section { margin: 16px 0 6px; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; color: #64748B; text-transform: uppercase; }
+        .hd-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid #F1F5F9; font-size: 0.92rem; }
+        .hd-label { color: #64748B; font-weight: 600; font-size: 0.85rem; }
+        .hd-value { color: #0F172A; font-weight: 700; text-align: right; min-width: 0; }
+        .hd-qr { font-family: ui-monospace, monospace; font-size: 0.8rem; word-break: break-all; }
+        .hd-muted { color: #94A3B8; font-weight: 600; font-size: 0.85rem; }
+        .hd-print { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 7px 0; border-bottom: 1px solid #F1F5F9; font-size: 0.9rem; font-weight: 600; color: #0F172A; }
+        .hd-print-no { color: #64748B; font-weight: 800; }
+        .hd-badge { font-size: 0.75rem; font-weight: 800; border-radius: 6px; padding: 2px 8px; border: 1px solid; }
+        .hd-badge.ok { background: #ECFDF5; color: #047857; border-color: #A7F3D0; }
+        .hd-badge.ng { background: #FEF2F2; color: #B91C1C; border-color: #FCA5A5; }
+        .hd-badge.warn { background: #FFFBEB; color: #B45309; border-color: #FCD34D; }
+        .hd-badge.edit { background: #F5F3FF; color: #6D28D9; border-color: #DDD6FE; }
+
         /* ---------------- In-app confirm dialog ---------------- */
         .app-dialog-overlay {
             position: fixed;
