@@ -11233,19 +11233,18 @@ const _FIN_BREAKDOWN_SOURCES = {
   kensa: { collection: 'kensaDB', ngField: 'Total_NG',     lotDated: true  }
 };
 
-// Fixed per-process defect columns (top-level fields on the submitted docs; names mirror
-// the 不良管理 screen). kensaDB is model-specific and resolved from defectDefinitions instead.
-const _FIN_FIXED_DEFECTS = {
-  press: [{ key: '疵引不良', label: '疵引不良', label_en: 'Scratch Defect' },
-          { key: '加工不良', label: '加工不良', label_en: 'Processing Defect' },
-          { key: 'その他',   label: 'その他',   label_en: 'Other' }],
-  srs:   ['くっつき・めくれ', 'シワ', '転写位置ズレ', '転写不良', '文字欠け', 'その他'].map(k => ({ key: k, label: k, label_en: '' }))
-};
-_FIN_FIXED_DEFECTS.slit = _FIN_FIXED_DEFECTS.press;
+// Per-process defect columns (top-level fields on the submitted docs) come from the
+// 不良管理 screen via processDefectDefinitions (built-in defaults + admin-added items).
+// kensaDB is model-specific and resolved from defectDefinitions instead.
+const _FIN_PROCESS_DEFECT_SOURCES = { press: 'pressDB', slit: 'slitDB', srs: 'SRSDB' };
 
 // Defect columns for one source; kensa labels come from the 背番号's model in defectDefinitions
 async function _finBreakdownDefectColumns(source, ban) {
-  if (_FIN_FIXED_DEFECTS[source]) return { columns: _FIN_FIXED_DEFECTS[source], model: '' };
+  const processKey = _FIN_PROCESS_DEFECT_SOURCES[source];
+  if (processKey) {
+    const items = await getProcessDefectItems(processKey);
+    return { columns: items.map(it => ({ key: it.jp, label: it.jp, label_en: it.en || '' })), model: '' };
+  }
   const masterDb = client.db('Sasaki_Coating_MasterDB');
   const master = await masterDb.collection('masterDB').findOne({ 背番号: ban }, { projection: { モデル: 1 } });
   const model = master?.モデル || '';
@@ -17297,6 +17296,101 @@ app.post('/defectDefinitions', async (req, res) => {
     res.json({ success: true, upsertedId: result.upsertedId, modifiedCount: result.modifiedCount });
   } catch (err) {
     console.error('Error upserting defectDefinitions:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---- Per-process defect items (pressDB / slitDB / SRSDB) ----
+// Built-in items are the field names the tablets write today; they are always present and
+// their JP key can't be renamed/removed (historical data is keyed on them). Admins may add
+// extra items and edit English labels. Stored in MasterDB.processDefectDefinitions:
+//   { process: 'pressDB', items: [{ jp, en }], updatedAt, updatedBy }
+const PROCESS_DEFECT_DEFAULTS = {
+  pressDB: [{ jp: '疵引不良', en: 'Scratch Defect' }, { jp: '加工不良', en: 'Processing Defect' }, { jp: 'その他', en: 'Other' }],
+  slitDB:  [{ jp: '疵引不良', en: 'Scratch Defect' }, { jp: '加工不良', en: 'Processing Defect' }, { jp: 'その他', en: 'Other' }],
+  SRSDB: [
+    { jp: 'くっつき・めくれ', en: 'Sticking / Peeling' }, { jp: 'シワ', en: 'Wrinkle' },
+    { jp: '転写位置ズレ', en: 'Transfer Position Shift' }, { jp: '転写不良', en: 'Transfer Defect' },
+    { jp: '文字欠け', en: 'Character Missing' }, { jp: 'その他', en: 'Other' }
+  ]
+};
+// Keys a new defect item may not use (they collide with existing document fields)
+const PROCESS_DEFECT_RESERVED_KEYS = new Set(['_id', 'Total_NG', 'SRS_Total_NG', 'Total', '背番号', '品番', '工場', 'Date', '製造ロット', 'Worker_Name', 'Spare', 'ショット数', '材料ロット']);
+
+// Built-in items first (stored EN label wins), then admin-added items in saved order
+function _mergeProcessDefectItems(processKey, storedItems = []) {
+  const defaults = PROCESS_DEFECT_DEFAULTS[processKey] || [];
+  const storedByJp = new Map((storedItems || []).filter(it => it && it.jp).map(it => [String(it.jp).trim(), it]));
+  const merged = defaults.map(d => ({ jp: d.jp, en: String(storedByJp.get(d.jp)?.en ?? d.en).trim(), builtIn: true }));
+  const defaultKeys = new Set(defaults.map(d => d.jp));
+  for (const [jp, it] of storedByJp) {
+    if (!defaultKeys.has(jp)) merged.push({ jp, en: String(it.en || '').trim(), builtIn: false });
+  }
+  return merged;
+}
+
+async function getProcessDefectItems(processKey) {
+  const doc = await client.db('Sasaki_Coating_MasterDB').collection('processDefectDefinitions').findOne({ process: processKey });
+  return _mergeProcessDefectItems(processKey, doc?.items);
+}
+
+// GET /processDefectDefinitions — all processes, or ?process=pressDB for one
+app.get('/processDefectDefinitions', async (req, res) => {
+  const { process } = req.query;
+  if (process && !PROCESS_DEFECT_DEFAULTS[process]) return res.status(400).json({ error: `Unknown process: ${process}` });
+  try {
+    await client.connect();
+    const coll = client.db('Sasaki_Coating_MasterDB').collection('processDefectDefinitions');
+    const keys = process ? [process] : Object.keys(PROCESS_DEFECT_DEFAULTS);
+    const docs = await coll.find({ process: { $in: keys } }).toArray();
+    const byProcess = new Map(docs.map(d => [d.process, d]));
+    res.json(keys.map(k => ({
+      process: k,
+      items: _mergeProcessDefectItems(k, byProcess.get(k)?.items),
+      updatedAt: byProcess.get(k)?.updatedAt || null,
+      updatedBy: byProcess.get(k)?.updatedBy || ''
+    })));
+  } catch (err) {
+    console.error('Error fetching processDefectDefinitions:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /processDefectDefinitions — replace a process's item list { process, items: [{jp, en}], username }
+app.post('/processDefectDefinitions', async (req, res) => {
+  const { process, items, username } = req.body || {};
+  if (!process || !Array.isArray(items) || !username) {
+    return res.status(400).json({ error: 'Missing required fields: process, items, username' });
+  }
+  if (!PROCESS_DEFECT_DEFAULTS[process]) return res.status(400).json({ error: `Unknown process: ${process}` });
+
+  const cleaned = [];
+  const seen = new Set();
+  for (const it of items) {
+    const jp = String(it?.jp || '').trim();
+    const en = String(it?.en || '').trim();
+    if (!jp) return res.status(400).json({ error: 'Defect name (JP) cannot be empty' });
+    if (jp.length > 40) return res.status(400).json({ error: `Defect name too long: ${jp}` });
+    if (jp.startsWith('$') || jp.includes('.')) return res.status(400).json({ error: `Defect name may not start with "$" or contain ".": ${jp}` });
+    if (/^counter-\d+$/i.test(jp) || PROCESS_DEFECT_RESERVED_KEYS.has(jp)) return res.status(400).json({ error: `Reserved name: ${jp}` });
+    if (seen.has(jp)) return res.status(400).json({ error: `Duplicate defect name: ${jp}` });
+    seen.add(jp);
+    cleaned.push({ jp, en });
+  }
+  const missing = PROCESS_DEFECT_DEFAULTS[process].map(d => d.jp).filter(jp => !seen.has(jp));
+  if (missing.length) return res.status(400).json({ error: `Built-in items cannot be removed: ${missing.join(', ')}` });
+
+  try {
+    await client.connect();
+    const coll = client.db('Sasaki_Coating_MasterDB').collection('processDefectDefinitions');
+    await coll.updateOne(
+      { process },
+      { $set: { process, items: cleaned, updatedAt: new Date(), updatedBy: username } },
+      { upsert: true }
+    );
+    res.json({ success: true, process, items: _mergeProcessDefectItems(process, cleaned) });
+  } catch (err) {
+    console.error('Error upserting processDefectDefinitions:', err);
     res.status(500).json({ error: err.message });
   }
 });
