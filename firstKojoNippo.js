@@ -2235,6 +2235,16 @@ function renderScheduleList(items, startTimeStr) {
                 return;
             }
 
+            // Same when every roll left is excluded (group = completed + excluded).
+            // The whole card goes away at once; excluded rolls are restored from the History tab.
+            const allLeftExcluded = group.items.every((rollItem, rIdx) =>
+                isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx) ||
+                getItemEdit(getItemKey(rollItem, gIdx, rIdx), rollItem).isExcluded
+            );
+            if (allLeftExcluded) {
+                return;
+            }
+
             const firstItem = remainingItems[0];
             const lastItem = remainingItems[remainingItems.length - 1];
             const orderRangeText = remainingItems.length > 1 ? `#${firstItem.orderIndex} — #${lastItem.orderIndex}` : `#${firstItem.orderIndex}`;
