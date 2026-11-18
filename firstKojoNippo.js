@@ -3,8 +3,8 @@
  * Logic for First Factory Nippo (第一工場 日報) Tablet UI
  */
 
-const serverURL = "https://kurachi.onrender.com";
-//const serverURL = "http://localhost:3000";
+//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "http://localhost:3000";
 //const serverURL = "http://192.168.0.20:3000";
 
 function getTodayDateString() {
@@ -7653,7 +7653,7 @@ async function startSetupPrompt(gIdx) {
         openSetupTimerModal();
         return;
     }
-    const okStart = await appConfirm(`「${name}」を開始しますか？`, `開始時刻を今の時刻で記録します。\n(Start "${name}" now?)`, { icon: '▶️', tone: 'amber', okLabel: '▶ 開始する (Start)', cancelLabel: 'キャンセル' });
+    const okStart = await appConfirm(`#${setupItem.orderIndex} 「${name}」を開始しますか？`, `開始時刻を今の時刻で記録します。\n(Start "${name}" now?)`, { icon: '▶️', tone: 'amber', okLabel: '▶ 開始する (Start)', cancelLabel: 'キャンセル' });
     if (!okStart) return;
 
     try {
@@ -7688,7 +7688,7 @@ async function endSetupPrompt() {
     const running = getRunningSetup();
     if (!running) return;
     const elapsedMins = Math.max(0, Math.floor((Date.now() - (Number(running.startEpoch) || Date.now())) / 60000));
-    const okEnd = await appConfirm(`「${running.name || '段替え'}」を終了しますか？`, `開始 ${running.startTime || ''} ・ 経過 ${elapsedMins} 分\n(End "${running.name || 'setup'}" now?)`, { icon: '■', tone: 'danger', okLabel: '■ 終了する (End)', cancelLabel: 'キャンセル' });
+    const okEnd = await appConfirm(`${running.orderIndex ? `#${running.orderIndex} ` : ''}「${running.name || '段替え'}」を終了しますか？`, `開始 ${running.startTime || ''} ・ 経過 ${elapsedMins} 分\n(End "${running.name || 'setup'}" now?)`, { icon: '■', tone: 'danger', okLabel: '■ 終了する (End)', cancelLabel: 'キャンセル' });
     if (!okEnd) return;
 
     try {
@@ -7813,7 +7813,9 @@ function updateSetupTimerUI() {
         const nameEl = document.getElementById('setupTimerName');
         const timeEl = document.getElementById('setupTimerElapsed');
         const metaEl = document.getElementById('setupTimerMeta');
-        if (nameEl) nameEl.textContent = running.name || '段替え';
+        if (nameEl) {
+            nameEl.innerHTML = `${running.orderIndex ? `<span class="setup-timer-order">#${escapeHtml(running.orderIndex)}</span>` : ''}${escapeHtml(running.name || '段替え')}`;
+        }
         if (timeEl) timeEl.textContent = elapsedText;
         if (metaEl) metaEl.textContent = `開始 ${running.startTime || ''}${overText ? ` ・ ${overText}` : ''}`;
     }
@@ -7821,7 +7823,7 @@ function updateSetupTimerUI() {
         bar.style.display = state.setupModalMinimized ? 'flex' : 'none';
         bar.classList.toggle('is-over', isOver);
         const barText = document.getElementById('setupTimerBarText');
-        if (barText) barText.textContent = `⏱ ${running.name || '段替え'} 実行中 ${elapsedText}${isOver ? ` (${overText})` : ''}`;
+        if (barText) barText.textContent = `⏱ ${running.orderIndex ? `#${running.orderIndex} ` : ''}${running.name || '段替え'} 実行中 ${elapsedText}${isOver ? ` (${overText})` : ''}`;
     }
     document.body.classList.toggle('has-setup-timer-bar', state.setupModalMinimized);
 }
