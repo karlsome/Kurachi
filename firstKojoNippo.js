@@ -696,6 +696,9 @@ async function fetchProductionStatus(dateStr) {
             localStorage.setItem(storageKey, JSON.stringify(stored));
             console.log(`🌐 Synced ${data.records.length} production record(s) from server for ${dateStr}`);
         }
+        if (data.success && Array.isArray(data.excludedRolls) && dateStr === state.selectedDate) {
+            state.excludesChanged = applyServerExcludes(data.excludedRolls) || state.excludesChanged;
+        }
         if (data.success && Array.isArray(data.setupRecords) && dateStr === state.selectedDate) {
             const map = {};
             data.setupRecords.forEach(rec => { if (rec.setupId) map[rec.setupId] = rec; });
@@ -1341,15 +1344,64 @@ function findRollForItemId(itemId, gIdx, rIdx) {
     return { item: null, group: null };
 }
 
+// Server is the source of truth for excludes, so every tablet shows the same 除外 state.
+// - on the server            -> excluded here too
+// - here, synced, not on server -> restored on another tablet -> clear it
+// - here, never synced       -> offline / pre-sync exclude -> kept and pushed by syncExcludedRollsForDate
+function applyServerExcludes(serverRolls) {
+    const serverIds = new Set((serverRolls || []).map(r => String(r.itemId)));
+    const edits = getItemEdits();
+    let changed = false;
+
+    serverIds.forEach(id => {
+        const e = edits[id] || {};
+        if (e.isExcluded !== true || e.excludeSynced !== true) {
+            setItemEdit(id, { isExcluded: true, excludeSynced: true });
+            changed = true;
+        }
+    });
+    Object.keys(edits).forEach(id => {
+        const e = edits[id];
+        if (e && e.isExcluded === true && e.excludeSynced === true && !serverIds.has(id)) {
+            setItemEdit(id, { isExcluded: false });
+            changed = true;
+        }
+    });
+    return changed;
+}
+
+// Another tablet excluded / restored a roll -> refresh from the server and redraw
+async function refreshExcludesFromServer({ onlyIfChanged = false } = {}) {
+    if (!state.selectedDate) return;
+    state.excludesChanged = false;
+    await fetchProductionStatus(state.selectedDate);
+    if (onlyIfChanged && !state.excludesChanged) return;
+    if (state.scheduledItems && state.scheduledItems.length > 0) {
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+    }
+    renderHistoryList();
+    updateHistoryBadges();
+}
+
+// Safety net if a live (SSE) update was missed: re-check every 30s while the tablet is visible
+setInterval(() => {
+    if (document.visibilityState === 'visible' && state.workerName) {
+        refreshExcludesFromServer({ onlyIfChanged: true });
+    }
+}, 30000);
+
 // Tell the server a roll was excluded / restored so freyaAdmin2 stops showing it as pending
 async function syncRollExcludeToServer(itemId, item, group, excluded) {
     if (!itemId || !state.selectedDate) return;
+    // Not confirmed by the server yet -> pushed again on the next schedule load
+    setItemEdit(itemId, { excludeSynced: false });
     try {
-        await fetch(`${serverURL}/api/production/roll-exclude`, {
+        const res = await fetch(`${serverURL}/api/production/roll-exclude`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ date: state.selectedDate, excluded, ...buildExcludedRollPayload(itemId, item, group) })
         });
+        if (res.ok) setItemEdit(itemId, { excludeSynced: true });
     } catch (err) {
         console.warn('Could not sync roll exclude to server:', err);
     }
@@ -1366,7 +1418,8 @@ function syncExcludedRollsForDate(groups) {
     groups.forEach((group, gIdx) => {
         (group.items || []).forEach((item, rIdx) => {
             const key = getItemKey(item, gIdx, rIdx);
-            if (getItemEdit(key, item).isExcluded) rolls.push(buildExcludedRollPayload(key, item, group));
+            const raw = getItemEdits()[key] || {};
+            if (raw.isExcluded === true && raw.excludeSynced !== true) rolls.push(buildExcludedRollPayload(key, item, group));
         });
     });
     if (rolls.length === 0) return;
@@ -1375,7 +1428,11 @@ function syncExcludedRollsForDate(groups) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date, rolls })
-    }).then(() => console.log(`🚫 Synced ${rolls.length} excluded roll(s) to server for ${date}`))
+    }).then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (date === state.selectedDate) rolls.forEach(r => setItemEdit(r.itemId, { excludeSynced: true }));
+        console.log(`🚫 Synced ${rolls.length} excluded roll(s) to server for ${date}`);
+    })
         .catch(err => {
             excludeSyncedDates.delete(date);
             console.warn('Could not sync excluded rolls:', err);
@@ -8158,6 +8215,10 @@ function handleProductionSSEEvent(data) {
     console.log('⚡ Received SSE event:', data.type, data);
     if (data.type === 'setup_update') {
         refreshSetupRecords();
+        return;
+    }
+    if (data.type === 'exclude_update') {
+        refreshExcludesFromServer();
         return;
     }
     if (data.type === 'queue_updated' || data.type === 'queue_scrapped' || data.type === 'roll_advanced' || data.type === 'queue_roll_printed') {
