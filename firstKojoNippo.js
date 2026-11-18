@@ -5420,14 +5420,6 @@ function proceedToCameraFromManual() {
         return;
     }
 
-    const socho = parseFloat(state.currentModalSocho);
-    const bicho = parseFloat(state.currentModalBicho);
-    if (!isNaN(socho) && !isNaN(bicho) && socho < bicho) {
-        const shorterMsg = _t('fk_socho_shorter_bicho') || `総長（${socho} m）が美長（${bicho} m）より短くなっています。\n数値を再確認してください。`;
-        alert(shorterMsg);
-        return;
-    }
-
     // Check priority order before proceeding to camera
     const ctx = state.currentModalRollContext;
     if (ctx && ctx.item) {
