@@ -5581,7 +5581,7 @@ async function runLabelAi() {
     // Values on screen when the AI starts: fields the worker changes meanwhile are left alone
     const before = { socho: state.currentModalSocho, shiki: state.currentModalShiki, bicho: state.currentModalBicho, lot: state.currentModalLotNo };
     state.labelAi = { status: 'busy', reqId, filled: {}, result: null, before };
-    setLabelAiStatus('busy', _t('fk_ai_reading') || 'AIがラベルを読み取り中…（このまま手動入力もできます）');
+    setLabelAiStatus('busy', _t('fk_ai_reading') || '画像を処理中…（このまま手動入力もできます）');
     updateManualDisplays();
 
     if (!navigator.onLine) {
@@ -5627,11 +5627,11 @@ function finishLabelAi(reqId, result) {
     if (!result || !result.success) {
         state.labelAi.status = 'failed';
         const kind = result && result.kind;
-        if (kind === 'quota') setLabelAiStatus('error', _t('fk_ai_quota') || 'AIの利用上限（残高）に達しました。手動で入力してください');
-        else if (kind === 'auth') setLabelAiStatus('error', _t('fk_ai_auth') || 'AIが設定されていません。手動で入力してください');
-        else if (kind === 'timeout') setLabelAiStatus('error', _t('fk_ai_timeout') || 'AIの応答がありません。手動で入力するか再試行してください');
-        else if (kind === 'offline') setLabelAiStatus('error', _t('fk_ai_offline') || 'オフラインのためAI読取できません。手動で入力してください');
-        else setLabelAiStatus('error', _t('fk_ai_failed') || 'AI読取に失敗しました。手動で入力するか再試行してください');
+        if (kind === 'quota') setLabelAiStatus('error', _t('fk_ai_quota') || '画像処理の利用上限に達しました。手動で入力してください');
+        else if (kind === 'auth') setLabelAiStatus('error', _t('fk_ai_auth') || '画像処理が設定されていません。手動で入力してください');
+        else if (kind === 'timeout') setLabelAiStatus('error', _t('fk_ai_timeout') || '画像処理の応答がありません。手動で入力するか再試行してください');
+        else if (kind === 'offline') setLabelAiStatus('error', _t('fk_ai_offline') || 'オフラインのため画像処理できません。手動で入力してください');
+        else setLabelAiStatus('error', _t('fk_ai_failed') || '画像処理に失敗しました。手動で入力するか再試行してください');
         updateManualDisplays();
         return;
     }
@@ -5668,8 +5668,8 @@ function finishLabelAi(reqId, result) {
     const usedQr = ['totalLengthSource', 'sDrawLengthSource', 'netLengthSource', 'dateSource'].some(k => v[k] === 'qr');
     const qrNote = usedQr ? ' ' + (_t('fk_ai_qr_used') || '（一部QRから）') : '';
     let msg = missing.length
-        ? (_t('fk_ai_partial') || 'AIが読み取れなかった項目: {fields} — タップして入力してください').replace('{fields}', missing.join('・'))
-        : (_t('fk_ai_done') || 'AI読取完了 — 数値を確認してください');
+        ? (_t('fk_ai_partial') || '読み取れなかった項目: {fields} — タップして入力してください').replace('{fields}', missing.join('・'))
+        : (_t('fk_ai_done') || '画像処理完了 — 数値が正しいか確認してください');
     msg += qrNote;
 
     // Label's base code vs the planned material (e.g. HM26 vs HM26/〇確（310D ﾓﾙﾄA）)
@@ -5703,7 +5703,7 @@ function buildLabelReadRecord() {
 
 function proceedToCameraFromManual() {
     if (state.labelAi && state.labelAi.status === 'busy') {
-        showToast('⏳ ' + (_t('fk_ai_wait') || 'AIが読み取り中です。完了まで少しお待ちください'), 'info', 2200);
+        showToast('⏳ ' + (_t('fk_ai_wait') || '画像を処理中です。完了まで少しお待ちください'), 'info', 2200);
         return;
     }
     const validation = validateModalRequiredFields();
