@@ -658,6 +658,31 @@
             text-align: center;
         }
 
+        .btn-confirm-start {
+            background: #10B981 !important;
+            border-color: #10B981 !important;
+            color: #FFFFFF !important;
+            font-weight: 800;
+            animation: confirmStartPulse 1.6s ease-in-out infinite;
+        }
+
+        @keyframes confirmStartPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+            50% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+        }
+
+        .queue-start-note {
+            margin-top: 4px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #B45309;
+            background: #FEF3C7;
+            border: 1px solid #FCD34D;
+            border-radius: 6px;
+            padding: 3px 8px;
+            display: inline-block;
+        }
+
         .worker-name-btn.selected {
             background: var(--blue);
             border-color: var(--blue);

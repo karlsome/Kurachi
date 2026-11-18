@@ -6528,6 +6528,13 @@ function renderStagingQueue() {
             }
         }
         const orderDisplay = orderIdx ? `#${orderIdx}` : `#${activeItem.rollIndex || 1}`;
+        // First roll of a run is auto-activated on enqueue while the machine is still being prepared
+        const needsStartConfirm = activeItem.startedBy === 'enqueue' && activeItem.startConfirmed !== true;
+        const startNote = needsStartConfirm
+            ? `<div class="queue-start-note">⏸ 準備中 — 機械の準備ができたら「生産開始」を押してください (Preparing — press Start when ready)</div>`
+            : (activeItem.startConfirmed === true && activeItem.actualStartTime
+                ? `<div style="font-size: 0.78rem; color: #059669; font-weight: 700; margin-top: 3px;">▶ 開始 ${activeItem.actualStartTime}</div>`
+                : '');
 
         rowsHTML += `
             <div class="queue-flat-row is-active" data-queue-id="${activeItem._id}">
@@ -6544,9 +6551,14 @@ function renderStagingQueue() {
                             <span>${_t('fk_lot_label')}<strong>${activeItem.lotNo || '-'}</strong></span>
                             ${activeItem.shippingDest ? `<span>• ${_t('fk_shipping_dest')}<strong>${activeItem.shippingDest}</strong></span>` : ''}
                         </div>
+                        ${startNote}
                     </div>
                 </div>
                 <div class="queue-flat-right" onclick="event.stopPropagation()">
+                    ${needsStartConfirm ? `
+                    <button type="button" class="btn-staging-action btn-confirm-start" onclick="confirmFirstRollStart('${activeItem._id}')" title="準備が終わったら押してください (Press when the machine is ready)">
+                        ▶ 生産開始 (Start)
+                    </button>` : ''}
                     <button type="button" class="btn-staging-action btn-staging-advance" onclick="advanceQueueItemPrompt('${activeItem._id}')" title="${_t('fk_btn_advance')}">
                         ${_t('fk_btn_advance')}
                     </button>
@@ -6611,6 +6623,26 @@ function renderStagingQueue() {
 
     queueContainer.innerHTML = rowsHTML;
     initQueueDragAndDrop();
+}
+
+// Re-stamp the real production start of the first roll (after 準備 / machine setup)
+async function confirmFirstRollStart(queueId) {
+    if (!queueId) return;
+    if (!confirm('生産を開始しますか？\n開始時刻を今の時刻で記録します。\n\n(Start production now? The start time will be recorded as now.)')) return;
+    try {
+        const res = await fetch(`${serverURL}/api/production/queue/confirm-start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ _id: queueId, worker: state.workerName || '' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        showToast(`生産開始を記録しました (${data.item?.actualStartTime || ''})`, 'success', 2500);
+        await fetchProductionQueue();
+    } catch (err) {
+        console.error('Could not confirm start:', err);
+        showToast(`開始の記録に失敗しました: ${err.message}`, 'error', 3500);
+    }
 }
 
 // -----------------------------------------------------

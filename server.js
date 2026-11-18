@@ -45376,6 +45376,11 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       newItem.startedAt = new Date();
       newItem.actualStartTime = timeNow;
       newItem.startEpoch = Date.now();
+      // Became active just by being fed into an empty queue (shift start / after a gap).
+      // The machine is usually still being prepared, so the tablet shows a 生産開始 button
+      // that re-stamps the real start via /api/production/queue/confirm-start.
+      newItem.startedBy = 'enqueue';
+      newItem.startConfirmed = false;
     }
 
     // Insert into submittedDB.firstFactoryProduction
@@ -45421,6 +45426,50 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
 });
 
 // Advance roll / lot (from in-progress to completed, and activate next queue item)
+// 第一工場: operator presses 生産開始 on the first roll of a run -> real start time
+app.post('/api/production/queue/confirm-start', async (req, res) => {
+  try {
+    const { _id, worker } = req.body || {};
+    if (!_id) return res.status(400).json({ error: '_id is required' });
+
+    const db = client.db('submittedDB');
+    const productionCol = db.collection('firstFactoryProduction');
+    const queueCol = db.collection('firstFactoryQueue');
+
+    let filter;
+    try { filter = { _id: new ObjectId(_id) }; } catch { filter = { _id }; }
+
+    const item = await productionCol.findOne(filter) || await queueCol.findOne(filter);
+    if (!item) return res.status(404).json({ error: 'Queue item not found' });
+    if (item.status !== 'in-progress' && item.status !== 'active') {
+      return res.status(409).json({ error: 'Roll is not in progress' });
+    }
+
+    const now = Date.now();
+    const update = {
+      startedAt: new Date(now),
+      startEpoch: now,
+      actualStartTime: new Date(now).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
+      startConfirmed: true,
+      startConfirmedBy: worker || '',
+      // keep the original auto-start for reference
+      autoStartEpoch: item.autoStartEpoch || item.startEpoch || null,
+      updatedAt: new Date()
+    };
+    await productionCol.updateOne({ _id: item._id }, { $set: update });
+    await queueCol.updateOne({ _id: item._id }, { $set: update });
+
+    broadcastProductionEvent({ type: 'queue_updated', date: item.date, machine: item.machine, _id: item._id, status: item.status });
+    broadcastProductionEvent({ type: 'schedule_update', date: item.date });
+
+    console.log(`▶️ Confirmed real start for [${item.hinban || item.groupId}] Roll #${item.rollIndex} at ${update.actualStartTime} by ${worker || '?'}`);
+    res.json({ success: true, item: { ...item, ...update } });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/queue/confirm-start:', error);
+    res.status(500).json({ error: 'Failed to confirm start' });
+  }
+});
+
 app.post('/api/production/queue/advance', async (req, res) => {
   try {
     const {
