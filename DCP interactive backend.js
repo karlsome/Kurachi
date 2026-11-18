@@ -1034,6 +1034,8 @@ async function fetchProductDetails() {
     // Populate fields
     document.getElementById("product-number").value = data.品番 || "";
     document.getElementById("model").value = data.モデル || "";
+    // Dynamic press defect buttons (non-SCNA): load this model's 不良管理 list
+    if (window.DCPDefects && typeof window.DCPDefects.onProduct === 'function') window.DCPDefects.onProduct(data);
     document.getElementById("shape").value = data.形状 || "";
     document.getElementById("R-L").value = data["R/L"] || "";
     document.getElementById("material").value = data.材料 || "";
@@ -5280,6 +5282,9 @@ function resetForm() {
       }
     });
 
+    // Clear dynamic press defect counts (non-SCNA)
+    if (window.DCPDefects && typeof window.DCPDefects.reset === 'function') window.DCPDefects.reset();
+
     // Clear counters with unique prefix
     for (let i = 1; i <= 20; i++) { // Adjusted loop to clear all counter values
       const key = `${uniquePrefix}counter-${i}`;
@@ -7489,7 +7494,9 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     const 疵引不良 = parseInt(document.getElementById('counter-18').value, 10) || 0;
     const 加工不良 = parseInt(document.getElementById('counter-19').value, 10) || 0;
     const その他 = parseInt(document.getElementById('counter-20').value, 10) || 0;
-    const Total_NG = 疵引不良 + 加工不良 + その他;
+    // Dynamic press defects (non-SCNA): NG comes from the 不良管理 list instead of counter-18/19/20
+    const dynDefects = (window.DCPDefects && window.DCPDefects.active) ? window.DCPDefects : null;
+    const Total_NG = dynDefects ? dynDefects.total() : 疵引不良 + 加工不良 + その他;
     const Total_PressDB = Process_Quantity - Total_NG;
     const rawWorker = document.getElementById('Machine Operator')?.value || '';
     const Worker_Name = (function (val) {
@@ -7937,6 +7944,14 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       // Include toggle state and counter data for kensaDB
       isToggleChecked: isToggleChecked
     };
+
+    // Dynamic press defects: per-defect counts by id (+ label snapshot); legacy fixed fields are not sent
+    if (dynDefects) {
+      dcpSubmissionData.Defects = dynDefects.payload();
+      delete dcpSubmissionData.疵引不良;
+      delete dcpSubmissionData.加工不良;
+      delete dcpSubmissionData.その他;
+    }
 
     // Per-lot production tracking (pressDB only, additive): shots / meters /
     // pieces per material lot. ショット数 is overwritten with the auto-summed
@@ -8787,6 +8802,9 @@ function updateTotal() {
     const counterValue = parseInt(document.getElementById(`counter-${i}`).value, 10) || 0;
     totalNG += counterValue;
   }
+
+  // Dynamic press defects (non-SCNA; counter-18/19/20 stay 0 while active)
+  if (window.DCPDefects && window.DCPDefects.active) totalNG += window.DCPDefects.total();
 
   // Update the Total_NG field
   const totalNGElement = document.getElementById('Total_NG');

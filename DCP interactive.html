@@ -4383,7 +4383,15 @@
             html += row(_t('submit_lbl_qty'), values.processQty, missingPc ? edit(3, 'ProcessQuantity') : '');
             html += row(_t('submit_lbl_shots'), values.shotCount, `<button type="button" class="row-edit-btn" onclick="if(window.openShotEditModal) window.openShotEditModal();">${_t('submit_edit_btn')}</button>`);
             html += row(_t('submit_lbl_material_lot'), (values.materialLot || '---'), edit(3, '材料ロット'));
-            html += row(_t('submit_lbl_defects'), _t('submit_lbl_defect_pull') + ': ' + values.defectsPull + ' | ' + _t('submit_lbl_defect_process') + ': ' + values.defectsProcess + ' | ' + _t('submit_lbl_defect_other') + ': ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(3, 'counter-box-18'));
+            if (window.DCPDefects && window.DCPDefects.active) {
+                // Dynamic press defects: list only the defects that were counted
+                const isEn = (localStorage.getItem('appLanguage') || 'ja') === 'en';
+                const counted = window.DCPDefects.payload().filter(d => d.count > 0)
+                    .map(d => ((isEn && d.en) ? d.en : d.jp) + ': ' + d.count).join(' | ');
+                html += row(_t('submit_lbl_defects'), (counted || '0') + ' (NG: ' + values.totalNG + ')', edit(3, window.DCPDefects.editTargetId));
+            } else {
+                html += row(_t('submit_lbl_defects'), _t('submit_lbl_defect_pull') + ': ' + values.defectsPull + ' | ' + _t('submit_lbl_defect_process') + ': ' + values.defectsProcess + ' | ' + _t('submit_lbl_defect_other') + ': ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(3, 'counter-box-18'));
+            }
             if (window.SCNA && SCNA.defectSummaryHtml) { const dh = SCNA.defectSummaryHtml(); if (dh) html += row('', '<div style="font-size:.85rem;">' + dh + '</div>'); }
             html += row(_t('submit_lbl_good_total'), '<span style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span>');
             html += row(_t('submit_lbl_cycle_check'), _t('submit_lbl_first_check') + ': ' + values.photosHatsumono + ' | ' + _t('submit_lbl_last_check') + ': ' + values.photosAtomono);
@@ -5902,6 +5910,8 @@
     <script>
         // NC add-on (AOL cutters outside SCNA: JSON send to machine + live cycle count). It stays idle on other machines.
         if (new URLSearchParams(location.search).get('filter') !== 'SCNA') document.write('<script src="DCP interactive NC.js?v=nc1"><\/script>');
+        // Dynamic press defect buttons from 不良管理 (non-SCNA only)
+        if (new URLSearchParams(location.search).get('filter') !== 'SCNA') document.write('<script src="DCP interactive defects.js?v=df1"><\/script>');
     </script>
     <script src="html5-qrcode.min.js"></script>
 
@@ -7269,6 +7279,7 @@
                             totalNG += parseInt(counterEl.value, 10) || 0;
                         }
                     }
+                    if (window.DCPDefects && window.DCPDefects.active) totalNG += window.DCPDefects.total();
 
                     const base = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
 
