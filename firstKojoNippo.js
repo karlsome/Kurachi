@@ -810,7 +810,8 @@ function groupScheduledItems(items) {
         // item.groupId (fixed by the server once the list is edited) keeps two moved groups of the same
         // hinban apart and keeps the id stable when the group changes position.
         if (currentGroup && currentGroup.type === 'hinban' && currentGroup.hinban === item.hinban &&
-            (!item.groupId || item.groupId === currentGroup.groupId)) {
+            (!item.groupId || item.groupId === currentGroup.groupId) &&
+            (item.sourceDate || '') === (currentGroup.items[0].sourceDate || '')) {
             currentGroup.items.push(item);
             currentGroup.totalDuration += Number(item.duration) || 0;
             currentGroup.totalMeters += Number(item.meters) || 0;
@@ -2392,7 +2393,12 @@ function renderScheduleList(items, startTimeStr) {
                         <div class="batch-header-left">
                             <span class="batch-order-range">${orderRangeText}</span>
                             <div class="batch-title-and-meta">
-                                <div class="batch-hinban-title">${kizaiCode}</div>
+                                <div class="batch-hinban-title">${kizaiCode}${(() => {
+                                    // Rolls added in freyaAdmin2 from another date's plan: "11/20分"
+                                    const src = group.items[0]?.sourceDate;
+                                    if (!src || src === state.selectedDate) return '';
+                                    return ` <span class="source-date-tag" title="${escapeHtml(src)} の計画から追加">${Number(src.slice(5, 7))}/${Number(src.slice(8, 10))}分</span>`;
+                                })()}</div>
                                 <div class="batch-chips-row">
                                     <span class="batch-time-text">${group.startTime} - ${group.endTime}</span>
                                     ${destText}

@@ -46833,8 +46833,10 @@ function stampScheduleGroupIds(order) {
   let cur = null;
   (order || []).forEach((item, idx) => {
     if (!item || item.type === 'setup') { cur = null; return; }
-    const joins = cur && cur.hinban === item.hinban && (!item.groupId || item.groupId === cur.groupId);
-    if (!joins) cur = { hinban: item.hinban, groupId: item.groupId || `group_${item.hinban}_${idx}` };
+    // Rolls of the same 品番 taken from another date's plan (sourceDate) form their own group
+    const src = item.sourceDate || '';
+    const joins = cur && cur.hinban === item.hinban && cur.src === src && (!item.groupId || item.groupId === cur.groupId);
+    if (!joins) cur = { hinban: item.hinban, src, groupId: item.groupId || `group_${item.hinban}_${idx}` };
     item.groupId = cur.groupId;
   });
   return order;
@@ -46884,6 +46886,32 @@ app.post('/api/production/schedule', async (req, res) => {
   } catch (error) {
     console.error('Error saving schedule:', error);
     res.status(500).json({ error: 'Failed to save schedule' });
+  }
+});
+
+// Which daily lists use the Excel plan of `date`: rolls with sourceDate = date on other days,
+// plus the date's own list (rolls without sourceDate). freyaAdmin2 hides those from Available.
+app.get('/api/production/schedule/by-source', async (req, res) => {
+  try {
+    const date = String(req.query.date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+    const month = date.slice(0, 7);
+    const day = Number(date.slice(8, 10));
+    const docs = await client.db('submittedDB').collection('firstFactorySchedule').find(
+      { type: 'dailySchedule', $or: [{ 'scheduleOrder.sourceDate': date }, { month, date: day }] },
+      { projection: { month: 1, date: 1, scheduleOrder: 1 } }
+    ).toArray();
+    const usage = docs.map(doc => {
+      const dateStr = scheduleDateString(doc.month, doc.date);
+      const hinbans = [...new Set((doc.scheduleOrder || [])
+        .filter(i => i && i.type !== 'setup' && i.hinban && (i.sourceDate ? i.sourceDate === date : dateStr === date))
+        .map(i => i.hinban))];
+      return { dateStr, hinbans };
+    }).filter(u => u.hinbans.length);
+    res.json({ success: true, usage });
+  } catch (error) {
+    console.error('❌ Error in GET /api/production/schedule/by-source:', error);
+    res.status(500).json({ error: 'Failed to read schedule usage' });
   }
 });
 
