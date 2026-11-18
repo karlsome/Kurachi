@@ -11233,18 +11233,19 @@ const _FIN_BREAKDOWN_SOURCES = {
   kensa: { collection: 'kensaDB', ngField: 'Total_NG',     lotDated: true  }
 };
 
-// Per-process defect columns (top-level fields on the submitted docs) come from the
-// 不良管理 screen via processDefectDefinitions (built-in defaults + admin-added items).
-// kensaDB is model-specific and resolved from defectDefinitions instead.
-const _FIN_PROCESS_DEFECT_SOURCES = { press: 'pressDB', slit: 'slitDB', srs: 'SRSDB' };
+// Fixed per-process defect columns (top-level fields on the submitted docs; names mirror
+// the 不良管理 screen). kensaDB is model-specific and resolved from defectDefinitions instead.
+const _FIN_FIXED_DEFECTS = {
+  press: [{ key: '疵引不良', label: '疵引不良', label_en: 'Scratch Defect' },
+          { key: '加工不良', label: '加工不良', label_en: 'Processing Defect' },
+          { key: 'その他',   label: 'その他',   label_en: 'Other' }],
+  srs:   ['くっつき・めくれ', 'シワ', '転写位置ズレ', '転写不良', '文字欠け', 'その他'].map(k => ({ key: k, label: k, label_en: '' }))
+};
+_FIN_FIXED_DEFECTS.slit = _FIN_FIXED_DEFECTS.press;
 
 // Defect columns for one source; kensa labels come from the 背番号's model in defectDefinitions
 async function _finBreakdownDefectColumns(source, ban) {
-  const processKey = _FIN_PROCESS_DEFECT_SOURCES[source];
-  if (processKey) {
-    const items = await getProcessDefectItems(processKey);
-    return { columns: items.map(it => ({ key: it.jp, label: it.jp, label_en: it.en || '' })), model: '' };
-  }
+  if (_FIN_FIXED_DEFECTS[source]) return { columns: _FIN_FIXED_DEFECTS[source], model: '' };
   const masterDb = client.db('Sasaki_Coating_MasterDB');
   const master = await masterDb.collection('masterDB').findOne({ 背番号: ban }, { projection: { モデル: 1 } });
   const model = master?.モデル || '';
@@ -17300,62 +17301,218 @@ app.post('/defectDefinitions', async (req, res) => {
   }
 });
 
-// ---- Per-process defect items (pressDB / slitDB / SRSDB) ----
-// Built-in items are the field names the tablets write today; they are always present and
-// their JP key can't be renamed/removed (historical data is keyed on them). Admins may add
-// extra items, edit English labels and reorder the list (saved order is the display order). Stored in MasterDB.processDefectDefinitions:
-//   { process: 'pressDB', items: [{ jp, en }], updatedAt, updatedBy }
-const PROCESS_DEFECT_DEFAULTS = {
-  pressDB: [{ jp: '疵引不良', en: 'Scratch Defect' }, { jp: '加工不良', en: 'Processing Defect' }, { jp: 'その他', en: 'Other' }],
-  slitDB:  [{ jp: '疵引不良', en: 'Scratch Defect' }, { jp: '加工不良', en: 'Processing Defect' }, { jp: 'その他', en: 'Other' }],
+// ---- Defect master + per-process lists + per-model differences (不良管理) ----
+// MasterDB collections:
+//   defectCatalog            { id, jp, en, system?, deleted, createdAt, updatedAt, updatedBy }
+//   processDefectDefinitions { process, items: [id], updatedAt, updatedBy }   (base list, その他 last)
+//   modelDefectOverrides     { process, model, hidden: [id], extras: [id], updatedAt, updatedBy }
+// Tablets read the resolved list: base − hidden + extras, その他 always last.
+// Submissions store their own label snapshot, so renaming a master item never rewrites history.
+const DEFECT_PROCESSES = ['kensaDB', 'pressDB', 'slitDB', 'SRSDB'];
+const DEFECT_OTHER_ID = 'other';
+const DEFECT_SEED_MODEL_KENSA = '255D'; // kensa base list is seeded from this model's counter names
+const DEFECT_SEED_PROCESS_ITEMS = {
+  pressDB: [{ jp: '疵引不良', en: 'Scratch Defect' }, { jp: '加工不良', en: 'Processing Defect' }],
+  slitDB:  [{ jp: '疵引不良', en: 'Scratch Defect' }, { jp: '加工不良', en: 'Processing Defect' }],
   SRSDB: [
     { jp: 'くっつき・めくれ', en: 'Sticking / Peeling' }, { jp: 'シワ', en: 'Wrinkle' },
     { jp: '転写位置ズレ', en: 'Transfer Position Shift' }, { jp: '転写不良', en: 'Transfer Defect' },
-    { jp: '文字欠け', en: 'Character Missing' }, { jp: 'その他', en: 'Other' }
+    { jp: '文字欠け', en: 'Character Missing' }
   ]
 };
-// Keys a new defect item may not use (they collide with existing document fields)
-const PROCESS_DEFECT_RESERVED_KEYS = new Set(['_id', 'Total_NG', 'SRS_Total_NG', 'Total', '背番号', '品番', '工場', 'Date', '製造ロット', 'Worker_Name', 'Spare', 'ショット数', '材料ロット']);
 
-// Items in the saved order (admins can reorder), flagging built-ins; any built-in missing
-// from the stored list (e.g. nothing saved yet) is appended with its default label.
-function _mergeProcessDefectItems(processKey, storedItems = []) {
-  const defaults = PROCESS_DEFECT_DEFAULTS[processKey] || [];
-  const defaultByJp = new Map(defaults.map(d => [d.jp, d]));
-  const merged = [];
-  const seen = new Set();
-  for (const it of storedItems || []) {
-    const jp = String(it?.jp || '').trim();
-    if (!jp || seen.has(jp)) continue;
-    seen.add(jp);
-    merged.push({ jp, en: String(it.en ?? defaultByJp.get(jp)?.en ?? '').trim(), builtIn: defaultByJp.has(jp) });
-  }
-  for (const d of defaults) {
-    if (!seen.has(d.jp)) merged.push({ jp: d.jp, en: d.en, builtIn: true });
-  }
-  return merged;
+function _defectColls() {
+  const db = client.db('Sasaki_Coating_MasterDB');
+  return {
+    catalog: db.collection('defectCatalog'),
+    process: db.collection('processDefectDefinitions'),
+    overrides: db.collection('modelDefectOverrides'),
+    legacyKensa: db.collection('defectDefinitions')
+  };
 }
 
-async function getProcessDefectItems(processKey) {
-  const doc = await client.db('Sasaki_Coating_MasterDB').collection('processDefectDefinitions').findOne({ process: processKey });
-  return _mergeProcessDefectItems(processKey, doc?.items);
+// Seeded items get a deterministic id from their name so concurrent seeding can't duplicate them
+function _seedDefectId(jp) {
+  return 'd_' + require('crypto').createHash('sha1').update(String(jp)).digest('hex').slice(0, 10);
+}
+function _newDefectId() {
+  return 'd_' + require('crypto').randomBytes(6).toString('hex');
 }
 
-// GET /processDefectDefinitions — all processes, or ?process=pressDB for one
-app.get('/processDefectDefinitions', async (req, res) => {
-  const { process } = req.query;
-  if (process && !PROCESS_DEFECT_DEFAULTS[process]) return res.status(400).json({ error: `Unknown process: ${process}` });
+function _cleanDefectName(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+// Ensures a non-deleted catalog item named `jp` exists; returns its id
+async function _ensureCatalogItem(colls, jp, en, username) {
+  const name = _cleanDefectName(jp);
+  if (!name) return null;
+  if (name === 'その他') return DEFECT_OTHER_ID;
+  const existing = await colls.catalog.findOne({ jp: name, deleted: { $ne: true } });
+  if (existing) return existing.id;
+  const id = _seedDefectId(name);
+  const now = new Date();
+  await colls.catalog.updateOne(
+    { id },
+    { $setOnInsert: { id, jp: name, en: _cleanDefectName(en), deleted: false, createdAt: now, updatedAt: now, updatedBy: username } },
+    { upsert: true }
+  );
+  return id;
+}
+
+// One-time seed (idempotent): その他, press/slit/SRS defaults, 255D kensa names. Also converts any
+// processDefectDefinitions docs saved in the earlier {jp, en} shape into id lists.
+let _defectSeedPromise = null;
+function ensureDefectCatalogSeeded() {
+  if (!_defectSeedPromise) {
+    _defectSeedPromise = _seedDefectCatalog().catch(err => { _defectSeedPromise = null; throw err; });
+  }
+  return _defectSeedPromise;
+}
+
+async function _seedDefectCatalog() {
+  await client.connect();
+  const colls = _defectColls();
+  const now = new Date();
+  await colls.catalog.updateOne(
+    { id: DEFECT_OTHER_ID },
+    { $setOnInsert: { id: DEFECT_OTHER_ID, jp: 'その他', en: 'Other', system: true, deleted: false, createdAt: now, updatedAt: now, updatedBy: 'system' } },
+    { upsert: true }
+  );
+
+  for (const processKey of DEFECT_PROCESSES) {
+    const doc = await colls.process.findOne({ process: processKey });
+    const legacyShape = doc && Array.isArray(doc.items) && doc.items.some(it => it && typeof it === 'object');
+    if (doc && !legacyShape) continue; // already an id list
+
+    let source;
+    if (legacyShape) {
+      source = doc.items.filter(it => it && it.jp);
+    } else if (processKey === 'kensaDB') {
+      const def = await colls.legacyKensa.findOne({ モデル: DEFECT_SEED_MODEL_KENSA });
+      source = Array.from({ length: 12 }, (_, i) => ({
+        jp: def?.counters?.[`counter-${i + 1}`], en: def?.counters_en?.[`counter-${i + 1}`]
+      })).filter(it => _cleanDefectName(it.jp));
+      if (!def) console.warn(`⚠️ defect seed: no defectDefinitions for model ${DEFECT_SEED_MODEL_KENSA}; kensa base list starts with その他 only`);
+    } else {
+      source = DEFECT_SEED_PROCESS_ITEMS[processKey] || [];
+    }
+
+    const ids = [];
+    for (const it of source) {
+      const id = await _ensureCatalogItem(colls, it.jp, it.en, 'system');
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+    await colls.process.updateOne(
+      { process: processKey },
+      { $set: { process: processKey, items: _withOtherLast(ids), updatedAt: now, updatedBy: doc?.updatedBy || 'system' } },
+      { upsert: true }
+    );
+  }
+}
+
+function _withOtherLast(ids = []) {
+  return [...ids.filter(id => id !== DEFECT_OTHER_ID), DEFECT_OTHER_ID];
+}
+
+function _uniqueStrings(list) {
+  return [...new Set((Array.isArray(list) ? list : []).map(v => String(v || '').trim()).filter(Boolean))];
+}
+
+// base − hidden + extras, その他 last; deleted catalog items are skipped
+function resolveDefectList(baseIds, override, catalogById) {
+  const hidden = new Set(override?.hidden || []);
+  const ids = [];
+  for (const id of baseIds || []) if (!hidden.has(id) && id !== DEFECT_OTHER_ID && !ids.includes(id)) ids.push(id);
+  for (const id of override?.extras || []) if (id !== DEFECT_OTHER_ID && !ids.includes(id)) ids.push(id);
+  ids.push(DEFECT_OTHER_ID);
+  return ids
+    .map(id => catalogById.get(id))
+    .filter(it => it && (it.id === DEFECT_OTHER_ID || !it.deleted))
+    .map(it => ({ id: it.id, jp: it.jp, en: it.en || '' }));
+}
+
+function _defectUsername(req) {
+  return String(req.body?.username || '').trim();
+}
+
+// GET /defectCatalog — every master item (deleted ones flagged, for history/restore)
+app.get('/defectCatalog', async (req, res) => {
   try {
-    await client.connect();
-    const coll = client.db('Sasaki_Coating_MasterDB').collection('processDefectDefinitions');
-    const keys = process ? [process] : Object.keys(PROCESS_DEFECT_DEFAULTS);
-    const docs = await coll.find({ process: { $in: keys } }).toArray();
+    await ensureDefectCatalogSeeded();
+    const items = await _defectColls().catalog.find({}, { projection: { _id: 0 } }).sort({ createdAt: 1 }).toArray();
+    res.json(items);
+  } catch (err) {
+    console.error('Error fetching defectCatalog:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /defectCatalog — { action: 'create'|'update'|'delete'|'restore', id?, jp?, en?, username }
+app.post('/defectCatalog', async (req, res) => {
+  const { action, id } = req.body || {};
+  const username = _defectUsername(req);
+  if (!username) return res.status(400).json({ error: 'Missing username' });
+  try {
+    await ensureDefectCatalogSeeded();
+    const colls = _defectColls();
+    const now = new Date();
+
+    const checkName = async (jp, selfId) => {
+      if (!jp) return 'Defect name (JP) cannot be empty';
+      if (jp.length > 40) return `Defect name too long: ${jp}`;
+      const dup = await colls.catalog.findOne({ jp, deleted: { $ne: true }, id: { $ne: selfId || null } });
+      return dup ? `Defect already exists: ${jp}` : '';
+    };
+
+    if (action === 'create') {
+      const jp = _cleanDefectName(req.body.jp);
+      const en = _cleanDefectName(req.body.en);
+      const problem = await checkName(jp);
+      if (problem) return res.status(400).json({ error: problem });
+      const item = { id: _newDefectId(), jp, en, deleted: false, createdAt: now, updatedAt: now, updatedBy: username };
+      await colls.catalog.insertOne({ ...item });
+      return res.json({ success: true, item });
+    }
+
+    const current = id ? await colls.catalog.findOne({ id }) : null;
+    if (!current) return res.status(404).json({ error: `Defect not found: ${id}` });
+    if (current.system && action !== 'update') return res.status(400).json({ error: 'その他 cannot be deleted' });
+
+    if (action === 'update') {
+      const jp = current.system ? current.jp : _cleanDefectName(req.body.jp);
+      const en = _cleanDefectName(req.body.en);
+      const problem = current.system ? '' : await checkName(jp, id);
+      if (problem) return res.status(400).json({ error: problem });
+      await colls.catalog.updateOne({ id }, { $set: { jp, en, updatedAt: now, updatedBy: username } });
+    } else if (action === 'delete') {
+      await colls.catalog.updateOne({ id }, { $set: { deleted: true, deletedAt: now, updatedAt: now, updatedBy: username } });
+    } else if (action === 'restore') {
+      const problem = await checkName(current.jp, id);
+      if (problem) return res.status(400).json({ error: problem });
+      await colls.catalog.updateOne({ id }, { $set: { deleted: false, updatedAt: now, updatedBy: username }, $unset: { deletedAt: '' } });
+    } else {
+      return res.status(400).json({ error: `Unknown action: ${action}` });
+    }
+    const item = await colls.catalog.findOne({ id }, { projection: { _id: 0 } });
+    res.json({ success: true, item });
+  } catch (err) {
+    console.error('Error updating defectCatalog:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /processDefectDefinitions — base lists [{ process, items: [id], updatedAt, updatedBy }]
+app.get('/processDefectDefinitions', async (req, res) => {
+  try {
+    await ensureDefectCatalogSeeded();
+    const docs = await _defectColls().process.find({ process: { $in: DEFECT_PROCESSES } }, { projection: { _id: 0 } }).toArray();
     const byProcess = new Map(docs.map(d => [d.process, d]));
-    res.json(keys.map(k => ({
-      process: k,
-      items: _mergeProcessDefectItems(k, byProcess.get(k)?.items),
-      updatedAt: byProcess.get(k)?.updatedAt || null,
-      updatedBy: byProcess.get(k)?.updatedBy || ''
+    res.json(DEFECT_PROCESSES.map(p => ({
+      process: p,
+      items: _withOtherLast(_uniqueStrings(byProcess.get(p)?.items)),
+      updatedAt: byProcess.get(p)?.updatedAt || null,
+      updatedBy: byProcess.get(p)?.updatedBy || ''
     })));
   } catch (err) {
     console.error('Error fetching processDefectDefinitions:', err);
@@ -17363,41 +17520,106 @@ app.get('/processDefectDefinitions', async (req, res) => {
   }
 });
 
-// POST /processDefectDefinitions — replace a process's item list { process, items: [{jp, en}], username }
+// Validates a list of catalog ids (must exist and not be deleted)
+async function _validateDefectIds(colls, ids) {
+  const wanted = ids.filter(id => id !== DEFECT_OTHER_ID);
+  if (!wanted.length) return '';
+  const found = await colls.catalog.find({ id: { $in: wanted }, deleted: { $ne: true } }, { projection: { id: 1 } }).toArray();
+  const ok = new Set(found.map(f => f.id));
+  const bad = wanted.filter(id => !ok.has(id));
+  return bad.length ? `Unknown or deleted defect ids: ${bad.join(', ')}` : '';
+}
+
+// POST /processDefectDefinitions — { process, items: [id], username }  (その他 is forced last)
 app.post('/processDefectDefinitions', async (req, res) => {
-  const { process, items, username } = req.body || {};
-  if (!process || !Array.isArray(items) || !username) {
-    return res.status(400).json({ error: 'Missing required fields: process, items, username' });
-  }
-  if (!PROCESS_DEFECT_DEFAULTS[process]) return res.status(400).json({ error: `Unknown process: ${process}` });
-
-  const cleaned = [];
-  const seen = new Set();
-  for (const it of items) {
-    const jp = String(it?.jp || '').trim();
-    const en = String(it?.en || '').trim();
-    if (!jp) return res.status(400).json({ error: 'Defect name (JP) cannot be empty' });
-    if (jp.length > 40) return res.status(400).json({ error: `Defect name too long: ${jp}` });
-    if (jp.startsWith('$') || jp.includes('.')) return res.status(400).json({ error: `Defect name may not start with "$" or contain ".": ${jp}` });
-    if (/^counter-\d+$/i.test(jp) || PROCESS_DEFECT_RESERVED_KEYS.has(jp)) return res.status(400).json({ error: `Reserved name: ${jp}` });
-    if (seen.has(jp)) return res.status(400).json({ error: `Duplicate defect name: ${jp}` });
-    seen.add(jp);
-    cleaned.push({ jp, en });
-  }
-  const missing = PROCESS_DEFECT_DEFAULTS[process].map(d => d.jp).filter(jp => !seen.has(jp));
-  if (missing.length) return res.status(400).json({ error: `Built-in items cannot be removed: ${missing.join(', ')}` });
-
+  const { process, items } = req.body || {};
+  const username = _defectUsername(req);
+  if (!process || !Array.isArray(items) || !username) return res.status(400).json({ error: 'Missing required fields: process, items, username' });
+  if (!DEFECT_PROCESSES.includes(process)) return res.status(400).json({ error: `Unknown process: ${process}` });
   try {
-    await client.connect();
-    const coll = client.db('Sasaki_Coating_MasterDB').collection('processDefectDefinitions');
-    await coll.updateOne(
-      { process },
-      { $set: { process, items: cleaned, updatedAt: new Date(), updatedBy: username } },
+    await ensureDefectCatalogSeeded();
+    const colls = _defectColls();
+    const ids = _withOtherLast(_uniqueStrings(items));
+    const problem = await _validateDefectIds(colls, ids);
+    if (problem) return res.status(400).json({ error: problem });
+    const now = new Date();
+    await colls.process.updateOne({ process }, { $set: { process, items: ids, updatedAt: now, updatedBy: username } }, { upsert: true });
+    res.json({ success: true, process, items: ids, updatedAt: now, updatedBy: username });
+  } catch (err) {
+    console.error('Error saving processDefectDefinitions:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /modelDefectOverrides?process=pressDB — per-model differences for one process (or all)
+app.get('/modelDefectOverrides', async (req, res) => {
+  const { process } = req.query;
+  if (process && !DEFECT_PROCESSES.includes(process)) return res.status(400).json({ error: `Unknown process: ${process}` });
+  try {
+    await ensureDefectCatalogSeeded();
+    const docs = await _defectColls().overrides.find(process ? { process } : {}, { projection: { _id: 0 } }).toArray();
+    res.json(docs);
+  } catch (err) {
+    console.error('Error fetching modelDefectOverrides:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /modelDefectOverrides — { process, model, hidden: [id], extras: [id], username }; empty → removed
+app.post('/modelDefectOverrides', async (req, res) => {
+  const { process, model } = req.body || {};
+  const username = _defectUsername(req);
+  const modelName = String(model || '').trim();
+  if (!process || !modelName || !username) return res.status(400).json({ error: 'Missing required fields: process, model, username' });
+  if (!DEFECT_PROCESSES.includes(process)) return res.status(400).json({ error: `Unknown process: ${process}` });
+  try {
+    await ensureDefectCatalogSeeded();
+    const colls = _defectColls();
+    const hidden = _uniqueStrings(req.body.hidden).filter(id => id !== DEFECT_OTHER_ID);
+    const extras = _uniqueStrings(req.body.extras).filter(id => id !== DEFECT_OTHER_ID && !hidden.includes(id));
+    const problem = await _validateDefectIds(colls, extras);
+    if (problem) return res.status(400).json({ error: problem });
+    const now = new Date();
+    if (!hidden.length && !extras.length) {
+      await colls.overrides.deleteOne({ process, model: modelName });
+      return res.json({ success: true, removed: true, process, model: modelName });
+    }
+    await colls.overrides.updateOne(
+      { process, model: modelName },
+      { $set: { process, model: modelName, hidden, extras, updatedAt: now, updatedBy: username } },
       { upsert: true }
     );
-    res.json({ success: true, process, items: _mergeProcessDefectItems(process, cleaned) });
+    res.json({ success: true, process, model: modelName, hidden, extras, updatedAt: now, updatedBy: username });
   } catch (err) {
-    console.error('Error upserting processDefectDefinitions:', err);
+    console.error('Error saving modelDefectOverrides:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /resolvedDefectList?process=pressDB&model=XXX  (or &背番号=YYY to look the model up)
+// Tablet entry point: [{ id, jp, en }] in display order, その他 last.
+app.get('/resolvedDefectList', async (req, res) => {
+  const process = String(req.query.process || '');
+  if (!DEFECT_PROCESSES.includes(process)) return res.status(400).json({ error: `Unknown process: ${process}` });
+  try {
+    await ensureDefectCatalogSeeded();
+    const colls = _defectColls();
+    let model = String(req.query.model || '').trim();
+    const ban = String(req.query['背番号'] || '').trim();
+    if (!model && ban) {
+      const master = await client.db('Sasaki_Coating_MasterDB').collection('masterDB')
+        .findOne({ 背番号: ban }, { projection: { モデル: 1 } });
+      model = String(master?.モデル || '').trim();
+    }
+    const [base, override, catalog] = await Promise.all([
+      colls.process.findOne({ process }),
+      model ? colls.overrides.findOne({ process, model }) : null,
+      colls.catalog.find({}).toArray()
+    ]);
+    const catalogById = new Map(catalog.map(it => [it.id, it]));
+    res.json({ process, model, items: resolveDefectList(base?.items || [], override, catalogById) });
+  } catch (err) {
+    console.error('Error resolving defect list:', err);
     res.status(500).json({ error: err.message });
   }
 });
