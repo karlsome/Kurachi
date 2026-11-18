@@ -7513,7 +7513,8 @@ function renderHistoryList() {
         let actionHTML = '';
 
         if (it.status === 'completed') {
-            statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #EEF2FF; color: #4338CA; border: 1px solid #C7D2FE; font-weight: 700;">${_t('fk_status_completed')}</span>`;
+            // No pill next to the meters: "Completed" is already shown before the Details button
+            statusTagHTML = '';
             actionHTML = `<span style="font-size: 0.8rem; color: #4338CA; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; padding-right: 4px;">${_t('fk_status_completed')}</span>`;
         } else if (it.status === 'active' || it.status === 'in-progress') {
             statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-weight: 700;">${_t('fk_status_in_progress')}</span>`;
