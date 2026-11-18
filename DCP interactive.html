@@ -3897,8 +3897,9 @@
             }
         }
 
-        // TEMP: set to false to restore the tab locks (checklist / scan / params)
-        const TEMP_TABS_UNLOCKED = false;
+        // TEMP: add ?unlockTabs=1 to the URL to skip the tab locks (checklist / scan / params)
+        // for UI review. Without the flag the locks behave as normal.
+        const TEMP_TABS_UNLOCKED = new URLSearchParams(location.search).get('unlockTabs') === '1';
 
         function isChecklistLocked() {
             if (TEMP_TABS_UNLOCKED) return false;
