@@ -45601,7 +45601,8 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       status,
       socho,
       shiki,
-      bicho
+      bicho,
+      labelRead
     } = req.body;
 
     const finalImageUrl = imageUrl || photoUrl || '';
@@ -45719,6 +45720,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       manufacturerUid: manufacturerUid || '',
       imageUrl: finalImageUrl,
       imageThumbUrl: imageThumbUrl || '',
+      ...(labelRead && typeof labelRead === 'object' ? { labelRead } : {}),
       queuePosition,
       status: finalStatus,
       createdAt: new Date(),
@@ -46891,6 +46893,109 @@ app.post('/api/production/schedule', async (req, res) => {
 
 // Which daily lists use the Excel plan of `date`: rolls with sourceDate = date on other days,
 // plus the date's own list (rolls without sourceDate). freyaAdmin2 hides those from Available.
+// ==================== 第一工場: AI label reading (Tablet 1 photo-first) ====================
+// The tablet sends the label photo (downscaled) plus the QR text it decoded from that photo, if any.
+// Gemini Flash-Lite reads the printed values; a value whose print is unreadable may come from the QR text.
+const FF_LABEL_MODEL = process.env.FF_LABEL_MODEL || 'gemini-3.5-flash-lite';
+const FF_LABEL_TIMEOUT_MS = 20000;
+let ffLabelAi = null;
+
+function ffLabelErrorKind(err) {
+  const status = Number(err?.status || err?.code || 0);
+  const msg = String(err?.message || '');
+  if (status === 429 || /RESOURCE_EXHAUSTED|quota|exhausted|billing|spend(ing)? (cap|limit)|prepay|credit/i.test(msg)) return 'quota';
+  if (status === 401 || status === 403 || /API key|PERMISSION_DENIED/i.test(msg)) return 'auth';
+  if (/timeout|timed out|aborted/i.test(msg)) return 'timeout';
+  return 'error';
+}
+
+function qrPromptPart(qr, qrParsed) {
+  const names = { totalLength: '総長', sDrawLength: 'S引長', netLength: '実長', date: '年月日' };
+  const known = qrParsed && typeof qrParsed === 'object'
+    ? Object.keys(names).filter(k => qrParsed[k] !== undefined && qrParsed[k] !== null && qrParsed[k] !== '').map(k => `${names[k]} (${k}) = ${qrParsed[k]}`)
+    : [];
+  if (known.length) {
+    return 'Read the printed text first (source "text"). The QR code on this label was decoded with the format learned for this material and gives:\n'
+      + known.join('\n')
+      + '\nOnly for a field whose printed value is unreadable or missing, use the QR value above for that same field (source "qr").';
+  }
+  if (qr) {
+    return `The QR code on this label was decoded by a QR reader. Its raw content is:\n<qr>${qr}</qr>\n`
+      + 'Read the printed text first (source "text"). Numbers in the QR usually have no labels, so do NOT assign a QR number to a field unless the QR content itself clearly names that field. When unsure, return null for that field.';
+  }
+  return 'No QR content is available, so read only the printed text.';
+}
+
+app.post('/api/production/label-read', async (req, res) => {
+  const started = Date.now();
+  try {
+    const { image, qrText, qrParsed, kizaiHint } = req.body || {};
+    if (!image || typeof image !== 'string') return res.status(400).json({ success: false, kind: 'error', error: 'image (base64) is required' });
+    if (!process.env.GEMINI_API_KEY) return res.status(503).json({ success: false, kind: 'auth', error: 'GEMINI_API_KEY is not configured' });
+
+    const { GoogleGenAI, Type } = require('@google/genai');
+    if (!ffLabelAi) ffLabelAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const data = image.replace(/^data:image\/\w+;base64,/, '');
+    const qr = typeof qrText === 'string' ? qrText.slice(0, 2000) : '';
+
+    const SRC = { type: Type.STRING, enum: ['text', 'qr', 'none'] };
+    const schema = {
+      type: Type.OBJECT,
+      properties: {
+        totalLength: { type: Type.NUMBER, nullable: true, description: '総長 in metres' },
+        totalLengthSource: SRC,
+        sDrawLength: { type: Type.NUMBER, nullable: true, description: 'S引長 / S引き長 in metres (0 when printed as 0.0)' },
+        sDrawLengthSource: SRC,
+        netLength: { type: Type.NUMBER, nullable: true, description: '実長 / 美長 / 純長 in metres' },
+        netLengthSource: SRC,
+        baseCode: { type: Type.STRING, nullable: true, description: 'Large printed material code, usually near the bottom (e.g. HM26)' },
+        baseCodeSource: SRC,
+        lotNo: { type: Type.STRING, nullable: true, description: 'ロット number' },
+        lotNoSource: SRC,
+        date: { type: Type.STRING, nullable: true, description: '年月日 / production date as YYYY-MM-DD' },
+        dateSource: SRC,
+        notes: { type: Type.STRING, nullable: true, description: 'Short note on anything unreadable' }
+      },
+      required: ['totalLength', 'totalLengthSource', 'sDrawLength', 'sDrawLengthSource', 'netLength', 'netLengthSource',
+        'baseCode', 'baseCodeSource', 'lotNo', 'lotNoSource', 'date', 'dateSource']
+    };
+    const prompt = [
+      'This photo shows a material roll label from a Japanese factory. Read the values printed on the label exactly as printed.',
+      'Do not calculate or guess values. If a value is not printed or cannot be read, use null with source "none".',
+      qrPromptPart(qr, qrParsed),
+      kizaiHint ? `The material expected for this roll is "${String(kizaiHint).slice(0, 80)}" (for context only; report what the label says).` : ''
+    ].filter(Boolean).join('\n\n');
+
+    const call = ffLabelAi.models.generateContent({
+      model: FF_LABEL_MODEL,
+      contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data } }, { text: prompt }] }],
+      config: { responseMimeType: 'application/json', responseSchema: schema }
+    });
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('AI label read timed out')), FF_LABEL_TIMEOUT_MS));
+    const r = await Promise.race([call, timeout]);
+
+    let values;
+    try { values = JSON.parse(r.text); } catch (e) { throw new Error('AI returned an unreadable answer'); }
+    if (values.date) {
+      const m = String(values.date).match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+      values.date = m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : values.date;
+    }
+    const usage = r.usageMetadata || {};
+    res.json({
+      success: true,
+      model: FF_LABEL_MODEL,
+      ms: Date.now() - started,
+      usedQr: !!qr,
+      values,
+      tokens: { input: usage.promptTokenCount || 0, output: (usage.candidatesTokenCount || 0) + (usage.thoughtsTokenCount || 0) }
+    });
+  } catch (err) {
+    const kind = ffLabelErrorKind(err);
+    console.error(`❌ label-read failed (${kind}):`, err.message);
+    res.status(kind === 'quota' ? 429 : 502).json({ success: false, kind, error: err.message, ms: Date.now() - started });
+  }
+});
+
 app.get('/api/production/schedule/by-source', async (req, res) => {
   try {
     // ?month=YYYY-MM: every list holding rolls taken from that month's plan on another day

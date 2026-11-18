@@ -4036,6 +4036,24 @@
             color: #DC2626 !important;
         }
 
+        /* Photo-first label reading (AI) */
+        .label-photo-btn { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 22px 34px; border: none; border-radius: 14px; background: var(--brand, #2563EB); color: #fff; font-size: 1.15rem; font-weight: 800; cursor: pointer; box-shadow: 0 4px 12px rgba(37,99,235,0.25); }
+        .label-photo-btn:active { transform: scale(0.98); }
+        .label-ai-strip { display: flex; gap: 12px; align-items: center; padding: 10px; margin-bottom: 10px; border: 1.5px solid var(--border, #E5E7EB); border-radius: 10px; background: #F9FAFB; }
+        .label-ai-thumb { width: 64px; height: 84px; object-fit: cover; border-radius: 6px; border: 1px solid #E5E7EB; background: #fff; cursor: zoom-in; flex-shrink: 0; }
+        .label-ai-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+        .label-ai-status { font-size: 0.86rem; font-weight: 700; line-height: 1.35; display: flex; align-items: flex-start; gap: 6px; white-space: pre-line; }
+        .label-ai-status.is-busy { color: #1D4ED8; }
+        .label-ai-status.is-ok { color: #047857; }
+        .label-ai-status.is-warn { color: #B45309; }
+        .label-ai-status.is-error { color: #B91C1C; }
+        .label-ai-spinner { width: 14px; height: 14px; margin-top: 2px; border: 2px solid #BFDBFE; border-top-color: #1D4ED8; border-radius: 50%; animation: labelAiSpin 0.8s linear infinite; flex-shrink: 0; }
+        @keyframes labelAiSpin { to { transform: rotate(360deg); } }
+        .label-ai-actions { display: flex; gap: 14px; }
+        .label-ai-link { background: none; border: none; padding: 0; font-size: 0.82rem; font-weight: 700; color: var(--brand, #2563EB); text-decoration: underline; cursor: pointer; }
+        .feed-numpad-field.ai-filled { position: relative; }
+        .feed-numpad-field.ai-filled::after { content: 'AI'; position: absolute; top: 4px; right: 6px; font-size: 0.6rem; font-weight: 800; color: #6D28D9; background: #EDE9FE; border-radius: 4px; padding: 1px 4px; }
+        .feed-numpad-field.ai-busy .feed-numpad-field-val { opacity: 0.45; }
         .feed-numpad-field.is-filled {
             border-color: #A7F3D0;
         }
@@ -5035,14 +5053,14 @@
                 <button type="button" class="feed-modal-close-btn" onclick="closeMaterialFeedModal()" title="閉じる">✕</button>
             </div>
 
-            <!-- VIEW 1: Scan Mode (Default - ONLY SCAN UI) -->
+            <!-- VIEW 1: Photo first (AI reads the label). The USB QR scanner still works here. -->
             <div id="feedScanView" class="feed-view-pane">
                 <div class="feed-scan-box">
-                    <div class="feed-qr-icon-wrap">
-                        <svg viewBox="0 0 24 24" width="44" height="44" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M7 17h.01"/><path d="M17 17h.01"/><path d="M7 7h.01"/><path d="M17 7h.01"/></svg>
-                    </div>
-                    <div class="feed-scan-prompt" data-i18n="fk_feed_scan_prompt">QRコードをスキャンしてください</div>
-                    <div class="feed-scan-detail" data-i18n="fk_feed_scan_detail">材料ラベルのQRコードをスキャナーで読み取ってください</div>
+                    <button type="button" class="label-photo-btn" onclick="startLabelPhoto()">
+                        <svg viewBox="0 0 24 24" width="46" height="46" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                        <span data-i18n="fk_label_photo_btn">ラベルを撮影</span>
+                    </button>
+                    <div class="feed-scan-detail" data-i18n="fk_label_photo_detail">撮影するとAIがラベルの数値を読み取ります（QRスキャナーも使用できます）</div>
                     <div id="feedScannerLiveBadge" class="feed-scanner-badge" data-i18n="fk_scanner_ready">🟢 スキャナー待機中</div>
                 </div>
 
@@ -5060,6 +5078,17 @@
 
             <!-- VIEW 2: Manual Input Mode (Shown when 手動入力 is pressed) -->
             <div id="feedManualView" class="feed-view-pane" style="display: none;">
+                <!-- Label photo + AI reading status (photo-first flow) -->
+                <div id="feedPhotoStrip" class="label-ai-strip" style="display: none;">
+                    <img id="feedPhotoThumb" class="label-ai-thumb" alt="" onclick="openLabelPhotoPreview()">
+                    <div class="label-ai-body">
+                        <div id="feedAiStatus" class="label-ai-status"></div>
+                        <div class="label-ai-actions">
+                            <button type="button" id="feedAiRetryBtn" class="label-ai-link" onclick="runLabelAi()" style="display: none;" data-i18n="fk_ai_retry">再試行</button>
+                            <button type="button" class="label-ai-link" onclick="startLabelPhoto()" data-i18n="fk_label_retake">撮り直す</button>
+                        </div>
+                    </div>
+                </div>
                 <p class="feed-manual-instruct" data-i18n="fk_feed_manual_instruct">項目をタップして数値を入力・確認してください</p>
 
                 <div class="feed-manual-fields-wrap">
@@ -5115,7 +5144,7 @@
                 </div>
 
                 <div class="feed-simple-footer">
-                    <button type="button" class="btn-cancel-flat" onclick="switchFeedModalView('scan')" data-i18n="fk_btn_back_scan">← スキャンに戻る</button>
+                    <button type="button" class="btn-cancel-flat" onclick="switchFeedModalView('scan')" data-i18n="fk_btn_back_photo">← 撮影に戻る</button>
                     <button type="button" class="btn-submit-enqueue-flat" id="btnManualProceedPhoto" onclick="proceedToCameraFromManual()" data-i18n="fk_btn_proceed_photo">写真撮影へ進む →</button>
                 </div>
             </div>

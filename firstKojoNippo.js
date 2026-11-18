@@ -5301,8 +5301,19 @@ function updateManualDisplays() {
         }
     }
 
+    const ai = state.labelAi || {};
+    [['socho', sochoEl], ['shiki', shikiEl], ['bicho', bichoEl], ['lot', lotEl]].forEach(([key, el]) => {
+        const card = el && el.closest('.feed-numpad-field');
+        if (!card) return;
+        card.classList.toggle('ai-filled', !!(ai.filled && ai.filled[key]) && String(ai.filled[key]) === String(labelAiFieldValue(key)));
+        card.classList.toggle('ai-busy', ai.status === 'busy');
+    });
+
     const proceedBtn = document.getElementById('btnManualProceedPhoto');
     if (proceedBtn) {
+        proceedBtn.textContent = state.currentModalPhoto
+            ? (_t('fk_btn_confirm_enqueue') || '確認してキューに追加 →')
+            : (_t('fk_btn_proceed_photo') || '写真撮影へ進む →');
         if (!v.isValid) {
             proceedBtn.classList.add('is-incomplete');
             proceedBtn.title = `未入力の項目があります: ${v.missing.map(m => m.name).join(', ')}`;
@@ -5411,7 +5422,290 @@ function materialKeypadConfirm() {
     closeMaterialKeypad();
 }
 
+// ==================== Photo first: AI reads the label ====================
+// Flow: take the label photo -> the server's AI (Gemini Flash-Lite) reads 総長 / S引長 / 実長 / 基材コード / date
+// -> values fill in (marked "AI") -> worker checks / fixes them -> 確認してキューに追加.
+// The QR code in the photo is decoded on the tablet and sent along; the AI uses it only for values whose
+// printed text it cannot read. Any failure (no budget, timeout, offline) leaves the fields for manual entry.
+const LABEL_AI_FIELDS = { socho: '総長', shiki: 'S引長', bicho: '実長', lot: '日付' };
+
+function resetLabelAiState() {
+    state.currentModalPhoto = null;
+    state.labelAi = { status: 'idle', reqId: (state.labelAi?.reqId || 0) + 1, filled: {}, result: null };
+    const strip = document.getElementById('feedPhotoStrip');
+    if (strip) strip.style.display = 'none';
+    const status = document.getElementById('feedAiStatus');
+    if (status) { status.className = 'label-ai-status'; status.textContent = ''; }
+    const retry = document.getElementById('feedAiRetryBtn');
+    if (retry) retry.style.display = 'none';
+}
+
+function labelAiFieldValue(key) {
+    if (key === 'socho') return state.currentModalSocho;
+    if (key === 'shiki') return state.currentModalShiki;
+    if (key === 'bicho') return state.currentModalBicho;
+    if (key === 'lot') return state.currentModalLotNo;
+    return '';
+}
+
+function setLabelAiFieldValue(key, value) {
+    if (key === 'socho') state.currentModalSocho = value;
+    else if (key === 'shiki') state.currentModalShiki = value;
+    else if (key === 'bicho') state.currentModalBicho = value;
+    else if (key === 'lot') state.currentModalLotNo = value;
+}
+
+function startLabelPhoto() {
+    const fileInput = document.getElementById('modalRollCameraInput');
+    if (!fileInput || !state.currentModalRollContext) return;
+    state.cameraMode = 'photoFirst';
+    fileInput.click();
+}
+
+function openLabelPhotoPreview() {
+    if (state.currentModalPhoto) openPhotoEnlarged(state.currentModalPhoto);
+}
+
+function onLabelPhotoTaken(base64) {
+    if (!state.currentModalRollContext) return;
+    state.currentModalPhoto = base64;
+    const thumb = document.getElementById('feedPhotoThumb');
+    if (thumb) thumb.src = base64;
+    const strip = document.getElementById('feedPhotoStrip');
+    if (strip) strip.style.display = 'flex';
+    switchFeedModalView('manual');
+    runLabelAi();
+}
+
+function setLabelAiStatus(kind, text) {
+    const el = document.getElementById('feedAiStatus');
+    if (el) {
+        el.className = `label-ai-status is-${kind}`;
+        el.innerHTML = (kind === 'busy' ? '<span class="label-ai-spinner"></span>' : '') + `<span>${escapeHtmlLabelAi(text)}</span>`;
+    }
+    const retry = document.getElementById('feedAiRetryBtn');
+    if (retry) retry.style.display = (kind === 'error' || kind === 'warn-retry') ? 'inline' : 'none';
+    if (kind === 'warn-retry' && el) el.className = 'label-ai-status is-warn';
+}
+
+function escapeHtmlLabelAi(str) {
+    return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function loadImageForLabelAi(base64) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = base64;
+    });
+}
+
+// Smaller JPEG for the AI (long edge 1456px keeps the label text sharp and the request small)
+function downscaleForLabelAi(img, maxEdge = 1456, quality = 0.8) {
+    const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * scale);
+    c.height = Math.round(img.naturalHeight * scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', quality);
+}
+
+let jsQRLoading = null;
+function loadJsQR() {
+    if (window.jsQR) return Promise.resolve(window.jsQR);
+    if (!jsQRLoading) {
+        jsQRLoading = new Promise((resolve, reject) => {
+            const sc = document.createElement('script');
+            sc.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+            sc.onload = () => resolve(window.jsQR);
+            sc.onerror = () => { jsQRLoading = null; reject(new Error('jsQR load failed')); };
+            document.head.appendChild(sc);
+        });
+    }
+    return jsQRLoading;
+}
+
+// Decode the label's QR code from the photo: the browser's BarcodeDetector when present, else jsQR
+async function decodeLabelQR(img) {
+    try {
+        if ('BarcodeDetector' in window) {
+            const det = new window.BarcodeDetector({ formats: ['qr_code'] });
+            const found = await det.detect(img);
+            if (found && found[0] && found[0].rawValue) return found[0].rawValue;
+        }
+    } catch (e) { /* fall through to jsQR */ }
+    try {
+        const jsQR = await loadJsQR();
+        const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * scale);
+        c.height = Math.round(img.naturalHeight * scale);
+        const g = c.getContext('2d');
+        g.drawImage(img, 0, 0, c.width, c.height);
+        const data = g.getImageData(0, 0, c.width, c.height);
+        const code = jsQR(data.data, c.width, c.height, { inversionAttempts: 'attemptBoth' });
+        return code && code.data ? code.data : '';
+    } catch (e) {
+        return '';
+    }
+}
+
+// Values in the QR, read with the format the tablets learned for this material (index of each field).
+// Only fields the format actually maps are returned, so an unmapped field never looks "read".
+function parseLabelQRWithLearnedFormat(kizai, qrText) {
+    if (!qrText) return null;
+    try {
+        const pattern = findLearnedPatternForKizai(kizai, qrText);
+        if (!pattern) return null;
+        const parsed = parseBarcodeWithLearnedPattern(pattern, qrText);
+        if (!parsed) return null;
+        const m = pattern.mapping || {};
+        const has = (i) => i !== null && i !== undefined;
+        const out = {};
+        if (has(m.sochoIndex) && parsed.socho !== '' && !isNaN(Number(parsed.socho))) out.totalLength = Number(parsed.socho);
+        if (has(m.shikiIndex) && parsed.shiki !== '' && !isNaN(Number(parsed.shiki))) out.sDrawLength = Number(parsed.shiki);
+        if (has(m.bichoIndex) && parsed.bicho !== '' && parsed.bicho !== null && !isNaN(Number(parsed.bicho))) out.netLength = Number(parsed.bicho);
+        if ((m.lotSlice || has(m.lotIndex)) && parsed.lotNo && /^\d{4}-\d{2}-\d{2}$/.test(parsed.lotNo)) out.date = parsed.lotNo;
+        return Object.keys(out).length ? out : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function runLabelAi() {
+    const ctx = state.currentModalRollContext;
+    const photo = state.currentModalPhoto;
+    if (!ctx || !photo) return;
+    const reqId = (state.labelAi?.reqId || 0) + 1;
+    // Values on screen when the AI starts: fields the worker changes meanwhile are left alone
+    const before = { socho: state.currentModalSocho, shiki: state.currentModalShiki, bicho: state.currentModalBicho, lot: state.currentModalLotNo };
+    state.labelAi = { status: 'busy', reqId, filled: {}, result: null, before };
+    setLabelAiStatus('busy', _t('fk_ai_reading') || 'AIがラベルを読み取り中…（このまま手動入力もできます）');
+    updateManualDisplays();
+
+    if (!navigator.onLine) {
+        finishLabelAi(reqId, { success: false, kind: 'offline' });
+        return;
+    }
+
+    let result;
+    try {
+        const img = await loadImageForLabelAi(photo);
+        const [qrText, small] = await Promise.all([decodeLabelQR(img), Promise.resolve(downscaleForLabelAi(img))]);
+        if (qrText && !state.currentModalRawQR) state.currentModalRawQR = qrText;
+        const kizaiHint = ctx.item?.kizai || ctx.group?.kizai || '';
+        const qrParsed = parseLabelQRWithLearnedFormat(kizaiHint || state.currentModalHinban, qrText);
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 30000);
+        try {
+            const res = await fetch(`${serverURL}/api/production/label-read`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: small, qrText, qrParsed, kizaiHint }),
+                signal: ctrl.signal
+            });
+            result = await res.json().catch(() => ({ success: false, kind: res.status === 429 ? 'quota' : 'error' }));
+            if (!res.ok && result.success !== false) result = { success: false, kind: res.status === 429 ? 'quota' : 'error' };
+            result.qrText = qrText;
+            result.qrParsed = qrParsed;
+        } finally {
+            clearTimeout(timer);
+        }
+    } catch (err) {
+        result = { success: false, kind: err && err.name === 'AbortError' ? 'timeout' : (navigator.onLine ? 'error' : 'offline'), error: err && err.message };
+    }
+    finishLabelAi(reqId, result);
+}
+
+function finishLabelAi(reqId, result) {
+    // Ignore answers for an older photo or a closed / different roll
+    if (!state.labelAi || state.labelAi.reqId !== reqId || !state.currentModalRollContext || !state.currentModalPhoto) return;
+    const before = state.labelAi.before || {};
+    state.labelAi.result = result;
+
+    if (!result || !result.success) {
+        state.labelAi.status = 'failed';
+        const kind = result && result.kind;
+        if (kind === 'quota') setLabelAiStatus('error', _t('fk_ai_quota') || 'AIの利用上限（残高）に達しました。手動で入力してください');
+        else if (kind === 'auth') setLabelAiStatus('error', _t('fk_ai_auth') || 'AIが設定されていません。手動で入力してください');
+        else if (kind === 'timeout') setLabelAiStatus('error', _t('fk_ai_timeout') || 'AIの応答がありません。手動で入力するか再試行してください');
+        else if (kind === 'offline') setLabelAiStatus('error', _t('fk_ai_offline') || 'オフラインのためAI読取できません。手動で入力してください');
+        else setLabelAiStatus('error', _t('fk_ai_failed') || 'AI読取に失敗しました。手動で入力するか再試行してください');
+        updateManualDisplays();
+        return;
+    }
+
+    const v = { ...(result.values || {}) };
+    const qp = result.qrParsed || {};
+    [['totalLength', 'totalLengthSource'], ['sDrawLength', 'sDrawLengthSource'], ['netLength', 'netLengthSource'], ['date', 'dateSource']].forEach(([k, srcKey]) => {
+        if ((v[k] === null || v[k] === undefined || v[k] === '') && qp[k] !== undefined && qp[k] !== null && qp[k] !== '') {
+            v[k] = qp[k];
+            v[srcKey] = 'qr';
+        }
+    });
+    const num = (x) => (x === null || x === undefined || x === '' || isNaN(Number(x))) ? null : Number(x);
+    const read = { socho: num(v.totalLength), shiki: num(v.sDrawLength), bicho: num(v.netLength), lot: v.date ? normalizeDateStringToISO(v.date) : null };
+    const filled = {};
+    const missing = [];
+    Object.keys(read).forEach(key => {
+        const untouched = String(labelAiFieldValue(key) ?? '') === String(before[key] ?? '');
+        if (read[key] !== null && read[key] !== '') {
+            if (untouched) {
+                setLabelAiFieldValue(key, String(read[key]));
+                filled[key] = String(read[key]);
+            }
+        } else {
+            missing.push(LABEL_AI_FIELDS[key]);
+            // Don't leave a planned / default value looking "checked" when the label could not be read
+            if (untouched && (key === 'shiki' || key === 'bicho')) setLabelAiFieldValue(key, '');
+        }
+    });
+    state.labelAi.status = 'done';
+    state.labelAi.filled = filled;
+    saveCurrentModalManualEdits();
+
+    const usedQr = ['totalLengthSource', 'sDrawLengthSource', 'netLengthSource', 'dateSource'].some(k => v[k] === 'qr');
+    const qrNote = usedQr ? ' ' + (_t('fk_ai_qr_used') || '（一部QRから）') : '';
+    let msg = missing.length
+        ? (_t('fk_ai_partial') || 'AIが読み取れなかった項目: {fields} — タップして入力してください').replace('{fields}', missing.join('・'))
+        : (_t('fk_ai_done') || 'AI読取完了 — 数値を確認してください');
+    msg += qrNote;
+
+    // Label's base code vs the planned material (e.g. HM26 vs HM26/〇確（310D ﾓﾙﾄA）)
+    const planned = String(state.currentModalRollContext.item?.kizai || state.currentModalRollContext.group?.kizai || '').toUpperCase().replace(/\s/g, '');
+    const code = String(v.baseCode || '').toUpperCase().replace(/\s/g, '');
+    if (code && planned && !planned.includes(code)) {
+        msg += '\n⚠ ' + (_t('fk_ai_code_mismatch') || 'ラベルの基材コード「{label}」が予定「{planned}」と一致しません')
+            .replace('{label}', v.baseCode).replace('{planned}', state.currentModalRollContext.item?.kizai || state.currentModalRollContext.group?.kizai || '');
+    }
+    setLabelAiStatus(missing.length || msg.includes('⚠') ? 'warn' : 'ok', msg);
+    updateManualDisplays();
+}
+
+// What the AI read, saved with the roll next to the values the worker confirmed
+function buildLabelReadRecord() {
+    const ai = state.labelAi;
+    if (!ai || !ai.result) return null;
+    const r = ai.result;
+    return {
+        at: new Date().toISOString(),
+        success: !!r.success,
+        kind: r.success ? 'ok' : (r.kind || 'error'),
+        model: r.model || '',
+        ms: r.ms || 0,
+        usedQr: !!r.usedQr,
+        qrText: r.qrText ? String(r.qrText).slice(0, 500) : '',
+        values: r.values || null,
+        changedByWorker: r.success ? Object.keys(ai.filled || {}).filter(k => String(labelAiFieldValue(k)) !== String(ai.filled[k])) : []
+    };
+}
+
 function proceedToCameraFromManual() {
+    if (state.labelAi && state.labelAi.status === 'busy') {
+        showToast('⏳ ' + (_t('fk_ai_wait') || 'AIが読み取り中です。完了まで少しお待ちください'), 'info', 2200);
+        return;
+    }
     const validation = validateModalRequiredFields();
     if (!validation.isValid) {
         const missingNames = validation.missing.map(m => `・${m.name}`).join('\n');
@@ -5439,6 +5733,14 @@ function proceedToCameraFromManual() {
     }
 
     saveCurrentModalManualEdits();
+    if (state.currentModalPhoto && ctx) {
+        // Photo-first flow: the label photo is already taken
+        const photo = state.currentModalPhoto;
+        const labelRead = buildLabelReadRecord();
+        if (labelRead) setItemEdit(ctx.itemId, { labelRead });
+        savePhotoAndEnqueue(ctx, photo);
+        return;
+    }
     triggerNativeCameraForModal();
 }
 
@@ -5546,15 +5848,10 @@ function openMaterialFeedModalForRollItem(itemId, gIdx, rIdx, event) {
     state.currentModalLotNo = normalizeDateStringToISO(edit.lotNo || '');
     state.currentModalRawQR = edit.rawQR || '';
     state.currentModalCustomSlices = {};
+    resetLabelAiState();
 
-    // Check if this material is registered as NO QR
-    const learnedPattern = findLearnedPatternForKizai(kizai);
-    if (learnedPattern && learnedPattern.hasQR === false) {
-        switchFeedModalView('manual');
-        showToast(`ℹ️ 「${kizai}」はQRなし登録基材です（手動入力モード）`, 'info', 2200);
-    } else {
-        switchFeedModalView('scan');
-    }
+    // Photo first: the label photo is read by AI (the USB QR scanner still works on this view)
+    switchFeedModalView('scan');
 
     const badge = document.getElementById('feedScannerLiveBadge');
     if (badge) {
@@ -5655,6 +5952,7 @@ function closeMaterialFeedModal() {
     state.currentModalRollContext = null;
     state.currentFeedItem = null;
     state.currentFeedGroup = null;
+    resetLabelAiState();
 }
 
 function hideMaterialFeedModal() {
@@ -6109,6 +6407,7 @@ function triggerNativeCameraForModal() {
     }
     const fileInput = document.getElementById('modalRollCameraInput');
     if (fileInput) {
+        state.cameraMode = 'legacy';
         fileInput.click();
     }
 }
@@ -6124,6 +6423,8 @@ function handleModalRollCameraCapture(event) {
 
         const ctx = state.currentModalRollContext;
         if (!ctx) return;
+        const photoFirst = state.cameraMode === 'photoFirst';
+        const proceed = () => photoFirst ? onLabelPhotoTaken(base64) : savePhotoAndEnqueue(ctx, base64);
 
         // 1. Run blur detection
         const blurResult = await detectBlur(base64, 60);
@@ -6131,15 +6432,15 @@ function handleModalRollCameraCapture(event) {
             showBlurWarning(blurResult.score,
                 () => {
                     // User chose Retake -> re-trigger camera
-                    triggerNativeCameraForModal();
+                    if (photoFirst) startLabelPhoto(); else triggerNativeCameraForModal();
                 },
                 () => {
                     // User chose Ignore -> proceed
-                    savePhotoAndEnqueue(ctx, base64);
+                    proceed();
                 }
             );
         } else {
-            savePhotoAndEnqueue(ctx, base64);
+            proceed();
         }
     };
     reader.readAsDataURL(file);
@@ -6406,7 +6707,8 @@ async function submitModalRollToQueue() {
             rawMaterialLength: String(bichoVal),
             manufacturerUid: '',
             imageUrl: photoUrl || '',
-            imageThumbUrl: (getItemEdits()[itemId] || {}).photoThumbUrl || ''
+            imageThumbUrl: (getItemEdits()[itemId] || {}).photoThumbUrl || '',
+            labelRead: (getItemEdits()[itemId] || {}).labelRead || undefined
         };
 
         console.log('Enqueueing single roll to queue:', enqueuePayload);
