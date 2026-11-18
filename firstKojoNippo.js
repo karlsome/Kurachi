@@ -6695,8 +6695,8 @@ function renderStagingQueue() {
         const needsStartConfirm = activeItem.startedBy === 'enqueue' && activeItem.startConfirmed !== true;
         const startNote = needsStartConfirm
             ? `<div class="queue-start-note">⏸ 準備中 — 機械の準備ができたら「生産開始」を押してください (Preparing — press Start when ready)</div>`
-            : (activeItem.startConfirmed === true && activeItem.actualStartTime
-                ? `<div style="font-size: 0.78rem; color: #059669; font-weight: 700; margin-top: 3px;">▶ 開始 ${activeItem.actualStartTime}</div>`
+            : (activeItem.startConfirmed === true && (activeItem.startEpoch || activeItem.actualStartTime)
+                ? `<div style="font-size: 0.78rem; color: #059669; font-weight: 700; margin-top: 3px;">▶ 開始 ${fmtJstTime(activeItem.startEpoch) || activeItem.actualStartTime}</div>`
                 : '');
 
         rowsHTML += `
@@ -7322,8 +7322,9 @@ function renderHistoryTableView() {
             itemId: doc.itemId || doc._id || doc.id,
             mongoId: doc._id,
             orderIndex: Number(orderIndex) || (qIdx + 1),
-            startTime: doc.actualStartTime || matchedSched?.startTime || '',
-            endTime: doc.actualEndTime || matchedSched?.endTime || '',
+            // Timestamps formatted in JST first: the stored HH:MM text was written in UTC by older servers
+            startTime: fmtJstTime(doc.startEpoch || doc.startedAt) || doc.actualStartTime || matchedSched?.startTime || '',
+            endTime: fmtJstTime(doc.endEpoch || doc.completedAt) || doc.actualEndTime || matchedSched?.endTime || '',
             completedAt: doc.completedAt || doc.createdAt || '',
             shippingDest: (matchedSched && matchedSched.shippingDest) || info.shippingDest || doc.shippingDest || '—',
             kizai: (matchedSched && matchedSched.kizai) || info.kizai || doc.kizai || doc.hinban || '材料',
@@ -7385,7 +7386,7 @@ function renderHistoryTableView() {
         } else if (item.completedAt) {
             const d = new Date(item.completedAt);
             if (!isNaN(d.getTime())) {
-                timeDisplay = `<strong>${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</strong>`;
+                timeDisplay = `<strong>${d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' })}</strong>`;
             }
         }
 
@@ -7407,7 +7408,7 @@ function renderHistoryTableView() {
 
     const firstTime = historyItems.find(it => it.startTime)?.startTime || '';
     const lastTime = [...historyItems].reverse().find(it => it.endTime)?.endTime || '';
-    const timeSpan = (firstTime && lastTime) ? `${firstTime} ～ ${lastTime}` : (historyItems[0]?.completedAt ? new Date(historyItems[0].completedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '本日');
+    const timeSpan = (firstTime && lastTime) ? `${firstTime} ～ ${lastTime}` : (historyItems[0]?.completedAt ? fmtJstTime(historyItems[0].completedAt) : '本日');
 
     const totalProdFormatted = `${totalMeters > 0 ? `${totalMeters.toLocaleString()} m` : ''}${totalMeters > 0 && totalPieces > 0 ? ' / ' : ''}${totalPieces > 0 ? `${totalPieces.toLocaleString()} 枚` : ''}${totalMeters > 0 ? ` (${(totalMeters * 100).toLocaleString()} cm)` : ''}`;
 

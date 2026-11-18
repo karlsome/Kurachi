@@ -182,6 +182,15 @@ function getTodayDateString() {
     return `${y}-${m}-${d}`;
 }
 
+// HH:MM in JST from an epoch / ISO date ('' if missing)
+function jstHM(value) {
+    if (value === undefined || value === null || value === '') return '';
+    const raw = value && value.$date ? value.$date : value;
+    const d = typeof raw === 'number' || /^\d+$/.test(String(raw)) ? new Date(Number(raw)) : new Date(raw);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit' });
+}
+
 function shiftDateString(dateStr, offsetDays) {
     if (!dateStr || !dateStr.includes('-')) return getTodayDateString();
     const parts = dateStr.split('-');
@@ -1410,8 +1419,9 @@ function renderHistoryTableView() {
             itemId: doc.itemId || doc._id || doc.queueId || String(qIdx + 1),
             mongoId: doc._id,
             orderIndex: Number(orderIndex) || (qIdx + 1),
-            startTime: doc.actualStartTime || matchedSched?.startTime || '',
-            endTime: doc.actualEndTime || matchedSched?.endTime || '',
+            // Timestamps formatted in JST first: the stored HH:MM text was written in UTC by older servers
+            startTime: jstHM(doc.startEpoch || doc.startedAt) || doc.actualStartTime || matchedSched?.startTime || '',
+            endTime: jstHM(doc.endEpoch || doc.completedAt) || doc.actualEndTime || matchedSched?.endTime || '',
             completedAt: doc.completedAt || doc.updatedAt || doc.createdAt || '',
             shippingDest: (matchedSched && matchedSched.shippingDest) || doc.shippingDest || '—',
             kizai: kizaiName,
