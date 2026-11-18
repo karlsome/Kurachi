@@ -658,6 +658,112 @@
             text-align: center;
         }
 
+        .worker-name-btn.selected {
+            background: var(--blue);
+            border-color: var(--blue);
+            color: #FFFFFF;
+        }
+
+        /* Worker roles (投入 / オペレーター / サポート / カッター / 取り出し) */
+        .worker-roles-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .worker-role-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid var(--border-strong);
+            border-radius: 12px;
+            background: #F9FAFB;
+        }
+
+        .worker-role-label {
+            flex: 0 0 150px;
+            font-weight: 800;
+            font-size: 0.95rem;
+            color: var(--text-main);
+            line-height: 1.25;
+        }
+
+        .worker-role-label small {
+            display: block;
+            font-weight: 600;
+            font-size: 0.75rem;
+            color: var(--text-soft);
+        }
+
+        .worker-role-chips {
+            flex: 1;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            min-height: 36px;
+            align-items: center;
+        }
+
+        .worker-role-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 6px 6px 12px;
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            color: #1E3A8A;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+
+        .worker-role-chip button {
+            width: 22px;
+            height: 22px;
+            border: none;
+            border-radius: 50%;
+            background: #DBEAFE;
+            color: #1E3A8A;
+            font-weight: 800;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .worker-role-empty {
+            color: var(--text-soft);
+            font-size: 0.85rem;
+        }
+
+        .worker-role-add {
+            flex: 0 0 auto;
+            min-height: 40px;
+            padding: 0 14px;
+            border: 1px dashed var(--blue);
+            border-radius: 10px;
+            background: #FFFFFF;
+            color: var(--blue);
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .worker-roles-summary {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .worker-roles-summary .worker-role-row {
+            padding: 8px 12px;
+        }
+
+        @media (max-width: 520px) {
+            .worker-role-row { flex-wrap: wrap; }
+            .worker-role-label { flex-basis: 100%; }
+        }
+
         .worker-name-btn:hover {
             background: var(--bg-subtle);
             border-color: var(--blue);
@@ -4317,8 +4423,8 @@
                         <h2 style="color: var(--brand);">作業者確認 (Worker Setup)</h2>
                         <p style="font-size: 1.05rem; color: var(--text-main); margin: 0; text-align: center; line-height: 1.5;">
                             現在の作業者:<br>
-                            <strong id="confirmUserName" style="color: var(--brand); font-size: 1.35rem; display: block; margin: 8px 0;"></strong>
                         </p>
+                        <div id="confirmUserName" class="worker-roles-summary"></div>
                         <div style="display: flex; gap: 10px; width: 100%; margin-top: 10px;">
                             <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="changeWorkerName()">変更 (Change)</button>
                             <button type="button" class="btn btn-primary" style="flex: 2;" onclick="confirmWorkerName()">確認 (Yes)</button>
@@ -4329,9 +4435,7 @@
                     <div id="newWorkerContainer">
                         <h2>作業者選択 (Worker Setup)</h2>
                         <div style="width: 100%;">
-                            <input list="machine-operator-suggestions" class="tap-field"
-                                id="workerInput" name="workerInput"
-                                placeholder="作業者を選択... (Select Worker)" required readonly>
+                            <div id="workerRolesContainer" class="worker-roles-list"></div>
                             <datalist id="machine-operator-suggestions"></datalist>
                         </div>
                         <button type="button" class="btn btn-primary btn-full" onclick="proceedFromStep0()">次へ (Next)</button>
@@ -4480,15 +4584,21 @@
     <!-- Worker Select Modal -->
     <div id="workerNameModal" class="modal">
         <div>
-            <h2 style="text-align: center; margin-bottom: 20px;">作業者名 (Worker Name)</h2>
+            <h2 id="workerModalTitle" style="text-align: center; margin-bottom: 6px;">作業者名 (Worker Name)</h2>
+            <p style="text-align: center; margin: 0 0 14px; font-size: 0.85rem; color: var(--text-soft);">タップで追加/解除 (Tap to add / remove) ・ 複数選択可 (Multiple OK)</p>
+            <div id="workerModalSelected" class="worker-role-chips" style="justify-content: center; margin-bottom: 12px;"></div>
             <div class="worker-names-container" id="workerNamesContainer" style="max-height: 50vh; overflow-y: auto;">
                 <!-- dynamic -->
             </div>
             <button type="button" class="btn btn-secondary btn-full" id="manualEntryBtn" style="margin-top: 15px;">
                 手動入力 (Manual Entry)
             </button>
-            <button type="button" class="btn btn-alert btn-full" id="closeWorkerModal" style="margin-top: 10px;">
-                閉じる (Close)
+            <div id="manualEntryRow" style="display: none; gap: 8px; margin-top: 10px;">
+                <input type="text" id="manualWorkerInput" class="tap-field" placeholder="名前を入力 (Type name)" style="flex: 1; background-image: none;">
+                <button type="button" class="btn btn-primary" id="manualWorkerAddBtn">追加 (Add)</button>
+            </div>
+            <button type="button" class="btn btn-primary btn-full" id="closeWorkerModal" style="margin-top: 10px;">
+                完了 (Done)
             </button>
         </div>
     </div>

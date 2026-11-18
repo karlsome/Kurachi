@@ -44624,6 +44624,17 @@ app.get('/api/production/status', async (req, res) => {
   }
 });
 
+// 第一工場 worker roles: { feeding, operator, support, cutter, unloader } -> arrays of names
+function sanitizeWorkerRoles(roles) {
+  const keys = ['feeding', 'operator', 'support', 'cutter', 'unloader'];
+  const out = {};
+  keys.forEach(k => {
+    const list = roles && Array.isArray(roles[k]) ? roles[k] : [];
+    out[k] = list.map(n => String(n || '').trim()).filter(Boolean);
+  });
+  return out;
+}
+
 app.post('/api/production/status', async (req, res) => {
   try {
     const {
@@ -44632,6 +44643,7 @@ app.post('/api/production/status', async (req, res) => {
       date,
       machine,
       worker,
+      workerRoles,
       hinban,
       hinmei,
       kizai,
@@ -44663,6 +44675,7 @@ app.post('/api/production/status', async (req, res) => {
         date,
         machine: machine || 'PSA2',
         worker: worker || '',
+        workerRoles: sanitizeWorkerRoles(workerRoles),
         hinban: hinban || '',
         hinmei: hinmei || '',
         kizai: kizai || '',
@@ -45135,6 +45148,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       date,
       machine,
       worker,
+      workerRoles,
       groupId,
       itemId,
       orderIndex,
@@ -45250,6 +45264,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       uniqueID,
       worker: worker || '',
       feederWorker: worker || '',
+      workerRoles: sanitizeWorkerRoles(workerRoles),
       wrapperWorker: '',
       groupId: groupId || '',
       itemId: itemId || '',

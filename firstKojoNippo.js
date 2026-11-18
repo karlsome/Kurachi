@@ -20,8 +20,50 @@ const initialTabIndex = (savedInitialTab !== null && !isNaN(parseInt(savedInitia
     ? parseInt(savedInitialTab, 10)
     : 0;
 
+// Worker roles (each role can hold multiple names)
+const WORKER_ROLES = [
+    { key: 'feeding', ja: '投入', en: 'Feeding' },
+    { key: 'operator', ja: 'オペレーター', en: 'Operator' },
+    { key: 'support', ja: 'サポート', en: 'Support' },
+    { key: 'cutter', ja: 'カッター', en: 'Cutter' },
+    { key: 'unloader', ja: '取り出し', en: 'Unloader' }
+];
+
+function emptyWorkerRoles() {
+    const roles = {};
+    WORKER_ROLES.forEach(r => { roles[r.key] = []; });
+    return roles;
+}
+
+function loadWorkerRoles() {
+    const roles = emptyWorkerRoles();
+    try {
+        const saved = JSON.parse(localStorage.getItem('firstkojo_nippo_worker_roles') || 'null');
+        if (saved && typeof saved === 'object') {
+            WORKER_ROLES.forEach(r => {
+                if (Array.isArray(saved[r.key])) roles[r.key] = saved[r.key].filter(Boolean);
+            });
+        }
+    } catch { }
+    return roles;
+}
+
+// Combined display name of everyone across all roles (used where a single worker string is expected)
+function summarizeWorkerRoles(roles) {
+    const seen = [];
+    WORKER_ROLES.forEach(r => (roles[r.key] || []).forEach(n => { if (!seen.includes(n)) seen.push(n); }));
+    return seen.join('・');
+}
+
+const initialWorkerRoles = loadWorkerRoles();
+
 const state = {
-    workerName: localStorage.getItem('firstkojo_nippo_worker_name') || null,
+    // Logged in only once roles have been set up (older single-name logins must pick roles again)
+    workerName: (localStorage.getItem('firstkojo_nippo_worker_name') && summarizeWorkerRoles(initialWorkerRoles))
+        ? summarizeWorkerRoles(initialWorkerRoles)
+        : null,
+    workerRoles: initialWorkerRoles,
+    activeWorkerRole: null,
     machineName: null,
     filterName: "第一工場",
 
@@ -113,12 +155,112 @@ function initWorker() {
     if (state.workerName) {
         if (welcomeBack) welcomeBack.classList.add('active');
         if (newWorker) newWorker.classList.remove('active');
-        if (confirmName) confirmName.textContent = state.workerName;
+        if (confirmName) renderWorkerRolesSummary(confirmName);
     } else {
         if (welcomeBack) welcomeBack.classList.remove('active');
         if (newWorker) newWorker.classList.add('active');
+        renderWorkerRoleEditor();
     }
     updateTabLocks();
+}
+
+function getWorkerRolesPayload() {
+    const roles = {};
+    WORKER_ROLES.forEach(r => { roles[r.key] = [...(state.workerRoles[r.key] || [])]; });
+    return roles;
+}
+
+function persistWorkerRoles() {
+    localStorage.setItem('firstkojo_nippo_worker_roles', JSON.stringify(state.workerRoles));
+}
+
+function roleLabelHtml(role, idx) {
+    return `<div class="worker-role-label">${idx + 1}. ${escapeHtml(role.ja)}<small>${escapeHtml(role.en)}</small></div>`;
+}
+
+function workerChipsHtml(names) {
+    return names.length
+        ? names.map(n => `<span class="worker-role-chip" style="padding-right: 12px;">${escapeHtml(n)}</span>`).join('')
+        : '<span class="worker-role-empty">未選択 (None)</span>';
+}
+
+function renderWorkerRolesSummary(container) {
+    container.innerHTML = WORKER_ROLES.map((role, idx) =>
+        `<div class="worker-role-row">${roleLabelHtml(role, idx)}<div class="worker-role-chips">${workerChipsHtml(state.workerRoles[role.key] || [])}</div></div>`
+    ).join('');
+}
+
+function renderWorkerRoleEditor() {
+    const container = document.getElementById('workerRolesContainer');
+    if (!container) return;
+    container.innerHTML = '';
+
+    WORKER_ROLES.forEach((role, idx) => {
+        const row = document.createElement('div');
+        row.className = 'worker-role-row';
+        row.innerHTML = roleLabelHtml(role, idx);
+
+        const chips = document.createElement('div');
+        chips.className = 'worker-role-chips';
+        const names = state.workerRoles[role.key] || [];
+        if (names.length === 0) chips.innerHTML = workerChipsHtml([]);
+        names.forEach(name => {
+            const chip = document.createElement('span');
+            chip.className = 'worker-role-chip';
+            chip.textContent = name;
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.textContent = '×';
+            del.title = '削除 (Remove)';
+            del.onclick = () => removeWorkerFromRole(role.key, name);
+            chip.appendChild(del);
+            chips.appendChild(chip);
+        });
+        row.appendChild(chips);
+
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'worker-role-add';
+        addBtn.textContent = '＋ 追加';
+        addBtn.onclick = () => openWorkerModalForRole(role.key);
+        row.appendChild(addBtn);
+
+        container.appendChild(row);
+    });
+}
+
+function openWorkerModalForRole(roleKey) {
+    state.activeWorkerRole = roleKey;
+    const role = WORKER_ROLES.find(r => r.key === roleKey);
+    const title = document.getElementById('workerModalTitle');
+    if (title && role) title.textContent = `${role.ja} (${role.en})`;
+    const manualRow = document.getElementById('manualEntryRow');
+    if (manualRow) manualRow.style.display = 'none';
+    renderWorkerNames();
+    const modal = document.getElementById('workerNameModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeWorkerModal() {
+    const modal = document.getElementById('workerNameModal');
+    if (modal) modal.style.display = 'none';
+    state.activeWorkerRole = null;
+    renderWorkerRoleEditor();
+}
+
+function addWorkerToRole(roleKey, name) {
+    const clean = String(name || '').trim();
+    if (!roleKey || !clean) return;
+    const list = state.workerRoles[roleKey] || (state.workerRoles[roleKey] = []);
+    if (!list.includes(clean)) list.push(clean);
+    saveRecentWorker(clean);
+    persistWorkerRoles();
+}
+
+function removeWorkerFromRole(roleKey, name) {
+    state.workerRoles[roleKey] = (state.workerRoles[roleKey] || []).filter(n => n !== name);
+    persistWorkerRoles();
+    renderWorkerRoleEditor();
 }
 
 async function fetchWorkersFromMongoDB() {
@@ -157,7 +299,7 @@ function saveRecentWorker(name) {
     let recent = getRecentWorkers();
     recent = recent.filter(w => w !== name);
     recent.unshift(name);
-    if (recent.length > 5) recent.pop();
+    if (recent.length > 10) recent.pop();
     localStorage.setItem('firstkojo_recent_workers', JSON.stringify(recent));
 }
 
@@ -199,6 +341,10 @@ function renderWorkerNames() {
     if (!container) return;
     container.innerHTML = '';
 
+    const selectedNames = state.workerRoles[state.activeWorkerRole] || [];
+    const selectedEl = document.getElementById('workerModalSelected');
+    if (selectedEl) selectedEl.innerHTML = workerChipsHtml(selectedNames);
+
     const recentWorkers = getRecentWorkers();
 
     if (recentWorkers.length > 0) {
@@ -218,7 +364,7 @@ function renderWorkerNames() {
 
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = 'worker-name-btn';
+            btn.className = 'worker-name-btn' + (selectedNames.includes(name) ? ' selected' : '');
             btn.textContent = name;
             btn.onclick = () => selectWorkerName(name);
 
@@ -258,7 +404,7 @@ function renderWorkerNames() {
         grouped[letter].forEach(name => {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = 'worker-name-btn';
+            btn.className = 'worker-name-btn' + (selectedNames.includes(name) ? ' selected' : '');
             btn.textContent = name;
             btn.onclick = () => selectWorkerName(name);
             grid.appendChild(btn);
@@ -269,27 +415,30 @@ function renderWorkerNames() {
     });
 }
 
+// Toggle a name in the role currently being edited (modal stays open for multiple picks)
 function selectWorkerName(name) {
-    state.workerName = name;
-    localStorage.setItem('firstkojo_nippo_worker_name', name);
-    const input = document.getElementById("workerInput");
-    if (input) input.value = name;
-    saveRecentWorker(name);
-
-    const modal = document.getElementById('workerNameModal');
-    if (modal) modal.style.display = 'none';
-
-    initWorker();
-    switchMainTab(1); // Jump to List tab
+    const roleKey = state.activeWorkerRole;
+    if (!roleKey) return;
+    if ((state.workerRoles[roleKey] || []).includes(name)) {
+        state.workerRoles[roleKey] = state.workerRoles[roleKey].filter(n => n !== name);
+        persistWorkerRoles();
+    } else {
+        addWorkerToRole(roleKey, name);
+    }
+    renderWorkerNames();
 }
 
 function proceedFromStep0() {
-    const val = document.getElementById("workerInput")?.value;
-    if (!val) {
-        alert("作業者を選択してください。(Please select a worker first.)");
+    const summary = summarizeWorkerRoles(state.workerRoles);
+    if (!summary) {
+        alert("作業者を選択してください。(Please select at least one worker.)");
         return;
     }
-    selectWorkerName(val);
+    state.workerName = summary;
+    localStorage.setItem('firstkojo_nippo_worker_name', summary);
+    persistWorkerRoles();
+    initWorker();
+    switchMainTab(1); // Jump to List tab
 }
 
 function confirmWorkerName() {
@@ -297,12 +446,11 @@ function confirmWorkerName() {
     switchMainTab(1); // Jump to List tab
 }
 
+// Go back to the role editor; current names stay filled in so they can be adjusted
 function changeWorkerName() {
     state.workerName = null;
     localStorage.removeItem('firstkojo_nippo_worker_name');
     localStorage.setItem('firstkojo_nippo_main_tab', '0');
-    const input = document.getElementById("workerInput");
-    if (input) input.value = '';
     initWorker();
     switchMainTab(0);
 }
@@ -558,6 +706,7 @@ async function syncProductionStatusToServer(group, patch) {
             date: state.selectedDate,
             machine: state.machineName || 'PSA2',
             worker: state.workerName || '',
+            workerRoles: getWorkerRolesPayload(),
             hinban: group.hinban,
             hinmei: group.hinmei || '',
             kizai: group.kizai || '',
@@ -1235,6 +1384,7 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
             date: state.selectedDate,
             machine: state.machineName || 'PSA2',
             worker: state.workerName || '作業者',
+            workerRoles: getWorkerRolesPayload(),
             groupId: group?.groupId || item.groupId || item.id,
             itemId: itemId,
             orderIndex: item.orderIndex || (rIdx + 1),
@@ -1369,6 +1519,7 @@ async function enqueueBatchGroup(gIdx, event) {
                 date: state.selectedDate,
                 machine: state.machineName || 'PSA2',
                 worker: state.workerName || '作業者',
+                workerRoles: getWorkerRolesPayload(),
                 groupId: group.groupId,
                 hinban: item.hinban || '',
                 hinmei: item.hinmei || '',
@@ -5998,6 +6149,7 @@ async function submitModalRollToQueue() {
             date: state.selectedDate,
             machine: state.machineName || 'PSA2',
             worker: state.workerName || '作業者',
+            workerRoles: getWorkerRolesPayload(),
             groupId: group?.groupId || item.groupId || item.id,
             itemId: itemId,
             orderIndex: item.orderIndex || (rIdx + 1),
@@ -7396,42 +7548,30 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btn) btn.textContent = '▼';
     }
 
-    // Worker input modal events
-    const workerInputEl = document.getElementById('workerInput');
-    const workerModal = document.getElementById('workerNameModal');
-
-    const openWorkerModal = (e) => {
-        if (workerInputEl && workerInputEl.readOnly) {
-            e.preventDefault();
-            renderWorkerNames();
-            if (workerModal) workerModal.style.display = 'flex';
-        }
-    };
-
-    if (workerInputEl) {
-        workerInputEl.addEventListener('click', openWorkerModal);
-        workerInputEl.addEventListener('focus', openWorkerModal);
-        workerInputEl.addEventListener('touchstart', openWorkerModal);
-        workerInputEl.addEventListener('blur', (e) => {
-            e.target.readOnly = true;
-        });
-    }
-
+    // Worker role modal events
     const closeWorkerModalBtn = document.getElementById('closeWorkerModal');
-    if (closeWorkerModalBtn) {
-        closeWorkerModalBtn.addEventListener('click', () => {
-            if (workerModal) workerModal.style.display = 'none';
-        });
-    }
+    if (closeWorkerModalBtn) closeWorkerModalBtn.addEventListener('click', closeWorkerModal);
 
     const manualEntryBtn = document.getElementById('manualEntryBtn');
-    if (manualEntryBtn) {
+    const manualRow = document.getElementById('manualEntryRow');
+    const manualInput = document.getElementById('manualWorkerInput');
+    const manualAddBtn = document.getElementById('manualWorkerAddBtn');
+    if (manualEntryBtn && manualRow) {
         manualEntryBtn.addEventListener('click', () => {
-            if (workerInputEl) {
-                workerInputEl.readOnly = false;
-                workerInputEl.focus();
-            }
-            if (workerModal) workerModal.style.display = 'none';
+            manualRow.style.display = 'flex';
+            if (manualInput) manualInput.focus();
+        });
+    }
+    const addManualWorker = () => {
+        if (!manualInput || !manualInput.value.trim()) return;
+        addWorkerToRole(state.activeWorkerRole, manualInput.value);
+        manualInput.value = '';
+        renderWorkerNames();
+    };
+    if (manualAddBtn) manualAddBtn.addEventListener('click', addManualWorker);
+    if (manualInput) {
+        manualInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); addManualWorker(); }
         });
     }
 
