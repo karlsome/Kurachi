@@ -4,8 +4,8 @@
  */
 
 //const serverURL = "https://kurachi.onrender.com";
-const serverURL = "http://localhost:3000";
-//const serverURL = "http://192.168.0.20:3000";
+//const serverURL = "http://localhost:3000";
+const serverURL = "http://192.168.0.148:3000";
 
 function getTodayDateString() {
     const now = new Date();
@@ -6673,13 +6673,17 @@ function renderStagingQueue() {
 // Re-stamp the real production start of the first roll (after 準備 / machine setup)
 async function confirmFirstRollStart(queueId) {
     if (!queueId) return;
-    const okStart = await appConfirm('生産を開始しますか？', '開始時刻を今の時刻で記録します。\n(Start production now? The start time will be recorded as now.)', { icon: '▶️', tone: 'brand', okLabel: '▶ 生産開始 (Start)', cancelLabel: 'キャンセル' });
+    const okStart = await appConfirm('生産を開始しますか？', '開始時刻を確認してください。押し忘れた場合は実際の時刻に変更できます。\n(Check the start time. Change it if production started earlier.)', {
+        icon: '▶️', tone: 'brand', okLabel: '▶ 生産開始 (Start)', cancelLabel: 'キャンセル',
+        fields: [{ key: 'start', label: '開始時刻 (Start time)', epoch: Date.now() }],
+        validate: (v) => validateNotFuture(v.start, '開始時刻')
+    });
     if (!okStart) return;
     try {
         const res = await fetch(`${serverURL}/api/production/queue/confirm-start`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ _id: queueId, worker: state.workerName || '' })
+            body: JSON.stringify({ _id: queueId, startEpoch: okStart.start, worker: state.workerName || '' })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
@@ -7566,7 +7570,25 @@ function restoreExcludedItem(itemId, event) {
 // In-app confirm / notice pop-up (replaces browser confirm()/alert() for setup & start)
 // appConfirm resolves true/false; appNotice resolves when closed.
 // -----------------------------------------------------
-function appDialog({ title, message, icon = '❓', tone = 'brand', okLabel = 'はい (Yes)', cancelLabel = 'いいえ (No)', showCancel = true }) {
+// Epoch for HH:MM on the selected schedule date (tablet local time = JST)
+function epochFromHM(h, m) {
+    const [y, mo, d] = (state.selectedDate || getTodayDateString()).split('-').map(Number);
+    return new Date(y, mo - 1, d, h, m, 0, 0).getTime();
+}
+
+function hmFromEpoch(epoch) {
+    const d = new Date(Number(epoch) || Date.now());
+    return { h: d.getHours(), m: d.getMinutes() };
+}
+
+function fmtHM(epoch) {
+    const { h, m } = hmFromEpoch(epoch);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+// fields: [{ key, label, epoch }] -> big hour/minute steppers. validate(values) returns an error string or ''.
+// Resolves false on cancel, true on OK (no fields) or { key: epoch } (with fields).
+function appDialog({ title, message, icon = '❓', tone = 'brand', okLabel = 'はい (Yes)', cancelLabel = 'いいえ (No)', showCancel = true, fields = [], validate = null }) {
     return new Promise(resolve => {
         let overlay = document.getElementById('appDialogOverlay');
         if (!overlay) {
@@ -7575,11 +7597,42 @@ function appDialog({ title, message, icon = '❓', tone = 'brand', okLabel = '�
             overlay.className = 'app-dialog-overlay';
             document.body.appendChild(overlay);
         }
+
+        const values = {};
+        fields.forEach(f => { values[f.key] = hmFromEpoch(f.epoch); });
+
+        const fieldHTML = fields.map(f => `
+            <div class="app-time-field" data-field="${f.key}">
+                <div class="app-time-label">${escapeHtml(f.label)}</div>
+                <div class="app-time-row">
+                    <div class="app-time-unit">
+                        <button type="button" data-step="${f.key}:h:1">▲</button>
+                        <div class="app-time-value" data-show="${f.key}:h"></div>
+                        <button type="button" data-step="${f.key}:h:-1">▼</button>
+                    </div>
+                    <div class="app-time-colon">:</div>
+                    <div class="app-time-unit">
+                        <button type="button" data-step="${f.key}:m:1">▲</button>
+                        <div class="app-time-value" data-show="${f.key}:m"></div>
+                        <button type="button" data-step="${f.key}:m:-1">▼</button>
+                    </div>
+                </div>
+                <div class="app-time-quick">
+                    <button type="button" data-quick="${f.key}:-10">−10分</button>
+                    <button type="button" data-quick="${f.key}:-5">−5分</button>
+                    <button type="button" data-quick="${f.key}:-1">−1分</button>
+                    <button type="button" data-quick="${f.key}:now">今 (Now)</button>
+                </div>
+            </div>
+        `).join('');
+
         overlay.innerHTML = `
             <div class="app-dialog-card tone-${tone}" role="dialog" aria-modal="true">
                 <div class="app-dialog-icon">${icon}</div>
                 <div class="app-dialog-title">${escapeHtml(title || '')}</div>
                 <div class="app-dialog-message">${escapeHtml(message || '').replace(/\n/g, '<br>')}</div>
+                ${fieldHTML ? `<div class="app-time-fields">${fieldHTML}</div>` : ''}
+                <div class="app-dialog-error" data-error></div>
                 <div class="app-dialog-actions">
                     ${showCancel ? `<button type="button" class="btn btn-secondary" data-dialog="cancel">${escapeHtml(cancelLabel)}</button>` : ''}
                     <button type="button" class="btn app-dialog-ok" data-dialog="ok">${escapeHtml(okLabel)}</button>
@@ -7587,16 +7640,63 @@ function appDialog({ title, message, icon = '❓', tone = 'brand', okLabel = '�
             </div>
         `;
         overlay.style.display = 'flex';
+
+        const epochs = () => {
+            const out = {};
+            Object.keys(values).forEach(k => { out[k] = epochFromHM(values[k].h, values[k].m); });
+            return out;
+        };
+        const errEl = overlay.querySelector('[data-error]');
+        const refresh = () => {
+            Object.keys(values).forEach(k => {
+                overlay.querySelector(`[data-show="${k}:h"]`).textContent = String(values[k].h).padStart(2, '0');
+                overlay.querySelector(`[data-show="${k}:m"]`).textContent = String(values[k].m).padStart(2, '0');
+            });
+            const msg = validate && fields.length ? validate(epochs()) : '';
+            errEl.textContent = msg || '';
+            overlay.querySelector('[data-dialog="ok"]').disabled = Boolean(msg);
+        };
+        overlay.querySelectorAll('[data-step]').forEach(btn => {
+            btn.onclick = () => {
+                const [k, unit, dir] = btn.dataset.step.split(':');
+                const v = values[k];
+                if (unit === 'h') v.h = (v.h + Number(dir) + 24) % 24;
+                else v.m = (v.m + Number(dir) + 60) % 60;
+                refresh();
+            };
+        });
+        overlay.querySelectorAll('[data-quick]').forEach(btn => {
+            btn.onclick = () => {
+                const [k, amount] = btn.dataset.quick.split(':');
+                const base = amount === 'now' ? Date.now() : epochFromHM(values[k].h, values[k].m) + Number(amount) * 60000;
+                values[k] = hmFromEpoch(base);
+                refresh();
+            };
+        });
+        refresh();
+
         const close = (result) => {
             overlay.style.display = 'none';
             overlay.innerHTML = '';
             resolve(result);
         };
-        overlay.querySelector('[data-dialog="ok"]').onclick = () => close(true);
+        overlay.querySelector('[data-dialog="ok"]').onclick = () => {
+            if (!fields.length) return close(true);
+            const vals = epochs();
+            const msg = validate ? validate(vals) : '';
+            if (msg) { errEl.textContent = msg; return; }
+            close(vals);
+        };
         const cancelBtn = overlay.querySelector('[data-dialog="cancel"]');
         if (cancelBtn) cancelBtn.onclick = () => close(false);
         overlay.onclick = (e) => { if (e.target === overlay && showCancel) close(false); };
     });
+}
+
+// Shared checks for operator-entered times
+function validateNotFuture(epoch, label) {
+    if (epoch > Date.now() + 60000) return `${label}に未来の時刻は設定できません`;
+    return '';
 }
 
 function appConfirm(title, message, options = {}) {
@@ -7653,7 +7753,11 @@ async function startSetupPrompt(gIdx) {
         openSetupTimerModal();
         return;
     }
-    const okStart = await appConfirm(`#${setupItem.orderIndex} 「${name}」を開始しますか？`, `開始時刻を今の時刻で記録します。\n(Start "${name}" now?)`, { icon: '▶️', tone: 'amber', okLabel: '▶ 開始する (Start)', cancelLabel: 'キャンセル' });
+    const okStart = await appConfirm(`#${setupItem.orderIndex} 「${name}」を開始しますか？`, `開始時刻を確認してください。押し忘れた場合は実際の時刻に変更できます。\n(Check the start time. Change it if you started earlier.)`, {
+        icon: '▶️', tone: 'amber', okLabel: '▶ 開始する (Start)', cancelLabel: 'キャンセル',
+        fields: [{ key: 'start', label: '開始時刻 (Start time)', epoch: Date.now() }],
+        validate: (v) => validateNotFuture(v.start, '開始時刻')
+    });
     if (!okStart) return;
 
     try {
@@ -7667,6 +7771,7 @@ async function startSetupPrompt(gIdx) {
                 orderIndex: setupItem.orderIndex,
                 name,
                 plannedMins: Number(setupItem.duration) || 0,
+                startEpoch: okStart.start,
                 worker: state.workerName || '',
                 workerRoles: getWorkerRolesPayload()
             })
@@ -7681,21 +7786,26 @@ async function startSetupPrompt(gIdx) {
     } catch (err) {
         console.error('Could not start setup:', err);
         await appNotice('開始できませんでした', err.message);
+        return;
     }
 }
 
 async function endSetupPrompt() {
     const running = getRunningSetup();
     if (!running) return;
-    const elapsedMins = Math.max(0, Math.floor((Date.now() - (Number(running.startEpoch) || Date.now())) / 60000));
-    const okEnd = await appConfirm(`${running.orderIndex ? `#${running.orderIndex} ` : ''}「${running.name || '段替え'}」を終了しますか？`, `開始 ${running.startTime || ''} ・ 経過 ${elapsedMins} 分\n(End "${running.name || 'setup'}" now?)`, { icon: '■', tone: 'danger', okLabel: '■ 終了する (End)', cancelLabel: 'キャンセル' });
+    const startEpoch = Number(running.startEpoch) || Date.now();
+    const okEnd = await appConfirm(`${running.orderIndex ? `#${running.orderIndex} ` : ''}「${running.name || '段替え'}」を終了しますか？`, `開始 ${running.startTime || fmtHM(startEpoch)}。終了を押し忘れた場合は実際の終了時刻に変更できます。\n(Change the end time if you finished earlier.)`, {
+        icon: '■', tone: 'danger', okLabel: '■ 終了する (End)', cancelLabel: 'キャンセル',
+        fields: [{ key: 'end', label: '終了時刻 (End time)', epoch: Date.now() }],
+        validate: (v) => validateNotFuture(v.end, '終了時刻') || (v.end <= startEpoch ? `終了時刻は開始 ${fmtHM(startEpoch)} より後にしてください` : '')
+    });
     if (!okEnd) return;
 
     try {
         const res = await fetch(`${serverURL}/api/production/setup/end`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ date: state.selectedDate, setupId: running.setupId, worker: state.workerName || '' })
+            body: JSON.stringify({ date: state.selectedDate, setupId: running.setupId, endEpoch: okEnd.end, worker: state.workerName || '' })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
@@ -7715,7 +7825,7 @@ async function endSetupPrompt() {
                 await fetch(`${serverURL}/api/production/queue/confirm-start`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ _id: waiting._id, worker: state.workerName || '' })
+                    body: JSON.stringify({ _id: waiting._id, startEpoch: data.record.endEpoch, worker: state.workerName || '' })
                 });
                 await fetchProductionQueue();
             } catch (e) {
@@ -7725,6 +7835,41 @@ async function endSetupPrompt() {
     } catch (err) {
         console.error('Could not end setup:', err);
         await appNotice('終了できませんでした', err.message);
+    }
+}
+
+async function editSetupTimes(setupId, event) {
+    if (event) event.stopPropagation();
+    const id = setupId || getRunningSetup()?.setupId;
+    const rec = state.setupRecords?.[id];
+    if (!rec) return;
+    const isDone = rec.status === 'done';
+    const fields = [{ key: 'start', label: '開始時刻 (Start time)', epoch: rec.startEpoch }];
+    if (isDone) fields.push({ key: 'end', label: '終了時刻 (End time)', epoch: rec.endEpoch });
+
+    const result = await appConfirm(`${rec.orderIndex ? `#${rec.orderIndex} ` : ''}「${rec.name || '段替え'}」の時刻修正`, isDone ? '実際の開始・終了時刻に修正してください。(Correct the real start / end time.)' : '実際の開始時刻に修正してください。(Correct the real start time.)', {
+        icon: '✎', tone: 'amber', okLabel: '保存 (Save)', cancelLabel: 'キャンセル',
+        fields,
+        validate: (v) => validateNotFuture(v.start, '開始時刻') ||
+            (isDone ? (validateNotFuture(v.end, '終了時刻') || (v.end <= v.start ? '終了時刻は開始時刻より後にしてください' : '')) : '')
+    });
+    if (!result) return;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/setup/edit-times`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: state.selectedDate, setupId: id, startEpoch: result.start, endEpoch: result.end, worker: state.workerName || '' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        state.setupRecords = { ...state.setupRecords, [id]: data.record };
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        renderHistoryList();
+        updateSetupTimerUI();
+        showToast('時刻を修正しました', 'success', 2500);
+    } catch (err) {
+        await appNotice('修正できませんでした', err.message);
     }
 }
 
@@ -7766,8 +7911,10 @@ function renderSetupHistoryRow(rec) {
                 <span style="font-size: 0.85rem; color: #475569; font-weight: 600;">${escapeHtml(rec.startTime || '')} 〜 ${escapeHtml(rec.endTime || '')}</span>
                 <span class="tag-pill" style="font-size: 0.8rem; padding: 2px 8px; font-weight: 800; ${over ? 'background:#FEE2E2; color:#B91C1C; border:1px solid #FCA5A5;' : 'background:#ECFDF5; color:#047857; border:1px solid #A7F3D0;'}">${actual} 分</span>
                 ${diffText ? `<span style="font-size: 0.78rem; font-weight: 700; color: ${over ? '#B91C1C' : '#047857'};">${diffText}</span>` : ''}
+                ${(rec.startEdited || rec.endEdited) ? `<span class="setup-edited-mark" title="時刻が修正されています">✎ 修正済</span>` : ''}
             </div>
             <div class="roll-row-right" style="display: flex; gap: 6px; align-items: center;">
+                <button type="button" class="btn-detail-secondary" onclick="editSetupTimes('${escapeHtml(rec.setupId)}', event)" title="開始・終了時刻を修正 (Edit times)">✎ 時刻修正</button>
                 <button type="button" class="btn-roll-exclude is-excluded" onclick="undoSetupEnd('${escapeHtml(rec.setupId)}', event)" title="終了を取り消す (Undo end)">元に戻す</button>
             </div>
         </div>

@@ -44719,6 +44719,19 @@ function jstTime(epoch) {
   return new Date(epoch).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
 }
 
+// Operator-entered time (forgot to press 開始/終了). Must be a real epoch, not in the future
+// (1 min clock tolerance) and within the last 24h. Returns null if not provided.
+function parseEditedEpoch(value, label) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`${label}が不正です`);
+  const now = Date.now();
+  if (n > now + 60000) throw new Error(`${label}に未来の時刻は設定できません`);
+  if (n < now - 24 * 3600000) throw new Error(`${label}は24時間以内にしてください`);
+  return n;
+}
+const isTimeEdited = (epoch, pressedAt) => Math.abs(epoch - pressedAt) > 60000;
+
 app.post('/api/production/setup/start', async (req, res) => {
   try {
     const { date, machine, setupId, orderIndex, name, plannedMins, worker, workerRoles } = req.body || {};
@@ -44731,7 +44744,13 @@ app.post('/api/production/setup/start', async (req, res) => {
       return res.status(409).json({ error: `「${other.name || '段替え'}」が実行中です。先に終了してください。`, running: other });
     }
 
-    const now = Date.now();
+    const pressedAt = Date.now();
+    let now;
+    try {
+      now = parseEditedEpoch(req.body.startEpoch, '開始時刻') || pressedAt;
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
     const doc = {
       date,
       machine: targetMachine,
@@ -44748,6 +44767,9 @@ app.post('/api/production/setup/start', async (req, res) => {
       startedBy: worker || '',
       endedBy: '',
       workerRoles: sanitizeWorkerRoles(workerRoles),
+      startEdited: isTimeEdited(now, pressedAt),
+      endEdited: false,
+      startPressedAt: pressedAt,
       updatedAt: new Date()
     };
     await col.updateOne({ date, setupId }, { $set: doc, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
@@ -44767,13 +44789,24 @@ app.post('/api/production/setup/end', async (req, res) => {
     const rec = await col.findOne({ date, setupId });
     if (!rec) return res.status(404).json({ error: 'Setup not started' });
 
-    const now = Date.now();
+    const pressedAt = Date.now();
+    let now;
+    try {
+      now = parseEditedEpoch(req.body.endEpoch, '終了時刻') || pressedAt;
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+    if (rec.startEpoch && now <= rec.startEpoch) {
+      return res.status(400).json({ error: '終了時刻は開始時刻より後にしてください' });
+    }
     const update = {
       status: 'done',
       endEpoch: now,
       endTime: jstTime(now),
       durationMins: Math.max(1, Math.round((now - (rec.startEpoch || now)) / 60000)),
       endedBy: worker || '',
+      endEdited: isTimeEdited(now, pressedAt),
+      endPressedAt: pressedAt,
       updatedAt: new Date()
     };
     await col.updateOne({ _id: rec._id }, { $set: update });
@@ -44782,6 +44815,53 @@ app.post('/api/production/setup/end', async (req, res) => {
   } catch (error) {
     console.error('❌ Error in POST /api/production/setup/end:', error);
     res.status(500).json({ error: 'Failed to end setup' });
+  }
+});
+
+// Correct start/end of a setup afterwards (running: start only). Every change is kept in timeEdits.
+app.post('/api/production/setup/edit-times', async (req, res) => {
+  try {
+    const { date, setupId, worker } = req.body || {};
+    if (!date || !setupId) return res.status(400).json({ error: 'date and setupId are required' });
+    const col = client.db('submittedDB').collection('firstFactorySetupLog');
+    const rec = await col.findOne({ date, setupId });
+    if (!rec) return res.status(404).json({ error: 'Setup not found' });
+
+    let newStart, newEnd;
+    try {
+      newStart = parseEditedEpoch(req.body.startEpoch, '開始時刻') ?? rec.startEpoch;
+      newEnd = rec.status === 'done' ? (parseEditedEpoch(req.body.endEpoch, '終了時刻') ?? rec.endEpoch) : null;
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+    if (newEnd && newEnd <= newStart) {
+      return res.status(400).json({ error: '終了時刻は開始時刻より後にしてください' });
+    }
+
+    const update = {
+      startEpoch: newStart,
+      startTime: jstTime(newStart),
+      startEdited: rec.startEdited || newStart !== rec.startEpoch,
+      updatedAt: new Date()
+    };
+    if (rec.status === 'done') {
+      update.endEpoch = newEnd;
+      update.endTime = jstTime(newEnd);
+      update.durationMins = Math.max(1, Math.round((newEnd - newStart) / 60000));
+      update.endEdited = rec.endEdited || newEnd !== rec.endEpoch;
+    }
+    const edit = {
+      at: new Date(),
+      by: worker || '',
+      from: { startEpoch: rec.startEpoch || null, endEpoch: rec.endEpoch || null },
+      to: { startEpoch: newStart, endEpoch: rec.status === 'done' ? newEnd : null }
+    };
+    await col.updateOne({ _id: rec._id }, { $set: update, $push: { timeEdits: edit } });
+    broadcastProductionEvent({ type: 'setup_update', date, setupId, status: rec.status });
+    res.json({ success: true, record: { ...rec, ...update, timeEdits: [...(rec.timeEdits || []), edit] } });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/setup/edit-times:', error);
+    res.status(500).json({ error: 'Failed to edit setup times' });
   }
 });
 
@@ -45545,10 +45625,18 @@ app.post('/api/production/queue/confirm-start', async (req, res) => {
       return res.status(409).json({ error: 'Roll is not in progress' });
     }
 
-    const now = Date.now();
+    const pressedAt = Date.now();
+    let now;
+    try {
+      now = parseEditedEpoch(req.body.startEpoch, '開始時刻') || pressedAt;
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
     const update = {
       startedAt: new Date(now),
       startEpoch: now,
+      startEdited: isTimeEdited(now, pressedAt),
+      startPressedAt: pressedAt,
       actualStartTime: new Date(now).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' }),
       startConfirmed: true,
       startConfirmedBy: worker || '',

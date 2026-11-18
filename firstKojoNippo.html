@@ -762,6 +762,62 @@
             margin: 14px 0 6px;
             font-variant-numeric: tabular-nums;
         }
+        .setup-timer-edit {
+            margin-top: 10px;
+            min-height: 40px;
+            padding: 0 16px;
+            border-radius: 10px;
+            border: 1px dashed #B45309;
+            background: transparent;
+            color: #B45309;
+            font-weight: 800;
+            font-size: 0.92rem;
+            cursor: pointer;
+        }
+        .setup-edited-mark {
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: #7C3AED;
+            background: #F5F3FF;
+            border: 1px solid #DDD6FE;
+            border-radius: 6px;
+            padding: 1px 7px;
+        }
+
+        /* Time picker inside the in-app pop-up */
+        .app-time-fields { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; margin-top: 16px; }
+        .app-time-field { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 14px; padding: 10px 14px 12px; }
+        .app-time-label { font-size: 0.85rem; font-weight: 800; color: #334155; margin-bottom: 6px; }
+        .app-time-row { display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .app-time-unit { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .app-time-unit button {
+            width: 64px;
+            height: 40px;
+            border-radius: 10px;
+            border: 1px solid #CBD5E1;
+            background: #FFFFFF;
+            font-size: 1rem;
+            color: #334155;
+            cursor: pointer;
+        }
+        .app-time-unit button:active { background: #E2E8F0; }
+        .app-time-value { font-size: 2.4rem; font-weight: 800; color: #0F172A; font-variant-numeric: tabular-nums; line-height: 1.1; }
+        .app-time-colon { font-size: 2.2rem; font-weight: 800; color: #0F172A; padding-bottom: 4px; }
+        .app-time-quick { display: flex; gap: 6px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+        .app-time-quick button {
+            min-height: 34px;
+            padding: 0 10px;
+            border-radius: 8px;
+            border: 1px solid #CBD5E1;
+            background: #FFFFFF;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #334155;
+            cursor: pointer;
+        }
+        .app-dialog-error { min-height: 1.3em; margin-top: 10px; font-size: 0.9rem; font-weight: 700; color: #DC2626; }
+        .app-dialog-ok:disabled { opacity: 0.45; cursor: not-allowed; }
+
         .setup-timer-order {
             display: inline-block;
             margin-right: 10px;
@@ -4498,7 +4554,7 @@
         }
 
         .app-toast {
-            pointer-events: auto;
+            pointer-events: none; /* taps pass through to buttons underneath (e.g. pop-up 保存) */
             background: #1E293B;
             color: #FFFFFF;
             padding: 12px 20px;
@@ -4775,6 +4831,7 @@
             <div class="setup-timer-name" id="setupTimerName">段替え</div>
             <div class="setup-timer-elapsed" id="setupTimerElapsed">00:00</div>
             <div class="setup-timer-meta" id="setupTimerMeta"></div>
+            <button type="button" class="setup-timer-edit" onclick="editSetupTimes()">✎ 開始時刻を修正 (Edit start time)</button>
             <div class="setup-timer-actions">
                 <button type="button" class="btn btn-secondary" onclick="minimizeSetupTimerModal()">最小化 (Minimize)</button>
                 <button type="button" class="btn setup-timer-end-btn" onclick="endSetupPrompt()">■ 終了 (End)</button>
