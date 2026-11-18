@@ -658,6 +658,39 @@
             text-align: center;
         }
 
+        /* ---------------- In-app confirm dialog ---------------- */
+        .app-dialog-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10100;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(16, 24, 40, 0.55);
+        }
+        .app-dialog-card {
+            width: 100%;
+            max-width: 460px;
+            background: #FFFFFF;
+            border-radius: 18px;
+            border-top: 6px solid var(--brand, #10B981);
+            padding: 26px 22px 20px;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+        }
+        .app-dialog-card.tone-amber { border-top-color: #F59E0B; }
+        .app-dialog-card.tone-danger { border-top-color: #DC2626; }
+        .app-dialog-card.tone-warn { border-top-color: #F59E0B; }
+        .app-dialog-icon { font-size: 2.2rem; line-height: 1; }
+        .app-dialog-title { font-size: 1.3rem; font-weight: 800; color: #0F172A; margin-top: 10px; }
+        .app-dialog-message { font-size: 0.98rem; color: #475569; margin-top: 8px; line-height: 1.6; }
+        .app-dialog-actions { display: flex; gap: 12px; margin-top: 22px; }
+        .app-dialog-actions .btn { flex: 1; min-height: 54px; font-size: 1.02rem; font-weight: 800; }
+        .app-dialog-ok { background: var(--brand, #10B981) !important; border-color: var(--brand, #10B981) !important; color: #FFFFFF !important; }
+        .tone-amber .app-dialog-ok, .tone-warn .app-dialog-ok { background: #F59E0B !important; border-color: #F59E0B !important; }
+        .tone-danger .app-dialog-ok { background: #DC2626 !important; border-color: #DC2626 !important; }
+
         /* ---------------- 段替え / Setup timer ---------------- */
         .schedule-setup-row.is-startable { cursor: pointer; }
         .schedule-setup-row.is-startable:active { transform: scale(0.995); }

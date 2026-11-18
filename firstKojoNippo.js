@@ -6663,7 +6663,8 @@ function renderStagingQueue() {
 // Re-stamp the real production start of the first roll (after 準備 / machine setup)
 async function confirmFirstRollStart(queueId) {
     if (!queueId) return;
-    if (!confirm('生産を開始しますか？\n開始時刻を今の時刻で記録します。\n\n(Start production now? The start time will be recorded as now.)')) return;
+    const okStart = await appConfirm('生産を開始しますか？', '開始時刻を今の時刻で記録します。\n(Start production now? The start time will be recorded as now.)', { icon: '▶️', tone: 'brand', okLabel: '▶ 生産開始 (Start)', cancelLabel: 'キャンセル' });
+    if (!okStart) return;
     try {
         const res = await fetch(`${serverURL}/api/production/queue/confirm-start`, {
             method: 'POST',
@@ -7552,6 +7553,51 @@ function restoreExcludedItem(itemId, event) {
 }
 
 // -----------------------------------------------------
+// In-app confirm / notice pop-up (replaces browser confirm()/alert() for setup & start)
+// appConfirm resolves true/false; appNotice resolves when closed.
+// -----------------------------------------------------
+function appDialog({ title, message, icon = '❓', tone = 'brand', okLabel = 'はい (Yes)', cancelLabel = 'いいえ (No)', showCancel = true }) {
+    return new Promise(resolve => {
+        let overlay = document.getElementById('appDialogOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'appDialogOverlay';
+            overlay.className = 'app-dialog-overlay';
+            document.body.appendChild(overlay);
+        }
+        overlay.innerHTML = `
+            <div class="app-dialog-card tone-${tone}" role="dialog" aria-modal="true">
+                <div class="app-dialog-icon">${icon}</div>
+                <div class="app-dialog-title">${escapeHtml(title || '')}</div>
+                <div class="app-dialog-message">${escapeHtml(message || '').replace(/\n/g, '<br>')}</div>
+                <div class="app-dialog-actions">
+                    ${showCancel ? `<button type="button" class="btn btn-secondary" data-dialog="cancel">${escapeHtml(cancelLabel)}</button>` : ''}
+                    <button type="button" class="btn app-dialog-ok" data-dialog="ok">${escapeHtml(okLabel)}</button>
+                </div>
+            </div>
+        `;
+        overlay.style.display = 'flex';
+        const close = (result) => {
+            overlay.style.display = 'none';
+            overlay.innerHTML = '';
+            resolve(result);
+        };
+        overlay.querySelector('[data-dialog="ok"]').onclick = () => close(true);
+        const cancelBtn = overlay.querySelector('[data-dialog="cancel"]');
+        if (cancelBtn) cancelBtn.onclick = () => close(false);
+        overlay.onclick = (e) => { if (e.target === overlay && showCancel) close(false); };
+    });
+}
+
+function appConfirm(title, message, options = {}) {
+    return appDialog({ title, message, ...options });
+}
+
+function appNotice(title, message, options = {}) {
+    return appDialog({ title, message, icon: '⚠️', tone: 'warn', okLabel: 'OK', showCancel: false, ...options });
+}
+
+// -----------------------------------------------------
 // 段替え / Setup timers (start & end from the List tab)
 // -----------------------------------------------------
 function getSetupDisplayName(setupItem) {
@@ -7589,7 +7635,7 @@ async function startSetupPrompt(gIdx) {
 
     const running = getRunningSetup();
     if (running && running.setupId !== group.groupId) {
-        alert(`「${running.name || '段替え'}」が実行中です。先に終了してください。\n(Another setup is running. End it first.)`);
+        await appNotice('段替え実行中', `「${running.name || '段替え'}」が実行中です。先に終了してください。\n(Another setup is running. End it first.)`);
         openSetupTimerModal();
         return;
     }
@@ -7597,7 +7643,8 @@ async function startSetupPrompt(gIdx) {
         openSetupTimerModal();
         return;
     }
-    if (!confirm(`「${name}」を開始しますか？\n開始時刻を今の時刻で記録します。\n\n(Start "${name}" now?)`)) return;
+    const okStart = await appConfirm(`「${name}」を開始しますか？`, `開始時刻を今の時刻で記録します。\n(Start "${name}" now?)`, { icon: '▶️', tone: 'amber', okLabel: '▶ 開始する (Start)', cancelLabel: 'キャンセル' });
+    if (!okStart) return;
 
     try {
         const res = await fetch(`${serverURL}/api/production/setup/start`, {
@@ -7623,14 +7670,16 @@ async function startSetupPrompt(gIdx) {
         updateSetupTimerUI();
     } catch (err) {
         console.error('Could not start setup:', err);
-        alert(`開始できませんでした: ${err.message}`);
+        await appNotice('開始できませんでした', err.message);
     }
 }
 
 async function endSetupPrompt() {
     const running = getRunningSetup();
     if (!running) return;
-    if (!confirm(`「${running.name || '段替え'}」を終了しますか？\n\n(End "${running.name || 'setup'}" now?)`)) return;
+    const elapsedMins = Math.max(0, Math.floor((Date.now() - (Number(running.startEpoch) || Date.now())) / 60000));
+    const okEnd = await appConfirm(`「${running.name || '段替え'}」を終了しますか？`, `開始 ${running.startTime || ''} ・ 経過 ${elapsedMins} 分\n(End "${running.name || 'setup'}" now?)`, { icon: '■', tone: 'danger', okLabel: '■ 終了する (End)', cancelLabel: 'キャンセル' });
+    if (!okEnd) return;
 
     try {
         const res = await fetch(`${serverURL}/api/production/setup/end`, {
@@ -7665,7 +7714,7 @@ async function endSetupPrompt() {
         }
     } catch (err) {
         console.error('Could not end setup:', err);
-        alert(`終了できませんでした: ${err.message}`);
+        await appNotice('終了できませんでした', err.message);
     }
 }
 
@@ -7673,7 +7722,8 @@ async function undoSetupEnd(setupId, event) {
     if (event) event.stopPropagation();
     const rec = state.setupRecords?.[setupId];
     if (!rec) return;
-    if (!confirm(`「${rec.name || '段替え'}」の終了を取り消して、実行中に戻しますか？\n(開始時刻はそのままです)`)) return;
+    const okUndo = await appConfirm(`「${rec.name || '段替え'}」の終了を取り消しますか？`, '実行中に戻します。開始時刻はそのままです。\n(Undo the end and resume the timer.)', { icon: '↩️', tone: 'amber', okLabel: '元に戻す (Undo)', cancelLabel: 'キャンセル' });
+    if (!okUndo) return;
     try {
         const res = await fetch(`${serverURL}/api/production/setup/undo`, {
             method: 'POST',
@@ -7688,7 +7738,7 @@ async function undoSetupEnd(setupId, event) {
         renderHistoryList();
         updateSetupTimerUI();
     } catch (err) {
-        alert(`取り消しできませんでした: ${err.message}`);
+        await appNotice('取り消しできませんでした', err.message);
     }
 }
 
