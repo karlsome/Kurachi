@@ -45210,6 +45210,22 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
 
     console.log(`📸 Uploaded first factory label photo: ${publicUrl}`);
 
+    // Small thumbnail made by the tablet (lists show this instead of the full photo)
+    let thumbUrl = '';
+    if (req.body.thumbBase64) {
+      try {
+        const thumbPath = filePath.replace(/\.jpg$/i, '') + '_thumb.jpg';
+        const thumbBuffer = Buffer.from(String(req.body.thumbBase64).replace(/^data:image\/\w+;base64,/, ''), 'base64');
+        await uploadToFirebaseWithRetry(bucket.file(thumbPath), thumbBuffer, {
+          metadata: { contentType: 'image/jpeg', cacheControl: 'public, max-age=31536000', metadata: { firebaseStorageDownloadTokens: downloadToken } },
+          validation: false
+        });
+        thumbUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(thumbPath)}?alt=media&token=${downloadToken}`;
+      } catch (thumbErr) {
+        console.warn('⚠️ Could not upload label photo thumbnail:', thumbErr.message);
+      }
+    }
+
     // If an item in firstFactoryQueue is associated, update its photoUrl in MongoDB
     try {
       const db = client.db('submittedDB');
@@ -45227,7 +45243,7 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
       }
 
       if (updateFilter) {
-        const updateDoc = { $set: { imageUrl: publicUrl, updatedAt: new Date() } };
+        const updateDoc = { $set: { imageUrl: publicUrl, ...(thumbUrl ? { imageThumbUrl: thumbUrl } : {}), updatedAt: new Date() } };
         const updateResult = await queueCol.updateMany(updateFilter, updateDoc);
         let prodModified = 0;
         try {
@@ -45250,6 +45266,7 @@ app.post(['/api/firstkojo/upload-label-photo', '/api/firstkojo/upload-photo'], a
       success: true,
       url: publicUrl,
       imageUrl: publicUrl,
+      thumbUrl,
       filePath
     });
   } catch (error) {
@@ -45425,6 +45442,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       manufacturerUid,
       photoUrl,
       imageUrl,
+      imageThumbUrl,
       status,
       socho,
       shiki,
@@ -45463,7 +45481,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
         console.log(`⚠️ Item already enqueued [${existingItem.hinban || existingItem.groupId}] (Roll #${existingItem.rollIndex}, Order #${existingItem.orderIndex}) -> returning existing _id: ${existingItem._id}`);
         // If imageUrl was missing and is now provided, update it
         if (finalImageUrl && (!existingItem.imageUrl && !existingItem.photoUrl)) {
-          const photoPatch = { imageUrl: finalImageUrl, updatedAt: new Date() };
+          const photoPatch = { imageUrl: finalImageUrl, ...(imageThumbUrl ? { imageThumbUrl } : {}), updatedAt: new Date() };
           await productionCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
           await queueCol.updateOne({ _id: existingItem._id }, { $set: photoPatch });
         }
@@ -45545,6 +45563,7 @@ app.post('/api/production/queue/enqueue', async (req, res) => {
       rawMaterialLength: rawMaterialLength || '',
       manufacturerUid: manufacturerUid || '',
       imageUrl: finalImageUrl,
+      imageThumbUrl: imageThumbUrl || '',
       queuePosition,
       status: finalStatus,
       createdAt: new Date(),

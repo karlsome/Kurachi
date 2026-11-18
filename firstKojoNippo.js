@@ -1512,7 +1512,7 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
         if (edit.photoBase64 && (!photoUrl || !photoUrl.startsWith('http'))) {
             try {
                 photoUrl = await uploadLabelPhotoToServer(edit.photoBase64, lotNoVal, item.hinban);
-                setItemEdit(itemId, { photoUrl: photoUrl });
+                setItemEdit(itemId, { photoUrl: photoUrl, photoThumbUrl: state.lastPhotoThumbUrl || '' });
             } catch (err) {
                 console.warn('Photo upload failed, using base64:', err);
                 photoUrl = edit.photoBase64;
@@ -1544,7 +1544,8 @@ async function enqueueSingleRollItem(itemId, gIdx, rIdx, event) {
             rawMaterialQR: edit.qrScanned || '',
             rawMaterialLength: String(edit.meters || item.meters || ''),
             manufacturerUid: '',
-            photoUrl: photoUrl || ''
+            photoUrl: photoUrl || '',
+            imageThumbUrl: (getItemEdits()[itemId] || {}).photoThumbUrl || ''
         };
 
         const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
@@ -1648,7 +1649,7 @@ async function enqueueBatchGroup(gIdx, event) {
             if (edit.photoBase64 && (!photoUrl || !photoUrl.startsWith('http'))) {
                 try {
                     photoUrl = await uploadLabelPhotoToServer(edit.photoBase64, lotNoVal, item.hinban);
-                    setItemEdit(itemId, { photoUrl: photoUrl });
+                    setItemEdit(itemId, { photoUrl: photoUrl, photoThumbUrl: state.lastPhotoThumbUrl || '' });
                 } catch (err) {
                     photoUrl = edit.photoBase64;
                 }
@@ -1676,7 +1677,8 @@ async function enqueueBatchGroup(gIdx, event) {
                 rawMaterialQR: '',
                 rawMaterialLength: String(edit.meters || item.meters || ''),
                 manufacturerUid: '',
-                photoUrl: photoUrl || ''
+                photoUrl: photoUrl || '',
+                imageThumbUrl: (getItemEdits()[itemId] || {}).photoThumbUrl || ''
             };
 
             const res = await fetch(`${serverURL}/api/production/queue/enqueue`, {
@@ -5930,6 +5932,33 @@ async function processBackgroundPhotoQueue() {
     isUploadingPhotos = false;
 }
 
+// Small JPEG for list thumbnails (made from the local photo, so no cross-site image read is needed)
+function makePhotoThumbnail(base64, maxSize = 160, quality = 0.7) {
+    return new Promise(resolve => {
+        if (!base64 || !String(base64).startsWith('data:image')) return resolve('');
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.max(1, Math.round(img.width * scale));
+                canvas.height = Math.max(1, Math.round(img.height * scale));
+                canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL('image/jpeg', quality));
+            } catch (e) {
+                resolve('');
+            }
+        };
+        img.onerror = () => resolve('');
+        img.src = base64;
+    });
+}
+
+// Thumbnail URL for list views; full photo only as fallback
+function getThumbUrl(doc, edit) {
+    return (doc && doc.imageThumbUrl) || (edit && edit.photoThumbUrl) || (doc && (doc.imageUrl || doc.photoUrl)) || (edit && edit.photoUrl) || '';
+}
+
 async function uploadLabelPhotoToServer(base64, lotNo, hinban, itemId) {
     if (!base64) return '';
     const targetDate = state.selectedDate || new Date().toISOString().slice(0, 10);
@@ -5942,6 +5971,7 @@ async function uploadLabelPhotoToServer(base64, lotNo, hinban, itemId) {
 
     const payload = {
         base64: base64,
+        thumbBase64: await makePhotoThumbnail(base64),
         filePath: filePath,
         date: targetDate,
         machine: targetMachine,
@@ -5960,8 +5990,9 @@ async function uploadLabelPhotoToServer(base64, lotNo, hinban, itemId) {
     if (!res.ok) throw new Error(`Upload failed HTTP ${res.status}`);
     const data = await res.json();
     const publicUrl = data.url || data.photoUrl || data.imageUrl || '';
+    state.lastPhotoThumbUrl = data.thumbUrl || '';
     if (publicUrl && itemId) {
-        setItemEdit(itemId, { photoUrl: publicUrl, hasPhoto: true });
+        setItemEdit(itemId, { photoUrl: publicUrl, photoThumbUrl: data.thumbUrl || '', hasPhoto: true });
         try {
             await firstKojoPhotoDB.updatePhoto(itemId, { photoUrl: publicUrl, status: 'uploaded' });
         } catch (e) { }
@@ -5978,6 +6009,7 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
 
     let attempts = record.uploadAttempts || 0;
     let uploadedUrl = null;
+    let uploadedThumbUrl = '';
 
     for (let i = attempts; i < maxRetries; i++) {
         try {
@@ -5991,6 +6023,7 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
 
             const payload = {
                 base64: record.base64,
+                thumbBase64: await makePhotoThumbnail(record.base64),
                 filePath: filePath,
                 date: targetDate,
                 machine: targetMachine,
@@ -6013,6 +6046,7 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
             const data = await res.json();
             if (data.success && (data.url || data.imageUrl || data.photoUrl)) {
                 uploadedUrl = data.url || data.imageUrl || data.photoUrl;
+                uploadedThumbUrl = data.thumbUrl || '';
                 break;
             } else {
                 throw new Error(data.error || 'No URL returned');
@@ -6033,7 +6067,7 @@ async function uploadSinglePhotoWithRetry(itemId, maxRetries = 3) {
             status: 'uploaded',
             photoUrl: uploadedUrl
         });
-        setItemEdit(itemId, { photoUrl: uploadedUrl, hasPhoto: true });
+        setItemEdit(itemId, { photoUrl: uploadedUrl, photoThumbUrl: uploadedThumbUrl, hasPhoto: true });
         console.log(`✅ Background upload finished for ${itemId}: ${uploadedUrl}`);
     } else {
         await firstKojoPhotoDB.updatePhoto(itemId, { status: 'failed' });
@@ -6347,7 +6381,8 @@ async function submitModalRollToQueue() {
             rawMaterialQR: rawQRVal,
             rawMaterialLength: String(bichoVal),
             manufacturerUid: '',
-            imageUrl: photoUrl || ''
+            imageUrl: photoUrl || '',
+            imageThumbUrl: (getItemEdits()[itemId] || {}).photoThumbUrl || ''
         };
 
         console.log('Enqueueing single roll to queue:', enqueuePayload);
@@ -6612,7 +6647,7 @@ function renderStagingQueue() {
         const kizaiCode = getScheduleDisplayName(activeItem);
         const activeImg = activeItem.imageUrl || activeItem.photoUrl;
         const photoThumb = activeImg
-            ? `<img class="queue-flat-thumb" src="${activeImg}" alt="" loading="lazy" decoding="async" data-item-id="${activeItem.itemId || activeItem._id}" data-src="${activeImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${activeImg}', '${activeItem.itemId || activeItem._id}')" onclick="openPhotoEnlarged('${activeImg}')" title="クリックで拡大">`
+            ? `<img class="queue-flat-thumb" src="${getThumbUrl(activeItem, getItemEdits()[activeItem.itemId] || null) || activeImg}" alt="" loading="lazy" decoding="async" data-item-id="${activeItem.itemId || activeItem._id}" data-src="${activeImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${activeImg}', '${activeItem.itemId || activeItem._id}')" onclick="openPhotoEnlarged('${activeImg}')" title="クリックで拡大">`
             : `<div class="queue-flat-thumb-placeholder">写真なし</div>`;
         const currentRoll = activeItem.currentRollIndex || activeItem.rollIndex || 1;
         const totalRolls = activeItem.totalRolls || 1;
@@ -6674,7 +6709,7 @@ function renderStagingQueue() {
         const kizaiCode = getScheduleDisplayName(item);
         const queuedImg = item.imageUrl || item.photoUrl;
         const photoThumb = queuedImg
-            ? `<img class="queue-flat-thumb" src="${queuedImg}" alt="" loading="lazy" decoding="async" data-item-id="${item.itemId || item._id}" data-src="${queuedImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${queuedImg}', '${item.itemId || item._id}')" onclick="openPhotoEnlarged('${queuedImg}')" title="クリックで拡大">`
+            ? `<img class="queue-flat-thumb" src="${getThumbUrl(item, getItemEdits()[item.itemId] || null) || queuedImg}" alt="" loading="lazy" decoding="async" data-item-id="${item.itemId || item._id}" data-src="${queuedImg}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${queuedImg}', '${item.itemId || item._id}')" onclick="openPhotoEnlarged('${queuedImg}')" title="クリックで拡大">`
             : `<div class="queue-flat-thumb-placeholder">${_t('no_photos_yet')}</div>`;
         const posNum = activeItem ? (qIdx + 2) : (qIdx + 1);
 
@@ -7470,7 +7505,7 @@ function openHistoryDetailModal(itemId, event) {
 
     const body = `
         <div class="hd-head">
-            ${photo ? `<img class="hd-photo" src="${escapeHtml(photo)}" alt="" onclick="openPhotoEnlarged('${escapeHtml(photo)}')" title="タップで拡大">` : '<div class="hd-photo hd-photo-empty">写真なし</div>'}
+            ${photo ? `<img class="hd-photo" src="${escapeHtml(it.thumbUrl || photo)}" alt="" onclick="openPhotoEnlarged('${escapeHtml(photo)}')" title="タップで拡大">` : '<div class="hd-photo hd-photo-empty">写真なし</div>'}
             <div class="hd-head-text">
                 <div class="hd-title"><span class="roll-sub-badge">#${escapeHtml(it.orderIndex || '')}</span> ${escapeHtml(it.kizai || doc.kizai || doc.hinban || '')}</div>
                 <div class="hd-sub">${escapeHtml(doc.hinban || '')}${doc.rollIndex ? ` ・ Roll ${escapeHtml(doc.rollIndex)} / ${escapeHtml(doc.totalRolls || '?')}` : ''}${doc.uniqueID ? ` ・ ID <strong>${escapeHtml(doc.uniqueID)}</strong>` : ''}</div>
@@ -7643,6 +7678,7 @@ function renderHistoryList() {
             meters: doc.bicho || doc.rollMeters || doc.meters || 0,
             lotNo: doc.lotNo || '',
             photoUrl: doc.imageUrl || doc.photoUrl || '',
+            thumbUrl: getThumbUrl(doc, getItemEdits()[doc.itemId] || null),
             rawDoc: doc
         });
     });
@@ -7666,6 +7702,7 @@ function renderHistoryList() {
                 meters: e.bicho || e.meters || matchedSched?.meters || 0,
                 lotNo: e.lotNo || '',
                 photoUrl: e.photoUrl || e.photoBase64 || '',
+                thumbUrl: e.photoThumbUrl || e.photoUrl || '',
                 rawDoc: e
             });
         }
@@ -7735,7 +7772,7 @@ function renderHistoryList() {
                 <div class="roll-row-left" style="display: flex; align-items: center; gap: 10px;">
                     <span class="roll-sub-badge">#${it.orderIndex}</span>
                     ${it.photoUrl ? `
-                        <img class="history-thumb-mini" src="${it.photoUrl}" alt="" loading="lazy" decoding="async" data-item-id="${it.itemId || it.mongoId || ''}" data-src="${it.photoUrl}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${it.photoUrl}', '${it.itemId || it.mongoId || ''}')" onclick="event.stopPropagation(); openPhotoEnlarged('${it.photoUrl}')" title="タップして拡大" style="width: 34px; height: 34px; border-radius: 6px; object-fit: cover; border: 1px solid #E5E7EB; cursor: pointer; flex-shrink: 0; background: #F3F4F6; transition: opacity 0.25s ease;">
+                        <img class="history-thumb-mini" src="${it.thumbUrl || it.photoUrl}" alt="" loading="lazy" decoding="async" width="34" height="34" data-item-id="${it.itemId || it.mongoId || ''}" data-src="${it.photoUrl}" onload="this.style.opacity='1'; this.classList.remove('img-loading-pulse');" onerror="handleThumbImgError(this, '${it.photoUrl}', '${it.itemId || it.mongoId || ''}')" onclick="event.stopPropagation(); openPhotoEnlarged('${it.photoUrl}')" title="タップして拡大" style="width: 34px; height: 34px; border-radius: 6px; object-fit: cover; border: 1px solid #E5E7EB; cursor: pointer; flex-shrink: 0; background: #F3F4F6; transition: opacity 0.25s ease;">
                     ` : `
                         <div style="width: 34px; height: 34px; border-radius: 6px; background: #F3F4F6; border: 1px dashed #D1D5DB; display: flex; align-items: center; justify-content: center; color: #9CA3AF; font-size: 0.65rem; flex-shrink: 0;">-</div>
                     `}
