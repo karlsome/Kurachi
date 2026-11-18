@@ -44668,6 +44668,8 @@ app.post('/api/production/roll-exclude', async (req, res) => {
 
     if (excluded === false) {
       await col.deleteOne(filter);
+      // A fed roll closed by the 02:00 day close goes back to the status it had
+      await reopenAutoClosedRoll(date, String(itemId));
     } else {
       await col.updateOne(
         filter,
@@ -44707,6 +44709,159 @@ app.post('/api/production/roll-exclude/sync', async (req, res) => {
   } catch (error) {
     console.error('❌ Error in POST /api/production/roll-exclude/sync:', error);
     res.status(500).json({ error: 'Failed to sync excluded rolls' });
+  }
+});
+
+// -----------------------------------------------------
+// 第一工場: day close at 02:00 JST.
+// The work day runs until 02:00 the next morning. Once it is over, every roll of that day's
+// schedule that was not finished is marked 除外 with autoClosed=true ("未処理 (自動)"):
+//  - never fed      -> a firstFactoryExcludedRolls doc (same as a manual 除外 on the tablet)
+//  - fed, unfinished -> production/queue doc status 'excluded' (old status kept in autoClosedFrom)
+//                       + a firstFactoryExcludedRolls doc so freyaAdmin2 shows it red
+// Restoring on the tablet undoes both. Only the day that just ended is closed (never older days),
+// once per day, guarded by a firstFactoryDayClose doc so several server instances don't double-run.
+// -----------------------------------------------------
+const FF_DAY_CUTOFF_HOUR = 2;
+
+function jstDateString(epoch) {
+  return new Date(epoch).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }); // YYYY-MM-DD
+}
+function ffCurrentWorkDay(now = Date.now()) {
+  return jstDateString(now - FF_DAY_CUTOFF_HOUR * 3600000);
+}
+function ffPrevDay(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return jstDateString(Date.UTC(y, m - 1, d, 3) - 24 * 3600000); // 12:00 JST of the previous day
+}
+
+async function reopenAutoClosedRoll(date, itemId) {
+  const db = client.db('submittedDB');
+  let reopened = 0;
+  for (const name of ['firstFactoryProduction', 'firstFactoryQueue']) {
+    const col = db.collection(name);
+    const docs = await col.find({ date, itemId, status: 'excluded', autoClosed: true }).toArray();
+    for (const doc of docs) {
+      await col.updateOne(
+        { _id: doc._id },
+        { $set: { status: doc.autoClosedFrom || 'queue', updatedAt: new Date() }, $unset: { autoClosed: '', autoClosedFrom: '', autoClosedAt: '' } }
+      );
+      reopened += 1;
+    }
+  }
+  if (reopened) broadcastProductionEvent({ type: 'queue_updated', date });
+  return reopened;
+}
+
+async function closeFirstFactoryDay(date, { force = false } = {}) {
+  const db = client.db('submittedDB');
+  if (!force) {
+    const claim = await db.collection('firstFactoryDayClose').updateOne(
+      { date },
+      { $setOnInsert: { date, startedAt: new Date() } },
+      { upsert: true }
+    );
+    if (!claim.upsertedCount) return null; // already closed (or another instance is doing it)
+  }
+
+  const [y, m, d] = date.split('-');
+  const schedule = await db.collection('firstFactorySchedule').findOne({ type: 'dailySchedule', month: `${y}-${m}`, date: Number(d) });
+  const rolls = (schedule?.scheduleOrder || [])
+    .map((item, idx) => ({ ...item, orderIndex: idx + 1 }))
+    .filter(item => item.type !== 'setup' && item.id);
+
+  const prodCol = db.collection('firstFactoryProduction');
+  const queueCol = db.collection('firstFactoryQueue');
+  const exclCol = db.collection('firstFactoryExcludedRolls');
+
+  const prodDocs = await prodCol.find({ date }).toArray();
+  const prodByItem = new Map();
+  prodDocs.forEach(doc => { if (doc.itemId) prodByItem.set(String(doc.itemId), doc); });
+  const alreadyExcluded = new Set((await exclCol.find({ date }).project({ itemId: 1 }).toArray()).map(x => String(x.itemId)));
+
+  const now = new Date();
+  const OPEN = ['queue', 'queued', 'in-progress', 'active', 'pending'];
+  const exclOps = [];
+  let neverFed = 0, unfinished = 0;
+
+  for (const item of rolls) {
+    const itemId = String(item.id);
+    const doc = prodByItem.get(itemId);
+    if (doc && !OPEN.includes(doc.status)) continue; // completed / excluded / scrapped / skipped
+    if (!doc && alreadyExcluded.has(itemId)) continue;
+
+    if (doc) {
+      const patch = { $set: { status: 'excluded', autoClosed: true, autoClosedFrom: doc.status, autoClosedAt: now, updatedAt: now } };
+      await prodCol.updateMany({ date, itemId, status: { $in: OPEN } }, patch);
+      await queueCol.updateMany({ date, itemId, status: { $in: OPEN } }, patch);
+      unfinished += 1;
+    } else {
+      neverFed += 1;
+    }
+    exclOps.push({
+      updateOne: {
+        filter: { date, itemId },
+        update: {
+          $set: {
+            ...buildExcludedRollDoc(date, {
+              itemId,
+              groupId: doc?.groupId || '',
+              rollIndex: item.rollIndex,
+              totalRolls: item.totalRolls,
+              orderIndex: doc?.orderIndex || item.orderIndex,
+              hinban: item.hinban,
+              kizai: item.kizai || doc?.kizai || '',
+              machine: doc?.machine || 'PSA2',
+              worker: ''
+            }),
+            autoClosed: true,
+            reason: '未処理 (日付変更 02:00 自動)',
+            updatedAt: now
+          },
+          $setOnInsert: { excludedAt: now }
+        },
+        upsert: true
+      }
+    });
+  }
+
+  if (exclOps.length) await exclCol.bulkWrite(exclOps);
+  await db.collection('firstFactoryDayClose').updateOne(
+    { date },
+    { $set: { closedAt: new Date(), neverFed, unfinished, scheduledRolls: rolls.length } },
+    { upsert: true }
+  );
+  if (exclOps.length) {
+    broadcastProductionEvent({ type: 'exclude_update', date });
+    broadcastProductionEvent({ type: 'queue_updated', date });
+  }
+  console.log(`🌙 第一工場 day close ${date}: ${neverFed} never fed + ${unfinished} unfinished roll(s) -> 除外 (未処理)`);
+  return { date, neverFed, unfinished };
+}
+
+// Every minute: close the work day that just ended (also catches up after a restart)
+async function runFirstFactoryDayCloseCheck() {
+  try {
+    if (!client) return;
+    await closeFirstFactoryDay(ffPrevDay(ffCurrentWorkDay()));
+  } catch (err) {
+    console.warn('⚠️ 第一工場 day close failed:', err.message);
+  }
+}
+setTimeout(runFirstFactoryDayCloseCheck, 30000);
+setInterval(runFirstFactoryDayCloseCheck, 60000);
+
+// Manual trigger / re-run (e.g. after restoring by mistake): POST { date, force }
+app.post('/api/production/day-close', async (req, res) => {
+  try {
+    const { date, force } = req.body || {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
+    if (date >= ffCurrentWorkDay()) return res.status(400).json({ error: '当日の生産日はまだ締められません' });
+    const result = await closeFirstFactoryDay(date, { force: !!force });
+    res.json({ success: true, result: result || 'already closed' });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/day-close:', error);
+    res.status(500).json({ error: 'Failed to close day' });
   }
 });
 

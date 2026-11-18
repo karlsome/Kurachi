@@ -157,8 +157,11 @@ async function saveRollTemperatureSnapshot(item, temperatures, setInProgress = f
 // -----------------------------------------------------
 // Date & Time Helpers
 // -----------------------------------------------------
+// Production day runs until 02:00 the next morning (JST), same as Tablet 1 and the server day close
+const DAY_CUTOFF_HOUR = 2;
+
 function getTodayDateString() {
-    const now = new Date();
+    const now = new Date(Date.now() - DAY_CUTOFF_HOUR * 3600000);
     try {
         const parts = new Intl.DateTimeFormat('ja-JP', {
             year: 'numeric',
@@ -2457,9 +2460,28 @@ function changeSelectedDate(newDate) {
 // -----------------------------------------------------
 // Bootstrapping
 // -----------------------------------------------------
+// At 02:00 move from the day that just ended to the new day (only if the tablet was on that day,
+// not on a date picked by hand). Waits while printing or a pop-up is open. Also runs on load.
+function startWorkDayWatcher() {
+    const KEY = 'firstkojo2_workday';
+    const check = () => {
+        const today = getTodayDateString();
+        const last = sessionStorage.getItem(KEY) || today;
+        if (today !== last && state.selectedDate === last) {
+            if (state.isPrinting || document.querySelector('.modal.open')) return; // retry in 30s
+            changeSelectedDate(today);
+            showToast(`日付が変わりました: ${today} の生産を表示します`, 'info', 6000);
+        }
+        sessionStorage.setItem(KEY, today);
+    };
+    check();
+    setInterval(check, 30000);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 firstKojoNippo2 initialized (Tablet 2 Wrapping & Label Printing)');
     parseUrlParams();
+    startWorkDayWatcher();
     setupEventListeners();
     // Always fetch fresh Mini PC IP from Google Sheets on page load / reload
     resolvePsaMiniPcIP(true);

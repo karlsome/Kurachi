@@ -7,12 +7,31 @@
 //const serverURL = "http://localhost:3000";
 const serverURL = "http://192.168.0.148:3000";
 
+// The production day runs until 02:00 the next morning (JST): at 01:30 it is still yesterday's list.
+// The server closes the finished day at the same hour (unfinished rolls -> 除外 未処理).
+const DAY_CUTOFF_HOUR = 2;
+
 function getTodayDateString() {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return new Date(Date.now() - DAY_CUTOFF_HOUR * 3600000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+}
+
+// At 02:00 move a tablet that is showing the day that just ended to the new day, without a reload.
+// A date picked by hand (any other day) is left alone. Also runs on load, so a tab reopened
+// after 02:00 starts on the new day.
+function startWorkDayWatcher(switchTo, canSwitch = () => true) {
+    const KEY = 'firstkojo_nippo_workday';
+    const check = () => {
+        const today = getTodayDateString();
+        const last = sessionStorage.getItem(KEY) || today;
+        if (today !== last && state.selectedDate === last) {
+            if (!canSwitch()) return; // busy (pop-up open) -> try again in 30s
+            switchTo(today);
+            showToast(`日付が変わりました: ${today} の生産リストを表示します`, 'info', 6000);
+        }
+        sessionStorage.setItem(KEY, today);
+    };
+    check();
+    setInterval(check, 30000);
 }
 
 const savedInitialTab = localStorage.getItem('firstkojo_nippo_main_tab');
@@ -1353,17 +1372,19 @@ function applyServerExcludes(serverRolls) {
     const edits = getItemEdits();
     let changed = false;
 
+    const autoIds = new Set((serverRolls || []).filter(r => r.autoClosed).map(r => String(r.itemId)));
     serverIds.forEach(id => {
         const e = edits[id] || {};
-        if (e.isExcluded !== true || e.excludeSynced !== true) {
-            setItemEdit(id, { isExcluded: true, excludeSynced: true });
+        const auto = autoIds.has(id);
+        if (e.isExcluded !== true || e.excludeSynced !== true || !!e.autoClosed !== auto) {
+            setItemEdit(id, { isExcluded: true, excludeSynced: true, autoClosed: auto });
             changed = true;
         }
     });
     Object.keys(edits).forEach(id => {
         const e = edits[id];
         if (e && e.isExcluded === true && e.excludeSynced === true && !serverIds.has(id)) {
-            setItemEdit(id, { isExcluded: false });
+            setItemEdit(id, { isExcluded: false, autoClosed: false });
             changed = true;
         }
     });
@@ -1376,6 +1397,7 @@ async function refreshExcludesFromServer({ onlyIfChanged = false } = {}) {
     state.excludesChanged = false;
     await fetchProductionStatus(state.selectedDate);
     if (onlyIfChanged && !state.excludesChanged) return;
+    await fetchProductionQueue(); // fed rolls closed / reopened by the day close live in the queue docs
     if (state.scheduledItems && state.scheduledItems.length > 0) {
         renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
     }
@@ -7760,7 +7782,10 @@ function renderHistoryList() {
             statusTagHTML = `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">スキップ</span>`;
             actionHTML = `<span style="font-size: 0.8rem; color: #6B7280; font-weight: 600; padding-right: 4px;">スキップ</span>`;
         } else if (isExcluded) {
-            statusTagHTML = `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">${_t('fk_status_excluded')}</span>`;
+            const autoClosed = it.rawDoc?.autoClosed || getItemEdits()[it.itemId]?.autoClosed;
+            statusTagHTML = autoClosed
+                ? `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;" title="02:00 の日付変更で未処理のため自動で除外">未処理 (自動)</span>`
+                : `<span class="tag-pill tag-excluded" style="font-size: 0.775rem; padding: 2px 8px;">${_t('fk_status_excluded')}</span>`;
             actionHTML = `<button type="button" class="btn-roll-exclude is-excluded" onclick="restoreExcludedItem('${it.itemId}', event)" title="${_t('fk_btn_restore')}">${_t('fk_btn_restore')}</button>`;
         } else {
             statusTagHTML = `<span class="tag-pill" style="font-size: 0.775rem; padding: 2px 8px; background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-weight: 700;">${_t('fk_status_queued')}</span>`;
@@ -7811,7 +7836,8 @@ function restoreExcludedItem(itemId, event) {
 // Epoch for HH:MM on the selected schedule date (tablet local time = JST)
 function epochFromHM(h, m) {
     const [y, mo, d] = (state.selectedDate || getTodayDateString()).split('-').map(Number);
-    return new Date(y, mo - 1, d, h, m, 0, 0).getTime();
+    // 00:00–01:59 belongs to the same production day but falls on the next calendar day
+    return new Date(y, mo - 1, d + (h < DAY_CUTOFF_HOUR ? 1 : 0), h, m, 0, 0).getTime();
 }
 
 function hmFromEpoch(epoch) {
@@ -8356,8 +8382,24 @@ document.addEventListener('DOMContentLoaded', () => {
     setupDateControls();
     fetchWorkersFromMongoDB();
 
+    // 02:00 day change: switch to the new production day without a reload.
+    // Waits while a pop-up is open or a 段替え timer is still running on the old day.
+    let initialFetchDone = false;
+    startWorkDayWatcher(
+        (newDate) => {
+            if (initialFetchDone) fetchDailySchedule(newDate);
+            else { state.selectedDate = newDate; sessionStorage.setItem('firstkojo_nippo_date', newDate); }
+        },
+        () => {
+            const popupOpen = [...document.querySelectorAll('.modal, #appDialogOverlay, #historyDetailOverlay, #setupTimerModal')]
+                .some(el => getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden');
+            return !popupOpen && !(typeof getRunningSetup === 'function' && getRunningSetup());
+        }
+    );
+
     // Initial schedule fetch for the selected date
     fetchDailySchedule(state.selectedDate);
+    initialFetchDone = true;
 
     // Initialize USB Barcode Scanner Listener
     setupUSBScannerListener();
