@@ -44618,7 +44618,8 @@ app.get('/api/production/status', async (req, res) => {
 
     const records = await productionCollection.find(query).toArray();
     const excludedRolls = await submittedDb.collection('firstFactoryExcludedRolls').find({ date }).toArray();
-    res.json({ success: true, records, excludedRolls });
+    const setupRecords = await submittedDb.collection('firstFactorySetupLog').find(machine ? { date, machine } : { date }).toArray();
+    res.json({ success: true, records, excludedRolls, setupRecords });
   } catch (error) {
     console.error('❌ Error in GET /api/production/status:', error);
     res.status(500).json({ error: 'Failed to fetch production status' });
@@ -44706,6 +44707,105 @@ app.post('/api/production/roll-exclude/sync', async (req, res) => {
   } catch (error) {
     console.error('❌ Error in POST /api/production/roll-exclude/sync:', error);
     res.status(500).json({ error: 'Failed to sync excluded rolls' });
+  }
+});
+
+// -----------------------------------------------------
+// 第一工場: 段替え / setup / task timers started & ended from the firstKojoNippo List tab.
+// Kept out of firstFactoryProduction so a running setup never looks like an active roll.
+// One doc per (date, setupId); setupId = the schedule's setup groupId (setup_<id>).
+// -----------------------------------------------------
+function jstTime(epoch) {
+  return new Date(epoch).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
+}
+
+app.post('/api/production/setup/start', async (req, res) => {
+  try {
+    const { date, machine, setupId, orderIndex, name, plannedMins, worker, workerRoles } = req.body || {};
+    if (!date || !setupId) return res.status(400).json({ error: 'date and setupId are required' });
+    const targetMachine = machine || 'PSA2';
+    const col = client.db('submittedDB').collection('firstFactorySetupLog');
+
+    const other = await col.findOne({ date, machine: targetMachine, status: 'running', setupId: { $ne: setupId } });
+    if (other) {
+      return res.status(409).json({ error: `「${other.name || '段替え'}」が実行中です。先に終了してください。`, running: other });
+    }
+
+    const now = Date.now();
+    const doc = {
+      date,
+      machine: targetMachine,
+      setupId,
+      orderIndex: Number(orderIndex) || null,
+      name: name || '段替え',
+      plannedMins: Number(plannedMins) || 0,
+      status: 'running',
+      startEpoch: now,
+      startTime: jstTime(now),
+      endEpoch: null,
+      endTime: null,
+      durationMins: null,
+      startedBy: worker || '',
+      endedBy: '',
+      workerRoles: sanitizeWorkerRoles(workerRoles),
+      updatedAt: new Date()
+    };
+    await col.updateOne({ date, setupId }, { $set: doc, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+    broadcastProductionEvent({ type: 'setup_update', date, setupId, status: 'running' });
+    res.json({ success: true, record: doc });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/setup/start:', error);
+    res.status(500).json({ error: 'Failed to start setup' });
+  }
+});
+
+app.post('/api/production/setup/end', async (req, res) => {
+  try {
+    const { date, setupId, worker } = req.body || {};
+    if (!date || !setupId) return res.status(400).json({ error: 'date and setupId are required' });
+    const col = client.db('submittedDB').collection('firstFactorySetupLog');
+    const rec = await col.findOne({ date, setupId });
+    if (!rec) return res.status(404).json({ error: 'Setup not started' });
+
+    const now = Date.now();
+    const update = {
+      status: 'done',
+      endEpoch: now,
+      endTime: jstTime(now),
+      durationMins: Math.max(1, Math.round((now - (rec.startEpoch || now)) / 60000)),
+      endedBy: worker || '',
+      updatedAt: new Date()
+    };
+    await col.updateOne({ _id: rec._id }, { $set: update });
+    broadcastProductionEvent({ type: 'setup_update', date, setupId, status: 'done' });
+    res.json({ success: true, record: { ...rec, ...update } });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/setup/end:', error);
+    res.status(500).json({ error: 'Failed to end setup' });
+  }
+});
+
+// Undo an accidental 終了: back to running with the original start time
+app.post('/api/production/setup/undo', async (req, res) => {
+  try {
+    const { date, setupId } = req.body || {};
+    if (!date || !setupId) return res.status(400).json({ error: 'date and setupId are required' });
+    const col = client.db('submittedDB').collection('firstFactorySetupLog');
+    const rec = await col.findOne({ date, setupId });
+    if (!rec) return res.status(404).json({ error: 'Setup not found' });
+
+    const other = await col.findOne({ date, machine: rec.machine, status: 'running', setupId: { $ne: setupId } });
+    if (other) {
+      return res.status(409).json({ error: `「${other.name || '段替え'}」が実行中です。先に終了してください。` });
+    }
+
+    const update = { status: 'running', endEpoch: null, endTime: null, durationMins: null, endedBy: '', updatedAt: new Date() };
+    await col.updateOne({ _id: rec._id }, { $set: update });
+    broadcastProductionEvent({ type: 'setup_update', date, setupId, status: 'running' });
+    res.json({ success: true, record: { ...rec, ...update } });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/setup/undo:', error);
+    res.status(500).json({ error: 'Failed to undo setup end' });
   }
 });
 

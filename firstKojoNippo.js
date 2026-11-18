@@ -64,6 +64,9 @@ const state = {
         : null,
     workerRoles: initialWorkerRoles,
     activeWorkerRole: null,
+    // 段替え / setup timers for the selected date, keyed by setup groupId (setup_<id>)
+    setupRecords: {},
+    setupModalMinimized: true, // a setup still running after reload shows as the pinned bar
     machineName: null,
     filterName: "第一工場",
 
@@ -576,6 +579,8 @@ async function fetchDailySchedule(dateStr) {
 
     state.selectedDate = dateStr;
     sessionStorage.setItem('firstkojo_nippo_date', dateStr);
+    state.setupRecords = {};
+    updateSetupTimerUI();
 
     fetchProductionQueue();
     setupProductionSSE();
@@ -690,6 +695,12 @@ async function fetchProductionStatus(dateStr) {
             });
             localStorage.setItem(storageKey, JSON.stringify(stored));
             console.log(`🌐 Synced ${data.records.length} production record(s) from server for ${dateStr}`);
+        }
+        if (data.success && Array.isArray(data.setupRecords) && dateStr === state.selectedDate) {
+            const map = {};
+            data.setupRecords.forEach(rec => { if (rec.setupId) map[rec.setupId] = rec; });
+            state.setupRecords = map;
+            updateSetupTimerUI();
         }
     } catch (err) {
         console.warn('Could not fetch server production status:', err);
@@ -2180,15 +2191,39 @@ function renderScheduleList(items, startTimeStr) {
 
         if (group.type === 'setup') {
             const setupItem = group.items[0];
-            html += `
-                <div class="schedule-setup-row" data-id="${setupItem.id}">
+            const setupRec = state.setupRecords[group.groupId];
+            // Ended setups move to the History tab
+            if (setupRec && setupRec.status === 'done') return;
+            const setupName = escapeHtml(getSetupDisplayName(setupItem));
+
+            if (setupRec && setupRec.status === 'running') {
+                html += `
+                <div class="schedule-setup-row is-running" data-id="${setupItem.id}" onclick="openSetupTimerModal()">
                     <div class="schedule-setup-left">
                         <span class="setup-tag-pill">#${setupItem.orderIndex} 段替</span>
-                        <span class="setup-title-text">${setupItem.name || '段替え'}</span>
+                        <span class="setup-title-text">${setupName}</span>
+                        <span class="setup-running-pill">⏱ 実行中 <span data-setup-elapsed="${escapeHtml(group.groupId)}">--:--</span></span>
                     </div>
-                    <div class="setup-time-text">${setupItem.startTime} - ${setupItem.endTime} (${setupItem.duration} 分)</div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="setup-time-text">開始 ${escapeHtml(setupRec.startTime || '')} ・ 予定 ${setupItem.duration} 分</div>
+                        <button type="button" class="setup-action-btn is-end" onclick="event.stopPropagation(); endSetupPrompt()">■ 終了</button>
+                    </div>
                 </div>
             `;
+            } else {
+                html += `
+                <div class="schedule-setup-row is-startable" data-id="${setupItem.id}" onclick="startSetupPrompt(${gIdx})" title="タップして開始 (Tap to start)">
+                    <div class="schedule-setup-left">
+                        <span class="setup-tag-pill">#${setupItem.orderIndex} 段替</span>
+                        <span class="setup-title-text">${setupName}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="setup-time-text">${setupItem.startTime} - ${setupItem.endTime} (${setupItem.duration} 分)</div>
+                        <button type="button" class="setup-action-btn" onclick="event.stopPropagation(); startSetupPrompt(${gIdx})">▶ 開始</button>
+                    </div>
+                </div>
+            `;
+            }
         } else {
             // Check remaining items that have not been enqueued yet across all tablets
             const remainingItems = group.items.filter((rollItem, rIdx) => {
@@ -7425,11 +7460,18 @@ function renderHistoryList() {
         }
     });
 
+    // 3. Ended 段替え / setup timers
+    Object.values(state.setupRecords || {}).forEach(rec => {
+        if (!rec || rec.status !== 'done') return;
+        items.push({ itemId: rec.setupId, type: 'setup', status: 'done', orderIndex: Number(rec.orderIndex) || 0, rawDoc: rec });
+    });
+
     // Sort by order index ascending so the order sequence (#1, #2, #3...) is preserved
     items.sort((a, b) => (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0));
 
     const filter = state.historyFilter || 'all';
     const filtered = items.filter(it => {
+        if (it.type === 'setup') return filter === 'all';
         if (filter === 'enqueued') return it.type === 'enqueued';
         if (filter === 'excluded') return it.type === 'excluded';
         return true;
@@ -7446,6 +7488,10 @@ function renderHistoryList() {
 
     let html = '';
     filtered.forEach(it => {
+        if (it.type === 'setup') {
+            html += renderSetupHistoryRow(it.rawDoc);
+            return;
+        }
         const isExcluded = (it.status === 'excluded' || it.type === 'excluded');
 
         let statusTagHTML = '';
@@ -7505,6 +7551,223 @@ function restoreExcludedItem(itemId, event) {
     showToast('項目を生産一覧に復帰させました', 'success', 2500);
 }
 
+// -----------------------------------------------------
+// 段替え / Setup timers (start & end from the List tab)
+// -----------------------------------------------------
+function getSetupDisplayName(setupItem) {
+    if (!setupItem) return '段替え';
+    const base = setupItem.name || '段替え';
+    return setupItem.comment ? `${base} ${setupItem.comment}` : base;
+}
+
+function getRunningSetup() {
+    return Object.values(state.setupRecords || {}).find(r => r && r.status === 'running') || null;
+}
+
+function formatElapsed(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = total % 60;
+    const mm = String(m).padStart(2, '0');
+    const ss = String(sec).padStart(2, '0');
+    return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+async function refreshSetupRecords() {
+    if (!state.selectedDate) return;
+    await fetchProductionStatus(state.selectedDate);
+    renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+    renderHistoryList();
+}
+
+async function startSetupPrompt(gIdx) {
+    const group = state.currentGroups?.[gIdx];
+    if (!group || group.type !== 'setup') return;
+    const setupItem = group.items[0];
+    const name = getSetupDisplayName(setupItem);
+
+    const running = getRunningSetup();
+    if (running && running.setupId !== group.groupId) {
+        alert(`「${running.name || '段替え'}」が実行中です。先に終了してください。\n(Another setup is running. End it first.)`);
+        openSetupTimerModal();
+        return;
+    }
+    if (running && running.setupId === group.groupId) {
+        openSetupTimerModal();
+        return;
+    }
+    if (!confirm(`「${name}」を開始しますか？\n開始時刻を今の時刻で記録します。\n\n(Start "${name}" now?)`)) return;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/setup/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: state.selectedDate,
+                machine: state.machineName || 'PSA2',
+                setupId: group.groupId,
+                orderIndex: setupItem.orderIndex,
+                name,
+                plannedMins: Number(setupItem.duration) || 0,
+                worker: state.workerName || '',
+                workerRoles: getWorkerRolesPayload()
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+
+        state.setupRecords = { ...state.setupRecords, [group.groupId]: data.record };
+        state.setupModalMinimized = false;
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        updateSetupTimerUI();
+    } catch (err) {
+        console.error('Could not start setup:', err);
+        alert(`開始できませんでした: ${err.message}`);
+    }
+}
+
+async function endSetupPrompt() {
+    const running = getRunningSetup();
+    if (!running) return;
+    if (!confirm(`「${running.name || '段替え'}」を終了しますか？\n\n(End "${running.name || 'setup'}" now?)`)) return;
+
+    try {
+        const res = await fetch(`${serverURL}/api/production/setup/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: state.selectedDate, setupId: running.setupId, worker: state.workerName || '' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+
+        state.setupRecords = { ...state.setupRecords, [running.setupId]: data.record };
+        updateSetupTimerUI();
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        renderHistoryList();
+        showToast(`「${running.name || '段替え'}」終了 (${data.record.durationMins} 分)`, 'success', 3000);
+
+        // Ending the setup is when production really starts for a roll already waiting in the queue
+        const waiting = (state.stagingQueue || []).find(q =>
+            q && (q.status === 'in-progress' || q.status === 'active') && q.startedBy === 'enqueue' && q.startConfirmed !== true
+        );
+        if (waiting) {
+            try {
+                await fetch(`${serverURL}/api/production/queue/confirm-start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ _id: waiting._id, worker: state.workerName || '' })
+                });
+                await fetchProductionQueue();
+            } catch (e) {
+                console.warn('Could not auto-confirm roll start after setup:', e);
+            }
+        }
+    } catch (err) {
+        console.error('Could not end setup:', err);
+        alert(`終了できませんでした: ${err.message}`);
+    }
+}
+
+async function undoSetupEnd(setupId, event) {
+    if (event) event.stopPropagation();
+    const rec = state.setupRecords?.[setupId];
+    if (!rec) return;
+    if (!confirm(`「${rec.name || '段替え'}」の終了を取り消して、実行中に戻しますか？\n(開始時刻はそのままです)`)) return;
+    try {
+        const res = await fetch(`${serverURL}/api/production/setup/undo`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: state.selectedDate, setupId })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        state.setupRecords = { ...state.setupRecords, [setupId]: data.record };
+        state.setupModalMinimized = true;
+        renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
+        renderHistoryList();
+        updateSetupTimerUI();
+    } catch (err) {
+        alert(`取り消しできませんでした: ${err.message}`);
+    }
+}
+
+function renderSetupHistoryRow(rec) {
+    const planned = Number(rec.plannedMins) || 0;
+    const actual = Number(rec.durationMins) || 0;
+    const over = planned > 0 && actual > planned;
+    const diffText = planned > 0 ? (over ? `+${actual - planned}分 超過` : `予定内 (${planned}分)`) : '';
+    return `
+        <div class="batch-roll-row setup-history-row">
+            <div class="roll-row-left" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <span class="roll-sub-badge">#${escapeHtml(rec.orderIndex || '-')}</span>
+                <span class="setup-tag-pill">段替</span>
+                <span class="history-item-hinban" style="font-weight: 700; color: #0F172A; font-size: 0.95rem;">${escapeHtml(rec.name || '段替え')}</span>
+                <span style="font-size: 0.85rem; color: #475569; font-weight: 600;">${escapeHtml(rec.startTime || '')} 〜 ${escapeHtml(rec.endTime || '')}</span>
+                <span class="tag-pill" style="font-size: 0.8rem; padding: 2px 8px; font-weight: 800; ${over ? 'background:#FEE2E2; color:#B91C1C; border:1px solid #FCA5A5;' : 'background:#ECFDF5; color:#047857; border:1px solid #A7F3D0;'}">${actual} 分</span>
+                ${diffText ? `<span style="font-size: 0.78rem; font-weight: 700; color: ${over ? '#B91C1C' : '#047857'};">${diffText}</span>` : ''}
+            </div>
+            <div class="roll-row-right" style="display: flex; gap: 6px; align-items: center;">
+                <button type="button" class="btn-roll-exclude is-excluded" onclick="undoSetupEnd('${escapeHtml(rec.setupId)}', event)" title="終了を取り消す (Undo end)">元に戻す</button>
+            </div>
+        </div>
+    `;
+}
+
+function openSetupTimerModal() {
+    if (!getRunningSetup()) return;
+    state.setupModalMinimized = false;
+    updateSetupTimerUI();
+}
+
+function minimizeSetupTimerModal() {
+    state.setupModalMinimized = true;
+    updateSetupTimerUI();
+}
+
+// Drives the big pop-up, the pinned bar and the elapsed text on the List row (called every second)
+function updateSetupTimerUI() {
+    const running = getRunningSetup();
+    const modal = document.getElementById('setupTimerModal');
+    const bar = document.getElementById('setupTimerBar');
+
+    if (!running) {
+        if (modal) modal.style.display = 'none';
+        if (bar) bar.style.display = 'none';
+        document.body.classList.remove('has-setup-timer-bar');
+        return;
+    }
+
+    const elapsedMs = Date.now() - (Number(running.startEpoch) || Date.now());
+    const elapsedText = formatElapsed(elapsedMs);
+    const planned = Number(running.plannedMins) || 0;
+    const overMins = planned > 0 ? Math.floor(elapsedMs / 60000) - planned : 0;
+    const isOver = planned > 0 && elapsedMs > planned * 60000;
+    const overText = isOver ? `+${Math.max(1, overMins)}分 超過` : (planned > 0 ? `予定 ${planned} 分` : '');
+
+    document.querySelectorAll('[data-setup-elapsed]').forEach(el => { el.textContent = elapsedText; });
+
+    if (modal) {
+        modal.style.display = state.setupModalMinimized ? 'none' : 'flex';
+        modal.classList.toggle('is-over', isOver);
+        const nameEl = document.getElementById('setupTimerName');
+        const timeEl = document.getElementById('setupTimerElapsed');
+        const metaEl = document.getElementById('setupTimerMeta');
+        if (nameEl) nameEl.textContent = running.name || '段替え';
+        if (timeEl) timeEl.textContent = elapsedText;
+        if (metaEl) metaEl.textContent = `開始 ${running.startTime || ''}${overText ? ` ・ ${overText}` : ''}`;
+    }
+    if (bar) {
+        bar.style.display = state.setupModalMinimized ? 'flex' : 'none';
+        bar.classList.toggle('is-over', isOver);
+        const barText = document.getElementById('setupTimerBarText');
+        if (barText) barText.textContent = `⏱ ${running.name || '段替え'} 実行中 ${elapsedText}${isOver ? ` (${overText})` : ''}`;
+    }
+    document.body.classList.toggle('has-setup-timer-bar', state.setupModalMinimized);
+}
+
+setInterval(updateSetupTimerUI, 1000);
+
 // --- SSE Realtime Synchronization ---
 let productionEventSource = null;
 
@@ -7540,6 +7803,10 @@ function setupProductionSSE() {
 
 function handleProductionSSEEvent(data) {
     console.log('⚡ Received SSE event:', data.type, data);
+    if (data.type === 'setup_update') {
+        refreshSetupRecords();
+        return;
+    }
     if (data.type === 'queue_updated' || data.type === 'queue_scrapped' || data.type === 'roll_advanced' || data.type === 'queue_roll_printed') {
         fetchProductionQueue();
     } else if (data.type === 'print_log') {

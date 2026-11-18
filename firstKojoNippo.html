@@ -658,6 +658,125 @@
             text-align: center;
         }
 
+        /* ---------------- 段替え / Setup timer ---------------- */
+        .schedule-setup-row.is-startable { cursor: pointer; }
+        .schedule-setup-row.is-startable:active { transform: scale(0.995); }
+        .schedule-setup-row.is-running {
+            cursor: pointer;
+            border-color: #F59E0B !important;
+            background: #FFFBEB !important;
+            box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+        }
+
+        .setup-running-pill {
+            font-size: 0.8rem;
+            font-weight: 800;
+            color: #B45309;
+            background: #FEF3C7;
+            border: 1px solid #FCD34D;
+            border-radius: 999px;
+            padding: 2px 10px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .setup-action-btn {
+            min-height: 40px;
+            padding: 0 16px;
+            border-radius: 10px;
+            border: 1px solid #F59E0B;
+            background: #FFFFFF;
+            color: #B45309;
+            font-weight: 800;
+            font-size: 0.9rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .setup-action-btn.is-end {
+            background: #DC2626;
+            border-color: #DC2626;
+            color: #FFFFFF;
+        }
+
+        .setup-timer-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 10050;
+            background: rgba(16, 24, 40, 0.55);
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .setup-timer-card {
+            width: 100%;
+            max-width: 560px;
+            background: #FFFBEB;
+            border: 3px solid #F59E0B;
+            border-radius: 20px;
+            padding: 28px 24px 22px;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+        }
+
+        .setup-timer-eyebrow { font-size: 0.9rem; font-weight: 800; color: #B45309; letter-spacing: 0.04em; }
+        .setup-timer-name { font-size: 1.6rem; font-weight: 800; color: #0F172A; margin-top: 6px; }
+        .setup-timer-elapsed {
+            font-size: 5.5rem;
+            line-height: 1.05;
+            font-weight: 800;
+            color: #B45309;
+            margin: 14px 0 6px;
+            font-variant-numeric: tabular-nums;
+        }
+        .setup-timer-meta { font-size: 1rem; font-weight: 700; color: #475569; min-height: 1.4em; }
+        .setup-timer-actions { display: flex; gap: 12px; margin-top: 22px; }
+        .setup-timer-actions .btn { flex: 1; min-height: 56px; font-size: 1.05rem; }
+        .setup-timer-end-btn { background: #DC2626 !important; border-color: #DC2626 !important; color: #FFFFFF !important; font-weight: 800; }
+
+        .setup-timer-modal.is-over .setup-timer-card { background: #FEF2F2; border-color: #DC2626; }
+        .setup-timer-modal.is-over .setup-timer-elapsed,
+        .setup-timer-modal.is-over .setup-timer-eyebrow { color: #DC2626; }
+        .setup-timer-modal.is-over .setup-timer-meta { color: #B91C1C; }
+
+        .setup-timer-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10040;
+            min-height: 56px;
+            padding: 6px 12px 6px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: #F59E0B;
+            color: #FFFFFF;
+            font-size: 1.05rem;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+            cursor: pointer;
+        }
+        .setup-timer-bar.is-over { background: #DC2626; animation: setupBarBlink 1.2s ease-in-out infinite; }
+        @keyframes setupBarBlink { 50% { filter: brightness(1.15); } }
+
+        .setup-timer-bar-end {
+            min-height: 42px;
+            padding: 0 18px;
+            border-radius: 10px;
+            border: 2px solid #FFFFFF;
+            background: rgba(255, 255, 255, 0.15);
+            color: #FFFFFF;
+            font-weight: 800;
+            font-size: 0.95rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .setup-history-row { background: #FFFBEB !important; border-color: #FDE68A !important; }
+
         .btn-confirm-start {
             background: #10B981 !important;
             border-color: #10B981 !important;
@@ -4604,6 +4723,26 @@
                 第一工場 日報タブレット (First Factory Tablet)
             </p>
         </div>
+    </div>
+
+    <!-- 段替え / Setup timer: big pop-up -->
+    <div id="setupTimerModal" class="setup-timer-modal" style="display: none;">
+        <div class="setup-timer-card">
+            <div class="setup-timer-eyebrow">⏱ 段替え実行中 (Setup running)</div>
+            <div class="setup-timer-name" id="setupTimerName">段替え</div>
+            <div class="setup-timer-elapsed" id="setupTimerElapsed">00:00</div>
+            <div class="setup-timer-meta" id="setupTimerMeta"></div>
+            <div class="setup-timer-actions">
+                <button type="button" class="btn btn-secondary" onclick="minimizeSetupTimerModal()">最小化 (Minimize)</button>
+                <button type="button" class="btn setup-timer-end-btn" onclick="endSetupPrompt()">■ 終了 (End)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 段替え / Setup timer: pinned bar (shown on every tab while minimized) -->
+    <div id="setupTimerBar" class="setup-timer-bar" style="display: none;" onclick="openSetupTimerModal()">
+        <span id="setupTimerBarText">⏱ 段替え 実行中</span>
+        <button type="button" class="setup-timer-bar-end" onclick="event.stopPropagation(); endSetupPrompt()">■ 終了</button>
     </div>
 
     <!-- Worker Select Modal -->
