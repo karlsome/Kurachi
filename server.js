@@ -17303,7 +17303,7 @@ app.post('/defectDefinitions', async (req, res) => {
 // ---- Per-process defect items (pressDB / slitDB / SRSDB) ----
 // Built-in items are the field names the tablets write today; they are always present and
 // their JP key can't be renamed/removed (historical data is keyed on them). Admins may add
-// extra items and edit English labels. Stored in MasterDB.processDefectDefinitions:
+// extra items, edit English labels and reorder the list (saved order is the display order). Stored in MasterDB.processDefectDefinitions:
 //   { process: 'pressDB', items: [{ jp, en }], updatedAt, updatedBy }
 const PROCESS_DEFECT_DEFAULTS = {
   pressDB: [{ jp: '疵引不良', en: 'Scratch Defect' }, { jp: '加工不良', en: 'Processing Defect' }, { jp: 'その他', en: 'Other' }],
@@ -17317,14 +17317,21 @@ const PROCESS_DEFECT_DEFAULTS = {
 // Keys a new defect item may not use (they collide with existing document fields)
 const PROCESS_DEFECT_RESERVED_KEYS = new Set(['_id', 'Total_NG', 'SRS_Total_NG', 'Total', '背番号', '品番', '工場', 'Date', '製造ロット', 'Worker_Name', 'Spare', 'ショット数', '材料ロット']);
 
-// Built-in items first (stored EN label wins), then admin-added items in saved order
+// Items in the saved order (admins can reorder), flagging built-ins; any built-in missing
+// from the stored list (e.g. nothing saved yet) is appended with its default label.
 function _mergeProcessDefectItems(processKey, storedItems = []) {
   const defaults = PROCESS_DEFECT_DEFAULTS[processKey] || [];
-  const storedByJp = new Map((storedItems || []).filter(it => it && it.jp).map(it => [String(it.jp).trim(), it]));
-  const merged = defaults.map(d => ({ jp: d.jp, en: String(storedByJp.get(d.jp)?.en ?? d.en).trim(), builtIn: true }));
-  const defaultKeys = new Set(defaults.map(d => d.jp));
-  for (const [jp, it] of storedByJp) {
-    if (!defaultKeys.has(jp)) merged.push({ jp, en: String(it.en || '').trim(), builtIn: false });
+  const defaultByJp = new Map(defaults.map(d => [d.jp, d]));
+  const merged = [];
+  const seen = new Set();
+  for (const it of storedItems || []) {
+    const jp = String(it?.jp || '').trim();
+    if (!jp || seen.has(jp)) continue;
+    seen.add(jp);
+    merged.push({ jp, en: String(it.en ?? defaultByJp.get(jp)?.en ?? '').trim(), builtIn: defaultByJp.has(jp) });
+  }
+  for (const d of defaults) {
+    if (!seen.has(d.jp)) merged.push({ jp: d.jp, en: d.en, builtIn: true });
   }
   return merged;
 }
