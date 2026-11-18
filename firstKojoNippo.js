@@ -3,9 +3,9 @@
  * Logic for First Factory Nippo (第一工場 日報) Tablet UI
  */
 
-//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.148:3000";
+//const serverURL = "http://192.168.0.148:3000";
 
 // The production day runs until 02:00 the next morning (JST): at 01:30 it is still yesterday's list.
 // The server closes the finished day at the same hour (unfinished rolls -> 除外 未処理).
