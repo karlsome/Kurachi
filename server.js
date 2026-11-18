@@ -46893,6 +46893,25 @@ app.post('/api/production/schedule', async (req, res) => {
 // plus the date's own list (rolls without sourceDate). freyaAdmin2 hides those from Available.
 app.get('/api/production/schedule/by-source', async (req, res) => {
   try {
+    // ?month=YYYY-MM: every list holding rolls taken from that month's plan on another day
+    // (freyaAdmin2's Excel sync report checks them against the new sheet)
+    if (req.query.month) {
+      const month = String(req.query.month);
+      if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month (YYYY-MM) is required' });
+      const docs = await client.db('submittedDB').collection('firstFactorySchedule').find(
+        { type: 'dailySchedule', 'scheduleOrder.sourceDate': { $regex: `^${month}-` } },
+        { projection: { month: 1, date: 1, scheduleOrder: 1 } }
+      ).toArray();
+      const usage = docs.map(doc => {
+        const dateStr = scheduleDateString(doc.month, doc.date);
+        const rolls = (doc.scheduleOrder || [])
+          .filter(i => i && i.type !== 'setup' && i.hinban && i.sourceDate && i.sourceDate.startsWith(`${month}-`) && i.sourceDate !== dateStr)
+          .map(i => ({ hinban: i.hinban, sourceDate: i.sourceDate, meters: Number(i.meters) || 0 }));
+        return { dateStr, rolls };
+      }).filter(u => u.rolls.length);
+      return res.json({ success: true, usage });
+    }
+
     const date = String(req.query.date || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
     const month = date.slice(0, 7);
