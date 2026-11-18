@@ -46822,22 +46822,54 @@ app.get('/api/production/schedule', async (req, res) => {
   }
 });
 
+// -----------------------------------------------------
+// 第一工場 daily schedule: shared by freyaAdmin2 (admin plans) and the firstKojoNippo tablet
+// (workers reorder groups / add tasks). `revision` goes up on every save; a save made from an
+// older revision gets 409 so neither side silently overwrites the other.
+// Hinban groups get a fixed `groupId` on their rolls: production records link to it, so it must not
+// change when groups move (it used to be derived from the position: group_<hinban>_<index>).
+// -----------------------------------------------------
+function stampScheduleGroupIds(order) {
+  let cur = null;
+  (order || []).forEach((item, idx) => {
+    if (!item || item.type === 'setup') { cur = null; return; }
+    const joins = cur && cur.hinban === item.hinban && (!item.groupId || item.groupId === cur.groupId);
+    if (!joins) cur = { hinban: item.hinban, groupId: item.groupId || `group_${item.hinban}_${idx}` };
+    item.groupId = cur.groupId;
+  });
+  return order;
+}
+const scheduleGroupKey = (item) => (item.type === 'setup' ? `setup_${item.id}` : item.groupId);
+
+function scheduleDateString(month, date) {
+  return `${month}-${String(Number(date)).padStart(2, '0')}`;
+}
+
 app.post('/api/production/schedule', async (req, res) => {
   try {
-    const { scheduleOrder, startTime, month, date, scheduledBy } = req.body;
+    const { scheduleOrder, startTime, month, date, scheduledBy, baseRevision, force } = req.body;
     if (!month || date === undefined) {
       return res.status(400).json({ success: false, message: 'month and date are required' });
     }
 
     const submittedDb = client.db('submittedDB');
     const scheduleCollection = submittedDb.collection('firstFactorySchedule');
+    const filter = { type: 'dailySchedule', month, date: Number(date) };
+    const existing = await scheduleCollection.findOne(filter, { projection: { revision: 1, lastChangedBy: 1 } });
+    const currentRevision = existing?.revision || 0;
+
+    if (!force && baseRevision !== undefined && baseRevision !== null && Number(baseRevision) !== currentRevision) {
+      return res.status(409).json({ success: false, conflict: true, revision: currentRevision, lastChangedBy: existing?.lastChangedBy || null, message: 'Schedule was changed by someone else' });
+    }
 
     const updateFields = {
       type: 'dailySchedule',
       month,
       date: Number(date),
-      scheduleOrder,
+      scheduleOrder: stampScheduleGroupIds(Array.isArray(scheduleOrder) ? scheduleOrder : []),
       startTime,
+      revision: currentRevision + 1,
+      lastChangedBy: { name: scheduledBy || 'Admin', source: 'admin', action: 'save', at: new Date() },
       updatedAt: new Date()
     };
 
@@ -46845,16 +46877,147 @@ app.post('/api/production/schedule', async (req, res) => {
       updateFields.scheduledBy = scheduledBy;
     }
 
-    await scheduleCollection.updateOne(
-      { type: 'dailySchedule', month, date: Number(date) },
-      { $set: updateFields },
-      { upsert: true }
-    );
+    await scheduleCollection.updateOne(filter, { $set: updateFields }, { upsert: true });
 
-    res.json({ success: true, message: 'Schedule saved successfully' });
+    broadcastProductionEvent({ type: 'schedule_update', date: scheduleDateString(month, date), revision: currentRevision + 1, source: 'admin' });
+    res.json({ success: true, message: 'Schedule saved successfully', revision: currentRevision + 1 });
   } catch (error) {
     console.error('Error saving schedule:', error);
     res.status(500).json({ error: 'Failed to save schedule' });
+  }
+});
+
+// Tablet edits: move one group, or add a task (段替え, 紙替, …) before a group.
+async function applyTabletScheduleEdit(req, res, edit) {
+  const { month, date, baseRevision, worker } = req.body || {};
+  if (!month || date === undefined) return res.status(400).json({ error: 'month and date are required' });
+  const db = client.db('submittedDB');
+  const col = db.collection('firstFactorySchedule');
+  const filter = { type: 'dailySchedule', month, date: Number(date) };
+  const doc = await col.findOne(filter);
+  if (!doc || !Array.isArray(doc.scheduleOrder)) return res.status(404).json({ error: 'この日のスケジュールがありません' });
+  const currentRevision = doc.revision || 0;
+  if (baseRevision !== undefined && baseRevision !== null && Number(baseRevision) !== currentRevision) {
+    return res.status(409).json({ conflict: true, revision: currentRevision, lastChangedBy: doc.lastChangedBy || null, error: 'リストが他の端末で更新されました' });
+  }
+
+  const order = stampScheduleGroupIds(doc.scheduleOrder.map(i => ({ ...i })));
+  const dateStr = scheduleDateString(month, date);
+  let result;
+  try {
+    result = await edit(order, dateStr, db);
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+
+  const lastChangedBy = { name: worker || '作業者', source: 'tablet', action: result.action, detail: result.detail, at: new Date() };
+  const upd = await col.updateOne(
+    { ...filter, $or: [{ revision: currentRevision }, ...(currentRevision === 0 ? [{ revision: { $exists: false } }] : [])] },
+    { $set: { scheduleOrder: result.order, revision: currentRevision + 1, lastChangedBy, updatedAt: new Date() }, $push: { changeLog: { $each: [lastChangedBy], $slice: -100 } } }
+  );
+  if (!upd.matchedCount) return res.status(409).json({ conflict: true, error: 'リストが他の端末で更新されました' });
+
+  broadcastProductionEvent({ type: 'schedule_update', date: dateStr, revision: currentRevision + 1, source: 'tablet' });
+  res.json({ success: true, revision: currentRevision + 1, ...(result.response || {}) });
+}
+
+async function isScheduleGroupStarted(db, dateStr, items) {
+  const first = items[0];
+  if (first.type === 'setup') {
+    return !!(await db.collection('firstFactorySetupLog').findOne({ date: dateStr, setupId: `setup_${first.id}` }));
+  }
+  const ids = items.map(i => String(i.id)).filter(Boolean);
+  return !!(await db.collection('firstFactoryProduction').findOne({ date: dateStr, itemId: { $in: ids }, status: { $nin: ['cancelled', 'deleted'] } }));
+}
+
+app.post('/api/production/schedule/move-group', async (req, res) => {
+  try {
+    const { groupId, beforeGroupId } = req.body || {};
+    if (!groupId || groupId === beforeGroupId) return res.status(400).json({ error: 'groupId is required' });
+    await applyTabletScheduleEdit(req, res, async (order, dateStr, db) => {
+      const moving = order.filter(i => scheduleGroupKey(i) === groupId);
+      if (!moving.length) throw new Error('移動するグループが見つかりません');
+      if (await isScheduleGroupStarted(db, dateStr, moving)) throw new Error('開始済みのグループは移動できません');
+      const rest = order.filter(i => scheduleGroupKey(i) !== groupId);
+      let at = beforeGroupId ? rest.findIndex(i => scheduleGroupKey(i) === beforeGroupId) : rest.length;
+      if (at < 0) throw new Error('移動先が見つかりません');
+      rest.splice(at, 0, ...moving);
+      const label = moving[0].type === 'setup' ? moving[0].name : (moving[0].kizai || moving[0].hinban);
+      return { order: rest, action: 'move', detail: `${label} を移動` };
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/schedule/move-group:', error);
+    res.status(500).json({ error: 'Failed to move group' });
+  }
+});
+
+app.post('/api/production/schedule/insert-task', async (req, res) => {
+  try {
+    const { name, duration, comment, beforeGroupId, worker } = req.body || {};
+    const taskName = String(name || '').trim().slice(0, 40);
+    if (!taskName) return res.status(400).json({ error: 'name is required' });
+    await applyTabletScheduleEdit(req, res, async (order) => {
+      const item = {
+        id: `${Date.now()}${Math.random().toString(36).slice(2, 7)}`,
+        type: 'setup',
+        name: taskName,
+        duration: Math.max(0, Math.min(600, Number(duration) || 0)),
+        comment: String(comment || '').slice(0, 200),
+        addedBy: worker || '作業者',
+        addedFrom: 'tablet',
+        addedAt: new Date()
+      };
+      let at = beforeGroupId ? order.findIndex(i => scheduleGroupKey(i) === beforeGroupId) : order.length;
+      if (at < 0) at = order.length;
+      order.splice(at, 0, item);
+      return { order, action: 'insert', detail: `${taskName} を追加`, response: { item, setupId: `setup_${item.id}` } };
+    });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/schedule/insert-task:', error);
+    res.status(500).json({ error: 'Failed to insert task' });
+  }
+});
+
+// 段替え / setup task presets: one list for freyaAdmin2 and the tablets (minutes per task)
+const FF_SETUP_PRESETS = [
+  { name: '段取り', defaultTime: 15 },
+  { name: '段替え', defaultTime: 15 },
+  { name: '乾燥温度設定', defaultTime: 15 },
+  { name: 'ロール温度設定', defaultTime: 15 },
+  { name: '試作', defaultTime: 30 },
+  { name: '紙替', defaultTime: 15 },
+];
+app.get('/api/production/setup-presets', async (req, res) => {
+  try {
+    const doc = await client.db('submittedDB').collection('firstFactorySettings').findOne({ _id: 'setupPresets' });
+    const times = doc?.times || {};
+    res.json({
+      success: true,
+      saved: !!doc,
+      times,
+      presets: FF_SETUP_PRESETS.map(p => ({ name: p.name, duration: times[p.name] !== undefined ? Number(times[p.name]) : p.defaultTime }))
+    });
+  } catch (error) {
+    console.error('❌ Error in GET /api/production/setup-presets:', error);
+    res.status(500).json({ error: 'Failed to load setup presets' });
+  }
+});
+app.post('/api/production/setup-presets', async (req, res) => {
+  try {
+    const input = (req.body && req.body.times) || {};
+    const times = {};
+    FF_SETUP_PRESETS.forEach(p => {
+      if (input[p.name] !== undefined) times[p.name] = Math.max(0, Math.min(600, Number(input[p.name]) || 0));
+    });
+    await client.db('submittedDB').collection('firstFactorySettings').updateOne(
+      { _id: 'setupPresets' },
+      { $set: Object.fromEntries(Object.entries(times).map(([k, v]) => [`times.${k}`, v])), $currentDate: { updatedAt: true } },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/setup-presets:', error);
+    res.status(500).json({ error: 'Failed to save setup presets' });
   }
 });
 

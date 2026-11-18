@@ -806,8 +806,11 @@ function groupScheduledItems(items) {
             return;
         }
 
-        // Hinban item: group consecutive items with the same hinban
-        if (currentGroup && currentGroup.type === 'hinban' && currentGroup.hinban === item.hinban) {
+        // Hinban item: group consecutive items with the same hinban.
+        // item.groupId (fixed by the server once the list is edited) keeps two moved groups of the same
+        // hinban apart and keeps the id stable when the group changes position.
+        if (currentGroup && currentGroup.type === 'hinban' && currentGroup.hinban === item.hinban &&
+            (!item.groupId || item.groupId === currentGroup.groupId)) {
             currentGroup.items.push(item);
             currentGroup.totalDuration += Number(item.duration) || 0;
             currentGroup.totalMeters += Number(item.meters) || 0;
@@ -815,7 +818,7 @@ function groupScheduledItems(items) {
         } else {
             currentGroup = {
                 type: 'hinban',
-                groupId: `group_${item.hinban}_${idx}`,
+                groupId: item.groupId || `group_${item.hinban}_${idx}`,
                 hinban: item.hinban,
                 hinmei: item.hinmei || '',
                 kizai: item.kizai || '',
@@ -1826,15 +1829,16 @@ function isRollEnqueuedOrProcessed(rollItem, group, gIdx, rIdx) {
             return true;
         }
 
-        // 3. Exact groupId + rollIndex match
+        // 3. Exact groupId + rollIndex match (groupId stays fixed when groups move)
         if (targetGroupId && doc.groupId && doc.groupId === targetGroupId) {
             if (Number(doc.rollIndex) === targetRollIdx) {
                 return true;
             }
         }
 
-        // 4. Exact orderIndex match
-        if (targetOrderIdx && Number(doc.orderIndex) === targetOrderIdx) {
+        // 4. Exact orderIndex match - only for old records without a roll id: after a reorder the
+        // # numbers are renumbered, so matching by number could hide a roll that was never fed
+        if (!(doc.itemId && rollItem.id) && targetOrderIdx && Number(doc.orderIndex) === targetOrderIdx) {
             return true;
         }
 
@@ -2293,7 +2297,7 @@ function renderScheduleList(items, startTimeStr) {
             `;
             } else {
                 html += `
-                <div class="schedule-setup-row is-startable" data-id="${setupItem.id}" onclick="startSetupPrompt(${gIdx})" title="タップして開始 (Tap to start)">
+                <div class="schedule-setup-row is-startable is-reorderable" data-id="${setupItem.id}" data-group-id="${escapeHtml(group.groupId)}" onclick="startSetupPrompt(${gIdx})" title="タップして開始・長押しで並べ替え (Tap to start, hold to reorder)">
                     <div class="schedule-setup-left">
                         <span class="setup-tag-pill">#${setupItem.orderIndex} 段替</span>
                         <span class="setup-title-text">${setupName}</span>
@@ -2379,7 +2383,7 @@ function renderScheduleList(items, startTimeStr) {
             const isExpanded = state.expandedGroups && state.expandedGroups.has(group.groupId);
 
             html += `
-                <div class="batch-group-card ${isGroupTinted ? 'group-tinted' : ''} ${isExpanded ? 'is-expanded' : ''}" 
+ <div class="batch-group-card ${isGroupTinted ? 'group-tinted' : ''} ${isExpanded ? 'is-expanded' : ''} ${remainingItems.length === group.items.length ? 'is-reorderable' : ''}" 
                      data-group-id="${group.groupId}" 
                      data-group-idx="${gIdx}"
                      data-total-rolls="${remainingItems.length}">
@@ -8274,6 +8278,276 @@ function setupProductionSSE() {
     }
 }
 
+// -----------------------------------------------------
+// List tab: workers reorder groups (hold & drag) and add tasks (＋ button).
+// Saved to the shared schedule (freyaAdmin2 sees it). Every save carries the schedule revision,
+// so a stale tablet or admin page gets 409 instead of overwriting someone else's change.
+// Only groups that have not started can move; # numbers follow the new order.
+// -----------------------------------------------------
+function scheduleMonthDate(dateStr = state.selectedDate) {
+    return { month: dateStr.slice(0, 7), date: Number(dateStr.slice(8, 10)) };
+}
+
+// Re-read the day's list without the loading skeleton (after a move / add, or another device's change)
+async function reloadScheduleQuietly() {
+    if (state.reorderDrag) { state.scheduleReloadPending = true; return; }
+    const dateStr = state.selectedDate;
+    if (!dateStr) return;
+    try {
+        const { month, date } = scheduleMonthDate(dateStr);
+        const res = await fetch(`${serverURL}/api/production/schedule/daily?month=${encodeURIComponent(month)}&date=${date}`);
+        const data = await res.json();
+        if (!data.success || !data.schedule || dateStr !== state.selectedDate) return;
+        state.dailySchedule = data.schedule;
+        const startTime = data.schedule.startTime || '08:00';
+        state.scheduledItems = computeTimeSchedule(data.schedule.scheduleOrder || [], startTime);
+        renderScheduleList(state.scheduledItems, startTime);
+    } catch (err) {
+        console.warn('Could not reload schedule:', err);
+    }
+}
+
+async function postScheduleEdit(path, body) {
+    const { month, date } = scheduleMonthDate();
+    const res = await fetch(`${serverURL}/api/production/schedule/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month, date, baseRevision: state.dailySchedule?.revision || 0, worker: state.workerName || '', ...body })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409) {
+        await reloadScheduleQuietly();
+        const by = data.lastChangedBy ? `\n(${data.lastChangedBy.name || ''} ${data.lastChangedBy.source === 'admin' ? '管理者' : 'タブレット'})` : '';
+        await appNotice('リストが更新されました', `他の端末でリストが変更されたため、最新の内容を読み込みました。もう一度操作してください。${by}\n(The list was changed elsewhere and has been reloaded. Please try again.)`);
+        return null;
+    }
+    if (!res.ok || !data.success) {
+        await appNotice('保存できませんでした', data.error || `HTTP ${res.status}`);
+        return null;
+    }
+    if (state.dailySchedule) state.dailySchedule.revision = data.revision;
+    return data;
+}
+
+// The group that should be processed next = first group that has not started (still movable)
+function getNextUnstartedGroupId() {
+    const el = document.querySelector('#scheduleListContainer .is-reorderable[data-group-id]');
+    return el ? el.dataset.groupId : null;
+}
+
+// ---- hold & drag ----
+const REORDER_HOLD_MS = 450;
+
+function getScrollParent(el) {
+    let p = el && el.parentElement;
+    while (p && p !== document.body) {
+        const oy = getComputedStyle(p).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight) return p;
+        p = p.parentElement;
+    }
+    return document.scrollingElement || document.documentElement;
+}
+
+function setupScheduleReorder() {
+    const container = document.getElementById('scheduleListContainer');
+    if (!container || container.dataset.reorderReady) return;
+    container.dataset.reorderReady = '1';
+
+    let hold = null;
+
+    container.addEventListener('pointerdown', (e) => {
+        if (state.listViewMode === 'table' || e.button > 0) return;
+        const card = e.target.closest('.is-reorderable[data-group-id]');
+        if (!card || e.target.closest('button, input, select, textarea, a, .batch-roll-row')) return;
+        hold = { card, x: e.clientX, y: e.clientY, pointerId: e.pointerId, timer: setTimeout(() => beginReorderDrag(card, e.clientX, e.clientY), REORDER_HOLD_MS) };
+    });
+    const cancelHold = () => { if (hold) { clearTimeout(hold.timer); hold = null; } };
+    container.addEventListener('pointermove', (e) => {
+        if (hold && !state.reorderDrag && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 10) cancelHold(); // it's a scroll
+    });
+    container.addEventListener('pointerup', cancelHold);
+    container.addEventListener('pointercancel', () => { if (!state.reorderDrag) cancelHold(); });
+    container.addEventListener('contextmenu', (e) => { if (hold || state.reorderDrag) e.preventDefault(); });
+
+    // While dragging: block page scrolling and follow the finger
+    document.addEventListener('touchmove', (e) => { if (state.reorderDrag) e.preventDefault(); }, { passive: false });
+    const onMove = (x, y) => { if (state.reorderDrag) moveReorderDrag(x, y); };
+    document.addEventListener('pointermove', (e) => onMove(e.clientX, e.clientY));
+    document.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (t) onMove(t.clientX, t.clientY); }, { passive: false });
+    const onEnd = () => { cancelHold(); if (state.reorderDrag) endReorderDrag(); };
+    document.addEventListener('pointerup', onEnd);
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('touchcancel', onEnd);
+}
+
+function beginReorderDrag(card, x, y) {
+    const container = document.getElementById('scheduleListContainer');
+    if (!container || !card.isConnected) return;
+    const rect = card.getBoundingClientRect();
+    const ghost = card.cloneNode(true);
+    ghost.classList.add('reorder-ghost');
+    ghost.removeAttribute('onclick');
+    Object.assign(ghost.style, { width: `${rect.width}px`, left: `${rect.left}px`, top: `${rect.top}px` });
+    document.body.appendChild(ghost);
+    card.classList.add('reorder-source');
+
+    const marker = document.createElement('div');
+    marker.className = 'reorder-marker';
+    container.appendChild(marker);
+
+    state.reorderDrag = { card, ghost, marker, offsetY: y - rect.top, scroller: getScrollParent(container), beforeGroupId: undefined, lastY: y };
+    document.body.classList.add('is-reordering');
+    if (navigator.vibrate) navigator.vibrate(25);
+    moveReorderDrag(x, y);
+
+    // The tap that started the hold must not open/start the card
+    const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+    document.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', swallow, { capture: true }), 800);
+}
+
+function moveReorderDrag(x, y) {
+    const d = state.reorderDrag;
+    d.lastY = y;
+    d.ghost.style.top = `${y - d.offsetY}px`;
+
+    // Auto-scroll near the top / bottom edge
+    const sr = d.scroller === document.scrollingElement ? { top: 0, bottom: window.innerHeight } : d.scroller.getBoundingClientRect();
+    if (y < sr.top + 70) d.scroller.scrollTop -= 14;
+    else if (y > sr.bottom - 70) d.scroller.scrollTop += 14;
+
+    // Drop slot: before the first movable card whose middle is below the finger
+    const container = document.getElementById('scheduleListContainer');
+    const cards = [...container.querySelectorAll('.is-reorderable[data-group-id]')].filter(c => c !== d.card);
+    let before = null;
+    for (const c of cards) {
+        const r = c.getBoundingClientRect();
+        if (y < r.top + r.height / 2) { before = c; break; }
+    }
+    d.beforeGroupId = before ? before.dataset.groupId : null;
+
+    const cRect = container.getBoundingClientRect();
+    let markerY;
+    if (before) markerY = before.getBoundingClientRect().top - 5;
+    else if (cards.length) markerY = cards[cards.length - 1].getBoundingClientRect().bottom + 3;
+    else markerY = d.card.getBoundingClientRect().bottom + 3;
+    d.marker.style.top = `${markerY - cRect.top + container.scrollTop}px`;
+}
+
+async function endReorderDrag() {
+    const d = state.reorderDrag;
+    state.reorderDrag = null;
+    document.body.classList.remove('is-reordering');
+    d.ghost.remove();
+    d.marker.remove();
+    d.card.classList.remove('reorder-source');
+
+    const groupId = d.card.dataset.groupId;
+    // Dropped where it already was?
+    const all = [...document.querySelectorAll('#scheduleListContainer .is-reorderable[data-group-id]')];
+    const nextAfterSelf = all[all.indexOf(d.card) + 1];
+    const unchanged = d.beforeGroupId === undefined || d.beforeGroupId === (nextAfterSelf ? nextAfterSelf.dataset.groupId : null);
+
+    if (!unchanged) {
+        d.card.classList.add('reorder-saving');
+        const ok = await postScheduleEdit('move-group', { groupId, beforeGroupId: d.beforeGroupId });
+        if (ok) showToast('並べ替えました (Reordered)', 'success', 2000);
+        await reloadScheduleQuietly();
+    }
+    if (state.scheduleReloadPending) {
+        state.scheduleReloadPending = false;
+        reloadScheduleQuietly();
+    }
+}
+
+// ---- ＋ add task ----
+const FALLBACK_TASK_PRESETS = [
+    { name: '段取り', duration: 15 }, { name: '段替え', duration: 15 }, { name: '乾燥温度設定', duration: 15 },
+    { name: 'ロール温度設定', duration: 15 }, { name: '試作', duration: 30 }, { name: '紙替', duration: 15 }
+];
+
+async function openAddTaskModal() {
+    if (!state.dailySchedule) {
+        await appNotice('リストがありません', 'この日の生産リストがないため追加できません。\n(No production list for this day.)');
+        return;
+    }
+    let presets = FALLBACK_TASK_PRESETS;
+    try {
+        const res = await fetch(`${serverURL}/api/production/setup-presets`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.presets) && data.presets.length) presets = data.presets;
+    } catch (e) { /* offline: built-in list */ }
+
+    let overlay = document.getElementById('addTaskOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'addTaskOverlay';
+        overlay.className = 'hd-overlay';
+        document.body.appendChild(overlay);
+    }
+    const tile = (p, i) => `
+        <div class="add-task-tile">
+            <span class="add-task-name">${escapeHtml(p.name)}</span>
+            <input type="number" class="add-task-min" id="addTaskMin${i}" value="${Number(p.duration) || 0}" min="0" max="600" inputmode="numeric"><span class="add-task-unit">分</span>
+            <button type="button" class="add-task-go" onclick="submitAddTask(${i})" aria-label="追加">追加 →</button>
+        </div>`;
+    overlay.innerHTML = `
+        <div class="hd-card" role="dialog" aria-modal="true" style="max-width: 720px;">
+            <div class="hd-card-header">
+                <span>＋ 作業を追加 (Add task)</span>
+                <button type="button" class="hd-close" onclick="closeAddTaskModal()" aria-label="閉じる">✕</button>
+            </div>
+            <div class="hd-card-body">
+                <div class="add-task-note">次に行う作業として、開始前の最初のグループの前に追加されます。<br>(Added as the next item, before the first group that has not started.)</div>
+                <div class="add-task-grid">
+                    ${presets.map(tile).join('')}
+                    <div class="add-task-tile is-custom">
+                        <input type="text" class="add-task-custom-name" id="addTaskCustomName" placeholder="その他 (名前を入力)" maxlength="40">
+                        <input type="number" class="add-task-min" id="addTaskMinCustom" value="15" min="0" max="600" inputmode="numeric"><span class="add-task-unit">分</span>
+                        <button type="button" class="add-task-go" onclick="submitAddTask('custom')" aria-label="追加">追加 →</button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    state.addTaskPresets = presets;
+    overlay.style.display = 'flex';
+    overlay.onclick = (e) => { if (e.target === overlay) closeAddTaskModal(); };
+}
+
+function closeAddTaskModal() {
+    const overlay = document.getElementById('addTaskOverlay');
+    if (overlay) { overlay.style.display = 'none'; overlay.innerHTML = ''; }
+}
+
+async function submitAddTask(which) {
+    let name, duration;
+    if (which === 'custom') {
+        name = (document.getElementById('addTaskCustomName')?.value || '').trim();
+        duration = Number(document.getElementById('addTaskMinCustom')?.value) || 0;
+        if (!name) { showToast('名前を入力してください', 'warning', 2500); return; }
+    } else {
+        const p = state.addTaskPresets?.[which];
+        if (!p) return;
+        name = p.name;
+        duration = Number(document.getElementById(`addTaskMin${which}`)?.value) || 0;
+    }
+    closeAddTaskModal();
+
+    const data = await postScheduleEdit('insert-task', { name, duration, beforeGroupId: getNextUnstartedGroupId() });
+    if (!data) return;
+    await reloadScheduleQuietly();
+    showToast(`「${name}」を追加しました`, 'success', 2500);
+
+    // Ask to start it now (same start pop-up as tapping the task in the list)
+    const gIdx = (state.currentGroups || []).findIndex(g => g.groupId === data.setupId);
+    if (gIdx >= 0) startSetupPrompt(gIdx);
+}
+
+function updateAddTaskFab() {
+    const fab = document.getElementById('addTaskFab');
+    if (fab) fab.style.display = state.currentMainTab === 1 && state.dailySchedule ? 'flex' : 'none';
+}
+
 function handleProductionSSEEvent(data) {
     console.log('⚡ Received SSE event:', data.type, data);
     if (data.type === 'setup_update') {
@@ -8282,6 +8556,10 @@ function handleProductionSSEEvent(data) {
     }
     if (data.type === 'exclude_update') {
         refreshExcludesFromServer();
+        return;
+    }
+    if (data.type === 'schedule_update') {
+        reloadScheduleQuietly();
         return;
     }
     if (data.type === 'queue_updated' || data.type === 'queue_scrapped' || data.type === 'roll_advanced' || data.type === 'queue_roll_printed') {
@@ -8400,6 +8678,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial schedule fetch for the selected date
     fetchDailySchedule(state.selectedDate);
     initialFetchDone = true;
+
+    // List tab: hold a card to reorder, ＋ to add a task
+    setupScheduleReorder();
+    if (!document.getElementById('addTaskFab')) {
+        const fab = document.createElement('button');
+        fab.type = 'button';
+        fab.id = 'addTaskFab';
+        fab.className = 'add-task-fab';
+        fab.title = '作業を追加 (Add task)';
+        fab.setAttribute('aria-label', '作業を追加');
+        fab.textContent = '＋';
+        fab.onclick = openAddTaskModal;
+        document.body.appendChild(fab);
+    }
+    setInterval(updateAddTaskFab, 1000);
 
     // Initialize USB Barcode Scanner Listener
     setupUSBScannerListener();

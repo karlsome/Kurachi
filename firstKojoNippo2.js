@@ -714,7 +714,7 @@ async function loadDailyScheduleForTablet2(dateStr) {
                     if (it.hinban) itemsMap.set(it.hinban, displayCode);
                     if (it.id) itemsMap.set(it.id, displayCode);
                     if (it.orderIndex !== undefined) itemsByOrder.set(Number(it.orderIndex), displayCode);
-                    itemsMap.set(`group_${it.hinban}_${idx}`, displayCode);
+                    itemsMap.set(it.groupId || `group_${it.hinban}_${idx}`, displayCode);
                 }
             });
         }
