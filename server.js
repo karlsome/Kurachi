@@ -44617,7 +44617,8 @@ app.get('/api/production/status', async (req, res) => {
     }
 
     const records = await productionCollection.find(query).toArray();
-    res.json({ success: true, records });
+    const excludedRolls = await submittedDb.collection('firstFactoryExcludedRolls').find({ date }).toArray();
+    res.json({ success: true, records, excludedRolls });
   } catch (error) {
     console.error('❌ Error in GET /api/production/status:', error);
     res.status(500).json({ error: 'Failed to fetch production status' });
@@ -44634,6 +44635,79 @@ function sanitizeWorkerRoles(roles) {
   });
   return out;
 }
+
+// -----------------------------------------------------
+// 第一工場: rolls excluded (除外) on the firstKojoNippo tablet.
+// One doc per excluded roll; restoring deletes it. freyaAdmin2 reads these via
+// GET /api/production/status (excludedRolls) to mark the roll red and close the group.
+// -----------------------------------------------------
+function buildExcludedRollDoc(date, r) {
+  return {
+    date,
+    itemId: String(r.itemId),
+    groupId: r.groupId || '',
+    rollIndex: Number(r.rollIndex) || null,
+    totalRolls: Number(r.totalRolls) || null,
+    orderIndex: Number(r.orderIndex) || null,
+    hinban: r.hinban || '',
+    kizai: r.kizai || '',
+    machine: r.machine || 'PSA2',
+    worker: r.worker || ''
+  };
+}
+
+app.post('/api/production/roll-exclude', async (req, res) => {
+  try {
+    const { date, itemId, excluded } = req.body || {};
+    if (!date || !itemId) {
+      return res.status(400).json({ error: 'date and itemId are required' });
+    }
+    const col = client.db('submittedDB').collection('firstFactoryExcludedRolls');
+    const filter = { date, itemId: String(itemId) };
+
+    if (excluded === false) {
+      await col.deleteOne(filter);
+    } else {
+      await col.updateOne(
+        filter,
+        { $set: { ...buildExcludedRollDoc(date, req.body), updatedAt: new Date() }, $setOnInsert: { excludedAt: new Date() } },
+        { upsert: true }
+      );
+    }
+
+    broadcastProductionEvent({ type: 'exclude_update', date, itemId: String(itemId), excluded: excluded !== false });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/roll-exclude:', error);
+    res.status(500).json({ error: 'Failed to update excluded roll' });
+  }
+});
+
+// Bulk upsert of rolls the tablet already has marked as excluded (catches excludes made offline / before this existed)
+app.post('/api/production/roll-exclude/sync', async (req, res) => {
+  try {
+    const { date, rolls } = req.body || {};
+    if (!date || !Array.isArray(rolls)) {
+      return res.status(400).json({ error: 'date and rolls[] are required' });
+    }
+    const valid = rolls.filter(r => r && r.itemId);
+    if (valid.length > 0) {
+      const col = client.db('submittedDB').collection('firstFactoryExcludedRolls');
+      await col.bulkWrite(valid.map(r => ({
+        updateOne: {
+          filter: { date, itemId: String(r.itemId) },
+          update: { $set: { ...buildExcludedRollDoc(date, r), updatedAt: new Date() }, $setOnInsert: { excludedAt: new Date() } },
+          upsert: true
+        }
+      })));
+      broadcastProductionEvent({ type: 'exclude_update', date });
+    }
+    res.json({ success: true, count: valid.length });
+  } catch (error) {
+    console.error('❌ Error in POST /api/production/roll-exclude/sync:', error);
+    res.status(500).json({ error: 'Failed to sync excluded rolls' });
+  }
+});
 
 app.post('/api/production/status', async (req, res) => {
   try {

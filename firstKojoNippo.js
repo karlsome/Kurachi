@@ -1302,11 +1302,82 @@ function updateRollMeters(itemId, newMeters, gIdx, rIdx) {
     updateCardSummaryChip(gIdx);
 }
 
+// Payload describing one roll for the excluded-rolls API (freyaAdmin2 reads it)
+function buildExcludedRollPayload(itemId, item, group) {
+    return {
+        itemId,
+        groupId: group?.groupId || item?.groupId || '',
+        rollIndex: Number(item?.rollIndex) || null,
+        totalRolls: Number(item?.totalRolls) || Number(group?.items?.length) || null,
+        orderIndex: Number(item?.orderIndex) || null,
+        hinban: item?.hinban || group?.hinban || '',
+        kizai: item?.kizai || group?.kizai || '',
+        machine: state.machineName || 'PSA2',
+        worker: state.workerName || ''
+    };
+}
+
+function findRollForItemId(itemId, gIdx, rIdx) {
+    const groups = state.currentGroups || [];
+    const direct = groups[gIdx]?.items?.[rIdx];
+    if (direct && getItemKey(direct, gIdx, rIdx) === itemId) return { item: direct, group: groups[gIdx] };
+    for (let g = 0; g < groups.length; g++) {
+        const items = groups[g].items || [];
+        for (let r = 0; r < items.length; r++) {
+            if (getItemKey(items[r], g, r) === itemId) return { item: items[r], group: groups[g] };
+        }
+    }
+    return { item: null, group: null };
+}
+
+// Tell the server a roll was excluded / restored so freyaAdmin2 stops showing it as pending
+async function syncRollExcludeToServer(itemId, item, group, excluded) {
+    if (!itemId || !state.selectedDate) return;
+    try {
+        await fetch(`${serverURL}/api/production/roll-exclude`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: state.selectedDate, excluded, ...buildExcludedRollPayload(itemId, item, group) })
+        });
+    } catch (err) {
+        console.warn('Could not sync roll exclude to server:', err);
+    }
+}
+
+// On schedule load, push every roll this tablet has marked excluded for the date (once per date per page load)
+const excludeSyncedDates = new Set();
+function syncExcludedRollsForDate(groups) {
+    const date = state.selectedDate;
+    if (!date || excludeSyncedDates.has(date) || !Array.isArray(groups) || groups.length === 0) return;
+    excludeSyncedDates.add(date);
+
+    const rolls = [];
+    groups.forEach((group, gIdx) => {
+        (group.items || []).forEach((item, rIdx) => {
+            const key = getItemKey(item, gIdx, rIdx);
+            if (getItemEdit(key, item).isExcluded) rolls.push(buildExcludedRollPayload(key, item, group));
+        });
+    });
+    if (rolls.length === 0) return;
+
+    fetch(`${serverURL}/api/production/roll-exclude/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, rolls })
+    }).then(() => console.log(`🚫 Synced ${rolls.length} excluded roll(s) to server for ${date}`))
+        .catch(err => {
+            excludeSyncedDates.delete(date);
+            console.warn('Could not sync excluded rolls:', err);
+        });
+}
+
 function toggleRollItemExclude(itemId, gIdx, rIdx, event) {
     if (event) event.stopPropagation();
     const edit = getItemEdit(itemId);
     const newExcluded = !edit.isExcluded;
     setItemEdit(itemId, { isExcluded: newExcluded });
+    const { item, group } = findRollForItemId(itemId, gIdx, rIdx);
+    syncRollExcludeToServer(itemId, item, group, newExcluded);
     renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
     updateHistoryBadges();
 }
@@ -2094,6 +2165,7 @@ function renderScheduleList(items, startTimeStr) {
 
     const groups = groupScheduledItems(items);
     state.currentGroups = groups;
+    syncExcludedRollsForDate(groups);
 
     if (state.listViewMode === 'table') {
         container.innerHTML = renderScheduleTableView(groups, items);
@@ -6272,6 +6344,8 @@ function excludeCurrentModalRoll() {
     const newExcluded = !edit.isExcluded;
 
     setItemEdit(itemId, { isExcluded: newExcluded });
+    const found = findRollForItemId(itemId, ctx.gIdx, rIdx);
+    syncRollExcludeToServer(itemId, item || found.item, ctx.group || found.group, newExcluded);
     closeMaterialFeedModal();
 
     showToast(newExcluded ? `Roll #${item.rollIndex || (rIdx + 1)} を除外しました（履歴タブで復帰可能）` : `Roll #${item.rollIndex || (rIdx + 1)} を復帰しました`, 'info', 2500);
@@ -7392,6 +7466,8 @@ function renderHistoryList() {
 function restoreExcludedItem(itemId, event) {
     if (event) event.stopPropagation();
     setItemEdit(itemId, { isExcluded: false });
+    const { item, group } = findRollForItemId(itemId);
+    syncRollExcludeToServer(itemId, item, group, false);
     renderHistoryList();
     renderScheduleList(state.scheduledItems, state.dailySchedule?.startTime || '08:00');
     showToast('項目を生産一覧に復帰させました', 'success', 2500);
