@@ -17305,8 +17305,10 @@ app.post('/defectDefinitions', async (req, res) => {
 // MasterDB collections:
 //   defectCatalog            { id, jp, en, system?, deleted, createdAt, updatedAt, updatedBy }
 //   processDefectDefinitions { process, items: [id], updatedAt, updatedBy }   (base list, その他 last)
-//   modelDefectOverrides     { process, model, hidden: [id], extras: [id], updatedAt, updatedBy }
-// Tablets read the resolved list: base − hidden + extras, その他 always last.
+//   modelDefectOverrides     { process, model, sources?: ['base'|setId], hidden: [id], extras: [id], updatedAt, updatedBy }
+//   defectSets               { id, name, items: [id], createdAt, updatedAt, updatedBy }  (shared across processes)
+// Tablets read the resolved list: items of the model's sources (default: the base list) in source
+// order, de-duplicated, − hidden + extras, その他 always last.
 // Submissions store their own label snapshot, so renaming a master item never rewrites history.
 const DEFECT_PROCESSES = ['kensaDB', 'pressDB', 'slitDB', 'SRSDB'];
 const DEFECT_OTHER_ID = 'other';
@@ -17327,6 +17329,7 @@ function _defectColls() {
     catalog: db.collection('defectCatalog'),
     process: db.collection('processDefectDefinitions'),
     overrides: db.collection('modelDefectOverrides'),
+    sets: db.collection('defectSets'),
     legacyKensa: db.collection('defectDefinitions')
   };
 }
@@ -17419,17 +17422,33 @@ function _uniqueStrings(list) {
   return [...new Set((Array.isArray(list) ? list : []).map(v => String(v || '').trim()).filter(Boolean))];
 }
 
-// base − hidden + extras, その他 last; deleted catalog items are skipped
-function resolveDefectList(baseIds, override, catalogById) {
+const DEFECT_BASE_SOURCE = 'base';
+
+function _overrideSources(override) {
+  const sources = _uniqueStrings(override?.sources);
+  return sources.length ? sources : [DEFECT_BASE_SOURCE];
+}
+
+// sources (base list and/or sets, in order, de-duplicated) − hidden + extras, その他 last;
+// deleted catalog items and unknown sets are skipped
+function resolveDefectList(baseIds, override, catalogById, setsById = new Map()) {
   const hidden = new Set(override?.hidden || []);
   const ids = [];
-  for (const id of baseIds || []) if (!hidden.has(id) && id !== DEFECT_OTHER_ID && !ids.includes(id)) ids.push(id);
-  for (const id of override?.extras || []) if (id !== DEFECT_OTHER_ID && !ids.includes(id)) ids.push(id);
+  const add = id => { if (id !== DEFECT_OTHER_ID && !ids.includes(id)) ids.push(id); };
+  for (const source of _overrideSources(override)) {
+    const sourceIds = source === DEFECT_BASE_SOURCE ? (baseIds || []) : (setsById.get(source)?.items || []);
+    for (const id of sourceIds) if (!hidden.has(id)) add(id);
+  }
+  for (const id of override?.extras || []) add(id);
   ids.push(DEFECT_OTHER_ID);
   return ids
     .map(id => catalogById.get(id))
     .filter(it => it && (it.id === DEFECT_OTHER_ID || !it.deleted))
     .map(it => ({ id: it.id, jp: it.jp, en: it.en || '' }));
+}
+
+function _isEmptyOverride(sources, hidden, extras) {
+  return !hidden.length && !extras.length && sources.length === 1 && sources[0] === DEFECT_BASE_SOURCE;
 }
 
 function _defectUsername(req) {
@@ -17577,19 +17596,26 @@ app.post('/modelDefectOverrides', async (req, res) => {
     const colls = _defectColls();
     const hidden = _uniqueStrings(req.body.hidden).filter(id => id !== DEFECT_OTHER_ID);
     const extras = _uniqueStrings(req.body.extras).filter(id => id !== DEFECT_OTHER_ID && !hidden.includes(id));
+    const sources = _overrideSources({ sources: req.body.sources });
     const problem = await _validateDefectIds(colls, extras);
     if (problem) return res.status(400).json({ error: problem });
+    const setIds = sources.filter(src => src !== DEFECT_BASE_SOURCE);
+    if (setIds.length) {
+      const found = await colls.sets.find({ id: { $in: setIds } }, { projection: { id: 1 } }).toArray();
+      const missing = setIds.filter(id => !found.some(f => f.id === id));
+      if (missing.length) return res.status(400).json({ error: `Unknown defect sets: ${missing.join(', ')}` });
+    }
     const now = new Date();
-    if (!hidden.length && !extras.length) {
+    if (_isEmptyOverride(sources, hidden, extras)) {
       await colls.overrides.deleteOne({ process, model: modelName });
       return res.json({ success: true, removed: true, process, model: modelName });
     }
     await colls.overrides.updateOne(
       { process, model: modelName },
-      { $set: { process, model: modelName, hidden, extras, updatedAt: now, updatedBy: username } },
+      { $set: { process, model: modelName, sources, hidden, extras, updatedAt: now, updatedBy: username } },
       { upsert: true }
     );
-    res.json({ success: true, process, model: modelName, hidden, extras, updatedAt: now, updatedBy: username });
+    res.json({ success: true, process, model: modelName, sources, hidden, extras, updatedAt: now, updatedBy: username });
   } catch (err) {
     console.error('Error saving modelDefectOverrides:', err);
     res.status(500).json({ error: err.message });
@@ -17611,15 +17637,117 @@ app.get('/resolvedDefectList', async (req, res) => {
         .findOne({ 背番号: ban }, { projection: { モデル: 1 } });
       model = String(master?.モデル || '').trim();
     }
-    const [base, override, catalog] = await Promise.all([
+    const [base, override, catalog, sets] = await Promise.all([
       colls.process.findOne({ process }),
       model ? colls.overrides.findOne({ process, model }) : null,
-      colls.catalog.find({}).toArray()
+      colls.catalog.find({}).toArray(),
+      colls.sets.find({}).toArray()
     ]);
     const catalogById = new Map(catalog.map(it => [it.id, it]));
-    res.json({ process, model, items: resolveDefectList(base?.items || [], override, catalogById) });
+    const setsById = new Map(sets.map(set => [set.id, set]));
+    res.json({ process, model, items: resolveDefectList(base?.items || [], override, catalogById, setsById) });
   } catch (err) {
     console.error('Error resolving defect list:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---- Defect sets (不良セット): named groups of master defects, shared across processes ----
+
+// Models (any process) whose sources include the set
+async function _setUsage(colls, setId) {
+  const docs = await colls.overrides.find({ sources: setId }, { projection: { _id: 0, process: 1, model: 1 } }).toArray();
+  return docs.map(d => ({ process: d.process, model: d.model }));
+}
+
+// GET /defectSets — every set
+app.get('/defectSets', async (req, res) => {
+  try {
+    await ensureDefectCatalogSeeded();
+    const sets = await _defectColls().sets.find({}, { projection: { _id: 0 } }).sort({ createdAt: 1 }).toArray();
+    res.json(sets);
+  } catch (err) {
+    console.error('Error fetching defectSets:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /defectSets — { action: 'create'|'update'|'delete', id?, name?, items?: [id], username }
+// delete is refused (409, with the affected models) while any model still uses the set.
+app.post('/defectSets', async (req, res) => {
+  const { action, id } = req.body || {};
+  const username = _defectUsername(req);
+  if (!username) return res.status(400).json({ error: 'Missing username' });
+  try {
+    await ensureDefectCatalogSeeded();
+    const colls = _defectColls();
+    const now = new Date();
+
+    if (action === 'delete') {
+      const current = id ? await colls.sets.findOne({ id }) : null;
+      if (!current) return res.status(404).json({ error: `Defect set not found: ${id}` });
+      const usedBy = await _setUsage(colls, id);
+      if (usedBy.length) return res.status(409).json({ error: 'Defect set is still used by models', usedBy });
+      await colls.sets.deleteOne({ id });
+      return res.json({ success: true, deleted: true, id });
+    }
+
+    const name = _cleanDefectName(req.body.name);
+    if (!name) return res.status(400).json({ error: 'Set name cannot be empty' });
+    if (name.length > 40) return res.status(400).json({ error: `Set name too long: ${name}` });
+    const dup = await colls.sets.findOne({ name, id: { $ne: action === 'update' ? id : null } });
+    if (dup) return res.status(400).json({ error: `Defect set already exists: ${name}` });
+    const items = _uniqueStrings(req.body.items).filter(item => item !== DEFECT_OTHER_ID);
+    const problem = await _validateDefectIds(colls, items);
+    if (problem) return res.status(400).json({ error: problem });
+
+    if (action === 'create') {
+      const set = { id: 's_' + require('crypto').randomBytes(6).toString('hex'), name, items, createdAt: now, updatedAt: now, updatedBy: username };
+      await colls.sets.insertOne({ ...set });
+      return res.json({ success: true, set });
+    }
+    if (action === 'update') {
+      const current = id ? await colls.sets.findOne({ id }) : null;
+      if (!current) return res.status(404).json({ error: `Defect set not found: ${id}` });
+      await colls.sets.updateOne({ id }, { $set: { name, items, updatedAt: now, updatedBy: username } });
+      const set = await colls.sets.findOne({ id }, { projection: { _id: 0 } });
+      return res.json({ success: true, set });
+    }
+    res.status(400).json({ error: `Unknown action: ${action}` });
+  } catch (err) {
+    console.error('Error saving defectSets:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /defectSets/detach — { setId, targets: [{ process, model }] | all: true, username }
+// Removes the set from those models' sources; a model left with no sources goes back to the base list.
+app.post('/defectSets/detach', async (req, res) => {
+  const { setId, targets, all } = req.body || {};
+  const username = _defectUsername(req);
+  if (!setId || !username || (!all && !Array.isArray(targets))) return res.status(400).json({ error: 'Missing required fields: setId, targets|all, username' });
+  try {
+    await ensureDefectCatalogSeeded();
+    const colls = _defectColls();
+    const list = all ? await _setUsage(colls, setId) : targets.filter(t => t && t.process && t.model);
+    const now = new Date();
+    const updated = [];
+    for (const { process, model } of list) {
+      const doc = await colls.overrides.findOne({ process, model });
+      if (!doc) continue;
+      const sources = _overrideSources(doc).filter(src => src !== setId);
+      const nextSources = sources.length ? sources : [DEFECT_BASE_SOURCE];
+      if (_isEmptyOverride(nextSources, doc.hidden || [], doc.extras || [])) {
+        await colls.overrides.deleteOne({ process, model });
+        updated.push({ process, model, removed: true });
+      } else {
+        await colls.overrides.updateOne({ process, model }, { $set: { sources: nextSources, updatedAt: now, updatedBy: username } });
+        updated.push({ process, model, sources: nextSources, hidden: doc.hidden || [], extras: doc.extras || [], updatedAt: now, updatedBy: username });
+      }
+    }
+    res.json({ success: true, updated, remaining: await _setUsage(colls, setId) });
+  } catch (err) {
+    console.error('Error detaching defect set:', err);
     res.status(500).json({ error: err.message });
   }
 });
