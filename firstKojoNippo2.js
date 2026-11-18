@@ -4,9 +4,9 @@
  */
 
 // Determine backend server URL
-//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.20:3000";
+//const serverURL = "http://192.168.0.20:3000";
 
 // -----------------------------------------------------
 // KEYENCE TR-W1000 Mini PC IP Resolution & Temperature Snapshot

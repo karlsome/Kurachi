@@ -3,9 +3,9 @@
  * Logic for First Factory Nippo (第一工場 日報) Tablet UI
  */
 
-//const serverURL = "https://kurachi.onrender.com";
+const serverURL = "https://kurachi.onrender.com";
 //const serverURL = "http://localhost:3000";
-const serverURL = "http://192.168.0.20:3000";
+//const serverURL = "http://192.168.0.20:3000";
 
 function getTodayDateString() {
     const now = new Date();
