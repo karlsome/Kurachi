@@ -36453,76 +36453,264 @@ app.patch('/api/video-manuals-studio/projects/:id/steps/:stepId', async (req, re
 // The browser extracts a small mono MP3 from the uploaded video (ffmpeg.wasm) and posts it here.
 // This route only forwards it to Gemini Transcribe and returns words with timestamps: no media
 // processing happens on this server. Step detection, subtitles and titles are built in the browser.
+// Every transcript is cached in MongoDB by the SHA-256 of the audio, so the same audio never reaches
+// Gemini twice (page reload, lost connection after Gemini answered, double click, retry).
 const VMSS_TRANSCRIBE_MODEL = process.env.VMSS_TRANSCRIBE_MODEL || 'gemini-3.5-transcribe';
 const VMSS_TRANSCRIBE_MAX_BYTES = 40 * 1024 * 1024; // 30 min of 48 kbps mono MP3 is ~11 MB
 const VMSS_TRANSCRIBE_MAX_CONCURRENT = 2;
 const VMSS_TRANSCRIBE_TIMEOUT_MS = 5 * 60 * 1000;
 const VMSS_TRANSCRIBE_MIME_TYPES = new Set(['audio/mp3', 'audio/mpeg', 'audio/m4a', 'audio/aac', 'audio/ogg', 'audio/opus', 'audio/webm', 'audio/wav', 'audio/flac']);
+const VMSS_TRANSCRIPTS_COLLECTION = 'videoManualTranscripts';
+const VMSS_AUTO_STEP_DRAFTS_COLLECTION = 'videoManualAutoStepDrafts';
+const VMSS_AUTO_STEPS_RETENTION_MS = 15 * 24 * 60 * 60 * 1000; // transcripts and drafts unused for 15 days are removed
+const VMSS_AUTO_STEP_DRAFT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 let vmssTranscribeActive = 0;
 let vmssTranscribeAi = null;
+let vmssAutoStepsIndexesReady = null;
+let vmssAutoStepDraftCleanupAt = 0;
+const vmssTranscribeInFlight = new Map(); // audioHash -> Promise<transcript>
 
 function vmssParseOffset(value) {
   const n = parseFloat(String(value ?? '').replace(/s$/, ''));
   return Number.isFinite(n) ? Math.max(0, n) : null;
 }
 
-// POST /projects/:id/transcribe  (raw audio body, Content-Type audio/*) -> { text, words: [{ word, start, end }] }
+function vmssEnsureAutoStepsIndexes(db) {
+  if (!vmssAutoStepsIndexesReady) {
+    vmssAutoStepsIndexesReady = Promise.all([
+      db.collection(VMSS_TRANSCRIPTS_COLLECTION).createIndex({ audioHash: 1, model: 1 }, { unique: true }),
+      // TTL on lastUsedAt: a transcript that keeps being reused (e.g. by an open draft) stays alive.
+      db.collection(VMSS_TRANSCRIPTS_COLLECTION).createIndex({ lastUsedAt: 1 }, { expireAfterSeconds: Math.round(VMSS_AUTO_STEPS_RETENTION_MS / 1000) }),
+      db.collection(VMSS_AUTO_STEP_DRAFTS_COLLECTION).createIndex({ projectId: 1, username: 1 }, { unique: true }),
+      db.collection(VMSS_AUTO_STEP_DRAFTS_COLLECTION).createIndex({ updatedAt: 1 }),
+    ]).catch((err) => {
+      vmssAutoStepsIndexesReady = null;
+      console.error('❌ video-manuals-studio auto steps index error:', err);
+    });
+  }
+  return vmssAutoStepsIndexesReady;
+}
+
+// Returns { text, words } for a cached transcript (and refreshes its retention), or null.
+async function vmssFindTranscript(db, audioHash) {
+  if (!audioHash) return null;
+  const doc = await db.collection(VMSS_TRANSCRIPTS_COLLECTION).findOneAndUpdate(
+    { audioHash, model: VMSS_TRANSCRIBE_MODEL },
+    { $set: { lastUsedAt: new Date() } },
+    { returnDocument: 'after', projection: { text: 1, words: 1 } }
+  );
+  const found = doc && doc.value !== undefined ? doc.value : doc; // driver v4 returns { value }, v6 the document
+  return found ? { text: found.text || '', words: Array.isArray(found.words) ? found.words : [] } : null;
+}
+
+async function vmssCallGeminiTranscribe(audio, mimeType) {
+  const { GoogleGenAI } = require('@google/genai');
+  if (!vmssTranscribeAi) vmssTranscribeAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { apiVersion: 'v1beta' } });
+  const response = await vmssTranscribeAi.models.generateContent({
+    model: VMSS_TRANSCRIBE_MODEL,
+    contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: audio.toString('base64') } }] }],
+    // VERBATIM (default) mode is required for word timestamps; no languageCodes => auto-detect incl. EN/JP mixed.
+    config: { audioTranscriptionConfig: { wordTimestamp: true }, abortSignal: AbortSignal.timeout(VMSS_TRANSCRIBE_TIMEOUT_MS) },
+  });
+  const parts = response?.candidates?.[0]?.content?.parts || [];
+  const texts = [];
+  const words = [];
+  for (const part of parts) {
+    const tr = part?.audioTranscription;
+    if (!tr) continue;
+    if (tr.text) texts.push(String(tr.text));
+    for (const w of tr.words || []) {
+      const start = vmssParseOffset(w.startOffset);
+      const end = vmssParseOffset(w.endOffset);
+      const word = String(w.word ?? '').trim();
+      if (!word || start == null || end == null) continue;
+      words.push({ word, start, end: Math.max(start, end) });
+    }
+  }
+  words.sort((a, b) => a.start - b.start);
+  return { text: texts.join('\n').trim(), words };
+}
+
+// POST /projects/:id/transcribe  (raw audio body, Content-Type audio/*)
+//   -> { text, words: [{ word, start, end }], audioHash, cached }
 app.post('/api/video-manuals-studio/projects/:id/transcribe',
   express.raw({ type: 'audio/*', limit: VMSS_TRANSCRIBE_MAX_BYTES }),
   async (req, res) => {
-    let counted = false;
     try {
       const ctx = await vmssLoadEditableProject(req, res);
       if (!ctx) return;
-      if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured' });
+      const { db } = ctx;
       const audio = req.body;
       if (!Buffer.isBuffer(audio) || !audio.length) return res.status(400).json({ error: 'Audio body is required' });
       const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
       if (!VMSS_TRANSCRIBE_MIME_TYPES.has(mimeType)) return res.status(415).json({ error: `Unsupported audio type: ${mimeType || 'none'}` });
-      if (vmssTranscribeActive >= VMSS_TRANSCRIBE_MAX_CONCURRENT) {
-        return res.status(429).json({ error: 'Another transcription is running. Please try again in a minute.' });
+      await vmssEnsureAutoStepsIndexes(db);
+
+      const audioHash = require('crypto').createHash('sha256').update(audio).digest('hex');
+      const cached = await vmssFindTranscript(db, audioHash);
+      if (cached) {
+        console.log(`🎙️ video-manuals-studio transcribe ${req.params.id}: cache hit ${audioHash.slice(0, 12)}`);
+        return res.json({ ...cached, audioHash, cached: true, model: VMSS_TRANSCRIBE_MODEL });
       }
-      vmssTranscribeActive += 1;
-      counted = true;
 
-      const { GoogleGenAI } = require('@google/genai');
-      if (!vmssTranscribeAi) vmssTranscribeAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { apiVersion: 'v1beta' } });
-      const started = Date.now();
-      const response = await vmssTranscribeAi.models.generateContent({
-        model: VMSS_TRANSCRIBE_MODEL,
-        contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: audio.toString('base64') } }] }],
-        // VERBATIM (default) mode is required for word timestamps; no languageCodes => auto-detect incl. EN/JP mixed.
-        config: { audioTranscriptionConfig: { wordTimestamp: true }, abortSignal: AbortSignal.timeout(VMSS_TRANSCRIBE_TIMEOUT_MS) },
-      });
-
-      const parts = response?.candidates?.[0]?.content?.parts || [];
-      const texts = [];
-      const words = [];
-      for (const part of parts) {
-        const tr = part?.audioTranscription;
-        if (!tr) continue;
-        if (tr.text) texts.push(String(tr.text));
-        for (const w of tr.words || []) {
-          const start = vmssParseOffset(w.startOffset);
-          const end = vmssParseOffset(w.endOffset);
-          const word = String(w.word ?? '').trim();
-          if (!word || start == null || end == null) continue;
-          words.push({ word, start, end: Math.max(start, end) });
+      // Same audio already being transcribed (double click / retry): wait for that call instead of a new one.
+      let task = vmssTranscribeInFlight.get(audioHash);
+      if (!task) {
+        if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured' });
+        if (vmssTranscribeActive >= VMSS_TRANSCRIBE_MAX_CONCURRENT) {
+          return res.status(429).json({ error: 'Another transcription is running. Please try again in a minute.' });
         }
+        vmssTranscribeActive += 1;
+        const started = Date.now();
+        task = (async () => {
+          try {
+            const result = await vmssCallGeminiTranscribe(audio, mimeType);
+            // Saved before answering, so the result survives a client that disconnected meanwhile.
+            const now = new Date();
+            await db.collection(VMSS_TRANSCRIPTS_COLLECTION).updateOne(
+              { audioHash, model: VMSS_TRANSCRIBE_MODEL },
+              { $set: { ...result, bytes: audio.length, mimeType, lastUsedAt: now }, $setOnInsert: { createdAt: now } },
+              { upsert: true }
+            );
+            console.log(`🎙️ video-manuals-studio transcribe ${req.params.id}: Gemini ${audio.length} bytes, ${result.words.length} words, ${Date.now() - started} ms`);
+            return result;
+          } finally {
+            vmssTranscribeActive -= 1;
+            vmssTranscribeInFlight.delete(audioHash);
+          }
+        })();
+        vmssTranscribeInFlight.set(audioHash, task);
       }
-      words.sort((a, b) => a.start - b.start);
-      console.log(`🎙️ video-manuals-studio transcribe ${req.params.id}: ${audio.length} bytes, ${words.length} words, ${Date.now() - started} ms`);
-      res.json({ text: texts.join('\n').trim(), words, model: VMSS_TRANSCRIBE_MODEL });
+      const result = await task;
+      if (!res.headersSent) res.json({ ...result, audioHash, cached: false, model: VMSS_TRANSCRIBE_MODEL });
     } catch (err) {
       console.error('❌ video-manuals-studio transcribe error:', err);
       const kind = ffLabelErrorKind(err);
       const status = kind === 'quota' ? 429 : kind === 'auth' ? 503 : kind === 'timeout' ? 504 : 502;
       if (!res.headersSent) res.status(status).json({ error: err.message || 'Transcription failed', kind });
-    } finally {
-      if (counted) vmssTranscribeActive -= 1;
     }
   }
 );
+
+// ---- Auto steps drafts: one per (project, user), so a reload / lost connection can continue where it left off ----
+// { projectId, username, file: { name, size, lastModified, duration }, asset: { assetId, url }, audioHash, cuts, updatedAt }
+
+// Drafts untouched for 15 days are deleted; their uploaded video goes to the asset recycle bin when no step uses it.
+async function vmssCleanupExpiredAutoStepDrafts(db) {
+  if (Date.now() - vmssAutoStepDraftCleanupAt < VMSS_AUTO_STEP_DRAFT_CLEANUP_INTERVAL_MS) return;
+  vmssAutoStepDraftCleanupAt = Date.now();
+  const cutoff = new Date(Date.now() - VMSS_AUTO_STEPS_RETENTION_MS);
+  const expired = await db.collection(VMSS_AUTO_STEP_DRAFTS_COLLECTION).find({ updatedAt: { $lt: cutoff } }).limit(100).toArray();
+  for (const draft of expired) {
+    try {
+      await vmssRecycleUnusedAutoStepAsset(db, draft, 'auto-steps-cleanup');
+      await db.collection(VMSS_AUTO_STEP_DRAFTS_COLLECTION).deleteOne({ _id: draft._id });
+    } catch (err) {
+      console.error('❌ video-manuals-studio auto steps draft cleanup error:', err);
+    }
+  }
+}
+
+async function vmssRecycleUnusedAutoStepAsset(db, draft, username) {
+  const assetId = String(draft?.asset?.assetId || '');
+  if (!assetId || !draft.playlistId) return false;
+  const playlistId = draft.playlistId;
+  const asset = await db.collection(VMSS_ASSETS_COLLECTION).findOne({
+    playlistId,
+    deleted: { $ne: true },
+    $or: [{ assetId }, ...(ObjectId.isValid(assetId) ? [{ _id: new ObjectId(assetId) }] : [])],
+  });
+  if (!asset) return false;
+  const usage = (await vmssBuildAssetUsageDetailsMap(db, playlistId, { assetDocs: [asset] })).get(String(asset._id));
+  if (Number(usage?.usageCount) > 0) return false; // a step uses it: keep
+  await db.collection(VMSS_ASSETS_COLLECTION).updateOne(
+    { _id: asset._id },
+    { $set: { ...vmssBuildDeletedAssetMetadata(username), updatedAt: new Date() } }
+  );
+  return true;
+}
+
+function vmssAutoStepDraftPayload(draft) {
+  if (!draft) return null;
+  return {
+    file: draft.file || null,
+    asset: draft.asset || null,
+    audioHash: draft.audioHash || '',
+    cuts: Array.isArray(draft.cuts) ? draft.cuts : null,
+    updatedAt: draft.updatedAt || null,
+  };
+}
+
+// GET /projects/:id/auto-steps-draft -> { draft, transcript } (transcript is null when not cached any more)
+app.get('/api/video-manuals-studio/projects/:id/auto-steps-draft', async (req, res) => {
+  try {
+    const ctx = await vmssLoadEditableProject(req, res);
+    if (!ctx) return;
+    const { db, project, username } = ctx;
+    await vmssEnsureAutoStepsIndexes(db);
+    vmssCleanupExpiredAutoStepDrafts(db).catch((err) => console.error('❌ video-manuals-studio auto steps draft cleanup error:', err));
+    const draft = await db.collection(VMSS_AUTO_STEP_DRAFTS_COLLECTION).findOne({ projectId: project._id, username });
+    const transcript = draft?.audioHash ? await vmssFindTranscript(db, draft.audioHash) : null;
+    res.json({ draft: vmssAutoStepDraftPayload(draft), transcript });
+  } catch (err) {
+    console.error('❌ video-manuals-studio auto steps draft get error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /projects/:id/auto-steps-draft  { file?, asset?, audioHash?, cuts? }  (merges the given fields)
+app.put('/api/video-manuals-studio/projects/:id/auto-steps-draft', async (req, res) => {
+  try {
+    const ctx = await vmssLoadEditableProject(req, res);
+    if (!ctx) return;
+    const { db, project, username } = ctx;
+    await vmssEnsureAutoStepsIndexes(db);
+    const body = req.body || {};
+    const set = { playlistId: project.playlistId, updatedAt: new Date() };
+    if (body.file !== undefined) {
+      const f = body.file || {};
+      set.file = { name: String(f.name || '').slice(0, 300), size: vmssNum(f.size), lastModified: vmssNum(f.lastModified), duration: vmssNum(f.duration) };
+    }
+    if (body.asset !== undefined) set.asset = body.asset ? { assetId: String(body.asset.assetId || ''), url: String(body.asset.url || '') } : null;
+    if (body.audioHash !== undefined) set.audioHash = /^[a-f0-9]{64}$/.test(String(body.audioHash || '')) ? String(body.audioHash) : '';
+    if (body.cuts !== undefined) {
+      set.cuts = Array.isArray(body.cuts)
+        ? body.cuts.slice(0, VMSS_STEP_MAX).map((cut) => ({
+          id: String(cut?.id || '').slice(0, 80),
+          start: Math.max(0, vmssNum(cut?.start)),
+          title: String(cut?.title || '').slice(0, 300),
+          kind: String(cut?.kind || 'step').slice(0, 20),
+        }))
+        : null;
+    }
+    await db.collection(VMSS_AUTO_STEP_DRAFTS_COLLECTION).updateOne(
+      { projectId: project._id, username },
+      { $set: set, $setOnInsert: { createdAt: new Date() } },
+      { upsert: true }
+    );
+    res.json({ saved: true });
+  } catch (err) {
+    console.error('❌ video-manuals-studio auto steps draft save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /projects/:id/auto-steps-draft?recycleAsset=1 -> removes the draft (and recycles its unused video)
+app.delete('/api/video-manuals-studio/projects/:id/auto-steps-draft', async (req, res) => {
+  try {
+    const ctx = await vmssLoadEditableProject(req, res);
+    if (!ctx) return;
+    const { db, project, username } = ctx;
+    const draft = await db.collection(VMSS_AUTO_STEP_DRAFTS_COLLECTION).findOne({ projectId: project._id, username });
+    let recycled = false;
+    if (draft && String(req.query.recycleAsset || '') === '1') recycled = await vmssRecycleUnusedAutoStepAsset(db, draft, username);
+    if (draft) await db.collection(VMSS_AUTO_STEP_DRAFTS_COLLECTION).deleteOne({ _id: draft._id });
+    res.json({ deleted: Boolean(draft), recycled });
+  } catch (err) {
+    console.error('❌ video-manuals-studio auto steps draft delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /projects/:id/steps/bulk  { steps: [{ title, edit, assetSourceMap, subtitles }] }
 // Appends several ready-made steps with a single save (used by "Create steps from video").
@@ -36553,6 +36741,8 @@ app.post('/api/video-manuals-studio/projects/:id/steps/bulk', async (req, res) =
     }
     const next = [...steps, ...created];
     const { composed } = await vmssSaveSteps(db, project, next, username);
+    // The auto steps draft (if any) is finished: its video is now used by these steps.
+    await db.collection(VMSS_AUTO_STEP_DRAFTS_COLLECTION).deleteOne({ projectId: project._id, username }).catch(() => {});
     res.json({ steps: created.map(vmssStepSummary), order: next.map((s) => s.id), duration: composed.duration });
   } catch (err) {
     console.error('❌ video-manuals-studio step bulk create error:', err);
