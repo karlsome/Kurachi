@@ -15455,8 +15455,7 @@ if (manualSendModal) {
               statusText = machineStatusText(m);
               foot = clT('checklist_machine_ng_wait', '保全の確認待ち');
             } else {
-              statusText = machineKey(m) === machineKey(nextUp) && todo.length < machines.filter(x => window.getChecklistMachineStatus(x) !== 'none').length
-                ? clT('checklist_machine_next_tag', '次はこちら') : clT('checklist_machine_status_todo', '未完了');
+              statusText = clT('checklist_machine_status_todo', '未完了');
               foot = clT('checklist_machine_tap_start', 'タップして点検開始');
             }
             const checks = prog.total ? `${prog.done}/${prog.total} ${clT('checklist_checks_unit', '項目')}` : '';
