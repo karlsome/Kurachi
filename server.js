@@ -41147,6 +41147,20 @@ function normalizeCheckFormMachineName(value = '') {
   return normalizeCheckFormText(value).toUpperCase();
 }
 
+// Mongo filter: the record / ticket was saved for exactly this machine name (case-insensitive, spaces
+// around the name ignored) in any of the machine fields the check-form records use.
+function buildCheckFormExactMachineFilter(machine = '') {
+  const name = normalizeCheckFormText(machine);
+  const exact = new RegExp(`^\\s*${escapeCheckFormRegex(name)}\\s*$`, 'i');
+  return {
+    $or: [
+      { 加工設備: exact },
+      { machine: exact },
+      { selectedMachine: exact }
+    ]
+  };
+}
+
 function checkFormMachineNamesMatch(left = '', right = '') {
   const normalizedLeft = normalizeCheckFormMachineName(left);
   const normalizedRight = normalizeCheckFormMachineName(right);
@@ -42263,30 +42277,11 @@ app.get('/api/check-forms/today-status', async (req, res) => {
     const jstDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
 
-    let relatedMachineIds = [];
-    try {
-      if (typeof getRelatedMachineIds === 'function') {
-        relatedMachineIds = await getRelatedMachineIds(machine);
-      }
-    } catch (_) {}
-
-    const machineTokens = Array.from(new Set([
-      ...machine.split(',').map(m => m.trim()).filter(Boolean),
-      ...relatedMachineIds
-    ]));
-    const machinePattern = machineTokens.map(m => escapeCheckFormRegex(m)).join('|');
-    const machineRegex = new RegExp(`(^|,)\\s*(${machinePattern})\\s*(,|$)`, 'i');
-
-    const machineMatchFilter = {
-      $or: [
-        { 加工設備: { $in: machineTokens } },
-        { machine: { $in: machineTokens } },
-        { selectedMachine: { $in: machineTokens } },
-        { 加工設備: machineRegex },
-        { machine: machineRegex },
-        { selectedMachine: machineRegex }
-      ]
-    };
+    // Checklists are per machine: a record / NG ticket counts only for the exact machine it was saved for.
+    // Grouped tablets (OZNC04,OZNC06) ask once per machine. Old records saved under the pair name
+    // ("OZNC04,OZNC06") are legacy group records and only match that exact pair name, so they don't
+    // count as done for either machine.
+    const machineMatchFilter = buildCheckFormExactMachineFilter(machine);
 
     const docs = await recordsCollection.find({
       factory,
@@ -42527,9 +42522,29 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
         if (!ngReason) ngReason = record.ngReason || 'NG判定項目あり';
       }
 
-      // Find matching machine
+      // Find the machine: exact name only. Checklists are per machine, so a record saved under a pair
+      // name ("OZNC04,OZNC06", from before per-machine checklists) is a legacy group record: it is shown as
+      // its own group row and does not count as done for OZNC04 or OZNC06.
+      const recordMachineKey = normalizeCheckFormMachineName(machineName);
+      let matchedMachine = false;
       for (const [key, machineObj] of machinesMap.entries()) {
-        if (checkFormMachineNamesMatch(machineObj.name, machineName)) {
+        if (recordMachineKey && normalizeCheckFormMachineName(machineObj.name) === recordMachineKey) matchedMachine = true;
+      }
+      if (!matchedMachine && recordMachineKey.includes(',')) {
+        const recordFactory = normalizeCheckFormText(record.factory || '—');
+        if (!filterFactory || recordFactory === filterFactory) {
+          machinesMap.set(`${recordFactory}:${machineName}`, {
+            id: '',
+            name: machineName,
+            factory: recordFactory,
+            assignedTemplates: [],
+            todaySubmissions: [],
+            legacyGroup: true,
+          });
+        }
+      }
+      for (const [key, machineObj] of machinesMap.entries()) {
+        if (recordMachineKey && normalizeCheckFormMachineName(machineObj.name) === recordMachineKey) {
           machineObj.todaySubmissions.push({
             recordId: recId,
             formId: record.formId || record.templateId || '',
@@ -42551,6 +42566,15 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
     let defectCount = 0;
     let pendingCount = 0;
 
+    // Grouped setsubi entries ("OZNC04,OZNC06") are not checked any more (each machine is); keep such a row
+    // only when it holds legacy group records for this day, otherwise it would show as pending forever.
+    for (const [key, m] of machinesMap.entries()) {
+      if (String(m.name || '').includes(',')) {
+        if (m.todaySubmissions.length === 0) machinesMap.delete(key);
+        else m.legacyGroup = true;
+      }
+    }
+
     const machineList = Array.from(machinesMap.values()).map((m) => {
       const hasSubmissions = m.todaySubmissions.length > 0;
       const hasNG = m.todaySubmissions.some((s) => s.hasNG);
@@ -42558,13 +42582,14 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
       let status = 'pending';
       if (hasNG) {
         status = 'defect';
-        defectCount += 1;
       } else if (hasSubmissions) {
         status = 'completed';
-        completedCount += 1;
-      } else {
-        status = 'pending';
-        pendingCount += 1;
+      }
+      // Legacy group rows are shown but kept out of the machine KPIs (they are not a machine)
+      if (!m.legacyGroup) {
+        if (status === 'defect') defectCount += 1;
+        else if (status === 'completed') completedCount += 1;
+        else pendingCount += 1;
       }
 
       // Sort submissions (NG first, then latest)
@@ -42586,6 +42611,7 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
         primarySubmission: primary,
         submissions: sortedSubmissions,
         assignedTemplates: m.assignedTemplates,
+        legacyGroup: !!m.legacyGroup,
       };
     });
 
@@ -42602,7 +42628,7 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
       date: jstDateStr,
       formattedDate: startOfDay.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }),
       summary: {
-        totalMachines: machineList.length,
+        totalMachines: machineList.filter((m) => !m.legacyGroup).length,
         completedCount,
         defectCount,
         pendingCount,
@@ -43299,29 +43325,11 @@ app.post('/api/check-forms/submit', async (req, res) => {
         const jstDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
         const startOfDay = new Date(`${jstDateStr}T00:00:00+09:00`);
 
-        let relatedEquipments = [];
-        try {
-          if (typeof getRelatedMachineIds === 'function') {
-            relatedEquipments = await getRelatedMachineIds(processingEquipment);
-          }
-        } catch (_) {}
-        const equipTokens = Array.from(new Set([
-          ...processingEquipment.split(',').map(m => m.trim()).filter(Boolean),
-          ...relatedEquipments
-        ]));
-        const equipPattern = equipTokens.map(m => escapeCheckFormRegex(m)).join('|');
-        const equipRegex = new RegExp(`(^|,)\\s*(${equipPattern})\\s*(,|$)`, 'i');
-
+        // Exact machine only (per-machine checklists): today's record of the pair partner, or a legacy
+        // record saved under the pair name, must not be overwritten by this machine's submission.
         const existingDoc = await recordsCollection.findOne({
           factory,
-          $or: [
-            { machine: { $in: equipTokens } },
-            { 加工設備: { $in: equipTokens } },
-            { selectedMachine: { $in: equipTokens } },
-            { machine: equipRegex },
-            { 加工設備: equipRegex },
-            { selectedMachine: equipRegex }
-          ],
+          ...buildCheckFormExactMachineFilter(processingEquipment),
           templateId,
           createdAt: { $gte: startOfDay }
         });
