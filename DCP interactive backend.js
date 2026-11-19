@@ -14716,23 +14716,39 @@ if (manualSendModal) {
     return machines.filter(m => !window.isMachineChecklistOk(m));
   };
 
-  // Show another machine's checklist
+  // Grouped tablet: the checklist tab first shows one card per machine (the machine picker); tapping a
+  // card opens that machine's checklist. A single-machine tablet never shows the picker.
+  window.checklistMachinePickerOpen = false;
+  window.isChecklistMachinePickerActive = function () {
+    return window.checklistMachinePickerOpen === true && window.checklistMachineOrder.length > 1;
+  };
+  window.openChecklistMachinePicker = function () {
+    window.checklistMachinePickerOpen = true;
+    if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
+    if (typeof window.updateTabLock === 'function') window.updateTabLock();
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { }
+  };
+
+  // Show a machine's checklist (from the picker card, or after a submit)
   window.switchChecklistMachine = function (machine) {
     const st = window.getChecklistStateFor(machine);
-    if (!st || st === window.checklistState) return;
+    if (!st || !stateHasQueue(st)) return;
+    const wasPicker = window.checklistMachinePickerOpen;
+    window.checklistMachinePickerOpen = false;
+    if (st === window.checklistState && !wasPicker) return;
     window.checklistState = st;
     if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
     if (typeof window.updateTabLock === 'function') window.updateTabLock();
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { }
   };
 
-  // After a machine finished its checklist: move on to the next machine that still needs one.
-  // Returns true when it switched.
+  // After a machine finished its checklist: back to the machine cards (that machine now green, the next one
+  // marked) when another machine still needs its checklist. Returns true when it went back to the cards.
   window.advanceToNextChecklistMachine = function () {
     const current = window.checklistState && window.checklistState.machine;
     const next = window.getChecklistMachinesWithQueue().find(m => machineKey(m) !== machineKey(current) && window.getChecklistMachineStatus(m) === 'todo');
     if (!next) return false;
-    window.switchChecklistMachine(next);
+    window.openChecklistMachinePicker();
     if (typeof showAppToast === 'function') {
       const msg = (typeof _t === 'function' && _t('checklist_machine_next') !== 'checklist_machine_next')
         ? _t('checklist_machine_next') : '{done} 完了 → {next} へ';
@@ -14822,6 +14838,8 @@ if (manualSendModal) {
         // Start on the first machine that still needs its checklist
         const first = withQueue.find(m => !window.isMachineChecklistOk(m)) || withQueue[0];
         window.checklistState = window.getChecklistStateFor(first);
+        // Grouped tablet: start on the machine cards
+        window.checklistMachinePickerOpen = machines.length > 1;
         if (btn) btn.style.display = 'inline-flex';
         if (typeof window.updateTabLock === 'function') window.updateTabLock();
 
@@ -15286,28 +15304,104 @@ if (manualSendModal) {
     return clT(key, fallback).replace('{m}', machine);
   };
 
+  // Is one field of a machine's checklist answered? (isChecklistFieldCompleted, for any machine's state)
+  function fieldDoneIn(st, field) {
+    if (field.type === 'name') {
+      return !!(window.selectedWorkerNames && window.selectedWorkerNames.some(n => (n || '').trim()));
+    }
+    const ans = st.answers ? st.answers[field.id] : undefined;
+    if (ans === undefined || ans === null || ans === '') return false;
+    if (typeof ans === 'string' && ans.startsWith('SKIPPED')) return true;
+    const num = typeof ans === 'number' ? ans : parseFloat(ans);
+    const outOfRange = field.type === 'number' && !isNaN(num) && (
+      (field.min !== null && field.min !== undefined && num < field.min) ||
+      (field.max !== null && field.max !== undefined && num > field.max));
+    const ticket = st.tickets ? st.tickets[field.id] : null;
+    if ((ans === 'NG' || outOfRange) && !(ticket && ticket.saved)) return false;
+    if (field.photoRequired && ans !== 'NG' && !outOfRange && !(st.fieldPhotos && st.fieldPhotos[field.id])) return false;
+    return true;
+  }
+
+  // Pre-production checks of a machine: { done, total } over all its checklists (a submitted checklist counts in full)
+  window.getChecklistMachineProgress = function (machine) {
+    const st = window.getChecklistStateFor(machine);
+    if (!stateHasQueue(st)) return { done: 0, total: 0 };
+    const finished = ['done', 'bypassed', 'ng'].includes(window.getChecklistMachineStatus(machine));
+    let done = 0, total = 0;
+    st.queue.forEach(t => {
+      const fields = (Array.isArray(t.fields) ? t.fields : []).filter(f => f.timing !== 'post');
+      const recorded = !!(st.recordIds && (st.recordIds[t._id] || st.recordIds[t.name]));
+      total += fields.length;
+      done += (recorded || finished) ? fields.length : fields.filter(f => fieldDoneIn(st, f)).length;
+    });
+    return { done, total };
+  };
+
+  // Grouped tablet: the machine cards (picker), or — inside one machine — its banner with a back button.
+  // Kept under its old name: every render of the checklist tab calls it.
   window.renderChecklistMachineSwitcher = function () {
     const wrap = document.getElementById('checklistMachineSwitcher');
     const banner = document.getElementById('checklistMachineBanner');
     const cards = document.getElementById('checklistCardsContainer');
     const tabAlert = document.getElementById('checklistTabAlert');
     const machines = window.getChecklistMachines();
-    const withQueue = window.getChecklistMachinesWithQueue();
     const current = window.checklistState && window.checklistState.machine;
     const grouped = machines.length > 1;
+    const picker = window.isChecklistMachinePickerActive();
     const color = window.getChecklistMachineColor(current);
 
+    // Parts of the single-checklist view, hidden while the machine cards are shown
+    const nextBtn = document.getElementById('checklistNextBtn');
+    const singleViewParts = [
+      document.getElementById('checklistSelectedContainer'),
+      document.getElementById('checklistActionsCard'),
+      cards,
+      nextBtn ? nextBtn.parentNode : null,
+      document.getElementById('checklistTierBadge'),
+      document.getElementById('checklistCounterBadge'),
+    ];
+    singleViewParts.forEach(el => {
+      if (!el) return;
+      if (picker) { if (el.dataset.pickerHidden !== '1') { el.dataset.pickerDisplay = el.style.display || ''; el.dataset.pickerHidden = '1'; } el.style.display = 'none'; }
+      else if (el.dataset.pickerHidden === '1') { el.style.display = el.dataset.pickerDisplay || ''; el.dataset.pickerHidden = ''; }
+    });
+
     if (wrap) {
-      if (withQueue.length > 1) {
-        wrap.style.display = 'flex';
-        wrap.innerHTML = withQueue.map(m => {
-          const status = window.getChecklistMachineStatus(m);
-          const active = machineKey(m) === machineKey(current);
-          return `<button type="button" class="checklist-machine-tab${active ? ' is-active' : ''}" data-machine="${clEsc(m)}" style="--m-color:${window.getChecklistMachineColor(m)}">` +
-            `<span class="checklist-machine-tab-name">${clEsc(m)}</span>` +
-            `<span class="checklist-machine-tab-status ${status}">${clEsc(machineStatusText(m))}</span></button>`;
-        }).join('');
-        wrap.querySelectorAll('[data-machine]').forEach(b => {
+      if (picker) {
+        const todo = machines.filter(m => window.getChecklistMachineStatus(m) === 'todo');
+        const nextUp = todo[0] || null;
+        wrap.style.display = 'block';
+        wrap.innerHTML = `<p class="checklist-machine-picker-hint">${clEsc(clT('checklist_machine_pick', '点検する機械を選んでください'))}</p>` +
+          '<div class="checklist-machine-cards">' + machines.map(m => {
+            const status = window.getChecklistMachineStatus(m);
+            const prog = window.getChecklistMachineProgress(m);
+            const pct = prog.total ? Math.round(prog.done / prog.total * 100) : 0;
+            let statusText, foot;
+            if (status === 'none') {
+              statusText = clT('checklist_machine_none', '点検なし');
+              foot = clT('checklist_machine_none_hint', '点検不要 — そのまま使用可');
+            } else if (status === 'done' || status === 'bypassed') {
+              statusText = machineStatusText(m);
+              foot = clT('checklist_machine_view_history', 'タップで本日の記録を表示');
+            } else if (status === 'ng') {
+              statusText = machineStatusText(m);
+              foot = clT('checklist_machine_ng_wait', '保全の確認待ち');
+            } else {
+              statusText = machineKey(m) === machineKey(nextUp) && todo.length < machines.filter(x => window.getChecklistMachineStatus(x) !== 'none').length
+                ? clT('checklist_machine_next_tag', '次はこちら') : clT('checklist_machine_status_todo', '未完了');
+              foot = clT('checklist_machine_tap_start', 'タップして点検開始');
+            }
+            const checks = prog.total ? `${prog.done}/${prog.total} ${clT('checklist_checks_unit', '項目')}` : '';
+            const isNext = status === 'todo' && machineKey(m) === machineKey(nextUp);
+            return `<button type="button" class="checklist-machine-card s-${status}${isNext ? ' is-next' : ''}" data-machine="${clEsc(m)}"` +
+              `${status === 'none' ? ' disabled' : ''} style="--m-color:${window.getChecklistMachineColor(m)}">` +
+              `<span class="checklist-machine-card-name">${clEsc(m)}</span>` +
+              `<span class="checklist-machine-card-status">${clEsc(statusText)}</span>` +
+              (checks ? `<span class="checklist-machine-card-checks">${clEsc(checks)}</span>` +
+                `<span class="checklist-machine-card-bar"><span style="width:${pct}%"></span></span>` : '') +
+              `<span class="checklist-machine-card-foot">${clEsc(foot)}</span></button>`;
+          }).join('') + '</div>';
+        wrap.querySelectorAll('[data-machine]:not([disabled])').forEach(b => {
           b.onclick = () => window.switchChecklistMachine(b.getAttribute('data-machine'));
         });
       } else {
@@ -15316,12 +15410,15 @@ if (manualSendModal) {
       }
     }
 
-    // Big name banner + coloured frame so nobody answers OZNC06's checks while standing at OZNC04
+    // Inside one machine: big name banner + back to the machine cards
     if (banner) {
-      if (grouped && current) {
-        banner.style.display = 'block';
+      if (grouped && current && !picker) {
+        banner.style.display = 'flex';
         banner.style.setProperty('--m-color', color);
-        banner.innerHTML = `▶ ${clEsc(clT('checklist_machine_now', '点検中'))}: ${clEsc(current)}<small>${clEsc(machineStatusText(current))}</small>`;
+        banner.innerHTML = `<button type="button" class="checklist-machine-back">${clEsc(clT('checklist_machine_back', '← 機械一覧'))}</button>` +
+          `<span>▶ ${clEsc(clT('checklist_machine_now', '点検中'))}: ${clEsc(current)}<small>${clEsc(machineStatusText(current))}</small></span>`;
+        const back = banner.querySelector('.checklist-machine-back');
+        if (back) back.onclick = () => window.openChecklistMachinePicker();
       } else {
         banner.style.display = 'none';
       }
@@ -17202,6 +17299,7 @@ if (manualSendModal) {
       }
 
       if (typeof window.goToTab === 'function') window.goToTab(0);
+      if (window.getChecklistMachines().length > 1) window.openChecklistMachinePicker();
     } catch (e) {
       console.error('Error recording bypass:', e);
       if (status) { status.style.color = '#ef4444'; status.textContent = _byp('bypass_network_error', '❌ Network error — bypass not recorded'); }
