@@ -278,15 +278,20 @@
   }
 
   // Chrome only connects to a remembered device it has recently seen advertising ("no longer in range" otherwise),
-  // so scan for its advertisement first.
+  // so scan for its advertisement first. Never rejects; resolves with what actually happened (for diagnostics):
+  // { seen: true, rssi } | { seen: false, reason: 'timeout' | 'unsupported' | 'watch failed: ...' }
   function seeAdvert(d) {
-    if (!d.watchAdvertisements) return Promise.resolve();
+    if (!d.watchAdvertisements) return Promise.resolve({ seen: false, reason: 'unsupported' });
     return new Promise(function (resolve) {
-      var ctl = new AbortController(), timer;
-      function finish() { clearTimeout(timer); d.removeEventListener('advertisementreceived', finish); try { ctl.abort(); } catch (e) { } resolve(); }
-      d.addEventListener('advertisementreceived', finish);
-      timer = setTimeout(finish, 6000);
-      d.watchAdvertisements({ signal: ctl.signal }).catch(finish);
+      var ctl = new AbortController(), timer, done = false, t0 = Date.now();
+      function finish(res) {
+        if (done) return; done = true;
+        clearTimeout(timer); d.removeEventListener('advertisementreceived', onAdv); try { ctl.abort(); } catch (e) { } resolve(res);
+      }
+      function onAdv(ev) { finish({ seen: true, rssi: ev && ev.rssi, ms: Date.now() - t0 }); }
+      d.addEventListener('advertisementreceived', onAdv);
+      timer = setTimeout(function () { finish({ seen: false, reason: 'timeout' }); }, 6000);
+      d.watchAdvertisements({ signal: ctl.signal }).catch(function (e) { finish({ seen: false, reason: 'watch failed: ' + ((e && e.message) || e) }); });
     });
   }
 
@@ -376,7 +381,10 @@
     add('Inspecting: ' + (d.name || '?') + ' [' + String(d.id).slice(0, 8) + ']');
     add('Link in use by printing: write=' + !!wch + ' notify=' + !!nch);
     var server;
-    try { await seeAdvert(d); add('Advertisement seen: yes'); } catch (e) { add('Advertisement: ' + e.message); }
+    var adv = await seeAdvert(d);
+    if (adv.seen) add('Advertisement: SEEN after ' + adv.ms + ' ms (RSSI ' + (adv.rssi == null ? '?' : adv.rssi + ' dBm') + ')');
+    else if (adv.reason === 'timeout') add('Advertisement: NOT seen in 6 s (printer off/asleep, out of range, or connected to another device)');
+    else add('Advertisement: could not check (' + adv.reason + ')');
     try { server = await withTimeout(d.gatt.connect(), BLE.idleTimeoutMs, 'gatt.connect'); add('gatt.connect: OK'); }
     catch (e) { add('gatt.connect FAILED: ' + e.message); return L; }
     var services = [];
