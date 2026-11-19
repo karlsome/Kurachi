@@ -4279,6 +4279,17 @@
             }
         }
 
+        // Keep the underline under the active tab when the tab bar's layout changes
+        // (e.g. the Checklist tab appears after reload, a badge shows, the window resizes)
+        try {
+            if (typeof ResizeObserver === 'function') {
+                const tabLayoutObserver = new ResizeObserver(() => updateTabIndicator(currentTabIndex));
+                tabs.forEach(t => tabLayoutObserver.observe(t));
+                if (tabs[0] && tabs[0].parentElement) tabLayoutObserver.observe(tabs[0].parentElement);
+            }
+        } catch (e) { }
+        window.addEventListener('resize', () => updateTabIndicator(currentTabIndex));
+
         // Bind clicks on Tab navigation bar
         tabs.forEach((tab, index) => {
             tab.addEventListener('click', () => {
