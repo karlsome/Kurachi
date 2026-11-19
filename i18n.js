@@ -3,6 +3,7 @@
 
 const translations = {
     ja: {
+        'defect_photo_joint': 'ジョイント',
         'tap_hint_machine': '機械をタップして不良を入力',
         'checklist_machine_next': '{done} 完了 → {next} へ',
         'checklist_machine_now': '点検中',
@@ -750,6 +751,7 @@ const translations = {
     },
 
     en: {
+        'defect_photo_joint': 'Joint',
         'tap_hint_machine': 'Tap a machine to enter its defects',
         'checklist_machine_next': '{done} done → {next}',
         'checklist_machine_now': 'Checking',
@@ -1497,6 +1499,7 @@ const translations = {
     },
 
     pt: {
+        'defect_photo_joint': 'Junta',
         'tap_hint_machine': 'Toque numa máquina para lançar os defeitos',
         'checklist_machine_next': '{done} concluída → {next}',
         'checklist_machine_now': 'Verificando',
@@ -2157,6 +2160,7 @@ const translations = {
     },
 
     vi: {
+        'defect_photo_joint': 'Mối nối',
         'tap_hint_machine': 'Chạm vào máy để nhập lỗi',
         'checklist_machine_next': '{done} xong → {next}',
         'checklist_machine_now': 'Đang kiểm tra',

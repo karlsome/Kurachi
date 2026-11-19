@@ -392,7 +392,9 @@
       '.dyn-defect-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}' +
       '.dyn-defect-head h3{margin:0}' +
       '.dyn-defect-head-actions{display:flex;align-items:center;gap:8px}' +
-      '.dyn-defect-head .tap-photo-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:999px;border:1px solid var(--border-strong);background:var(--bg-card);color:var(--text-muted);cursor:pointer;font-size:.8rem;font-weight:700;margin:0}' +
+      // Joint (defect) photo button: light red so it reads as a defect photo
+      '.dyn-defect-head .tap-photo-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:999px;border:1px solid var(--red);background:var(--red-soft);color:var(--red);cursor:pointer;font-size:.8rem;font-weight:700;margin:0}' +
+      '.dyn-defect-head .tap-photo-btn:active{transform:scale(.96)}' +
       '.dyn-defect-total{padding:6px 12px;border-radius:999px;border:1px solid var(--border-strong);font-size:.85rem;font-weight:800;color:var(--text-muted)}' +
       '.dyn-defect-total.has-count{border-color:var(--red);color:var(--red);background:var(--red-soft)}' +
       '.dyn-defect-grid{display:grid;gap:12px;grid-template-columns:repeat(3,1fr)}' +
