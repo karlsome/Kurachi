@@ -14803,6 +14803,8 @@ if (manualSendModal) {
     if (!st || !stateHasQueue(st)) return;
     const wasPicker = window.checklistMachinePickerOpen;
     window.checklistMachinePickerOpen = false;
+    // Opening a finished machine from its card: show today's record already expanded
+    st._isAccordionOpen = true;
     if (st === window.checklistState && !wasPicker) return;
     window.checklistState = st;
     if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
@@ -15588,6 +15590,12 @@ if (manualSendModal) {
     if (actionsCard) {
       actionsCard.style.display = 'flex';
     }
+    // Super Bypass only while this machine still needs it (not when it is already done / bypassed)
+    if (superBypassBtn) {
+      const machineStatus = typeof window.getChecklistMachineStatus === 'function'
+        ? window.getChecklistMachineStatus(window.checklistState.machine) : 'todo';
+      superBypassBtn.style.display = (machineStatus === 'done' || machineStatus === 'bypassed') ? 'none' : '';
+    }
 
     const localizedTitle = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
     const isCurrentRecorded = !!(window.checklistState.recordIds && (window.checklistState.recordIds[tpl._id] || window.checklistState.recordIds[tpl.name]));
@@ -15775,6 +15783,8 @@ if (manualSendModal) {
         window._accordionClickOutsideAttached = true;
         document.addEventListener('click', function (e) {
           const acc = document.querySelector('.completed-pre-steps-accordion');
+          // The tap on a machine card (which just opened the record) must not collapse it again
+          if (e.target && e.target.closest && e.target.closest('.checklist-machine-card')) return;
           if (acc && acc.open && !acc.contains(e.target)) {
             acc.open = false;
             if (window.checklistState) {
