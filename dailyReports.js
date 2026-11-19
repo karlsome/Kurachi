@@ -145,6 +145,9 @@ function slim(d) {
     Total_NG: d.Total_NG ?? d.SRS_Total_NG,
     Cycle_Time: d.Cycle_Time,
     Comment: d.Comment,
+    approvalStatus: d.approvalStatus,
+    hanchoApprovedBy: d.hanchoApprovedBy,
+    kachoApprovedBy: d.kachoApprovedBy,
   };
 }
 
@@ -535,7 +538,10 @@ async function buildDailyReport(db, date) {
       params: { factory: fac, count: list.length, count30: bypass30.filter((b) => b.factory === fac).length, openTickets: openByFac[fac] || 0, first: { machine: list[0].machine, leader: list[0].leaderName, reason: list[0].reason } },
       trend: null,
       compare: { unit: "", items: [{ label: fac, today: list.length, normal: round(bypass30.filter((b) => b.factory === fac).length / BASELINE_DAYS, 2) }] },
-      rows: list.map((b) => ({ cells: [b.machine, b.workerName || "—", b.leaderName, b.reason] })),
+      rows: list.map((b) => ({
+        cells: [b.machine, b.workerName || "—", b.leaderName, b.reason],
+        bypass: { ...b, _id: String(b._id) },
+      })),
       columns: ["machine", "worker", "leader", "reason"],
     });
   }
@@ -589,7 +595,7 @@ async function buildDailyReport(db, date) {
       params: { count: list.length, workers: list.slice(0, 12) },
       trend: null,
       compare: { unit: type === "peopleNew" ? "" : "d", items: list.slice(0, 8).map((w) => ({ label: w.name, today: type === "peopleNew" ? w.records : w.days, normal: type === "peopleNew" ? 0 : w.days })) },
-      rows: list.map((w) => ({ cells: [w.name, w.factory, w.process, type === "peopleNew" ? w.records : w.lastSeen, w.days] })),
+      rows: list.map((w) => ({ cells: [w.name, w.factory, w.process, type === "peopleNew" ? w.records : w.lastSeen, w.days], worker: { name: w.name, factory: w.factory } })),
       columns: ["worker", "factory", "process", type === "peopleNew" ? "recordsToday" : "lastSeen", "daysIn30"],
     });
   };
@@ -653,7 +659,7 @@ async function buildDailyReport(db, date) {
         params: { waiting, total: today.length, approved: today.length - waiting, approvers: [...approvers].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count) },
         trend: null,
         compare: { unit: "", items: rows.slice(0, 8).map((r) => ({ label: `${r.fac} · ${r.proc}`, today: r.approved, normal: r.approved + r.waiting })) },
-        rows: rows.map((r) => ({ cells: [r.fac, r.proc, r.approved, r.waiting] })),
+        rows: rows.map((r) => ({ cells: [r.fac, r.proc, r.approved, r.waiting], group: { factory: r.fac, proc: r.proc } })),
         columns: ["factory", "process", "approved", "waiting"],
       });
     }
@@ -742,8 +748,61 @@ async function buildDailyReport(db, date) {
 }
 
 // ─── route ───────────────────────────────────────────────────────────────────
+function escapeRe(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Records behind a people / approvals row (opened from the report's detail modals).
+ *   ?date=D&worker=NAME        → that worker's records for D−30..D
+ *   ?date=D&factory=F&proc=P   → that factory + process's records for D
+ */
+async function findReportRecords(db, { date, worker, factory, proc }) {
+  const procs = proc ? PROCS.filter((p) => p.key === proc) : PROCS;
+  const from = worker ? addDays(date, -BASELINE_DAYS) : date;
+  const q = { Date: { $gte: from, $lte: date } };
+  if (worker) q.Worker_Name = { $regex: escapeRe(worker) };
+  if (factory) q["工場"] = factory;
+  const lists = await Promise.all(
+    procs.map(async (p) => {
+      const docs = await db
+        .collection(p.col)
+        .find(q)
+        .project({ 初物チェック画像: 0, 終物チェック画像: 0, 材料ラベル画像: 0, materialLabelImages: 0, defectImages: 0, Break_Time_Data: 0, Maintenance_Data: 0, Lot_Details: 0 })
+        .limit(500)
+        .toArray();
+      return docs.map((d) => ({ ...slim({ ...d, _source: p.col }), _proc: p.key }));
+    })
+  );
+  let records = lists.flat();
+  // "長屋" must not match "長屋浩志" unless that is how the name was typed: prefer exact names.
+  if (worker) {
+    const exact = records.filter((r) => splitWorkers(r.Worker_Name).includes(worker));
+    if (exact.length) records = exact;
+  }
+  records.sort((a, b) => String(b.Date).localeCompare(String(a.Date)) || String(normalizeClock(b.Time_start)).localeCompare(String(normalizeClock(a.Time_start))));
+  return records;
+}
+
 function registerDailyReportRoutes(app, client) {
   const cache = new Map();
+
+  app.get("/api/reports/records", async (req, res) => {
+    try {
+      const date = String(req.query.date || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date required" });
+      const worker = req.query.worker ? String(req.query.worker) : "";
+      const factory = req.query.factory ? String(req.query.factory) : "";
+      const proc = req.query.proc ? String(req.query.proc) : "";
+      if (!worker && !(factory && proc)) return res.status(400).json({ error: "worker, or factory + proc, required" });
+      await client.connect();
+      const records = await findReportRecords(client.db("submittedDB"), { date, worker, factory, proc });
+      res.json({ date, from: worker ? addDays(date, -BASELINE_DAYS) : date, records });
+    } catch (err) {
+      console.error("reports/records failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   app.get("/api/reports/daily", async (req, res) => {
     try {
