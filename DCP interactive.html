@@ -1775,16 +1775,23 @@
             flex-wrap: wrap;
         }
         .checklist-machine-back {
-            border: none;
+            display: inline-flex;
+            align-items: center;
+            margin-top: 12px;
+            border: 2px solid var(--border-strong, #cbd5e1);
             border-radius: 10px;
-            padding: 8px 14px;
-            background: rgba(255, 255, 255, 0.22);
-            color: #ffffff;
-            font-size: 0.9rem;
+            padding: 8px 16px;
+            background: var(--bg-surface, #ffffff);
+            color: var(--text-main, #1f2733);
+            font-size: 0.95rem;
             font-weight: 800;
             cursor: pointer;
             touch-action: manipulation;
+            font-family: inherit;
         }
+        .checklist-machine-back { align-self: flex-start; width: auto; max-width: max-content; }
+        .checklist-machine-back:active { transform: scale(0.96); }
+        .checklist-machine-back + .checklist-machine-banner { margin-top: 10px; }
         .checklist-machine-back:active { transform: scale(0.96); }
         /* Grouped tablet: machine cards (picker) */
         .checklist-machine-picker-hint {

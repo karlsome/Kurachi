@@ -15412,15 +15412,24 @@ if (manualSendModal) {
 
     // Inside one machine: big name banner + back to the machine cards
     if (banner) {
+      // Back button on its own row above the banner, so it reads clearly as "back"
+      let back = document.getElementById('checklistMachineBack');
+      if (!back && banner.parentNode) {
+        back = document.createElement('button');
+        back.type = 'button';
+        back.id = 'checklistMachineBack';
+        back.className = 'checklist-machine-back';
+        back.onclick = () => window.openChecklistMachinePicker();
+        banner.parentNode.insertBefore(back, banner);
+      }
       if (grouped && current && !picker) {
         banner.style.display = 'flex';
         banner.style.setProperty('--m-color', color);
-        banner.innerHTML = `<button type="button" class="checklist-machine-back">${clEsc(clT('checklist_machine_back', '← 機械一覧'))}</button>` +
-          `<span>▶ ${clEsc(clT('checklist_machine_now', '点検中'))}: ${clEsc(current)}<small>${clEsc(machineStatusText(current))}</small></span>`;
-        const back = banner.querySelector('.checklist-machine-back');
-        if (back) back.onclick = () => window.openChecklistMachinePicker();
+        banner.innerHTML = `<span>▶ ${clEsc(clT('checklist_machine_now', '点検中'))}: ${clEsc(current)}<small>${clEsc(machineStatusText(current))}</small></span>`;
+        if (back) { back.textContent = clT('checklist_machine_back', '← 機械一覧'); back.style.display = 'inline-flex'; }
       } else {
         banner.style.display = 'none';
+        if (back) back.style.display = 'none';
       }
     }
     if (cards) {
