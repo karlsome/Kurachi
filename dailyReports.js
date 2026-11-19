@@ -759,6 +759,13 @@ function registerDailyReportRoutes(app, client) {
         cache.set(date, { at: Date.now(), data });
         if (cache.size > 40) cache.delete(cache.keys().next().value);
       }
+      if (req.query.list) {
+        // Top-bar bell popup: one page of compact findings (no trend/rows/records).
+        const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 15));
+        const items = data.findings.slice(offset, offset + limit).map((f) => ({ id: f.id, type: f.type, cat: f.cat, sev: f.sev, facs: f.facs, params: f.params }));
+        return res.json({ date: data.date, total: data.findings.length, offset, items, hasMore: offset + items.length < data.findings.length });
+      }
       if (req.query.summary) {
         // Top-bar bell: same number as the page's "All" tab.
         const bySeverity = {};
