@@ -217,7 +217,8 @@ async function buildDailyReport(db, date) {
     let found = null;
     days.forEach((list, day) => {
       const p = pool(list);
-      if (p.qty >= 50 && p.rate >= threshold && (!found || day > found.date)) found = { date: day, rate: round(p.rate) };
+      // > 100% means NG was typed larger than the quantity: bad data, not a spike.
+      if (p.qty >= 20 && p.rate >= threshold && p.rate <= 100 && (!found || day > found.date)) found = { date: day, rate: round(p.rate) };
     });
     return found;
   };
@@ -705,6 +706,8 @@ async function buildDailyReport(db, date) {
     }
   }
 
+  // A day with no submissions (holiday) has nothing to report.
+  if (!today.length) findings.length = 0;
   findings.sort((a, b) => SEV_RANK[a.sev] - SEV_RANK[b.sev]);
 
   // ── KPI tiles per factory (+ "All") ─────────────────────────────────────
