@@ -12016,7 +12016,75 @@ function showStep3Modal() {
   machineName.textContent = getMachineName();
   modal.style.display = 'block';
   saveCurrentStep(3);
+  refreshStep3ChecklistBlock();
 }
+
+// Grouped tablet: when a machine's checklist is not done / NG, Step 3 says so plainly —
+// the button reads "OZNC26 のみに送信" and a grey row per blocked machine says it will not be sent to.
+const STEP3_SEND_LABEL = 'マシンに送信 / Send to machine';
+let step3BlockSignature = '';
+function refreshStep3ChecklistBlock() {
+  const modal = document.getElementById('step3Modal');
+  const button = document.getElementById('startStep3Send');
+  if (!modal || !button || isOZMANASMachine()) return;
+  const machines = typeof window.getChecklistMachines === 'function' ? window.getChecklistMachines() : [];
+  const blocked = machines.length > 1 && typeof window.getChecklistBlockedMachines === 'function'
+    ? window.getChecklistBlockedMachines() : [];
+  const operable = machines.filter(m => blocked.indexOf(m) < 0);
+  const statusOf = m => (window.getChecklistMachineStatus && window.getChecklistMachineStatus(m) === 'ng') ? 'ng' : 'todo';
+
+  // Notice box above the button
+  let notice = document.getElementById('step3ChecklistNotice');
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.id = 'step3ChecklistNotice';
+    notice.style.cssText = 'width:100%;display:none;flex-direction:column;gap:8px;';
+    button.parentNode.insertBefore(notice, button);
+  }
+  const desiredLabel = blocked.length && operable.length
+    ? `${operable.join(', ')} のみに送信 / Send to ${operable.join(', ')} only`
+    : STEP3_SEND_LABEL;
+  const sig = blocked.map(m => m + ':' + statusOf(m)).join('|') + '#' + desiredLabel;
+
+  if (sig !== step3BlockSignature) {
+    step3BlockSignature = sig;
+    if (blocked.length) {
+      notice.innerHTML = blocked.map(m => {
+        const why = statusOf(m) === 'ng'
+          ? '点検NGのため送信しません / Checklist NG — not sent'
+          : '点検未完了のため送信しません / Checklist not done — not sent';
+        return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;background:#E4E7EC;color:#475467;font-weight:700;font-size:0.9rem;">' +
+          '<span style="font-size:1.05rem;font-weight:800;color:#98A2B3;text-decoration:line-through;">' + m + '</span>' +
+          '<span>⚠ ' + why + '</span></div>';
+      }).join('');
+      notice.style.display = 'flex';
+    } else {
+      notice.innerHTML = '';
+      notice.style.display = 'none';
+    }
+    // Machine line under the button: blocked machines crossed out
+    const nameEl = document.getElementById('step3MachineName');
+    if (nameEl) {
+      nameEl.innerHTML = machines.length > 1 && blocked.length
+        ? machines.map(m => blocked.indexOf(m) >= 0
+          ? '<span style="color:#98A2B3;text-decoration:line-through;">' + m + '</span>' : m).join(', ')
+        : getMachineName();
+    }
+  }
+  // Button label (kept even while a send cooldown is showing its countdown)
+  const resting = button.dataset.sendToMachineOriginalHtml !== undefined ? button.dataset.sendToMachineOriginalHtml : button.textContent;
+  if (resting.trim() !== desiredLabel) setSendButtonRestingMarkup(button, desiredLabel);
+}
+window.refreshStep3ChecklistBlock = refreshStep3ChecklistBlock;
+// Checklist status / language can change while Step 3 is open (bypass, maintenance, language switch)
+setInterval(() => {
+  const modal = document.getElementById('step3Modal');
+  if (modal && modal.style.display === 'block') {
+    const button = document.getElementById('startStep3Send');
+    if (button && button.dataset.sendToMachineOriginalHtml === undefined && button.textContent.indexOf(' / ') < 0) step3BlockSignature = '';
+    refreshStep3ChecklistBlock();
+  }
+}, 1000);
 
 // Function to close all step modals
 function closeAllStepModals() {
