@@ -45260,6 +45260,9 @@ app.post("/api/analytics/stop-calls", async (req, res) => {
   }
 });
 
+// Daily Reports (freyaAdmin2 › Factories › Reports): per-day findings vs 30-day normal
+require("./dailyReports").registerDailyReportRoutes(app, client);
+
 // ---------------------------------------------------------------------------
 // First Factory Daily Schedule API (for firstKojoNippo Tablet & Nippo)
 // ---------------------------------------------------------------------------
