@@ -489,7 +489,7 @@ async function buildDailyReport(db, date) {
         params: { factory: fac, absent: absent.map((l) => ({ name: l.name, base: l.base })), over: over.map((l) => ({ name: l.name, today: l.today, base: l.base })), focus: focus.name, total: tEv.length },
         trend: { unit: "", points: trendDays.map((day) => ({ date: day, value: evs.filter((e) => e.date === day && e.leader === focus.name).length })) },
         compare: { unit: "", items: ranked.slice(0, 8).map((l) => ({ label: l.name, today: l.today, normal: l.base })) },
-        rows: ranked.slice(0, 10).map((l) => ({ cells: [l.name, l.today, l.base, l.avgWait, l.maxWait] })),
+        rows: ranked.slice(0, 10).map((l) => ({ cells: [l.name, l.today, l.base, l.avgWait, l.maxWait], leader: l.name })),
         columns: ["leader", "callsToday", "callsNormal", "avgWait", "maxWait"],
       });
     }
@@ -750,12 +750,23 @@ function registerDailyReportRoutes(app, client) {
       const raw = String(req.query.date || "");
       const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : addDays(jstToday(), -1);
       const hit = cache.get(date);
-      if (!req.query.refresh && hit && Date.now() - hit.at < CACHE_TTL_MS) return res.json(hit.data);
-
-      await client.connect();
-      const data = await buildDailyReport(client.db("submittedDB"), date);
-      cache.set(date, { at: Date.now(), data });
-      if (cache.size > 40) cache.delete(cache.keys().next().value);
+      let data;
+      if (!req.query.refresh && hit && Date.now() - hit.at < CACHE_TTL_MS) {
+        data = hit.data;
+      } else {
+        await client.connect();
+        data = await buildDailyReport(client.db("submittedDB"), date);
+        cache.set(date, { at: Date.now(), data });
+        if (cache.size > 40) cache.delete(cache.keys().next().value);
+      }
+      if (req.query.summary) {
+        // Top-bar bell: same number as the page's "All" tab.
+        const bySeverity = {};
+        data.findings.forEach((f) => {
+          bySeverity[f.sev] = (bySeverity[f.sev] || 0) + 1;
+        });
+        return res.json({ date: data.date, count: data.findings.length, bySeverity });
+      }
       res.json(data);
     } catch (error) {
       console.error("❌ Error in /api/reports/daily:", error);
