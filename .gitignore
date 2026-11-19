@@ -179,3 +179,7 @@ server.log
 # Graphify files
 graphify-out/
 backups/
+
+# Local Claude Code notes (never commit)
+CLAUDE.md
+CLAUDE.local.md
