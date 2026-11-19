@@ -36449,6 +36449,117 @@ app.patch('/api/video-manuals-studio/projects/:id/steps/:stepId', async (req, re
   }
 });
 
+// ==================== Video Manual: auto steps from voice ====================
+// The browser extracts a small mono MP3 from the uploaded video (ffmpeg.wasm) and posts it here.
+// This route only forwards it to Gemini Transcribe and returns words with timestamps: no media
+// processing happens on this server. Step detection, subtitles and titles are built in the browser.
+const VMSS_TRANSCRIBE_MODEL = process.env.VMSS_TRANSCRIBE_MODEL || 'gemini-3.5-transcribe';
+const VMSS_TRANSCRIBE_MAX_BYTES = 40 * 1024 * 1024; // 30 min of 48 kbps mono MP3 is ~11 MB
+const VMSS_TRANSCRIBE_MAX_CONCURRENT = 2;
+const VMSS_TRANSCRIBE_TIMEOUT_MS = 5 * 60 * 1000;
+const VMSS_TRANSCRIBE_MIME_TYPES = new Set(['audio/mp3', 'audio/mpeg', 'audio/m4a', 'audio/aac', 'audio/ogg', 'audio/opus', 'audio/webm', 'audio/wav', 'audio/flac']);
+let vmssTranscribeActive = 0;
+let vmssTranscribeAi = null;
+
+function vmssParseOffset(value) {
+  const n = parseFloat(String(value ?? '').replace(/s$/, ''));
+  return Number.isFinite(n) ? Math.max(0, n) : null;
+}
+
+// POST /projects/:id/transcribe  (raw audio body, Content-Type audio/*) -> { text, words: [{ word, start, end }] }
+app.post('/api/video-manuals-studio/projects/:id/transcribe',
+  express.raw({ type: 'audio/*', limit: VMSS_TRANSCRIBE_MAX_BYTES }),
+  async (req, res) => {
+    let counted = false;
+    try {
+      const ctx = await vmssLoadEditableProject(req, res);
+      if (!ctx) return;
+      if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured' });
+      const audio = req.body;
+      if (!Buffer.isBuffer(audio) || !audio.length) return res.status(400).json({ error: 'Audio body is required' });
+      const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      if (!VMSS_TRANSCRIBE_MIME_TYPES.has(mimeType)) return res.status(415).json({ error: `Unsupported audio type: ${mimeType || 'none'}` });
+      if (vmssTranscribeActive >= VMSS_TRANSCRIBE_MAX_CONCURRENT) {
+        return res.status(429).json({ error: 'Another transcription is running. Please try again in a minute.' });
+      }
+      vmssTranscribeActive += 1;
+      counted = true;
+
+      const { GoogleGenAI } = require('@google/genai');
+      if (!vmssTranscribeAi) vmssTranscribeAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { apiVersion: 'v1beta' } });
+      const started = Date.now();
+      const response = await vmssTranscribeAi.models.generateContent({
+        model: VMSS_TRANSCRIBE_MODEL,
+        contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: audio.toString('base64') } }] }],
+        // VERBATIM (default) mode is required for word timestamps; no languageCodes => auto-detect incl. EN/JP mixed.
+        config: { audioTranscriptionConfig: { wordTimestamp: true }, abortSignal: AbortSignal.timeout(VMSS_TRANSCRIBE_TIMEOUT_MS) },
+      });
+
+      const parts = response?.candidates?.[0]?.content?.parts || [];
+      const texts = [];
+      const words = [];
+      for (const part of parts) {
+        const tr = part?.audioTranscription;
+        if (!tr) continue;
+        if (tr.text) texts.push(String(tr.text));
+        for (const w of tr.words || []) {
+          const start = vmssParseOffset(w.startOffset);
+          const end = vmssParseOffset(w.endOffset);
+          const word = String(w.word ?? '').trim();
+          if (!word || start == null || end == null) continue;
+          words.push({ word, start, end: Math.max(start, end) });
+        }
+      }
+      words.sort((a, b) => a.start - b.start);
+      console.log(`🎙️ video-manuals-studio transcribe ${req.params.id}: ${audio.length} bytes, ${words.length} words, ${Date.now() - started} ms`);
+      res.json({ text: texts.join('\n').trim(), words, model: VMSS_TRANSCRIBE_MODEL });
+    } catch (err) {
+      console.error('❌ video-manuals-studio transcribe error:', err);
+      const kind = ffLabelErrorKind(err);
+      const status = kind === 'quota' ? 429 : kind === 'auth' ? 503 : kind === 'timeout' ? 504 : 502;
+      if (!res.headersSent) res.status(status).json({ error: err.message || 'Transcription failed', kind });
+    } finally {
+      if (counted) vmssTranscribeActive -= 1;
+    }
+  }
+);
+
+// POST /projects/:id/steps/bulk  { steps: [{ title, edit, assetSourceMap, subtitles }] }
+// Appends several ready-made steps with a single save (used by "Create steps from video").
+app.post('/api/video-manuals-studio/projects/:id/steps/bulk', async (req, res) => {
+  try {
+    const ctx = await vmssLoadEditableProject(req, res);
+    if (!ctx) return;
+    const { db, project, username } = ctx;
+    const incoming = Array.isArray(req.body?.steps) ? req.body.steps : [];
+    if (!incoming.length) return res.status(400).json({ error: 'steps is required' });
+    const steps = Array.isArray(project.steps) ? [...project.steps] : [];
+    if (steps.length + incoming.length > VMSS_STEP_MAX) return res.status(400).json({ error: `A project can have at most ${VMSS_STEP_MAX} steps` });
+    const now = new Date();
+    const created = [];
+    for (const item of incoming) {
+      const edit = item?.edit ?? null;
+      if (edit !== null && !Array.isArray(edit?.timeline?.tracks)) return res.status(400).json({ error: 'edit.timeline.tracks is required' });
+      created.push({
+        id: new ObjectId().toString(),
+        title: String(item?.title || '').trim() || `Step ${steps.length + created.length + 1}`,
+        edit,
+        assetSourceMap: item?.assetSourceMap && typeof item.assetSourceMap === 'object' ? item.assetSourceMap : {},
+        subtitles: vmssNormalizeSubtitles(item?.subtitles),
+        durationSeconds: vmssStepEditDuration(edit),
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    const next = [...steps, ...created];
+    const { composed } = await vmssSaveSteps(db, project, next, username);
+    res.json({ steps: created.map(vmssStepSummary), order: next.map((s) => s.id), duration: composed.duration });
+  } catch (err) {
+    console.error('❌ video-manuals-studio step bulk create error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/api/video-manuals-studio/projects/:id/steps/:stepId', async (req, res) => {
   try {
     const ctx = await vmssLoadEditableProject(req, res);
