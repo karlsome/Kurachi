@@ -49,9 +49,10 @@ DB state (2026-11-19): 2 active templates. `NCカッター設備点検` (小瀬)
 
 ## UI
 
-- A machine switcher above the existing checklist selector: big tabs `OZNC04 ✓完了` / `OZNC06 3/12` /
-  `⚠NG`, each machine with its own colour and a name banner on every card.
-- Auto-advance: "OZNC04 完了 → OZNC06へ" after a machine's last checklist.
+- Grouped tablet: the checklist tab opens on one card per machine (name, status, "x/y 項目" + progress bar).
+  Tapping a card opens that machine's checklist, with a "← 機械一覧" back button in its colour banner.
+- After a machine is submitted the page returns to the cards: done/bypassed = green (tap → today's record),
+  NG = red (保全の確認待ち), next machine = 「次はこちら」, no checklist = grey 「点検なし」 (not tappable).
 - The lock message names the machine: "OZNC04 の NG が解決されるまで OZNC04 は使えません".
 - No "copy answers from the other machine".
 
