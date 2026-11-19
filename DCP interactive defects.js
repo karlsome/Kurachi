@@ -8,6 +8,12 @@
 // The legacy 疵引不良 / 加工不良 / その他 fields (counter-18/19/20) stay in the DOM at 0 so the shared
 // backend code keeps working, but are not submitted while this module is active.
 // Layout: ≤12 items → tile grid that sizes itself; >12 → first 11 tiles + "他の不良" tile opening a modal.
+//
+// Grouped tablet (?machine=OZNC04,OZNC06): one red button per machine; it opens the defect list (modal) for
+// that machine. Each count goes against the lot that machine is running now (byMachine: machine → lot → defect id), the same idea as SCNA's defectByMachineLot.
+// A machine with no lot yet, or blocked by its checklist, is greyed out. The run totals (counts, Defects,
+// Total_NG) are still the sum, so everything that reads them keeps working; the split goes into
+// Lot_Details[].Defects / Total_NG at submit and into each machine's NG on the TV.
 (function () {
   'use strict';
 
@@ -51,7 +57,7 @@
     });
   }
 
-  var state = { model: '', items: [], counts: {} };
+  var state = { model: '', items: [], counts: {}, byMachine: {} };
 
   function load() {
     try {
@@ -60,6 +66,7 @@
         state.model = saved.model || '';
         state.items = saved.items;
         state.counts = saved.counts || {};
+        state.byMachine = (saved.byMachine && typeof saved.byMachine === 'object') ? saved.byMachine : {};
       }
     } catch (e) { /* corrupt state: start fresh */ }
   }
@@ -71,6 +78,40 @@
     var sum = 0;
     for (var id in state.counts) sum += parseInt(state.counts[id], 10) || 0;
     return sum;
+  }
+
+  // ── Grouped machines ─────────────────────────────────────────────────────
+  function machines() {
+    try {
+      if (typeof groupedMachines !== 'undefined' && Array.isArray(groupedMachines)) return groupedMachines.filter(Boolean);
+    } catch (e) { /* not ready */ }
+    return [];
+  }
+  function isGrouped() { return machines().length > 1; }
+  // The lot a machine is running now: its newest lot record (open or already closed for shots)
+  function currentLotOf(machine) {
+    try {
+      var recs = (window.getAllLotRecords ? window.getAllLotRecords() : []).filter(function (r) { return r && r.machine === machine && r.lotNumber; });
+      if (!recs.length) return '';
+      recs.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
+      return recs[recs.length - 1].lotNumber;
+    } catch (e) { return ''; }
+  }
+  function machineOk(machine) {
+    try { return typeof window.isMachineChecklistOk !== 'function' || window.isMachineChecklistOk(machine); } catch (e) { return true; }
+  }
+  function machineCount(machine, lot, id) {
+    var m = state.byMachine[machine];
+    return parseInt(m && m[lot] && m[lot][id], 10) || 0;
+  }
+  function machineTotal(machine) {
+    var sum = 0, m = state.byMachine[machine] || {};
+    Object.keys(m).forEach(function (lot) { for (var id in m[lot]) sum += parseInt(m[lot][id], 10) || 0; });
+    return sum;
+  }
+  function machineColor(machine) {
+    try { if (typeof window.getChecklistMachineColor === 'function') return window.getChecklistMachineColor(machine); } catch (e) { }
+    return 'var(--brand)';
   }
 
   // Keep items that already have counts even if the new list dropped them, so no NG is lost mid-run
@@ -122,16 +163,30 @@
     var model = String((record && record.モデル) || '').trim();
     if (model === state.model && state.items.length) return;
     // A different product starts a new count only if nothing was counted yet
-    if (state.model && model !== state.model && total() === 0) state.counts = {};
+    if (state.model && model !== state.model && total() === 0) { state.counts = {}; state.byMachine = {}; }
     state.model = model;
     save();
     fetchList(model);
   }
 
-  function changeCount(id, delta) {
+  // machine: grouped tablet → count against that machine's current lot (and the run total)
+  function changeCount(id, delta, machine) {
     var current = parseInt(state.counts[id], 10) || 0;
-    var next = Math.max(0, current + delta);
-    if (next === current) return;
+    var next;
+    if (machine) {
+      var lot = currentLotOf(machine);
+      if (!lot || !machineOk(machine)) return;
+      var mCur = machineCount(machine, lot, id);
+      var mNext = Math.max(0, mCur + delta);
+      if (mNext === mCur) return;
+      state.byMachine[machine] = state.byMachine[machine] || {};
+      state.byMachine[machine][lot] = state.byMachine[machine][lot] || {};
+      state.byMachine[machine][lot][id] = mNext;
+      next = Math.max(0, current + (mNext - mCur));
+    } else {
+      next = Math.max(0, current + delta);
+      if (next === current) return;
+    }
     state.counts[id] = next;
     save();
     var item = state.items.find(function (it) { return it.id === id; }) || { jp: id };
@@ -142,12 +197,14 @@
     } catch (e) { /* logging is best effort */ }
     if (typeof updateTotal === 'function') updateTotal();
     render();
-    if (delta > 0) bump(id);
+    if (delta > 0) bump(id, machine);
     if (typeof window.assertMachineState === 'function') window.assertMachineState();
   }
 
-  function bump(id) {
-    var tile = document.querySelector('.dyn-defect-tile[data-id="' + CSS.escape(id) + '"]');
+  function bump(id, machine) {
+    var sel = machine ? '.dyn-mdef-btn[data-machine="' + CSS.escape(machine) + '"]'
+      : '.dyn-defect-tile[data-id="' + CSS.escape(id) + '"]';
+    var tile = document.querySelector(sel);
     if (!tile) return;
     tile.classList.remove('bump');
     void tile.offsetWidth;
@@ -157,6 +214,7 @@
 
   function reset() {
     state.counts = {};
+    state.byMachine = {};
     save();
     render();
   }
@@ -165,6 +223,49 @@
   function payload() {
     return state.items
       .map(function (it) { return { id: it.id, jp: it.jp, en: it.en || '', count: parseInt(state.counts[it.id], 10) || 0 }; });
+  }
+
+  // Grouped tablet: per machine (totals across its lots) with the per-lot split. null for a single machine.
+  //   { OZNC04: { Total_NG, lots: { <lot>: { Total_NG, Defects: [{ id, jp, en, count }] } } } }
+  function perMachinePayload() {
+    if (!isGrouped()) return null;
+    var out = {};
+    machines().forEach(function (m) {
+      var lots = {}, mTotal = 0;
+      Object.keys(state.byMachine[m] || {}).forEach(function (lot) {
+        var lotTotal = 0;
+        var defects = state.items.map(function (it) {
+          var c = machineCount(m, lot, it.id);
+          lotTotal += c;
+          return { id: it.id, jp: it.jp, en: it.en || '', count: c };
+        });
+        // ids no longer in the list but counted on this lot
+        Object.keys(state.byMachine[m][lot]).forEach(function (id) {
+          if (state.items.some(function (it) { return it.id === id; })) return;
+          var c = machineCount(m, lot, id);
+          if (c > 0) { lotTotal += c; defects.push({ id: id, jp: id, en: '', count: c }); }
+        });
+        lots[lot] = { Total_NG: lotTotal, Defects: defects };
+        mTotal += lotTotal;
+      });
+      out[m] = { Total_NG: mTotal, lots: lots };
+    });
+    return out;
+  }
+
+  // One line per machine and lot for the submit summary, e.g. "OZNC04 · 888-1: 疵引不良 2". '' when none.
+  function summaryHtml() {
+    var p = perMachinePayload();
+    if (!p) return '';
+    return Object.keys(p).map(function (m) {
+      var lots = Object.keys(p[m].lots).filter(function (l) { return p[m].lots[l].Total_NG > 0; });
+      if (!lots.length) return '';
+      return '<div><b>' + esc(m) + '</b> ' + lots.map(function (l) {
+        var counted = p[m].lots[l].Defects.filter(function (d) { return d.count > 0; })
+          .map(function (d) { return esc((isEnglish() && d.en) ? d.en : d.jp) + ' ' + d.count; }).join(', ');
+        return esc(l) + ': ' + counted;
+      }).join(' · ') + '</div>';
+    }).join('');
   }
 
   // ── DOM ──────────────────────────────────────────────────────────────────
@@ -181,6 +282,8 @@
 
   function render() {
     if (!grid) return;
+    if (isGrouped()) { renderGrouped(); return; }
+    grid.className = 'dyn-defect-grid';
     var items = state.items;
     var overflow = items.length > MAX_TILES;
     var tiles = overflow ? items.slice(0, TILES_WITH_MORE) : items;
@@ -204,10 +307,66 @@
     if (modal && modal.classList.contains('open')) renderModal();
   }
 
+  // Grouped tablet: one header + tile grid per machine; the overflow tile opens the modal for that machine
+  var modalMachine = null;
+  var lastSignature = '';
+  function groupedSignature() {
+    return machines().map(function (m) { return m + ':' + currentLotOf(m) + ':' + (machineOk(m) ? 1 : 0); }).join('|');
+  }
+  // One red button per machine (name, current lot, NG count); tapping it opens the defect list for that
+  // machine's current lot. Keeps the production tab minimal however long the 不良管理 list is.
+  function renderGrouped() {
+    grid.className = 'dyn-defect-machines';
+    // The page's "tap a card +1" hint doesn't fit machine buttons
+    var hint = grid.parentNode && grid.parentNode.querySelector('.tap-hint');
+    if (hint && hint.getAttribute('data-i18n') !== 'tap_hint_machine') {
+      hint.setAttribute('data-i18n', 'tap_hint_machine');
+      hint.textContent = tr('tap_hint_machine', '機械をタップして不良を入力', 'Tap a machine to enter its defects');
+    }
+    lastSignature = groupedSignature();
+
+    grid.innerHTML = machines().map(function (m) {
+      var lot = currentLotOf(m);
+      var ok = machineOk(m);
+      var off = !lot || !ok;
+      var sub = !ok ? tr('defect_machine_blocked', '点検NG — 使用不可', 'Checklist NG — not in use')
+        : (lot ? lot : tr('defect_machine_no_lot', 'ロット未スキャン', 'No lot scanned'));
+      var lotTotal = 0;
+      if (lot) state.items.forEach(function (it) { lotTotal += machineCount(m, lot, it.id); });
+      var mTotal = machineTotal(m);
+      return '<button type="button" class="dyn-mdef-btn' + (off ? ' dyn-mdef-off' : '') + (lotTotal > 0 ? ' has-count' : '') +
+        '" data-machine="' + esc(m) + '"' + (off ? ' aria-disabled="true"' : '') + '>' +
+        '<span class="dyn-mdef-name">' + esc(m) + '</span>' +
+        '<span class="dyn-mdef-count">' + lotTotal + '</span>' +
+        '<span class="dyn-mdef-lot">' + esc(sub) + '</span>' +
+        (mTotal > lotTotal ? '<span class="dyn-mdef-total">Σ ' + mTotal + '</span>' : '') +
+        '</button>';
+    }).join('');
+
+    if (totalEl) {
+      totalEl.textContent = tr('defect_total', '不良合計', 'Total NG') + ' ' + total();
+      totalEl.classList.toggle('has-count', total() > 0);
+    }
+    if (modal && modal.classList.contains('open')) renderModal();
+  }
+
+  function modalCount(id) {
+    if (modalMachine) {
+      var lot = currentLotOf(modalMachine);
+      return lot ? machineCount(modalMachine, lot, id) : 0;
+    }
+    return parseInt(state.counts[id], 10) || 0;
+  }
+
   function renderModal() {
     var list = modal.querySelector('.dyn-defect-modal-list');
+    var head = modal.querySelector('.dyn-defect-modal-head h3');
+    if (head) {
+      head.textContent = tr('defect_counter_title', '加工不良カウンター', 'Defect counter') +
+        (modalMachine ? ' — ' + modalMachine + (currentLotOf(modalMachine) ? ' · ' + currentLotOf(modalMachine) : '') : '');
+    }
     list.innerHTML = state.items.map(function (item) {
-      var count = parseInt(state.counts[item.id], 10) || 0;
+      var count = modalCount(item.id);
       return '<div class="dyn-defect-row' + (count > 0 ? ' has-count' : '') + '">' +
         '<span class="dyn-defect-row-label">' + esc(label(item)) + '</span>' +
         '<button type="button" class="dyn-step" data-minus="' + esc(item.id) + '" aria-label="minus">&minus;</button>' +
@@ -215,10 +374,12 @@
         '<button type="button" class="dyn-step dyn-step-plus" data-plus="' + esc(item.id) + '" aria-label="plus">+</button>' +
         '</div>';
     }).join('');
-    modal.querySelector('.dyn-defect-modal-total').textContent = tr('defect_total', '不良合計', 'Total NG') + ' ' + total();
+    modal.querySelector('.dyn-defect-modal-total').textContent = tr('defect_total', '不良合計', 'Total NG') + ' ' +
+      (modalMachine ? machineTotal(modalMachine) : total());
   }
 
-  function openModal() {
+  function openModal(machine) {
+    modalMachine = machine || null;
     renderModal();
     modal.classList.add('open');
   }
@@ -242,6 +403,15 @@
       '.dyn-defect-grid[data-size="md"] .tap-minus{width:28px;height:28px;font-size:1rem;top:6px;left:6px}' +
       '.dyn-defect-grid .tap-label{word-break:break-word;line-height:1.2}' +
       '.dyn-defect-more{border-style:dashed}' +
+      '.dyn-defect-machines{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}' +
+      '.dyn-mdef-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:150px;padding:16px 12px;border:none;border-radius:18px;background:var(--red,#e5484d);color:#fff;cursor:pointer;touch-action:manipulation;box-shadow:0 6px 18px rgba(229,72,77,.3);font-family:inherit}' +
+      '.dyn-mdef-btn:active{transform:scale(.97)}' +
+      '.dyn-mdef-name{font-size:1.5rem;font-weight:800;letter-spacing:.02em}' +
+      '.dyn-mdef-count{font-size:2.6rem;font-weight:800;line-height:1}' +
+      '.dyn-mdef-lot{font-size:.9rem;font-weight:700;opacity:.92}' +
+      '.dyn-mdef-total{font-size:.8rem;font-weight:800;padding:2px 10px;border-radius:999px;background:rgba(255,255,255,.22)}' +
+      '.dyn-mdef-btn.dyn-mdef-off{background:var(--bg-muted,#e4e7ec);color:var(--text-muted,#667085);box-shadow:none;cursor:not-allowed}' +
+      '.dyn-mdef-btn.bump{transform:scale(1.04)}' +
       '@media (max-width:600px){.dyn-defect-grid,.dyn-defect-grid[data-size="md"]{grid-template-columns:repeat(2,1fr)}}' +
       '.dyn-defect-modal{position:fixed;inset:0;z-index:100100;display:none;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.45)}' +
       '.dyn-defect-modal.open{display:flex}' +
@@ -297,11 +467,25 @@
     legacyGrid.parentNode.insertBefore(grid, legacyGrid.nextSibling);
 
     grid.addEventListener('click', function (e) {
+      // Grouped tablet: a machine button opens the defect list for that machine
+      var mBtn = e.target.closest('.dyn-mdef-btn');
+      if (mBtn) {
+        var m = mBtn.getAttribute('data-machine');
+        if (mBtn.classList.contains('dyn-mdef-off')) {
+          var why = machineOk(m) ? tr('defect_machine_no_lot', 'ロット未スキャン', 'No lot scanned')
+            : (typeof window.getChecklistBlockedMessage === 'function' ? window.getChecklistBlockedMessage(m) : tr('defect_machine_blocked', '点検NG — 使用不可', 'Checklist NG — not in use'));
+          if (typeof window.showAppToast === 'function') window.showAppToast(m + ': ' + why.replace(m + ': ', ''));
+          return;
+        }
+        openModal(m);
+        return;
+      }
+      var machine = null;
       var minus = e.target.closest('[data-minus]');
-      if (minus) { e.stopPropagation(); changeCount(minus.getAttribute('data-minus'), -1); return; }
-      if (e.target.closest('[data-more]')) { openModal(); return; }
+      if (minus) { e.stopPropagation(); changeCount(minus.getAttribute('data-minus'), -1, machine); return; }
+      if (e.target.closest('[data-more]')) { openModal(machine); return; }
       var tile = e.target.closest('.dyn-defect-tile');
-      if (tile) changeCount(tile.getAttribute('data-id'), +1);
+      if (tile) changeCount(tile.getAttribute('data-id'), +1, machine);
     });
 
     modal = document.createElement('div');
@@ -317,9 +501,9 @@
     modal.addEventListener('click', function (e) {
       if (e.target === modal || e.target.closest('.dyn-defect-modal-close')) { closeModal(); return; }
       var plus = e.target.closest('[data-plus]');
-      if (plus) { changeCount(plus.getAttribute('data-plus'), +1); return; }
+      if (plus) { changeCount(plus.getAttribute('data-plus'), +1, modalMachine); return; }
       var minus = e.target.closest('[data-minus]');
-      if (minus) changeCount(minus.getAttribute('data-minus'), -1);
+      if (minus) changeCount(minus.getAttribute('data-minus'), -1, modalMachine);
     });
     return true;
   }
@@ -334,6 +518,8 @@
     active: true,
     total: total,
     payload: payload,
+    perMachinePayload: perMachinePayload,
+    summaryHtml: summaryHtml,
     reset: reset,
     onProduct: onProduct,
     refresh: function () { fetchList(state.model); },
@@ -351,4 +537,9 @@
   // i18n has no change event: re-render labels when the selector changes (after setLanguage runs)
   var langSelector = document.getElementById('languageSelector');
   if (langSelector) langSelector.addEventListener('change', function () { setTimeout(render, 0); });
+  // Grouped tablet: lots are scanned and checklists finished elsewhere on the page; repaint when a machine
+  // gets a new lot or is unblocked / blocked.
+  setInterval(function () {
+    try { if (isGrouped() && groupedSignature() !== lastSignature) render(); } catch (e) { /* ignore */ }
+  }, 1000);
 })();

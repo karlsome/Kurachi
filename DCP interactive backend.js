@@ -3649,12 +3649,25 @@ async function getChecklistPhotoFromIDB(id) {
   }
 }
 
-async function clearChecklistPhotosFromIDB() {
+// With factory + machine: only that machine's photos (keys fp_/tp_<factory>_<machine>_...), so clearing one
+// machine of a grouped tablet keeps the other machine's photos. Without: everything.
+async function clearChecklistPhotosFromIDB(factory, machine) {
   try {
     const db = await openChecklistPhotosDB();
     const tx = db.transaction(STORE_NAME_CHECKLIST, 'readwrite');
     const store = tx.objectStore(STORE_NAME_CHECKLIST);
-    store.clear();
+    if (factory && machine) {
+      const mid = `_${factory}_${machine}_`;
+      store.openCursor().onsuccess = (ev) => {
+        const cur = ev.target.result;
+        if (!cur) return;
+        const k = String(cur.key);
+        if ((k.startsWith('fp_') || k.startsWith('tp_')) && k.slice(2).startsWith(mid)) cur.delete();
+        cur.continue();
+      };
+    } else {
+      store.clear();
+    }
     return new Promise((res, rej) => {
       tx.oncomplete = () => res();
       tx.onerror = () => rej(tx.error);
@@ -3700,18 +3713,19 @@ function getJSTDateString(date = new Date()) {
 }
 window.getJSTDateString = getJSTDateString;
 
-window.saveChecklistDraftToStorage = async function () {
-  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+window.saveChecklistDraftToStorage = async function (stateArg) {
+  const st = stateArg || window.checklistState;
+  if (!st || !st.factory || !st.machine) return;
   const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
-  const factory = window.checklistState.factory;
-  const machine = window.checklistState.machine;
+  const factory = st.factory;
+  const machine = st.machine;
   const key = `${prefix}checklistDraft_${factory}_${machine}`;
 
   // Process field photos: save base64 to IndexedDB, save reference keys in draft
   const fieldPhotoRefs = {};
-  if (window.checklistState.fieldPhotos) {
-    for (const fId of Object.keys(window.checklistState.fieldPhotos)) {
-      const base64 = window.checklistState.fieldPhotos[fId];
+  if (st.fieldPhotos) {
+    for (const fId of Object.keys(st.fieldPhotos)) {
+      const base64 = st.fieldPhotos[fId];
       if (base64) {
         const idbKey = `fp_${factory}_${machine}_${fId}`;
         if (base64.startsWith('data:image')) {
@@ -3724,9 +3738,9 @@ window.saveChecklistDraftToStorage = async function () {
 
   // Process ticket photos: save base64 to IndexedDB, save reference keys in draft
   const ticketsClean = {};
-  if (window.checklistState.tickets) {
-    for (const fId of Object.keys(window.checklistState.tickets)) {
-      const ticket = window.checklistState.tickets[fId];
+  if (st.tickets) {
+    for (const fId of Object.keys(st.tickets)) {
+      const ticket = st.tickets[fId];
       if (ticket) {
         const imgRefs = [];
         if (Array.isArray(ticket.images)) {
@@ -3752,15 +3766,15 @@ window.saveChecklistDraftToStorage = async function () {
   }
 
   const draftData = {
-    answers: window.checklistState.answers || {},
-    answeredAt: window.checklistState.answeredAt || {},
+    answers: st.answers || {},
+    answeredAt: st.answeredAt || {},
     tickets: ticketsClean,
     fieldPhotos: fieldPhotoRefs,
-    recordIds: window.checklistState.recordIds || {},
-    queueIndex: window.checklistState.queueIndex || 0,
-    isPreComplete: window.checklistState.isPreComplete || false,
-    isPostComplete: window.checklistState.isPostComplete || false,
-    isBypassed: window.checklistState.isBypassed || false,
+    recordIds: st.recordIds || {},
+    queueIndex: st.queueIndex || 0,
+    isPreComplete: st.isPreComplete || false,
+    isPostComplete: st.isPostComplete || false,
+    isBypassed: st.isBypassed || false,
     dateStr: getJSTDateString(),
     timestamp: Date.now()
   };
@@ -3771,11 +3785,12 @@ window.saveChecklistDraftToStorage = async function () {
   }
 };
 
-window.loadChecklistDraftFromStorage = async function () {
-  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+window.loadChecklistDraftFromStorage = async function (stateArg) {
+  const st = stateArg || window.checklistState;
+  if (!st || !st.factory || !st.machine) return;
   const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
-  const factory = window.checklistState.factory;
-  const machine = window.checklistState.machine;
+  const factory = st.factory;
+  const machine = st.machine;
   const key = `${prefix}checklistDraft_${factory}_${machine}`;
   const raw = localStorage.getItem(key);
   if (!raw) return;
@@ -3786,37 +3801,37 @@ window.loadChecklistDraftFromStorage = async function () {
     if ((draft.dateStr && draft.dateStr !== todayIso) || (draft.timestamp && (Date.now() - draft.timestamp > 86400000))) {
       console.log(`🧹 Clearing previous day's draft data (draft date: ${draft.dateStr}, today: ${todayIso})`);
       localStorage.removeItem(key);
-      await clearChecklistPhotosFromIDB();
+      await clearChecklistPhotosFromIDB(factory, machine);
       return;
     }
 
-    if (draft.answers) window.checklistState.answers = { ...window.checklistState.answers, ...draft.answers };
-    if (draft.answeredAt) window.checklistState.answeredAt = { ...(window.checklistState.answeredAt || {}), ...draft.answeredAt };
-    if (draft.recordIds) window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...draft.recordIds };
-    if (typeof draft.queueIndex === 'number' && draft.queueIndex < (window.checklistState.queue?.length || 1)) {
-      window.checklistState.queueIndex = draft.queueIndex;
+    if (draft.answers) st.answers = { ...st.answers, ...draft.answers };
+    if (draft.answeredAt) st.answeredAt = { ...(st.answeredAt || {}), ...draft.answeredAt };
+    if (draft.recordIds) st.recordIds = { ...(st.recordIds || {}), ...draft.recordIds };
+    if (typeof draft.queueIndex === 'number' && draft.queueIndex < (st.queue?.length || 1)) {
+      st.queueIndex = draft.queueIndex;
     }
-    if (draft.isPreComplete) window.checklistState.isPreComplete = true;
-    if (typeof draft.isPostComplete === 'boolean') window.checklistState.isPostComplete = draft.isPostComplete;
-    if (draft.isBypassed) window.checklistState.isBypassed = true;
+    if (draft.isPreComplete) st.isPreComplete = true;
+    if (typeof draft.isPostComplete === 'boolean') st.isPostComplete = draft.isPostComplete;
+    if (draft.isBypassed) st.isBypassed = true;
 
     // Hydrate field photos from IndexedDB
     if (draft.fieldPhotos) {
-      window.checklistState.fieldPhotos = window.checklistState.fieldPhotos || {};
+      st.fieldPhotos = st.fieldPhotos || {};
       for (const fId of Object.keys(draft.fieldPhotos)) {
         const val = draft.fieldPhotos[fId];
         if (val && val.startsWith('data:image')) {
-          window.checklistState.fieldPhotos[fId] = val;
+          st.fieldPhotos[fId] = val;
         } else if (val) {
           const base64 = await getChecklistPhotoFromIDB(val);
-          if (base64) window.checklistState.fieldPhotos[fId] = base64;
+          if (base64) st.fieldPhotos[fId] = base64;
         }
       }
     }
 
     // Hydrate ticket photos from IndexedDB
     if (draft.tickets) {
-      window.checklistState.tickets = window.checklistState.tickets || {};
+      st.tickets = st.tickets || {};
       for (const fId of Object.keys(draft.tickets)) {
         const t = draft.tickets[fId];
         if (t) {
@@ -3831,7 +3846,7 @@ window.loadChecklistDraftFromStorage = async function () {
               }
             }
           }
-          window.checklistState.tickets[fId] = {
+          st.tickets[fId] = {
             reason: t.reason || '',
             saved: t.saved || false,
             chatworkMessageId: t.chatworkMessageId || '',
@@ -3841,7 +3856,7 @@ window.loadChecklistDraftFromStorage = async function () {
       }
     }
 
-    if (typeof window.renderCurrentChecklistTemplate === 'function') {
+    if (st === window.checklistState && typeof window.renderCurrentChecklistTemplate === 'function') {
       window.renderCurrentChecklistTemplate();
     }
   } catch (e) {
@@ -3849,12 +3864,13 @@ window.loadChecklistDraftFromStorage = async function () {
   }
 };
 
-window.clearChecklistDraftFromStorage = async function () {
-  if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
+window.clearChecklistDraftFromStorage = async function (stateArg) {
+  const st = stateArg || window.checklistState;
+  if (!st || !st.factory || !st.machine) return;
   const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
-  const key = `${prefix}checklistDraft_${window.checklistState.factory}_${window.checklistState.machine}`;
+  const key = `${prefix}checklistDraft_${st.factory}_${st.machine}`;
   localStorage.removeItem(key);
-  await clearChecklistPhotosFromIDB();
+  await clearChecklistPhotosFromIDB(st.factory, st.machine);
 };
 
 window.renderWorkerListUI = function () {
@@ -7966,6 +7982,23 @@ document.getElementById('submit').addEventListener('click', async (event) => {
       }
     } catch (e) { console.warn('Lot production payload build failed:', e); }
 
+    // Grouped tablet (non-SCNA; SCNA rewrites its own payload): NG per machine per lot, and 設備 = only the
+    // machines that ran (a machine blocked by its checklist all shift has no lot).
+    try {
+      const _perMachine = (dynDefects && typeof dynDefects.perMachinePayload === 'function') ? dynDefects.perMachinePayload() : null;
+      if (_perMachine && Array.isArray(dcpSubmissionData.Lot_Details)) {
+        dcpSubmissionData.Lot_Details.forEach(l => {
+          const d = _perMachine[l.machine] && _perMachine[l.machine].lots[l.lotNumber];
+          l.Defects = d ? d.Defects : [];
+          l.Total_NG = d ? d.Total_NG : 0;
+        });
+      }
+      if (!window.SCNA && typeof groupedMachines !== 'undefined' && groupedMachines.length > 1 && Array.isArray(dcpSubmissionData.Lot_Details)) {
+        const ran = groupedMachines.filter(m => dcpSubmissionData.Lot_Details.some(l => l.machine === m));
+        if (ran.length > 0 && ran.length < groupedMachines.length) dcpSubmissionData.設備 = ran.join(',');
+      }
+    } catch (e) { console.warn('Per-machine defect / 設備 payload failed:', e); }
+
     // Add counter + inspection data if toggle is checked (for kensaDB)
     if (isToggleChecked) {
       const counters = Array.from({ length: 12 }, (_, i) => {
@@ -8607,6 +8640,27 @@ async function sendtoNC(selectedValue) {
       if (Object.keys(filtered).length) {
         machineIPMap = filtered;
         console.log("🎯 Restricting send to assigned machine(s):", Object.keys(filtered).join(', '));
+      }
+    }
+
+    // Never send to a machine whose checklist is not done / NG (grouped tablets check each machine)
+    if (typeof window.isMachineChecklistOk === 'function') {
+      const blockedNow = Object.keys(machineIPMap).filter(m => !window.isMachineChecklistOk(m));
+      if (blockedNow.length) {
+        blockedNow.forEach(m => delete machineIPMap[m]);
+        console.warn('⛔ Not sending to machine(s) blocked by their checklist:', blockedNow.join(', '));
+        if (typeof window.showAppToast === 'function' && typeof window.getChecklistBlockedMessage === 'function') {
+          window.showAppToast('⛔ ' + blockedNow.map(m => window.getChecklistBlockedMessage(m)).join(' / '));
+        }
+      }
+      if (Object.keys(machineIPMap).length === 0) {
+        sendtoNCButtonisPressed = false;
+        try { localStorage.removeItem(key); } catch (e) { }
+        closeSendingToMachineIndicator();
+        hideSendToMachineProgress();
+        sendToMachineCooldownEndTime = 0;
+        updateSendToMachineCooldownUI();
+        return { sent: false, reason: 'checklist', machines: [] };
       }
     }
 
@@ -13153,6 +13207,11 @@ async function sendToIndividualMachine(machine, ncFilename, index) {
   const statusIndicator = document.getElementById(`sendStatus-${index}`);
 
   if (!sendButton) return;
+  // A machine blocked by its checklist (not done / NG) gets nothing
+  if (typeof window.isMachineChecklistOk === 'function' && !window.isMachineChecklistOk(machine)) {
+    if (typeof window.showAppToast === 'function') window.showAppToast('⛔ ' + window.getChecklistBlockedMessage(machine));
+    return;
+  }
 
   // Disable button
   sendButton.disabled = true;
@@ -13811,12 +13870,22 @@ if (manualSendModal) {
   function chooseMachine(machines, onPick, opts) {
     opts = opts || {};
     const done = opts.done || [];
+    // Machines that may not run (checklist not done / NG): shown greyed with the reason, not pickable
+    const blocked = opts.blocked || [];
     closeLP();
     const card = shell();
 
     const btns = (machines || []).map(m => {
-      const isDone = done.indexOf(m) >= 0;
-      const label = opts.formatLabel ? opts.formatLabel(m) : (m + (isDone ? ' ✓ 済' : ''));
+      const isBlocked = blocked.indexOf(m) >= 0;
+      const isDone = done.indexOf(m) >= 0 || isBlocked;
+      const blockedLabel = isBlocked
+        ? ' ⚠ ' + (window.getChecklistMachineStatus && window.getChecklistMachineStatus(m) === 'ng'
+          ? ((typeof _t === 'function' && _t('machine_chooser_blocked') !== 'machine_chooser_blocked') ? _t('machine_chooser_blocked') : '点検NG')
+          : ((typeof _t === 'function' && _t('machine_chooser_todo') !== 'machine_chooser_todo') ? _t('machine_chooser_todo') : '点検未完了'))
+        : '';
+      const label = isBlocked
+        ? (m + blockedLabel)
+        : (opts.formatLabel ? opts.formatLabel(m) : (m + (isDone ? ' ✓ 済' : '')));
       const style = isDone
         ? 'width:100%;background:#E4E7EC;color:#98A2B3;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:not-allowed;'
         : 'width:100%;background:#16223A;color:#fff;border:none;border-radius:10px;padding:16px;font-size:1.1rem;font-weight:800;margin-bottom:10px;cursor:pointer;';
@@ -13874,11 +13943,14 @@ if (manualSendModal) {
       const mName = (typeof getMachineName === 'function' ? getMachineName() : '')
         || (document.getElementById('process') ? document.getElementById('process').value : '')
         || 'UNKNOWN';
-      const targetMachines = (mName && mName.includes(','))
+      const allTargetMachines = (mName && mName.includes(','))
         ? mName.split(',').map(m => m.trim()).filter(Boolean)
         : ((typeof groupedMachines !== 'undefined' && Array.isArray(groupedMachines) && groupedMachines.length > 0)
           ? groupedMachines
           : [mName]);
+      // A machine blocked by its checklist did not run: don't put a lot on it
+      const operableTargets = (typeof window.getOperableMachines === 'function') ? window.getOperableMachines(allTargetMachines) : allTargetMachines;
+      const targetMachines = operableTargets.length ? operableTargets : allTargetMachines;
       const mLots = (typeof materialLots !== 'undefined' && Array.isArray(materialLots) && materialLots.length > 0)
         ? materialLots.map(l => (typeof l === 'object' ? l.lotNumber : l)).filter(Boolean)
         : [];
@@ -14133,10 +14205,13 @@ if (manualSendModal) {
   window.chooseMachine = chooseMachine;
   window.chooseScanMachine = function (onPicked) {
     const done = window.__lotCycleMachinesDone || [];
-    chooseMachine((typeof groupedMachines !== 'undefined') ? groupedMachines : [],
+    const list = (typeof groupedMachines !== 'undefined') ? groupedMachines : [];
+    chooseMachine(list,
       m => { window.__lotScanMachine = m; if (onPicked) onPicked(); },
       {
         done: done,
+        // A machine whose checklist is not done / NG gets no lot
+        blocked: (typeof window.getChecklistBlockedMachines === 'function') ? window.getChecklistBlockedMachines(list) : [],
         allowDone: done.length > 0,
         // Abandoning the machine choice abandons the material scan itself.
         clearsMaterialScanMode: true,
@@ -14177,7 +14252,8 @@ if (manualSendModal) {
     console.log('🟣 [proceedAfterMachineDone] grouped:', grouped);
     if (grouped && window.__materialScanMode !== 'production') {
       const done = window.__lotCycleMachinesDone || [];
-      const remaining = groupedMachines.filter(m => done.indexOf(m) < 0);
+      const remaining = groupedMachines.filter(m => done.indexOf(m) < 0
+        && (typeof window.isMachineChecklistOk !== 'function' || window.isMachineChecklistOk(m)));
       console.log('🟣 [proceedAfterMachineDone] done:', done, 'remaining:', remaining);
       if (remaining.length > 0) {
         window.__lotScanMachine = null; // force a fresh choice
@@ -14549,6 +14625,7 @@ if (manualSendModal) {
       }, {
         title: '機械を選択 / Select machine',
         subtitle: '疵引きが発生した機械 / Machine with defect',
+        blocked: (typeof window.getChecklistBlockedMachines === 'function') ? window.getChecklistBlockedMachines(machines) : [],
         allowCancel: true,
         onCancel: () => {
           isDefectPhotoFlowActive = false;
@@ -14565,24 +14642,103 @@ if (manualSendModal) {
 // CHECKLIST INTEGRATION MODULE (DCP INTERACTIVE)
 // ============================================================================
 (function () {
-  window.checklistState = {
-    factory: '',
-    machine: '',
-    preChecklists: [],
-    postChecklists: [],
-    queue: [],
-    queueIndex: 0,
-    answers: {},
-    answeredAt: {},
-    tickets: {},
-    fieldPhotos: {},
-    isPreComplete: false,
-    isBypassed: false,
-    isPostComplete: false,
-    isPostSkipped: false,
-    activeKeypadField: null,
-    activeTicketField: null,
-    bypassQrScanner: null,
+  // ── Per-machine checklists ───────────────────────────────────────────────────────────
+  // A grouped tablet (?machine=OZNC04,OZNC06) checks each machine on its own: one state object per
+  // machine in checklistMachineStates. window.checklistState always points at the machine on screen,
+  // so the rest of this module (cards, tickets, photos, draft, submit, bypass) works on that machine
+  // and saves under its single name. A single-machine tablet has exactly one state, as before.
+  function newChecklistState(factory, machine) {
+    return {
+      factory: factory || '',
+      machine: machine || '',
+      preChecklists: [],
+      postChecklists: [],
+      queue: [],
+      queueIndex: 0,
+      answers: {},
+      answeredAt: {},
+      tickets: {},
+      fieldPhotos: {},
+      recordIds: {},
+      isPreComplete: false,
+      isBypassed: false,
+      isPostComplete: false,
+      isPostSkipped: false,
+      hasOpenTickets: false,
+      activeKeypadField: null,
+      activeTicketField: null,
+      bypassQrScanner: null,
+    };
+  }
+
+  window.checklistState = newChecklistState('', '');
+  window.checklistMachineStates = {};   // MACHINE (upper case) -> state
+  window.checklistMachineOrder = [];    // machine names in tablet order
+
+  function machineKey(m) { return String(m || '').trim().toUpperCase(); }
+  function stateHasQueue(st) { return !!(st && Array.isArray(st.queue) && st.queue.length > 0); }
+  function tabsUnlockedForReview() {
+    try { return typeof TEMP_TABS_UNLOCKED !== 'undefined' && TEMP_TABS_UNLOCKED === true; } catch (e) { return false; }
+  }
+
+  window.getChecklistStateFor = function (machine) {
+    return window.checklistMachineStates[machineKey(machine)] || null;
+  };
+  window.getChecklistMachines = function () { return window.checklistMachineOrder.slice(); };
+  // Machines that have a checklist today (the ones shown in the machine switcher)
+  window.getChecklistMachinesWithQueue = function () {
+    return window.checklistMachineOrder.filter(m => stateHasQueue(window.getChecklistStateFor(m)));
+  };
+
+  // 'none' (no checklist for this machine) | 'bypassed' | 'ng' (open NG ticket) | 'done' | 'todo'
+  window.getChecklistMachineStatus = function (machine) {
+    const st = window.getChecklistStateFor(machine);
+    if (!stateHasQueue(st)) return 'none';
+    if (st.isBypassed) return 'bypassed';          // a leader bypass also overrides an open NG
+    if (st.hasOpenTickets) return 'ng';
+    return st.isPreComplete ? 'done' : 'todo';
+  };
+
+  // May this machine be operated (send to machine, lot scan, defect counting)? Machines this page doesn't
+  // know (or before the checklists have loaded) are not blocked.
+  window.isMachineChecklistOk = function (machine) {
+    if (tabsUnlockedForReview()) return true;
+    const status = window.getChecklistMachineStatus(machine);
+    return status === 'none' || status === 'bypassed' || status === 'done';
+  };
+
+  window.getOperableMachines = function (list) {
+    const machines = Array.isArray(list) ? list : window.checklistMachineOrder;
+    return machines.filter(m => window.isMachineChecklistOk(m));
+  };
+  window.getChecklistBlockedMachines = function (list) {
+    const machines = Array.isArray(list) ? list : window.checklistMachineOrder;
+    return machines.filter(m => !window.isMachineChecklistOk(m));
+  };
+
+  // Show another machine's checklist
+  window.switchChecklistMachine = function (machine) {
+    const st = window.getChecklistStateFor(machine);
+    if (!st || st === window.checklistState) return;
+    window.checklistState = st;
+    if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
+    if (typeof window.updateTabLock === 'function') window.updateTabLock();
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { }
+  };
+
+  // After a machine finished its checklist: move on to the next machine that still needs one.
+  // Returns true when it switched.
+  window.advanceToNextChecklistMachine = function () {
+    const current = window.checklistState && window.checklistState.machine;
+    const next = window.getChecklistMachinesWithQueue().find(m => machineKey(m) !== machineKey(current) && window.getChecklistMachineStatus(m) === 'todo');
+    if (!next) return false;
+    window.switchChecklistMachine(next);
+    if (typeof showAppToast === 'function') {
+      const msg = (typeof _t === 'function' && _t('checklist_machine_next') !== 'checklist_machine_next')
+        ? _t('checklist_machine_next') : '{done} 完了 → {next} へ';
+      showAppToast('✓ ' + msg.replace('{done}', current || '').replace('{next}', next));
+    }
+    return true;
   };
 
   function getJSTDateString() {
@@ -14614,63 +14770,72 @@ if (manualSendModal) {
 
   window.initChecklistsForMachine = async function (factory, machine) {
     if (!factory || !machine) return;
+    const machines = [];
+    String(machine).split(',').map(m => m.trim()).filter(Boolean).forEach(m => {
+      if (!machines.some(x => machineKey(x) === machineKey(m))) machines.push(m);
+    });
+    if (machines.length === 0) return;
+
+    const scheduleOrder = { daily: 1, weekly: 2, monthly: 3 };
+    const bySchedule = (a, b) => (scheduleOrder[a.schedule] || 99) - (scheduleOrder[b.schedule] || 99);
+
     try {
-      const url = `${serverURL}/api/check-forms/templates?factory=${encodeURIComponent(factory)}&machine=${encodeURIComponent(machine)}`;
-      const res = await fetch(url);
-      if (!res.ok) return;
-      const data = await res.json();
-      const templates = Array.isArray(data.templates) ? data.templates : [];
-
-      const preChecklists = templates.filter(t => (t.timing || 'pre').toLowerCase() === 'pre');
-      const postChecklists = templates.filter(t => (t.timing || 'pre').toLowerCase() === 'post');
-
-      window.checklistState.factory = factory;
-      window.checklistState.machine = machine;
-      window.checklistState.dateStr = getJSTDateString();
-      window.checklistState.preChecklists = preChecklists;
-      window.checklistState.postChecklists = postChecklists;
-
-      const scheduleOrder = { daily: 1, weekly: 2, monthly: 3 };
-      preChecklists.sort((a, b) => (scheduleOrder[a.schedule] || 99) - (scheduleOrder[b.schedule] || 99));
-      postChecklists.sort((a, b) => (scheduleOrder[a.schedule] || 99) - (scheduleOrder[b.schedule] || 99));
-
-      const btn = document.getElementById('checklistTabBtn');
-      const bar = document.querySelector('.tab-bar');
-
-      if (preChecklists.length > 0) {
-        if (btn) btn.style.display = 'inline-flex';
-
-        window.checklistState.queue = preChecklists;
-        window.checklistState.queueIndex = 0;
-        window.checklistState.isPreComplete = false;
-        window.checklistState.isBypassed = false;
-        window.checklistState.answers = {};
-        window.checklistState.answeredAt = {};
-        window.checklistState.tickets = {};
-        window.checklistState.fieldPhotos = {};
-
-        if (typeof window.loadWorkerNamesFromStorage === 'function') window.loadWorkerNamesFromStorage();
-        if (typeof window.loadChecklistDraftFromStorage === 'function') await window.loadChecklistDraftFromStorage();
-
-        if (window.checklistState.isPreComplete || window.checklistState.isBypassed) {
-          if (bar) bar.classList.remove('locked-checklist');
-        } else {
-          if (bar) bar.classList.add('locked-checklist');
+      // One template list per machine (a template linked to the grouped setsubi entry applies to each machine)
+      const lists = await Promise.all(machines.map(async (m) => {
+        try {
+          const url = `${serverURL}/api/check-forms/templates?factory=${encodeURIComponent(factory)}&machine=${encodeURIComponent(m)}`;
+          const res = await fetch(url);
+          if (!res.ok) return [];
+          const data = await res.json();
+          return Array.isArray(data.templates) ? data.templates : [];
+        } catch (e) {
+          console.warn(`Checklist templates for ${m} could not be loaded:`, e);
+          return [];
         }
+      }));
+
+      if (typeof window.loadWorkerNamesFromStorage === 'function') window.loadWorkerNamesFromStorage();
+
+      const states = {};
+      for (let i = 0; i < machines.length; i++) {
+        const m = machines[i];
+        const templates = lists[i];
+        const st = newChecklistState(factory, m);
+        st.dateStr = getJSTDateString();
+        st.preChecklists = templates.filter(t => (t.timing || 'pre').toLowerCase() === 'pre').sort(bySchedule);
+        st.postChecklists = templates.filter(t => (t.timing || 'pre').toLowerCase() === 'post').sort(bySchedule);
+        st.queue = st.preChecklists;
+        if (st.queue.length === 0) st.isPreComplete = true;
+        states[machineKey(m)] = st;
+        if (st.queue.length > 0 && typeof window.loadChecklistDraftFromStorage === 'function') {
+          await window.loadChecklistDraftFromStorage(st);
+        }
+      }
+
+      window.checklistMachineStates = states;
+      window.checklistMachineOrder = machines;
+
+      const withQueue = window.getChecklistMachinesWithQueue();
+      const btn = document.getElementById('checklistTabBtn');
+
+      if (withQueue.length > 0) {
+        // Start on the first machine that still needs its checklist
+        const first = withQueue.find(m => !window.isMachineChecklistOk(m)) || withQueue[0];
+        window.checklistState = window.getChecklistStateFor(first);
+        if (btn) btn.style.display = 'inline-flex';
+        if (typeof window.updateTabLock === 'function') window.updateTabLock();
 
         window.renderCurrentChecklistTemplate();
-        if (!window.checklistState.isPreComplete && !window.checklistState.isBypassed) {
+        if (typeof window.isChecklistLocked === 'function' && window.isChecklistLocked()) {
           window.goToChecklistTab();
         }
 
-        // MongoDB SWR Background Sync: Verify today's MongoDB status and sync to localStorage & UI
-        verifyChecklistStatusWithMongoDB(factory, machine);
+        // MongoDB SWR Background Sync: verify each machine's status for today
+        withQueue.forEach(m => verifyChecklistStatusWithMongoDB(factory, m));
       } else {
-        window.checklistState.queue = [];
-        window.checklistState.queueIndex = 0;
-        window.checklistState.isPreComplete = true;
+        window.checklistState = window.getChecklistStateFor(machines[0]) || newChecklistState(factory, machines[0]);
         if (btn) btn.style.display = 'none';
-        if (bar) bar.classList.remove('locked-checklist');
+        if (typeof window.updateTabLock === 'function') window.updateTabLock();
 
         // Switch to Scan tab (tab index 1)
         if (typeof window.goToTab === 'function') {
@@ -14680,111 +14845,94 @@ if (manualSendModal) {
           }
         }
       }
+      if (typeof window.assertMachineState === 'function') window.assertMachineState();
     } catch (err) {
       console.error('Error initializing checklists:', err);
     }
   };
 
+  // Re-render after one machine's status changed: the cards when it is the machine on screen,
+  // always the machine switcher / tab lock (they show every machine).
+  function refreshAfterStateChange(st, hasStateChanged) {
+    if (hasStateChanged && st === window.checklistState && typeof window.renderCurrentChecklistTemplate === 'function') {
+      window.renderCurrentChecklistTemplate();
+    } else if (typeof window.renderChecklistMachineSwitcher === 'function') {
+      window.renderChecklistMachineSwitcher();
+    }
+    if (typeof window.updateTabLock === 'function') window.updateTabLock();
+    const locked = typeof window.isChecklistLocked === 'function' && window.isChecklistLocked();
+    const currentTab = typeof currentTabIndex !== 'undefined' ? currentTabIndex : 0;
+    if (locked && currentTab === 0 && typeof window.goToChecklistTab === 'function') {
+      window.goToChecklistTab();
+    }
+  }
+
   async function verifyChecklistStatusWithMongoDB(factory, machine) {
     if (!factory || !machine) return;
-    if (!window.checklistState || !window.checklistState.queue || window.checklistState.queue.length === 0) return;
+    const st = window.getChecklistStateFor(machine) || (machineKey(window.checklistState.machine) === machineKey(machine) ? window.checklistState : null);
+    if (!stateHasQueue(st)) return;
     try {
-      const res = await fetch(`${serverURL}/api/check-forms/today-status?factory=${encodeURIComponent(factory)}&machine=${encodeURIComponent(machine)}`);
+      const res = await fetch(`${serverURL}/api/check-forms/today-status?factory=${encodeURIComponent(factory)}&machine=${encodeURIComponent(st.machine)}`);
       if (!res.ok) return;
       const data = await res.json();
 
       if (data) {
-        const isRecentlySubmitted = !!(window.checklistState.submittedAt && (Date.now() - window.checklistState.submittedAt < 60000));
+        const isRecentlySubmitted = !!(st.submittedAt && (Date.now() - st.submittedAt < 60000));
 
         if (!data.hasSubmittedToday) {
           if (isRecentlySubmitted) {
-            console.log('⏳ Submission made within last 60s - skipping MongoDB empty status reset.');
+            console.log(`⏳ ${st.machine}: submission made within last 60s - skipping MongoDB empty status reset.`);
             return;
           }
 
-          // MongoDB has NO record for today (in JST) - clear recordIds and ensure tabs are locked if not completed
-          window.checklistState.recordIds = {};
-          if (window.checklistState.isPreComplete) {
-            console.log('🧹 MongoDB has no record for today - Resetting stale local completed status.');
-            window.checklistState.isPreComplete = false;
-            window.checklistState.isPostComplete = false;
-            window.checklistState.isBypassed = false;
+          // MongoDB has NO record for today (in JST) - clear recordIds and ensure the machine is locked if not completed
+          st.recordIds = {};
+          if (st.isPreComplete || st.hasOpenTickets) {
+            console.log(`🧹 ${st.machine}: MongoDB has no record for today - Resetting stale local completed status.`);
+            st.isPreComplete = false;
+            st.isPostComplete = false;
+            st.isBypassed = false;
+            st.hasOpenTickets = false;
 
             if (typeof window.saveChecklistDraftToStorage === 'function') {
-              await window.saveChecklistDraftToStorage();
+              await window.saveChecklistDraftToStorage(st);
             }
-
-            if (typeof window.updateTabLock === 'function') {
-              window.updateTabLock();
-            } else {
-              const bar = document.querySelector('.tab-bar');
-              if (bar) bar.classList.add('locked-checklist');
-            }
-
-            if (typeof window.renderCurrentChecklistTemplate === 'function') {
-              window.renderCurrentChecklistTemplate();
-            }
-
-            const currentTab = typeof currentTabIndex !== 'undefined' ? currentTabIndex : 0;
-            if (currentTab === 0 && typeof window.goToChecklistTab === 'function') {
-              window.goToChecklistTab();
-            }
+            refreshAfterStateChange(st, true);
           }
           return;
         }
 
-        window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...(data.recordIds || {}) };
+        st.recordIds = { ...(st.recordIds || {}), ...(data.recordIds || {}) };
 
-        const allPreDone = window.checklistState.queue && window.checklistState.queue.length > 0 && window.checklistState.queue.every(t => {
-          return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+        const allPreDone = st.queue.every(t => {
+          return !!(st.recordIds && (st.recordIds[t._id] || st.recordIds[t.name]));
         });
 
-        if (allPreDone) {
+        if (allPreDone && st === window.checklistState) {
           const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
           localStorage.removeItem(pfx + 'activeChecklistStart');
           if (typeof assertMachineState === 'function') assertMachineState();
         }
 
-        const prevPre = window.checklistState.isPreComplete;
-        const prevPost = window.checklistState.isPostComplete;
-        const prevTickets = window.checklistState.hasOpenTickets;
-        const prevRecordIdsCount = Object.keys(window.checklistState.recordIds || {}).length;
+        const prevPre = st.isPreComplete;
+        const prevPost = st.isPostComplete;
+        const prevTickets = !!st.hasOpenTickets;
+        const prevRecordIdsCount = Object.keys(st.recordIds || {}).length;
         const newRecordIdsCount = Object.keys(data.recordIds || {}).length;
 
         const hasStateChanged = prevPre !== allPreDone || prevPost !== !!data.isPostComplete || prevTickets !== !!data.hasOpenTickets || prevRecordIdsCount !== newRecordIdsCount;
 
         if (allPreDone || !isRecentlySubmitted) {
-          window.checklistState.isPreComplete = allPreDone;
+          st.isPreComplete = allPreDone;
         }
-        window.checklistState.isPostComplete = !!data.isPostComplete;
-        window.checklistState.hasOpenTickets = !!data.hasOpenTickets;
+        st.isPostComplete = !!data.isPostComplete;
+        st.hasOpenTickets = !!data.hasOpenTickets;
 
         if (typeof window.saveChecklistDraftToStorage === 'function') {
-          await window.saveChecklistDraftToStorage();
+          await window.saveChecklistDraftToStorage(st);
         }
 
-        if (typeof window.updateTabLock === 'function') {
-          window.updateTabLock();
-        } else {
-          const bar = document.querySelector('.tab-bar');
-          const canProceed = (window.checklistState.isPreComplete || window.checklistState.isBypassed) && !window.checklistState.hasOpenTickets;
-          if (canProceed) {
-            if (bar) bar.classList.remove('locked-checklist');
-          } else {
-            if (bar) bar.classList.add('locked-checklist');
-          }
-        }
-
-        if (hasStateChanged && typeof window.renderCurrentChecklistTemplate === 'function') {
-          window.renderCurrentChecklistTemplate();
-        }
-
-        if (!window.checklistState.isPreComplete && !window.checklistState.isBypassed && window.checklistState.queue && window.checklistState.queue.length > 0) {
-          const currentTab = typeof currentTabIndex !== 'undefined' ? currentTabIndex : 0;
-          if (currentTab === 0 && typeof window.goToChecklistTab === 'function') {
-            window.goToChecklistTab();
-          }
-        }
+        refreshAfterStateChange(st, hasStateChanged);
       }
     } catch (e) {
       console.warn('MongoDB checklist status sync background check failed:', e);
@@ -14792,42 +14940,40 @@ if (manualSendModal) {
   }
   window.verifyChecklistStatusWithMongoDB = verifyChecklistStatusWithMongoDB;
 
-  // Heartbeat check every 30 seconds for overnight day-changes and MongoDB record updates
+  function allChecklistStates() {
+    const list = Object.values(window.checklistMachineStates || {});
+    return list.length ? list : (window.checklistState ? [window.checklistState] : []);
+  }
+
+  // Heartbeat every 5 seconds for overnight day-changes and MongoDB record updates (every machine)
   if (!window._checklistDayCheckInterval) {
     window._checklistDayCheckInterval = setInterval(function () {
-      if (!window.checklistState || !window.checklistState.factory || !window.checklistState.machine) return;
-      if (!window.checklistState.queue || window.checklistState.queue.length === 0) return;
       const todayIso = getJSTDateString();
-      if (window.checklistState.dateStr && window.checklistState.dateStr !== todayIso) {
-        console.log(`🌅 Date changed from ${window.checklistState.dateStr} to ${todayIso} - Auto-resetting checklist for new day.`);
-        window.checklistState.dateStr = todayIso;
-        window.checklistState.isPreComplete = false;
-        window.checklistState.isPostComplete = false;
-        window.checklistState.isBypassed = false;
-        window.checklistState.answers = {};
-        window.checklistState.answeredAt = {};
-        window.checklistState.tickets = {};
-        window.checklistState.fieldPhotos = {};
-        window.checklistState.recordIds = {};
+      allChecklistStates().forEach(st => {
+        if (!st || !st.factory || !st.machine || !stateHasQueue(st)) return;
+        if (st.dateStr && st.dateStr !== todayIso) {
+          console.log(`🌅 ${st.machine}: Date changed from ${st.dateStr} to ${todayIso} - Auto-resetting checklist for new day.`);
+          st.dateStr = todayIso;
+          st.isPreComplete = false;
+          st.isPostComplete = false;
+          st.isBypassed = false;
+          st.hasOpenTickets = false;
+          st.answers = {};
+          st.answeredAt = {};
+          st.tickets = {};
+          st.fieldPhotos = {};
+          st.recordIds = {};
+          st.queueIndex = 0;
 
-        if (typeof window.clearChecklistDraftFromStorage === 'function') {
-          window.clearChecklistDraftFromStorage();
+          if (typeof window.clearChecklistDraftFromStorage === 'function') {
+            window.clearChecklistDraftFromStorage(st);
+          }
+          refreshAfterStateChange(st, true);
         }
 
-        const bar = document.querySelector('.tab-bar');
-        if (bar) bar.classList.add('locked-checklist');
-
-        if (typeof window.renderCurrentChecklistTemplate === 'function') {
-          window.renderCurrentChecklistTemplate();
-        }
-
-        if (typeof window.goToChecklistTab === 'function') {
-          window.goToChecklistTab();
-        }
-      }
-
-      // SWR polling every 5s
-      verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
+        // SWR polling every 5s
+        verifyChecklistStatusWithMongoDB(st.factory, st.machine);
+      });
     }, 5000);
   }
 
@@ -15105,9 +15251,126 @@ if (manualSendModal) {
     renderCurrentChecklistTemplate();
   };
 
+  // ── Machine switcher (grouped tablets) ────────────────────────────────────────────────
+  const CHECKLIST_MACHINE_COLORS = ['#2563eb', '#7c3aed', '#0d9488', '#ea580c'];
+  function clT(key, fallback) {
+    try {
+      if (typeof _t === 'function') {
+        const v = _t(key);
+        if (v && v !== key) return v;
+      }
+    } catch (e) { }
+    return fallback;
+  }
+  function clEsc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  window.getChecklistMachineColor = function (machine) {
+    const idx = window.checklistMachineOrder.findIndex(m => machineKey(m) === machineKey(machine));
+    return CHECKLIST_MACHINE_COLORS[(idx < 0 ? 0 : idx) % CHECKLIST_MACHINE_COLORS.length];
+  };
+  function machineStatusText(machine) {
+    const status = window.getChecklistMachineStatus(machine);
+    if (status === 'done') return clT('checklist_machine_status_done', '✓ 完了');
+    if (status === 'bypassed') return clT('checklist_machine_status_bypassed', '⚡ バイパス');
+    if (status === 'ng') return clT('checklist_machine_status_ng', '⚠ 点検NG');
+    const st = window.getChecklistStateFor(machine);
+    const doneCount = st.queue.filter(t => !!(st.recordIds && (st.recordIds[t._id] || st.recordIds[t.name]))).length;
+    return `${clT('checklist_machine_status_todo', '未完了')} ${doneCount}/${st.queue.length}`;
+  }
+
+  // Lock-screen text for one blocked machine
+  window.getChecklistBlockedMessage = function (machine) {
+    const key = window.getChecklistMachineStatus(machine) === 'ng' ? 'checklist_machine_blocked_ng' : 'checklist_machine_blocked_todo';
+    const fallback = key === 'checklist_machine_blocked_ng' ? '{m}: 点検NG — 保全の確認まで使えません' : '{m}: 点検が終わるまで使えません';
+    return clT(key, fallback).replace('{m}', machine);
+  };
+
+  window.renderChecklistMachineSwitcher = function () {
+    const wrap = document.getElementById('checklistMachineSwitcher');
+    const banner = document.getElementById('checklistMachineBanner');
+    const cards = document.getElementById('checklistCardsContainer');
+    const tabAlert = document.getElementById('checklistTabAlert');
+    const machines = window.getChecklistMachines();
+    const withQueue = window.getChecklistMachinesWithQueue();
+    const current = window.checklistState && window.checklistState.machine;
+    const grouped = machines.length > 1;
+    const color = window.getChecklistMachineColor(current);
+
+    if (wrap) {
+      if (withQueue.length > 1) {
+        wrap.style.display = 'flex';
+        wrap.innerHTML = withQueue.map(m => {
+          const status = window.getChecklistMachineStatus(m);
+          const active = machineKey(m) === machineKey(current);
+          return `<button type="button" class="checklist-machine-tab${active ? ' is-active' : ''}" data-machine="${clEsc(m)}" style="--m-color:${window.getChecklistMachineColor(m)}">` +
+            `<span class="checklist-machine-tab-name">${clEsc(m)}</span>` +
+            `<span class="checklist-machine-tab-status ${status}">${clEsc(machineStatusText(m))}</span></button>`;
+        }).join('');
+        wrap.querySelectorAll('[data-machine]').forEach(b => {
+          b.onclick = () => window.switchChecklistMachine(b.getAttribute('data-machine'));
+        });
+      } else {
+        wrap.style.display = 'none';
+        wrap.innerHTML = '';
+      }
+    }
+
+    // Big name banner + coloured frame so nobody answers OZNC06's checks while standing at OZNC04
+    if (banner) {
+      if (grouped && current) {
+        banner.style.display = 'block';
+        banner.style.setProperty('--m-color', color);
+        banner.innerHTML = `▶ ${clEsc(clT('checklist_machine_now', '点検中'))}: ${clEsc(current)}<small>${clEsc(machineStatusText(current))}</small>`;
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+    if (cards) {
+      cards.classList.toggle('machine-framed', grouped);
+      if (grouped) cards.style.setProperty('--m-color', color);
+    }
+
+    // Red count on the checklist tab when a machine is still blocked but the tabs are open
+    if (tabAlert) {
+      const blocked = window.getChecklistBlockedMachines();
+      const locked = typeof window.isChecklistLocked === 'function' && window.isChecklistLocked();
+      if (grouped && blocked.length > 0 && !locked) {
+        tabAlert.textContent = String(blocked.length);
+        tabAlert.style.display = 'inline-block';
+        tabAlert.title = blocked.map(m => window.getChecklistBlockedMessage(m)).join('\n');
+      } else {
+        tabAlert.style.display = 'none';
+      }
+    }
+  };
+
+  // The machine on screen can't run (NG / not done) but another machine can: let the worker go on with it.
+  function setProceedWithOtherMachinesButton(nextBtn) {
+    const operable = window.getOperableMachines();
+    const label = clT('checklist_proceed_other_machines', '生産へ進む（{list} のみ）').replace('{list}', operable.join(', '));
+    nextBtn.innerHTML = `<span>${clEsc(label)}</span> →`;
+    nextBtn.disabled = false;
+    nextBtn.style.opacity = '1';
+    nextBtn.style.cursor = 'pointer';
+    nextBtn.style.pointerEvents = 'auto';
+    nextBtn.style.filter = 'none';
+    nextBtn.style.background = '#f59e0b';
+    nextBtn.style.boxShadow = '0 4px 14px rgba(245,158,11,0.3)';
+    nextBtn.classList.remove('checklist-next-pulse');
+    nextBtn.onclick = function () {
+      if (typeof window.goToTab === 'function') window.goToTab(1);
+    };
+  }
+  function pageUnlockedByOtherMachine() {
+    return window.getChecklistMachines().length > 1 && typeof window.isChecklistLocked === 'function' && !window.isChecklistLocked();
+  }
+
   window.renderCurrentChecklistTemplate = function () {
     const { queue, queueIndex } = window.checklistState;
     if (!queue || !queue[queueIndex]) return;
+
+    if (typeof window.renderChecklistMachineSwitcher === 'function') window.renderChecklistMachineSwitcher();
 
     const tpl = queue[queueIndex];
     const tierBadge = document.getElementById('checklistTierBadge');
@@ -15172,7 +15435,9 @@ if (manualSendModal) {
           nextBtn.style.boxShadow = isPostDone ? '0 4px 14px rgba(16,185,129,0.3)' : 'none';
           nextBtn.onclick = window.handleChecklistSubmitOrNext;
         } else {
-          if (window.checklistState.hasOpenTickets) {
+          if (window.checklistState.hasOpenTickets && !window.checklistState.isBypassed && pageUnlockedByOtherMachine()) {
+            setProceedWithOtherMachinesButton(nextBtn);
+          } else if (window.checklistState.hasOpenTickets) {
             const label = (typeof _t === 'function') ? _t('please_wait_for_maintenance') : 'Please wait for maintenance team';
             nextBtn.innerHTML = `<span>⚠️ ${label}</span>`;
             nextBtn.disabled = true;
@@ -15217,7 +15482,9 @@ if (manualSendModal) {
             }
           };
         } else {
-          if (window.checklistState.hasOpenTickets) {
+          if (window.checklistState.hasOpenTickets && !window.checklistState.isBypassed && pageUnlockedByOtherMachine()) {
+            setProceedWithOtherMachinesButton(nextBtn);
+          } else if (window.checklistState.hasOpenTickets) {
             const label = (typeof _t === 'function') ? _t('please_wait_for_maintenance') : 'Please wait for maintenance team';
             nextBtn.innerHTML = `<span>⚠️ ${label}</span>`;
             nextBtn.disabled = true;
@@ -16604,7 +16871,8 @@ if (manualSendModal) {
     const activeNames = window.selectedWorkerNames ? window.selectedWorkerNames.map(n => (n || '').trim()).filter(Boolean) : [];
     const namesText = activeNames.length > 0 ? activeNames.join(', ') : 'Operator';
 
-    const confirmMsg = `Reset all checklist progress & photos?\n\n(Worker name "${namesText}" will be preserved)`;
+    const machineNote = window.getChecklistMachines().length > 1 ? ` [${window.checklistState.machine}]` : '';
+    const confirmMsg = `Reset all checklist progress & photos${machineNote}?\n\n(Worker name "${namesText}" will be preserved)`;
     if (!confirm(confirmMsg)) return;
 
     // Harvest Chatwork message IDs to cancel stale notifications
@@ -16653,9 +16921,9 @@ if (manualSendModal) {
       window.assertMachineState();
     }
 
-    // Lock checklist tab bar
-    const bar = document.querySelector('.tab-bar');
-    if (bar) bar.classList.add('locked-checklist');
+    // Re-lock this machine (the whole tab bar only when no other machine can run)
+    window.checklistState.hasOpenTickets = false;
+    if (typeof window.updateTabLock === 'function') window.updateTabLock();
 
     // Re-render template cards
     if (typeof window.renderCurrentChecklistTemplate === 'function') {
@@ -16684,6 +16952,15 @@ if (manualSendModal) {
   }
 
   window.openSuperBypassModal = function () {
+    // A bypass is for ONE machine: the one on screen when the leader opens it
+    window._bypassTargetState = window.checklistState;
+    const machineEl = document.getElementById('checklistBypassMachine');
+    if (machineEl) {
+      const grouped = window.getChecklistMachines().length > 1;
+      machineEl.style.display = grouped ? 'block' : 'none';
+      machineEl.style.color = window.getChecklistMachineColor(window.checklistState.machine);
+      machineEl.textContent = clT('checklist_bypass_for', '対象機械: {m}').replace('{m}', window.checklistState.machine || '');
+    }
     const modal = document.getElementById('checklistBypassModal');
     const status = document.getElementById('checklistBypassStatus');
     if (status) { status.style.color = '#6b7280'; status.textContent = _byp('bypass_scanning_leader', 'Scanning Leader QR...'); }
@@ -16877,13 +17154,14 @@ if (manualSendModal) {
 
   async function submitSuperBypass(leaderUser, reason) {
     const status = document.getElementById('checklistBypassStatus');
+    const st = window._bypassTargetState || window.checklistState;
     try {
       const bypassRes = await fetch(`${serverURL}/api/check-forms/bypass`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          factory: window.checklistState.factory,
-          machine: window.checklistState.machine,
+          factory: st.factory,
+          machine: st.machine,
           workerName: (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
             ? window.selectedWorkerNames.filter(Boolean).join(',')
             : (document.getElementById('Machine Operator')?.value || ''),
@@ -16891,7 +17169,7 @@ if (manualSendModal) {
           leaderUsername: leaderUser.username,
           reason,
           timing: 'pre',
-          templates: window.checklistState.queue.map(t => ({
+          templates: st.queue.map(t => ({
             _id: t._id, name: t.name, description: t.description,
             schedule: t.schedule, startDate: t.startDate
           }))
@@ -16904,23 +17182,23 @@ if (manualSendModal) {
         return;
       }
       const bypassData = await bypassRes.json().catch(() => ({}));
-      window.checklistState.recordIds = { ...(window.checklistState.recordIds || {}), ...(bypassData.recordIds || {}) };
-      window.checklistState.submittedAt = Date.now();
-      window.checklistState.isBypassed = true;
-      window.checklistState.isPreComplete = true;
-      if (typeof window.saveChecklistDraftToStorage === 'function') { try { await window.saveChecklistDraftToStorage(); } catch (e) { } }
+      st.recordIds = { ...(st.recordIds || {}), ...(bypassData.recordIds || {}) };
+      st.submittedAt = Date.now();
+      st.isBypassed = true;
+      st.isPreComplete = true;
+      if (typeof window.saveChecklistDraftToStorage === 'function') { try { await window.saveChecklistDraftToStorage(st); } catch (e) { } }
 
       const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
       localStorage.removeItem(pfx + 'activeChecklistStart');
       if (typeof assertMachineState === 'function') assertMachineState();
 
-      const bar = document.querySelector('.tab-bar');
-      if (bar) bar.classList.remove('locked-checklist');
+      if (typeof window.updateTabLock === 'function') window.updateTabLock();
+      if (typeof window.renderCurrentChecklistTemplate === 'function') window.renderCurrentChecklistTemplate();
 
       closeSuperBypassModal();
 
       if (typeof showAppToast === 'function') {
-        showAppToast(_byp('bypass_done_toast', '⚡ Checklist Super-Bypassed by {name}', leaderUser.firstName || leaderUser.username));
+        showAppToast((window.getChecklistMachines().length > 1 ? st.machine + ': ' : '') + _byp('bypass_done_toast', '⚡ Checklist Super-Bypassed by {name}', leaderUser.firstName || leaderUser.username));
       }
 
       if (typeof window.goToTab === 'function') window.goToTab(0);
@@ -16931,13 +17209,15 @@ if (manualSendModal) {
   }
 
   window.handleChecklistSubmitOrNext = async function () {
-    const { queue, queueIndex } = window.checklistState;
+    // The machine being submitted (the worker may switch machines while the request is running)
+    const st = window.checklistState;
+    const { queue, queueIndex } = st;
     if (!queue || !queue[queueIndex]) return;
 
     const tpl = queue[queueIndex];
     const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
 
-    const isSubmittingPre = !window.checklistState.isPreComplete;
+    const isSubmittingPre = !st.isPreComplete;
     const targetFields = isSubmittingPre
       ? fields.filter(f => f.timing !== 'post')
       : queue.flatMap(t => (t.fields || []).filter(f => f.timing === 'post' && f.type !== 'name'));
@@ -16945,8 +17225,8 @@ if (manualSendModal) {
     let firstIncompleteCard = null;
     targetFields.forEach((field) => {
       if (field.type === 'name') return;
-      const ans = window.checklistState.answers[field.id];
-      const ticket = window.checklistState.tickets[field.id];
+      const ans = st.answers[field.id];
+      const ticket = st.tickets[field.id];
       const card = document.getElementById(`checklist-card-${field.id}`);
 
       const isNg = ans === 'NG';
@@ -16960,7 +17240,7 @@ if (manualSendModal) {
 
       if (field.required && (ans === undefined || ans === '' || ans === null)) isFieldValid = false;
       if ((isNg || isOutOfRange) && (!ticket || !ticket.saved)) isFieldValid = false;
-      if (field.photoRequired && !isNg && !isOutOfRange && !window.checklistState.fieldPhotos[field.id]) isFieldValid = false;
+      if (field.photoRequired && !isNg && !isOutOfRange && !st.fieldPhotos[field.id]) isFieldValid = false;
 
       if (!isFieldValid) {
         if (card) card.classList.add('invalid-highlight');
@@ -16983,11 +17263,11 @@ if (manualSendModal) {
       let workerName = (window.selectedWorkerNames && window.selectedWorkerNames.length > 0)
         ? window.selectedWorkerNames.filter(Boolean).join(',')
         : (document.getElementById('Machine Operator')?.value?.trim() || '');
-      if (!workerName && window.checklistState.answers) {
+      if (!workerName && st.answers) {
         for (const t of queue) {
           const nameField = (t.fields || []).find(f => f.type === 'name');
-          if (nameField && window.checklistState.answers[nameField.id]) {
-            const val = window.checklistState.answers[nameField.id];
+          if (nameField && st.answers[nameField.id]) {
+            const val = st.answers[nameField.id];
             if (Array.isArray(val)) workerName = val.filter(Boolean).join(', ');
             else if (typeof val === 'string' && val.trim()) workerName = val.trim();
             if (workerName) break;
@@ -17004,9 +17284,9 @@ if (manualSendModal) {
         : queue.filter(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post' && f.type !== 'name'));
 
       const payload = {
-        factory: window.checklistState.factory,
-        machine: window.checklistState.machine,
-        equipmentId: window.checklistState.equipmentId || null,
+        factory: st.factory,
+        machine: st.machine,
+        equipmentId: st.equipmentId || null,
         workerName,
         templates: templatesToSubmit.map(t => {
           const tFields = Array.isArray(t.fields) ? t.fields : [];
@@ -17016,11 +17296,11 @@ if (manualSendModal) {
 
           return {
             templateId: t._id,
-            recordId: (window.checklistState.recordIds && window.checklistState.recordIds[t._id]) ? window.checklistState.recordIds[t._id] : null,
+            recordId: (st.recordIds && st.recordIds[t._id]) ? st.recordIds[t._id] : null,
             templateName: t.name,
             schedule: t.schedule,
             workerName,
-            equipmentId: window.checklistState.equipmentId || t.equipmentId || (Array.isArray(t.equipmentIds) ? t.equipmentIds[0] : null),
+            equipmentId: st.equipmentId || t.equipmentId || (Array.isArray(t.equipmentIds) ? t.equipmentIds[0] : null),
             answers: fieldsToSubmit.map(f => {
               const itemLabel = f.label || f.label_ja || f.label_en || (f.type === 'name' ? '作業者名' : '項目');
               return {
@@ -17036,28 +17316,30 @@ if (manualSendModal) {
                 max: f.max !== undefined ? f.max : null,
                 options: f.options || [],
                 unit: f.unit || '',
-                value: window.checklistState.answers[f.id],
-                answeredAt: (window.checklistState.answeredAt && window.checklistState.answeredAt[f.id]) || new Date().toISOString(),
-                fieldPhotoBase64: window.checklistState.fieldPhotos[f.id] || null,
-                fieldPhotoData: window.checklistState.fieldPhotos[f.id] || null,
-                ticket: (window.checklistState.tickets[f.id] && window.checklistState.tickets[f.id].saved && (window.checklistState.tickets[f.id].reason || '').trim()) ? {
-                  reason: (window.checklistState.tickets[f.id].reason || '').trim(),
-                  imagesData: window.checklistState.tickets[f.id].images || [],
-                  chatworkMessageId: window.checklistState.tickets[f.id].chatworkMessageId || null,
-                  ticketType: (window.isDefectTicket(f.id) || window.checklistState.answers[f.id] === 'NG') ? 'defect' : (window.checklistState.tickets[f.id].ticketType || 'optional'),
+                value: (f.type === 'name' && (st.answers[f.id] === undefined || st.answers[f.id] === null || st.answers[f.id] === '' || (Array.isArray(st.answers[f.id]) && st.answers[f.id].length === 0)))
+                  ? workerName.split(',').map(n => n.trim()).filter(Boolean)
+                  : st.answers[f.id],
+                answeredAt: (st.answeredAt && st.answeredAt[f.id]) || new Date().toISOString(),
+                fieldPhotoBase64: st.fieldPhotos[f.id] || null,
+                fieldPhotoData: st.fieldPhotos[f.id] || null,
+                ticket: (st.tickets[f.id] && st.tickets[f.id].saved && (st.tickets[f.id].reason || '').trim()) ? {
+                  reason: (st.tickets[f.id].reason || '').trim(),
+                  imagesData: st.tickets[f.id].images || [],
+                  chatworkMessageId: st.tickets[f.id].chatworkMessageId || null,
+                  ticketType: (window.isDefectTicket(f.id) || st.answers[f.id] === 'NG') ? 'defect' : (st.tickets[f.id].ticketType || 'optional'),
                   saved: true
                 } : null
               };
             }),
-            tickets: Object.keys(window.checklistState.tickets || {})
+            tickets: Object.keys(st.tickets || {})
               .filter(fId => fieldsToSubmit.some(tf => tf.id === fId))
               .filter(fId => {
-                const tkt = window.checklistState.tickets[fId];
+                const tkt = st.tickets[fId];
                 return !!(tkt && tkt.saved && (tkt.reason || '').trim());
               })
               .map(fId => {
-                const tkt = window.checklistState.tickets[fId];
-                const isDefect = window.isDefectTicket(fId) || window.checklistState.answers[fId] === 'NG';
+                const tkt = st.tickets[fId];
+                const isDefect = window.isDefectTicket(fId) || st.answers[fId] === 'NG';
                 return {
                   fieldId: fId,
                   reason: (tkt.reason || '').trim(),
@@ -17087,68 +17369,72 @@ if (manualSendModal) {
       if (res.ok) {
         const resData = await res.json().catch(() => ({}));
         console.log('✅ Checklist submitted successfully! Response:', resData);
-        window.checklistState.recordIds = window.checklistState.recordIds || {};
+        st.recordIds = st.recordIds || {};
         if (resData.recordIds) {
-          window.checklistState.recordIds = { ...window.checklistState.recordIds, ...resData.recordIds };
+          st.recordIds = { ...st.recordIds, ...resData.recordIds };
         } else {
-          window.checklistState.recordIds[tpl._id] = true;
-          window.checklistState.recordIds[tpl.name] = true;
+          st.recordIds[tpl._id] = true;
+          st.recordIds[tpl.name] = true;
         }
 
         const submittedHasDefectTicket = !!(
           resData.hasOpenTickets !== undefined
             ? resData.hasOpenTickets
             : (payload.templates && payload.templates.some(t =>
-              Array.isArray(t.tickets) && t.tickets.some(tk => tk.ticketType === 'defect' || window.isDefectTicket(tk.fieldId) || window.checklistState.answers[tk.fieldId] === 'NG')
+              Array.isArray(t.tickets) && t.tickets.some(tk => tk.ticketType === 'defect' || window.isDefectTicket(tk.fieldId) || st.answers[tk.fieldId] === 'NG')
             ))
         );
 
         if (submittedHasDefectTicket) {
-          window.checklistState.hasOpenTickets = true;
+          st.hasOpenTickets = true;
         } else {
-          window.checklistState.hasOpenTickets = false;
+          st.hasOpenTickets = false;
         }
 
         if (overlay) overlay.style.display = 'none';
 
         // Check if all templates in queue are now submitted
         const allTemplatesFinished = queue.every(t => {
-          return !!(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name]));
+          return !!(st.recordIds && (st.recordIds[t._id] || st.recordIds[t.name]));
         });
 
         if (isSubmittingPre) {
           if (allTemplatesFinished) {
-            window.checklistState.isPreComplete = true;
-            window.checklistState.submittedAt = Date.now();
+            st.isPreComplete = true;
+            st.submittedAt = Date.now();
             const pfx = (typeof breakPrefix !== 'undefined') ? breakPrefix : (window.breakPrefix || 'kurachi_');
             localStorage.removeItem(pfx + 'activeChecklistStart');
             if (typeof assertMachineState === 'function') assertMachineState();
             const hasPostFields = queue.some(t => Array.isArray(t.fields) && t.fields.some(f => f.timing === 'post'));
             if (!hasPostFields) {
-              window.checklistState.isPostComplete = true;
+              st.isPostComplete = true;
             }
             if (typeof window.saveChecklistDraftToStorage === 'function') {
-              await window.saveChecklistDraftToStorage();
+              await window.saveChecklistDraftToStorage(st);
             }
 
             // Sync with backend immediately
             if (typeof verifyChecklistStatusWithMongoDB === 'function') {
-              verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
+              verifyChecklistStatusWithMongoDB(st.factory, st.machine);
             }
 
             // Check if any open defect tickets exist across all completed checks
-            if (window.checklistState.hasOpenTickets && !window.checklistState.isBypassed) {
+            if (st.hasOpenTickets && !st.isBypassed) {
               if (typeof window.updateTabLock === 'function') {
                 window.updateTabLock();
               }
               if (typeof showAppToast === 'function') {
-                showAppToast('⚠️ Checklist submitted. Please wait for maintenance approval.');
+                showAppToast(`⚠️ ${st.machine}: Checklist submitted. Please wait for maintenance approval.`);
               }
               if (typeof renderCurrentChecklistTemplate === 'function') {
                 renderCurrentChecklistTemplate();
               }
+              // The other machine can still be checked / run
+              if (st === window.checklistState && typeof window.advanceToNextChecklistMachine === 'function') {
+                window.advanceToNextChecklistMachine();
+              }
             } else {
-              window.checklistState.hasOpenTickets = false;
+              st.hasOpenTickets = false;
               if (typeof window.updateTabLock === 'function') {
                 window.updateTabLock();
               } else {
@@ -17164,19 +17450,22 @@ if (manualSendModal) {
                 renderCurrentChecklistTemplate();
               }
 
-              if (typeof window.goToTab === 'function') {
+              // Grouped tablet: go on with the next machine's checklist; else to the Scan tab
+              const switched = st === window.checklistState && typeof window.advanceToNextChecklistMachine === 'function'
+                && window.advanceToNextChecklistMachine();
+              if (!switched && typeof window.goToTab === 'function') {
                 window.goToTab(1);
               }
             }
           } else {
             // Some templates still pending: find next pending template and jump to it
             if (typeof window.saveChecklistDraftToStorage === 'function') {
-              await window.saveChecklistDraftToStorage();
+              await window.saveChecklistDraftToStorage(st);
             }
 
-            const nextIncompleteIdx = queue.findIndex(t => !(window.checklistState.recordIds && (window.checklistState.recordIds[t._id] || window.checklistState.recordIds[t.name])));
+            const nextIncompleteIdx = queue.findIndex(t => !(st.recordIds && (st.recordIds[t._id] || st.recordIds[t.name])));
             if (nextIncompleteIdx !== -1) {
-              window.checklistState.queueIndex = nextIncompleteIdx;
+              st.queueIndex = nextIncompleteIdx;
             }
 
             const localizedTplName = (typeof getLocalizedText === 'function') ? getLocalizedText(tpl, 'name') : (tpl.name || 'Checklist');
@@ -17190,13 +17479,13 @@ if (manualSendModal) {
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }
         } else {
-          window.checklistState.isPostComplete = true;
+          st.isPostComplete = true;
           if (typeof window.saveChecklistDraftToStorage === 'function') {
-            await window.saveChecklistDraftToStorage();
+            await window.saveChecklistDraftToStorage(st);
           }
 
           if (typeof verifyChecklistStatusWithMongoDB === 'function') {
-            verifyChecklistStatusWithMongoDB(window.checklistState.factory, window.checklistState.machine);
+            verifyChecklistStatusWithMongoDB(st.factory, st.machine);
           }
 
           if (typeof renderCurrentChecklistTemplate === 'function') {

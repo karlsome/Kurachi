@@ -1,6 +1,6 @@
 # DCP interactive: per-machine checklists + NG for grouped machines
 
-Status: plan locked 2026-11-19, not built yet.
+Status: built 2026-11-19 on feature/dcp-json-send-live-count (headless-tested with a mock API; not yet tested on a tablet / real server).
 
 ## Problem
 
@@ -31,9 +31,10 @@ DB state (2026-11-19): 2 active templates. `NCカッター設備点検` (小瀬)
    (or bypassed), only OZNC06 can be operated: send to machine, lot scan, shots, defect counting, cycle stop / break.
    OZNC04 is shown greyed with 点検NG / 点検未完了. Tabs unlock when at least one machine is OK. When maintenance
    resolves OZNC04's NG it joins after its lot is scanned.
-6. **NG counts per machine and per lot**, as in SCNA (`defectByMachineLot`), on top of the dynamic 不良管理 tiles
-   (DCP interactive defects.js): one tile row per machine, keyed machine → lot → defect id, the blocked or lot-less
-   machine's row greyed. Saved into `Lot_Details[].defects`; run totals (Defects, Total_NG) stay as now. Each
+6. **NG counts per machine and per lot**, as in SCNA (`defectByMachineLot`), on top of the dynamic 不良管理 list
+   (DCP interactive defects.js): one big red button per machine (name, NG on its current lot, lot number); tapping
+   it opens the defect list for that machine's current lot. Keyed machine → lot → defect id. A blocked or lot-less
+   machine's button is greyed and only shows the reason. Saved into `Lot_Details[].defects`; run totals (Defects, Total_NG) stay as now. Each
    machine gets its own NG in `/api/machine-assert` (TV).
 7. **Daily report 設備 = only the machines that ran** (like SCNA's active machines).
 8. today-status no longer adds the pair partner for checklists.
@@ -62,3 +63,17 @@ DB state (2026-11-19): 2 active templates. `NCカッター設備点検` (小瀬)
   `DCP interactive defects.js` (per-machine rows), `DCP interactive SCNA.js` (`activeMachines` ∩ operable).
 - Server (`server.js`): `/api/check-forms/templates` (per-machine resolve incl. grouped entries), `today-status`
   (per machine, no pair expansion, per-machine result), `bypass`, `today-overview` (legacy group records).
+
+## Built (2026-11-19)
+
+- Client state: `checklistMachineStates` (one state per machine), `window.checklistState` = machine on screen.
+  Helpers: `getChecklistMachineStatus`, `isMachineChecklistOk`, `getOperableMachines`, `getChecklistBlockedMachines`,
+  `switchChecklistMachine`, `advanceToNextChecklistMachine`. Draft save/load/clear take a state argument.
+- Gating: lot chooser + defect-photo chooser grey blocked machines; grouped send, per-machine send buttons and
+  `sendToIndividualMachine` skip them; `promptFinalLots` auto-lots only operable machines; SCNA NG rows grey them.
+- Submit: `Lot_Details[].Defects` / `Total_NG` per lot; `設備` = machines that have a lot (non-SCNA).
+- Server: `buildCheckFormExactMachineFilter` for today-status and the submit's existing-record lookup;
+  today-overview matches exact names, shows pair-name records as `legacyGroup` rows outside the KPIs, and drops
+  grouped setsubi rows that have no records that day.
+- Known gap: SCNA template `sample` is linked to `AOL 4,5` but SCNA tablets use `AOL-4`/`AOL-5`, so names don't
+  match (same as before). Not changed: fixing it would start locking AOL tablets with that checklist.

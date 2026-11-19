@@ -3094,9 +3094,14 @@
     } catch (e) { return ''; }
   }
 
+  // A machine blocked by its checklist (not done / NG) can't run, so it gets no NG either
+  function machineOk(m) {
+    try { return typeof window.isMachineChecklistOk !== 'function' || window.isMachineChecklistOk(m); } catch (e) { return true; }
+  }
+
   function defectBump(m, n, delta) {
     var lot = currentLotOf(m);
-    if (!lot) return;
+    if (!lot || !machineOk(m)) return;
     var st = defectState();
     var cur = defectGet(st, m, lot, n);
     if (delta < 0 && cur <= 0) return;
@@ -3115,8 +3120,10 @@
       var m = row.dataset.machine, lot = currentLotOf(m);
       var all = st[m] || {}, total = 0;
       Object.keys(all).forEach(function (l) { DEFECT_TYPES.forEach(function (t) { total += defectGet(st, m, l, t.n); }); });
-      row.classList.toggle('scna-mdef-off', !lot);
-      row.querySelector('.scna-mdef-lot').textContent = lot ? lot : '— ' + defectTr('scna_scan_lot', 'ロット未スキャン / Scan a lot');
+      var ok = machineOk(m);
+      row.classList.toggle('scna-mdef-off', !lot || !ok);
+      row.querySelector('.scna-mdef-lot').textContent = !ok ? defectTr('defect_machine_blocked', '点検NG — 使用不可')
+        : (lot ? lot : '— ' + defectTr('scna_scan_lot', 'ロット未スキャン / Scan a lot'));
       row.querySelector('.scna-mdef-total').textContent = lot && total ? 'Σ ' + total : '';
       row.querySelectorAll('.scna-mdef-card').forEach(function (c) {
         var v = lot ? defectGet(st, m, lot, c.dataset.n) : 0;

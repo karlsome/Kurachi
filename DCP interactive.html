@@ -1722,6 +1722,74 @@
             transition: all 0.2s ease;
         }
 
+        /* Grouped tablet: machine switcher (one checklist per machine) */
+        .checklist-machine-switcher {
+            display: flex;
+            gap: 10px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+        }
+        .checklist-machine-tab {
+            flex: 1 1 140px;
+            min-height: 64px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 4px;
+            padding: 10px 14px;
+            border-radius: 14px;
+            border: 2px solid var(--border-strong, #e2e8f0);
+            border-left: 8px solid var(--m-color, #2563eb);
+            background: var(--bg-surface, #ffffff);
+            color: var(--text-main, #1f2733);
+            cursor: pointer;
+            text-align: left;
+            touch-action: manipulation;
+        }
+        .checklist-machine-tab.is-active {
+            border-color: var(--m-color, #2563eb);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--m-color, #2563eb) 22%, transparent);
+        }
+        .checklist-machine-tab-name { font-size: 1.15rem; font-weight: 800; }
+        .checklist-machine-tab-status {
+            font-size: 0.8rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: var(--bg-muted, #f3f4f6);
+            color: var(--text-muted, #6b7280);
+        }
+        .checklist-machine-tab-status.done, .checklist-machine-tab-status.bypassed { background: #dcfce7; color: #166534; }
+        .checklist-machine-tab-status.ng { background: #fee2e2; color: #b91c1c; }
+        .checklist-machine-banner {
+            margin-top: 12px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: var(--m-color, #2563eb);
+            color: #ffffff;
+            font-size: 1.05rem;
+            font-weight: 800;
+        }
+        .checklist-machine-banner small { font-weight: 700; opacity: 0.9; margin-left: 8px; }
+        #checklistCardsContainer.machine-framed {
+            border-left: 6px solid var(--m-color, #2563eb);
+            padding-left: 12px;
+        }
+        .checklist-tab-alert {
+            display: none;
+            margin-left: 4px;
+            min-width: 18px;
+            padding: 0 5px;
+            border-radius: 999px;
+            background: #dc2626;
+            color: #ffffff;
+            font-size: 0.7rem;
+            font-weight: 800;
+            line-height: 18px;
+            text-align: center;
+        }
+
         /* Interactive Checklist Template Chips / Selector Bar */
         /* Single Active Checklist Selector & Modal Trigger */
         .checklist-selected-container {
@@ -2298,7 +2366,7 @@
                     <path d="M9 11l3 3L22 4" />
                     <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
                 </svg></span>
-            <span class="tab-label" data-i18n="checklist_tab">Checklist</span>
+            <span class="tab-label" data-i18n="checklist_tab">Checklist</span><span class="checklist-tab-alert" id="checklistTabAlert"></span>
         </button>
         <button type="button" class="tab-btn active" data-tab="0">
             <span class="tab-icon"><svg viewBox="0 0 24 24">
@@ -2420,6 +2488,9 @@
                                     <span class="checklist-counter-badge" id="checklistCounterBadge">1 Checklist</span>
                                 </div>
                             </div>
+                            <!-- Grouped tablet: one checklist per machine (filled by renderChecklistMachineSwitcher) -->
+                            <div id="checklistMachineSwitcher" class="checklist-machine-switcher" style="display:none;"></div>
+                            <div id="checklistMachineBanner" class="checklist-machine-banner" style="display:none;"></div>
                             <!-- Single Active Checklist Display & Modal Trigger -->
                             <div id="checklistSelectedContainer" class="checklist-selected-container">
                                 <button type="button" id="checklistSelectorBtn" class="checklist-selector-btn" onclick="openChecklistSwitcherModal()">
@@ -3524,6 +3595,7 @@
         <div class="checklist-modal-card" style="max-width:440px;">
             <h3 style="font-size:1.1rem; font-weight:800; color:#e5484d; text-align:center;" data-i18n="super_bypass">Super Bypass (Skip Checklist)</h3>
             <p style="font-size:0.8rem; color:#6b7280; text-align:center;" data-i18n="scan_leader_qr_to_bypass">Scan Leader QR Code to Bypass</p>
+            <p id="checklistBypassMachine" style="display:none; font-size:1.05rem; font-weight:800; text-align:center; margin:0;"></p>
             <div id="checklistBypassQrReader" style="width:100%; aspect-ratio:1; border-radius:12px; background:#000; overflow:hidden;"></div>
             <p id="checklistBypassStatus" style="font-size:0.85rem; font-weight:700; text-align:center; min-height:20px; color:#6b7280;"></p>
             <input type="text" id="checklistBypassReason" style="display:none; width:100%; padding:10px; border-radius:10px; border:1px solid #e6e8ef; font-size:0.85rem;" data-i18n-placeholder="bypass_reason_placeholder" placeholder="Enter reason for super bypass...">
@@ -3900,14 +3972,32 @@
         // TEMP: add ?unlockTabs=1 to the URL to skip the tab locks (checklist / scan / params)
         // for UI review. Without the flag the locks behave as normal.
         const TEMP_TABS_UNLOCKED = new URLSearchParams(location.search).get('unlockTabs') === '1';
+        window.TEMP_TABS_UNLOCKED = TEMP_TABS_UNLOCKED;
 
+        // Locked = no machine of this tablet may run yet. A grouped tablet (OZNC04,OZNC06) checks each
+        // machine on its own: the tabs open as soon as one machine is done (or bypassed, or has no
+        // checklist); the machines still blocked stay unusable (see isMachineChecklistOk).
         function isChecklistLocked() {
             if (TEMP_TABS_UNLOCKED) return false;
+            const machines = (typeof window.getChecklistMachines === 'function') ? window.getChecklistMachines() : [];
+            if (machines.length > 0) {
+                return !machines.some(m => window.isMachineChecklistOk(m));
+            }
             if (!window.checklistState || !window.checklistState.queue || window.checklistState.queue.length === 0) return false;
             if (window.checklistState.isBypassed) return false;
             if (window.checklistState.hasOpenTickets) return true;
             return !window.checklistState.isPreComplete;
         }
+        // Why the tabs are locked: 'ng' when every blocked machine waits for maintenance, else 'todo'
+        function getChecklistLockReason() {
+            const machines = (typeof window.getChecklistMachines === 'function') ? window.getChecklistMachines() : [];
+            if (machines.length > 0) {
+                const blocked = window.getChecklistBlockedMachines(machines);
+                return blocked.length > 0 && blocked.every(m => window.getChecklistMachineStatus(m) === 'ng') ? 'ng' : 'todo';
+            }
+            return window.checklistState?.hasOpenTickets ? 'ng' : 'todo';
+        }
+        window.getChecklistLockReason = getChecklistLockReason;
         window.isChecklistLocked = isChecklistLocked;
 
         function updateTabLock() {
@@ -3922,6 +4012,8 @@
                 bar.classList.toggle('locked-scan', !checklistLocked && scanIncomplete);
                 bar.classList.toggle('locked-params', !checklistLocked && !scanIncomplete && paramsLocked);
             }
+            // Machine switcher / red count on the checklist tab follow the lock state
+            if (typeof window.renderChecklistMachineSwitcher === 'function') window.renderChecklistMachineSwitcher();
         }
         window.isScanComplete = isScanComplete;
         window.updateTabLock = updateTabLock;
@@ -3945,7 +4037,7 @@
             // Lock: cannot leave Checklist tab (0) if pre-production checklist is incomplete or has open tickets
             if (index !== 0 && isChecklistLocked()) {
                 if (!isRestore && typeof window.showAppToast === 'function') {
-                    const toastMsg = window.checklistState?.hasOpenTickets
+                    const toastMsg = getChecklistLockReason() === 'ng'
                         ? ((typeof _t === 'function' ? _t('please_wait_for_maintenance') : null) || 'Please wait for maintenance team approval')
                         : ((typeof _t === 'function' ? _t('toast_complete_checklist_first') : null) || 'Please complete pre-production checklist first');
                     window.showAppToast(toastMsg);
@@ -4393,6 +4485,7 @@
                 html += row(_t('submit_lbl_defects'), _t('submit_lbl_defect_pull') + ': ' + values.defectsPull + ' | ' + _t('submit_lbl_defect_process') + ': ' + values.defectsProcess + ' | ' + _t('submit_lbl_defect_other') + ': ' + values.defectsOther + ' (NG: ' + values.totalNG + ')', edit(3, 'counter-box-18'));
             }
             if (window.SCNA && SCNA.defectSummaryHtml) { const dh = SCNA.defectSummaryHtml(); if (dh) html += row('', '<div style="font-size:.85rem;">' + dh + '</div>'); }
+            else if (window.DCPDefects && window.DCPDefects.summaryHtml) { const dh = window.DCPDefects.summaryHtml(); if (dh) html += row('', '<div style="font-size:.85rem;">' + dh + '</div>'); }
             html += row(_t('submit_lbl_good_total'), '<span style="font-weight: bold; color: var(--accent-green);">' + values.totalGood + '</span>');
             html += row(_t('submit_lbl_cycle_check'), _t('submit_lbl_first_check') + ': ' + values.photosHatsumono + ' | ' + _t('submit_lbl_last_check') + ': ' + values.photosAtomono);
             html += row(_t('submit_lbl_label_photos'), values.photosMaterial + _t('submit_lbl_photos_unit'));
@@ -7185,32 +7278,38 @@
                                           !!document.querySelector('.tab-bar')?.classList.contains('locked-checklist') ||
                                           (window.checklistState && !window.checklistState.isPreComplete && window.checklistState.queue && window.checklistState.queue.length > 0);
 
-                    // Check specifically if Step 2 (or any inspection step beyond Step 1 worker name) has an answer
-                    const checklistAnswers = (window.checklistState && window.checklistState.answers) ? window.checklistState.answers : {};
-                    const queue = (window.checklistState && window.checklistState.queue) ? window.checklistState.queue : [];
-                    
-                    const nameFieldIds = new Set();
-                    queue.forEach(tpl => {
-                        if (Array.isArray(tpl.fields)) {
-                            tpl.fields.forEach(f => {
-                                if (f.type === 'name') nameFieldIds.add(f.id);
-                            });
+                    // Has a checklist state answered Step 2 or later (excluding the Step 1 worker name)?
+                    function hasStep2AnswerIn(st) {
+                        const checklistAnswers = (st && st.answers) ? st.answers : {};
+                        const queue = (st && st.queue) ? st.queue : [];
+                        const nameFieldIds = new Set();
+                        queue.forEach(tpl => {
+                            if (Array.isArray(tpl.fields)) {
+                                tpl.fields.forEach(f => {
+                                    if (f.type === 'name') nameFieldIds.add(f.id);
+                                });
+                            }
+                        });
+                        for (const [fId, val] of Object.entries(checklistAnswers)) {
+                            if (nameFieldIds.has(fId)) continue;
+                            if (Array.isArray(val)) continue; // Worker name slot array
+                            if (val !== undefined && val !== null && val !== '') return true;
                         }
-                    });
-
-                    // Has answer in Step 2 or later (excluding Step 1 name)
-                    let hasStep2Answer = false;
-                    for (const [fId, val] of Object.entries(checklistAnswers)) {
-                        if (nameFieldIds.has(fId)) continue;
-                        if (Array.isArray(val)) continue; // Worker name slot array
-                        if (val !== undefined && val !== null && val !== '') {
-                            hasStep2Answer = true;
-                            break;
-                        }
+                        return false;
                     }
 
+                    // Grouped tablet: each machine has its own checklist. A machine is "in checklist" on the TV
+                    // while it is blocked (not done / NG) and its checklist has been started.
+                    const hasMachineStates = typeof window.getChecklistStateFor === 'function'
+                        && typeof window.getChecklistMachines === 'function' && window.getChecklistMachines().length > 0;
+                    const isMachineDoingChecklist = (m) => {
+                        if (!hasMachineStates) return isCheckLocked && hasStep2AnswerIn(window.checklistState);
+                        const st = window.getChecklistStateFor(m);
+                        return !!st && !window.isMachineChecklistOk(m) && hasStep2AnswerIn(st);
+                    };
+
                     let checkStart = parseInt(localStorage.getItem(breakPrefix + 'activeChecklistStart') || '0', 10);
-                    const isDoingChecklist = isCheckLocked && hasStep2Answer;
+                    const isDoingChecklist = machines.some(m => isMachineDoingChecklist(m));
 
                     if (isDoingChecklist) {
                         if (!checkStart) {
@@ -7283,15 +7382,18 @@
 
                     const base = (typeof serverURL !== 'undefined' && serverURL) ? serverURL : '';
 
-                    // Grouped SCNA tablets (e.g. AOL-2 + AOL-3) track defects per machine; send each machine its own NG.
+                    // Grouped tablets (SCNA AOL-2 + AOL-3, 小瀬 OZNC04 + OZNC06) track defects per machine;
+                    // send each machine its own NG.
                     let perMachineNG = null;
                     try {
                         if (window.SCNA && typeof window.SCNA.defectPayload === 'function') perMachineNG = window.SCNA.defectPayload();
+                        else if (window.DCPDefects && typeof window.DCPDefects.perMachinePayload === 'function') perMachineNG = window.DCPDefects.perMachinePayload();
                     } catch (e) { perMachineNG = null; }
 
                     machines.forEach(m => {
-                        const mTotalNG = (perMachineNG && perMachineNG[m] && Number.isFinite(Number(perMachineNG[m].Total_NG)))
-                            ? Number(perMachineNG[m].Total_NG)
+                        const pmKey = perMachineNG ? (perMachineNG[m] ? m : Object.keys(perMachineNG).find(k => k.toUpperCase() === m)) : null;
+                        const mTotalNG = (pmKey && perMachineNG[pmKey] && Number.isFinite(Number(perMachineNG[pmKey].Total_NG)))
+                            ? Number(perMachineNG[pmKey].Total_NG)
                             : totalNG;
                         const isLotScanned = (typeof window.isMachineLotScanned === 'function')
                             ? window.isMachineLotScanned(m)
@@ -7314,7 +7416,7 @@
                             mModeStartedAt = stopCallStart || cncCancelStart;
                             mSebanggo = isLotScanned ? 背番号Raw : '';
                             mHinban = isLotScanned ? 品番Raw : '';
-                        } else if (isDoingChecklist) {
+                        } else if (isMachineDoingChecklist(m)) {
                             mMode = 'check';
                             mModeStartedAt = checkStart || Date.now();
                             mSebanggo = isLotScanned ? 背番号Raw : '';
@@ -7984,6 +8086,11 @@
 
                         btn.addEventListener('click', async () => {
                             if (typeof getMachineSendCooldownSeconds === 'function' && getMachineSendCooldownSeconds(name) > 0) {
+                                return;
+                            }
+                            // A machine blocked by its checklist (not done / NG) gets nothing
+                            if (typeof window.isMachineChecklistOk === 'function' && !window.isMachineChecklistOk(name)) {
+                                if (window.showAppToast) window.showAppToast('⛔ ' + window.getChecklistBlockedMessage(name));
                                 return;
                             }
                             const seb = document.getElementById('sub-dropdown')?.value;
