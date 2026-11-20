@@ -1,5 +1,5 @@
 /* ============================================================================
-   DCP interactive NC add-on (non-SCNA AOL cutters: OZNC.. and NCC01)
+   DCP interactive OZE add-on (non-SCNA AOL cutters: OZNC.. and NCC01)
    Loaded by "DCP interactive.html" AFTER "DCP interactive backend.js", only when the page is not
    ?filter=SCNA. It does nothing unless one of the page's machines is an AOL cutter.
    The backend and the SCNA add-on are not changed by this file; printing is not touched.
@@ -14,7 +14,7 @@
       A red card (not for "machine busy") offers the old Xiao send.
    2. Live cycle count (listener cycles_total, live_cycle_count_v1)
         - reading taken when a lot is added to a machine (the backend's lotsByMachine);
-        - the ショット数 keypad of a lot offers (reading at the next lot - reading at this lot) to Confirm;
+        - the ショット数 keypad of a lot is pre-filled with (reading at the next lot - reading at this lot), still editable;
         - Lot_Details in the submit get countSource / shotsAuto / cyclesTotalStart / cyclesTotalEnd;
         - Process Quantity shows the closed lots + the open lot's cycles x pcPerCycle while running.
    ============================================================================ */
@@ -376,20 +376,26 @@
       if (!f) return;
       var offered = end - f.list[f.i].start;
       if (!(offered >= 0)) return;   // counter went backwards: manual
+      // Fill the box with the machine's count; the keypad stays so a legacy / wrong value can be corrected.
+      if (disp.value) return;   // the worker already started typing before the reading arrived: leave it
       var keys = card.querySelector('#lpKeys');
-      var confirmed = false;
-      var bar = document.createElement('div');
-      bar.style.cssText = 'margin-bottom:12px;padding:12px;border:2px solid #29C36A;border-radius:12px;background:#ECFDF3;text-align:center;';
-      bar.innerHTML = '<div style="font-size:.85rem;font-weight:700;color:#027A48;">' + esc(tr('自動カウント', 'Auto count')) + '</div>' +
-        '<div style="font-size:2.4rem;font-weight:900;color:#101828;line-height:1.2;">' + offered + '</div>' +
-        '<button type="button" data-c="1" style="' + btnCss('#29C36A', '#fff') + '">' + esc(tr('確定', 'Confirm')) + '</button>' +
-        '<button type="button" data-m="1" style="' + btnCss('#fff', '#344054', '#D0D5DD') + '">' + esc(tr('手入力', 'Manual entry')) + '</button>';
-      disp.parentNode.insertBefore(bar, disp);
-      disp.style.display = 'none'; keys.style.display = 'none'; okBtn.style.display = 'none';
-      bar.querySelector('[data-c]').onclick = function () { confirmed = true; disp.value = String(offered); okBtn.click(); };
-      bar.querySelector('[data-m]').onclick = function () {
-        bar.remove(); disp.style.display = ''; keys.style.display = ''; okBtn.style.display = ''; disp.value = '';
-      };
+      var note = document.createElement('div');
+      note.style.cssText = 'margin:-4px 0 10px;font-size:.85rem;font-weight:700;color:#027A48;text-align:center;';
+      note.textContent = '✓ ' + tr('機械から自動入力 (' + offered + ') — 必要なら修正', 'Auto-filled from the machine (' + offered + ') — edit if needed');
+      disp.parentNode.insertBefore(note, disp.nextSibling);
+      disp.value = String(offered);
+      disp.style.borderColor = '#29C36A';
+      disp.style.background = '#ECFDF3';
+      var untouched = true;
+      // First digit typed replaces the auto value (instead of appending to it); ⌫ / C edit it as usual
+      keys.addEventListener('click', function (e) {
+        var btn = e.target.closest && e.target.closest('button');
+        if (!btn) return;
+        if (untouched && /^\d$/.test(btn.textContent)) disp.value = '';
+        untouched = false;
+        disp.style.borderColor = '#2E6FF2';
+        disp.style.background = '';
+      }, true);
       okBtn.addEventListener('click', function () {
         try {
           var v = parseInt(disp.value, 10) || 0;
@@ -397,7 +403,7 @@
           if (!ff) return;
           var m = ff.list[ff.i];
           m.end = end; m.offered = offered;
-          m.source = (confirmed && v === offered) ? 'auto-confirmed' : 'manual';
+          m.source = v === offered ? 'auto-confirmed' : 'manual';
           lsSet(MARKS_KEY, all);
         } catch (e) { }
       }, true);
