@@ -128,6 +128,28 @@ function mode(values) {
   return best;
 }
 /** Only the fields the record modal / tables need — keeps the payload small. */
+// A finding's id must stay the same while today's report grows (viewers' "checked" marks and
+// ?open= links use it), so it is built from what the finding is about, never from its position.
+const ID_KEYS = {
+  qualityMultiPlace: ["seban", "process"],
+  qualitySpike: ["factory", "machine", "worker", "process"],
+  qualityOngoing: ["factory"],
+  qualityFactoryRate: ["factory", "process"],
+  qualityGood: ["factory", "process"],
+  speedSlow: ["factory", "process"],
+  leaderLoad: ["factory"],
+  machineCalls: ["factory", "machine"],
+  checklistBypass: ["factory"],
+  dataTotalMismatch: ["factory"],
+  dataTime: ["factory"],
+  flowOutput: ["factory", "process"],
+  flowNotInspected: ["factory"],
+};
+function stableId(f) {
+  const key = [f.type, ...(ID_KEYS[f.type] || []).map((k) => String(f.params?.[k] ?? ""))].join("|");
+  return `${f.type}-${require("crypto").createHash("sha1").update(key).digest("hex").slice(0, 10)}`;
+}
+
 function slim(d) {
   return {
     _id: d._id,
@@ -196,7 +218,9 @@ async function buildDailyReport(db, date) {
   // sent with the report; /api/reports/daily/trend-day reads it when a bar is clicked.
   const add = (f) => {
     const { trendSrc, ...rest } = f;
-    const item = { ...rest, id: `${f.type}-${findings.length}` };
+    let id = stableId(f);
+    for (let n = 2; findings.some((x) => x.id === id); n += 1) id = `${stableId(f)}-${n}`;
+    const item = { ...rest, id };
     if (trendSrc) Object.defineProperty(item, "_trendSrc", { value: trendSrc, enumerable: false });
     findings.push(item);
   };
@@ -1026,20 +1050,23 @@ function registerDailyReportRoutes(app, client) {
       const raw = String(req.query.date || "");
       const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : jstToday();
       const data = await getReport(date, Boolean(req.query.refresh));
+      // ?exclude=id,id… — the viewer's checked findings (bell shows unchecked only).
+      const exclude = new Set(String(req.query.exclude || "").split(",").filter(Boolean));
+      const open = data.findings.filter((f) => !exclude.has(f.id));
       if (req.query.list) {
         // Top-bar bell popup: one page of compact findings (no trend/rows/records).
         const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
         const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 15));
-        const items = data.findings.slice(offset, offset + limit).map((f) => ({ id: f.id, type: f.type, cat: f.cat, sev: f.sev, facs: f.facs, params: f.params }));
-        return res.json({ date: data.date, total: data.findings.length, offset, items, hasMore: offset + items.length < data.findings.length });
+        const items = open.slice(offset, offset + limit).map((f) => ({ id: f.id, type: f.type, cat: f.cat, sev: f.sev, facs: f.facs, params: f.params }));
+        return res.json({ date: data.date, total: open.length, offset, items, hasMore: offset + items.length < open.length });
       }
       if (req.query.summary) {
         // Top-bar bell: same number as the page's "All" tab.
         const bySeverity = {};
-        data.findings.forEach((f) => {
+        open.forEach((f) => {
           bySeverity[f.sev] = (bySeverity[f.sev] || 0) + 1;
         });
-        return res.json({ date: data.date, count: data.findings.length, bySeverity });
+        return res.json({ date: data.date, count: open.length, bySeverity });
       }
       res.json(data);
     } catch (error) {
