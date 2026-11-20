@@ -1454,27 +1454,28 @@
             animation: guideRollPulse 1.3s ease-in-out infinite;
         }
 
-        /* Setup check sheet (after "Values changed"): release paper up/down + blade, portrait tablet first */
-        .setup-check-overlay {
-            position: fixed; inset: 0; z-index: 100000; display: none; /* above the Call menu, below CNC stop overlays */
-            align-items: flex-end; justify-content: center;
-            background: rgba(15, 23, 42, 0.55); padding: 16px;
+        /* Params tab, page 2 (after "Values changed"): release paper up/down + blade, portrait tablet first */
+        .params-pager { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        .params-pager-step {
+            flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
+            padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);
+            background: var(--bg-surface); color: var(--text-soft); font-weight: 700; font-size: 0.85rem;
         }
-        .setup-check-overlay.open { display: flex; }
-        @media (min-height: 700px) { .setup-check-overlay { align-items: center; } }
-        .setup-check-sheet {
-            width: 100%; max-width: 560px; max-height: calc(100vh - 32px);
-            display: flex; flex-direction: column; overflow: hidden;
-            background: var(--bg-surface); border-radius: 16px; box-shadow: var(--shadow-pop);
+        .params-pager-step span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .params-pager-num {
+            display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+            width: 22px; height: 22px; border-radius: 50%; background: var(--border); color: var(--text-muted); font-size: 0.8rem;
         }
-        .setup-check-head { padding: 20px 20px 12px; border-bottom: 1px solid var(--border); }
-        .setup-check-head h3 { margin: 0; font-size: 1.2rem; font-weight: 800; color: var(--text-main); }
-        .setup-check-head p { margin: 4px 0 0; font-size: 0.9rem; color: var(--text-muted); }
-        .setup-check-body { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+        .params-pager-step.active { border-color: var(--brand); background: var(--brand-soft); color: var(--text-main); }
+        .params-pager-step.active .params-pager-num { background: var(--brand); color: #fff; }
+        .params-pager-step.done .params-pager-num { background: var(--brand); color: #fff; }
+        .params-pager-line { width: 14px; height: 2px; background: var(--border); flex-shrink: 0; }
+
+        .setup-check-list { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
         .setup-check-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-app); }
         .setup-check-card-head {
             display: flex; align-items: center; justify-content: space-between; gap: 12px;
-            padding: 12px 14px; background: var(--bg-surface);
+            padding: 12px 14px; background: var(--bg-surface); border-bottom: 1px solid var(--border);
         }
         .setup-check-label { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1rem; color: var(--text-main); }
         .setup-check-step {
@@ -1482,22 +1483,24 @@
             width: 26px; height: 26px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 0.85rem;
         }
         .setup-check-value {
-            font-size: 1.25rem; font-weight: 900; padding: 6px 14px; border-radius: 10px;
+            font-size: 1.3rem; font-weight: 900; padding: 6px 14px; border-radius: 10px;
             background: var(--blue-soft); color: var(--blue); text-align: right; word-break: break-word;
         }
         .setup-check-value.up { background: var(--amber-soft); color: #9A5B00; }
         .setup-check-value.down { background: #E5E7EB; color: #111827; }
         .setup-check-value.missing { background: var(--red-soft); color: var(--red); font-size: 1rem; }
         .setup-check-img {
-            display: block; width: 100%; aspect-ratio: 4 / 3; max-height: 34vh;
-            object-fit: contain; background: #0F172A;
+            display: block; width: 100%; aspect-ratio: 4 / 3; max-height: 30vh;
+            object-fit: contain; background: #F1F3F7;
         }
         .setup-check-noimg {
             display: flex; align-items: center; justify-content: center; min-height: 96px;
             color: var(--text-soft); font-weight: 700; font-size: 0.9rem;
         }
-        .setup-check-foot { padding: 12px 20px 20px; border-top: 1px solid var(--border); }
-        .setup-check-foot .btn { width: 100%; min-height: 56px; font-size: 1.1rem; font-weight: 800; }
+        .setup-check-actions { display: flex; gap: 10px; margin-top: 20px; }
+        .setup-check-actions .btn { min-height: 52px; font-size: 1.05rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+        .setup-check-actions .btn-back { flex: 0 0 34%; }
+        .setup-check-actions .btn-primary { flex: 1; }
 
         .param-steps {
             list-style: none;
@@ -2860,7 +2863,13 @@
 
                 <!-- TAB 2: PARAMS -->
                 <div class="tab-panel" id="panel-1">
-                    <div class="glass-card">
+                    <!-- Two pages: 1 = rolldist guide, 2 = release paper + blade (after "Values changed") -->
+                    <div class="params-pager" id="paramsPager" style="display:none;">
+                        <div class="params-pager-step active" id="paramsPagerStep1"><span class="params-pager-num">1</span><span data-i18n="params_page_values">数値設定</span></div>
+                        <div class="params-pager-line"></div>
+                        <div class="params-pager-step" id="paramsPagerStep2"><span class="params-pager-num">2</span><span data-i18n="params_page_setup">離型紙・刃物</span></div>
+                    </div>
+                    <div class="glass-card" id="paramsPage1">
                         <h3 data-i18n="cutter_guide_title">カッター設定ガイド</h3>
                         <p class="gallery-sub" data-i18n="cutter_guide_desc">AOLカッターのパラメーター設定手順</p>
                         <div class="param-guide">
@@ -2960,6 +2969,32 @@
                             style="margin-top: 20px;" data-i18n="values_changed_btn">
                             変更完了
                         </button>
+                    </div>
+
+                    <div class="glass-card" id="paramsPage2" style="display:none;">
+                        <h3 data-i18n="setup_check_title">生産前の確認</h3>
+                        <p class="gallery-sub" data-i18n="setup_check_sub">離型紙の向きと刃物を確認してください</p>
+                        <div class="setup-check-list">
+                            <div class="setup-check-card">
+                                <div class="setup-check-card-head">
+                                    <span class="setup-check-label"><span class="setup-check-step">1</span><span data-i18n="setup_release_paper">離型紙</span></span>
+                                    <span class="setup-check-value" id="setupCheckPaperValue">—</span>
+                                </div>
+                                <img class="setup-check-img" id="setupCheckPaperImg" alt="" style="display:none;">
+                            </div>
+                            <div class="setup-check-card">
+                                <div class="setup-check-card-head">
+                                    <span class="setup-check-label"><span class="setup-check-step">2</span><span data-i18n="setup_blade">刃物</span></span>
+                                    <span class="setup-check-value" id="setupCheckBladeValue">—</span>
+                                </div>
+                                <img class="setup-check-img" id="setupCheckBladeImg" alt="" style="display:none;">
+                                <div class="setup-check-noimg" id="setupCheckBladeNoImg" style="display:none;"></div>
+                            </div>
+                        </div>
+                        <div class="setup-check-actions">
+                            <button type="button" id="setupCheckBackBtn" class="btn btn-secondary btn-back" data-i18n="setup_back_btn">戻る</button>
+                            <button type="button" id="setupCheckConfirmBtn" class="btn btn-primary" data-i18n="setup_confirm_btn">確認しました</button>
+                        </div>
                     </div>
                 </div>
 
@@ -6144,36 +6179,6 @@
     </div>
 
     <!-- Core application dependencies -->
-    <!-- Setup check sheet: shown after "Values changed" (release paper up/down + blade) -->
-    <div id="setupCheckOverlay" class="setup-check-overlay" role="dialog" aria-modal="true" aria-labelledby="setupCheckTitle">
-        <div class="setup-check-sheet">
-            <div class="setup-check-head">
-                <h3 id="setupCheckTitle" data-i18n="setup_check_title">生産前の確認</h3>
-                <p data-i18n="setup_check_sub">離型紙の向きと刃物を確認してください</p>
-            </div>
-            <div class="setup-check-body">
-                <div class="setup-check-card" id="setupCheckPaperCard">
-                    <div class="setup-check-card-head">
-                        <span class="setup-check-label"><span class="setup-check-step">1</span><span data-i18n="setup_release_paper">離型紙</span></span>
-                        <span class="setup-check-value" id="setupCheckPaperValue">—</span>
-                    </div>
-                    <img class="setup-check-img" id="setupCheckPaperImg" alt="" style="display:none;">
-                </div>
-                <div class="setup-check-card" id="setupCheckBladeCard">
-                    <div class="setup-check-card-head">
-                        <span class="setup-check-label"><span class="setup-check-step">2</span><span data-i18n="setup_blade">刃物</span></span>
-                        <span class="setup-check-value" id="setupCheckBladeValue">—</span>
-                    </div>
-                    <img class="setup-check-img" id="setupCheckBladeImg" alt="" style="display:none;">
-                    <div class="setup-check-noimg" id="setupCheckBladeNoImg" style="display:none;"></div>
-                </div>
-            </div>
-            <div class="setup-check-foot">
-                <button type="button" id="setupCheckConfirmBtn" class="btn btn-primary" data-i18n="setup_confirm_btn">確認しました</button>
-            </div>
-        </div>
-    </div>
-
     <script src="i18n.js"></script>
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>

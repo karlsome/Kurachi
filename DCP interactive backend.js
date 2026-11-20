@@ -1024,6 +1024,7 @@ async function fetchProductDetails() {
     // 送りピッチ / pcPerCycle per machine (machineConfig or the encoded string).
     window.currentMasterRecord = data;
     if (typeof window.prefetchSetupCheck === 'function') window.prefetchSetupCheck(data);
+    if (typeof window.showParamsPage === 'function') window.showParamsPage(1);
     try {
       localStorage.setItem(`${uniquePrefix}feedConfig`, JSON.stringify({
         送りピッチ: data.送りピッチ != null ? data.送りピッチ : '',
@@ -12186,6 +12187,9 @@ function resetAllSteps() {
   // Also clear the saved tab index so it doesn't remember the locked tab after a reset
   localStorage.removeItem(`${prefix}activeTabIndex`);
 
+  // New scan: Params tab starts on page 1 (rolldist) again
+  if (typeof window.showParamsPage === 'function') window.showParamsPage(1);
+
   // Explicitly reset Values Changed button to prevent it from staying green
   const btn = document.getElementById('valuesChangedBtn');
   if (btn) {
@@ -19570,9 +19574,10 @@ if (manualSendModal) {
   });
 })();
 
-// ── Setup check sheet (after "Values changed") ──────────────────────────────────────────
-// Shows the product's release paper direction (masterDB 離型紙上/下: 上 = up, 下 = down) and blade
-// (masterDB 刃物, photo from Sasaki_Coating_MasterDB.NCBladeDB by name). "確認しました" continues.
+// ── Params tab page 2 (after "Values changed") ──────────────────────────────────────────
+// Page 1 is the rolldist guide. "Values changed" moves to page 2: the product's release paper direction
+// (masterDB 離型紙上/下: 上 = up, 下 = down) and blade (masterDB 刃物, photo from
+// Sasaki_Coating_MasterDB.NCBladeDB by name). "確認しました" continues, "戻る" goes back to page 1.
 (function () {
   const PAPER_IMAGES = { up: 'src/releasePaperUp.jpg', down: 'src/releasePaperDown.jpg' };
   const bladeCache = new Map(); // blade name -> Promise<record|null>
@@ -19623,12 +19628,34 @@ if (manualSendModal) {
     if (src) { img.src = src; img.style.display = 'block'; } else { img.removeAttribute('src'); img.style.display = 'none'; }
   }
 
-  window.showSetupCheckSheet = function (onConfirmed) {
-    const overlay = document.getElementById('setupCheckOverlay');
+  function hasSetupData() {
     const { paper, blade } = readSetup(getSetupMaster());
-    // Nothing to check for this product: carry on as before
-    if (!overlay || (!paper && !blade)) { onConfirmed(); return; }
+    return Boolean(paper || blade);
+  }
 
+  // Show page 1 or 2 of the Params tab. The pager only shows when this product has a page 2.
+  window.showParamsPage = function (page) {
+    const p1 = document.getElementById('paramsPage1');
+    const p2 = document.getElementById('paramsPage2');
+    if (!p1 || !p2) return;
+    const two = page === 2;
+    p1.style.display = two ? 'none' : '';
+    p2.style.display = two ? '' : 'none';
+    const pager = document.getElementById('paramsPager');
+    if (pager) pager.style.display = hasSetupData() ? 'flex' : 'none';
+    const s1 = document.getElementById('paramsPagerStep1');
+    const s2 = document.getElementById('paramsPagerStep2');
+    if (s1) { s1.classList.toggle('active', !two); s1.classList.toggle('done', two); }
+    if (s2) s2.classList.toggle('active', two);
+    const panel = document.getElementById('panel-1');
+    if (panel) {
+      try { panel.scrollTop = 0; } catch (e) { }
+      const top = panel.getBoundingClientRect().top + window.scrollY - 140;
+      if (window.scrollY > top) window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }
+  };
+
+  function fillSetupPage(paper, blade) {
     // 1. Release paper
     const paperValue = document.getElementById('setupCheckPaperValue');
     const paperImg = document.getElementById('setupCheckPaperImg');
@@ -19656,7 +19683,7 @@ if (manualSendModal) {
     bladeNoImg.textContent = tr('setup_loading', '読み込み中…');
     if (blade) {
       fetchBlade(blade).then(rec => {
-        if (bladeValue.textContent !== blade) return; // sheet was reopened for another product
+        if (bladeValue.textContent !== blade) return; // page was refilled for another product
         if (rec && rec.imageURL) {
           bladeNoImg.style.display = 'none';
           setImage(bladeImg, rec.imageURL);
@@ -19665,12 +19692,32 @@ if (manualSendModal) {
         }
       });
     }
+  }
 
-    const confirmBtn = document.getElementById('setupCheckConfirmBtn');
-    confirmBtn.onclick = function () {
-      overlay.classList.remove('open');
+  // "Values changed": go to page 2, and run onConfirmed when it is confirmed there
+  window.showSetupCheckSheet = function (onConfirmed) {
+    const { paper, blade } = readSetup(getSetupMaster());
+    // Nothing to check for this product, or no page 2 on this page: carry on as before
+    if (!document.getElementById('paramsPage2') || (!paper && !blade)) { onConfirmed(); return; }
+
+    fillSetupPage(paper, blade);
+    document.getElementById('setupCheckBackBtn').onclick = function () { window.showParamsPage(1); };
+    document.getElementById('setupCheckConfirmBtn').onclick = function () {
       onConfirmed();
+      // Next visit to Params starts on page 1 again
+      setTimeout(() => window.showParamsPage(1), 400);
     };
-    overlay.classList.add('open');
+    window.showParamsPage(2);
   };
+
+  // Pager visibility follows the loaded product; translated labels follow the language
+  document.addEventListener('DOMContentLoaded', () => window.showParamsPage(1));
+  if (document.readyState !== 'loading') setTimeout(() => window.showParamsPage(1), 0);
+  document.addEventListener('languageChanged', () => {
+    const p2 = document.getElementById('paramsPage2');
+    if (p2 && p2.style.display !== 'none') {
+      const { paper, blade } = readSetup(getSetupMaster());
+      fillSetupPage(paper, blade);
+    }
+  });
 })();
