@@ -11740,6 +11740,30 @@ function getMachineName() {
   return document.getElementById('process')?.value || 'MACHINE';
 }
 
+// Machine line under a step's button. Grouped tablet: a machine blocked by its checklist (not done / NG)
+// is crossed out, e.g. "~~OZNC24~~,OZNC26"; hovering shows why.
+function renderStepMachineLine(el) {
+  if (!el) return;
+  const machines = typeof window.getChecklistMachines === 'function' ? window.getChecklistMachines() : [];
+  const blocked = machines.length > 1 && typeof window.getChecklistBlockedMachines === 'function'
+    ? window.getChecklistBlockedMachines() : [];
+  const esc = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const html = blocked.length
+    ? machines.map(m => blocked.indexOf(m) >= 0
+      ? '<span style="color:#98A2B3;text-decoration:line-through;">' + esc(m) + '</span>' : esc(m)).join(',')
+    : esc(getMachineName());
+  const title = blocked.length && typeof window.getChecklistBlockedMessage === 'function'
+    ? blocked.map(m => window.getChecklistBlockedMessage(m)).join('\n') : '';
+  if (el.dataset.lineHtml !== html) { el.innerHTML = html; el.dataset.lineHtml = html; }
+  if ((el.getAttribute('title') || '') !== title) {
+    if (title) el.setAttribute('title', title); else el.removeAttribute('title');
+  }
+}
+function refreshStepMachineLines() {
+  ['step1MachineName', 'step2MachineName', 'step3MachineName'].forEach(id => renderStepMachineLine(document.getElementById(id)));
+}
+window.refreshStepMachineLines = refreshStepMachineLines;
+
 // OZMANAS-specific flag helper
 function isOZMANASMachine() {
   const machineFromQuery = String(selectedMachine || '').trim().toUpperCase();
@@ -11908,7 +11932,7 @@ function showStep1Modal() {
   const content = document.getElementById('step1Content');
   const scanner = document.getElementById('step1Scanner');
 
-  machineName.textContent = getMachineName();
+  renderStepMachineLine(machineName);
   content.style.display = 'flex';
   scanner.style.display = 'none';
   modal.style.display = 'block';
@@ -11928,7 +11952,7 @@ function showStep2Modal() {
   // Format material codes for display: "MA44,MA90" -> "MA44 or MA90"
   document.getElementById('step2Material').textContent = formatMaterialCodesForDisplay(currentProductDetails.materialCode);
 
-  machineName.textContent = getMachineName();
+  renderStepMachineLine(machineName);
   content.style.display = 'flex';
   scanner.style.display = 'none';
   modal.style.display = 'block';
@@ -12013,7 +12037,7 @@ function showStep3Modal() {
   // Format material codes for display: "MA44,MA90" -> "MA44 or MA90"
   document.getElementById('step3Material').textContent = formatMaterialCodesForDisplay(currentProductDetails.materialCode);
 
-  machineName.textContent = getMachineName();
+  renderStepMachineLine(machineName);
   modal.style.display = 'block';
   saveCurrentStep(3);
   refreshStep3ChecklistBlock();
@@ -12063,21 +12087,16 @@ function refreshStep3ChecklistBlock() {
       notice.style.display = 'none';
     }
     // Machine line under the button: blocked machines crossed out
-    const nameEl = document.getElementById('step3MachineName');
-    if (nameEl) {
-      nameEl.innerHTML = machines.length > 1 && blocked.length
-        ? machines.map(m => blocked.indexOf(m) >= 0
-          ? '<span style="color:#98A2B3;text-decoration:line-through;">' + m + '</span>' : m).join(', ')
-        : getMachineName();
-    }
+    renderStepMachineLine(document.getElementById('step3MachineName'));
   }
   // Button label (kept even while a send cooldown is showing its countdown)
   const resting = button.dataset.sendToMachineOriginalHtml !== undefined ? button.dataset.sendToMachineOriginalHtml : button.textContent;
   if (resting.trim() !== desiredLabel) setSendButtonRestingMarkup(button, desiredLabel);
 }
 window.refreshStep3ChecklistBlock = refreshStep3ChecklistBlock;
-// Checklist status / language can change while Step 3 is open (bypass, maintenance, language switch)
+// Checklist status / language can change while a step is open (bypass, maintenance, language switch)
 setInterval(() => {
+  refreshStepMachineLines();
   const modal = document.getElementById('step3Modal');
   if (modal && modal.style.display === 'block') {
     const button = document.getElementById('startStep3Send');
