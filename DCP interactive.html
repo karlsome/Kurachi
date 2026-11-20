@@ -1454,6 +1454,51 @@
             animation: guideRollPulse 1.3s ease-in-out infinite;
         }
 
+        /* Setup check sheet (after "Values changed"): release paper up/down + blade, portrait tablet first */
+        .setup-check-overlay {
+            position: fixed; inset: 0; z-index: 100000; display: none; /* above the Call menu, below CNC stop overlays */
+            align-items: flex-end; justify-content: center;
+            background: rgba(15, 23, 42, 0.55); padding: 16px;
+        }
+        .setup-check-overlay.open { display: flex; }
+        @media (min-height: 700px) { .setup-check-overlay { align-items: center; } }
+        .setup-check-sheet {
+            width: 100%; max-width: 560px; max-height: calc(100vh - 32px);
+            display: flex; flex-direction: column; overflow: hidden;
+            background: var(--bg-surface); border-radius: 16px; box-shadow: var(--shadow-pop);
+        }
+        .setup-check-head { padding: 20px 20px 12px; border-bottom: 1px solid var(--border); }
+        .setup-check-head h3 { margin: 0; font-size: 1.2rem; font-weight: 800; color: var(--text-main); }
+        .setup-check-head p { margin: 4px 0 0; font-size: 0.9rem; color: var(--text-muted); }
+        .setup-check-body { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+        .setup-check-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-app); }
+        .setup-check-card-head {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 12px 14px; background: var(--bg-surface);
+        }
+        .setup-check-label { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1rem; color: var(--text-main); }
+        .setup-check-step {
+            display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+            width: 26px; height: 26px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 0.85rem;
+        }
+        .setup-check-value {
+            font-size: 1.25rem; font-weight: 900; padding: 6px 14px; border-radius: 10px;
+            background: var(--blue-soft); color: var(--blue); text-align: right; word-break: break-word;
+        }
+        .setup-check-value.up { background: var(--amber-soft); color: #9A5B00; }
+        .setup-check-value.down { background: #E5E7EB; color: #111827; }
+        .setup-check-value.missing { background: var(--red-soft); color: var(--red); font-size: 1rem; }
+        .setup-check-img {
+            display: block; width: 100%; aspect-ratio: 4 / 3; max-height: 34vh;
+            object-fit: contain; background: #0F172A;
+        }
+        .setup-check-noimg {
+            display: flex; align-items: center; justify-content: center; min-height: 96px;
+            color: var(--text-soft); font-weight: 700; font-size: 0.9rem;
+        }
+        .setup-check-foot { padding: 12px 20px 20px; border-top: 1px solid var(--border); }
+        .setup-check-foot .btn { width: 100%; min-height: 56px; font-size: 1.1rem; font-weight: 800; }
+
         .param-steps {
             list-style: none;
             margin-top: 16px;
@@ -4224,10 +4269,13 @@
                     btn.classList.remove('btn-secondary');
                     btn.classList.add('btn-primary');
                     btn.onclick = function () {
-                        if (typeof window.showAppToast === 'function') {
-                            window.showAppToast(_t('toast_settings_confirmed'));
-                        }
-                        if (typeof window.goToTab === 'function') window.goToTab(3);
+                        // Release paper up/down + blade check first, then on to Production
+                        withSetupCheck(function () {
+                            if (typeof window.showAppToast === 'function') {
+                                window.showAppToast(_t('toast_settings_confirmed'));
+                            }
+                            if (typeof window.goToTab === 'function') window.goToTab(3);
+                        });
                     };
                 }
             }
@@ -4254,19 +4302,28 @@
 
                     // Re-add event listener to prevent duplicate binding just in case
                     btn.onclick = function () {
-                        window.paramsLocked = false;
-                        const confirmedKey = getParamsConfirmedKey();
-                        localStorage.setItem(confirmedKey, 'true');
-                        updateTabLock();
-                        if (typeof window.showAppToast === 'function') {
-                            window.showAppToast(_t('toast_settings_confirmed'));
-                        }
-                        if (typeof window.goToTab === 'function') window.goToTab(3);
+                        // Release paper up/down + blade check first; the tabs unlock once it is confirmed
+                        withSetupCheck(function () {
+                            window.paramsLocked = false;
+                            const confirmedKey = getParamsConfirmedKey();
+                            localStorage.setItem(confirmedKey, 'true');
+                            updateTabLock();
+                            if (typeof window.showAppToast === 'function') {
+                                window.showAppToast(_t('toast_settings_confirmed'));
+                            }
+                            if (typeof window.goToTab === 'function') window.goToTab(3);
+                        });
                     };
                 }
             }
         }
         window.updateParamsGuide = updateParamsGuide;
+
+        // Show the setup check sheet (backend.js) when it is available, otherwise go straight on
+        function withSetupCheck(onConfirmed) {
+            if (typeof window.showSetupCheckSheet === 'function') window.showSetupCheckSheet(onConfirmed);
+            else onConfirmed();
+        }
 
         function updateTabIndicator(index) {
             const checklistBtn = document.getElementById('checklistTabBtn');
@@ -6087,6 +6144,36 @@
     </div>
 
     <!-- Core application dependencies -->
+    <!-- Setup check sheet: shown after "Values changed" (release paper up/down + blade) -->
+    <div id="setupCheckOverlay" class="setup-check-overlay" role="dialog" aria-modal="true" aria-labelledby="setupCheckTitle">
+        <div class="setup-check-sheet">
+            <div class="setup-check-head">
+                <h3 id="setupCheckTitle" data-i18n="setup_check_title">生産前の確認</h3>
+                <p data-i18n="setup_check_sub">離型紙の向きと刃物を確認してください</p>
+            </div>
+            <div class="setup-check-body">
+                <div class="setup-check-card" id="setupCheckPaperCard">
+                    <div class="setup-check-card-head">
+                        <span class="setup-check-label"><span class="setup-check-step">1</span><span data-i18n="setup_release_paper">離型紙</span></span>
+                        <span class="setup-check-value" id="setupCheckPaperValue">—</span>
+                    </div>
+                    <img class="setup-check-img" id="setupCheckPaperImg" alt="" style="display:none;">
+                </div>
+                <div class="setup-check-card" id="setupCheckBladeCard">
+                    <div class="setup-check-card-head">
+                        <span class="setup-check-label"><span class="setup-check-step">2</span><span data-i18n="setup_blade">刃物</span></span>
+                        <span class="setup-check-value" id="setupCheckBladeValue">—</span>
+                    </div>
+                    <img class="setup-check-img" id="setupCheckBladeImg" alt="" style="display:none;">
+                    <div class="setup-check-noimg" id="setupCheckBladeNoImg" style="display:none;"></div>
+                </div>
+            </div>
+            <div class="setup-check-foot">
+                <button type="button" id="setupCheckConfirmBtn" class="btn btn-primary" data-i18n="setup_confirm_btn">確認しました</button>
+            </div>
+        </div>
+    </div>
+
     <script src="i18n.js"></script>
     <script src="qrcode.min.js"></script>
     <script src="JsBarcode.code128.min.js"></script>

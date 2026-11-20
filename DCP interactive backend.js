@@ -1023,6 +1023,7 @@ async function fetchProductDetails() {
     // Stash the full master record so the per-lot tracker can resolve
     // 送りピッチ / pcPerCycle per machine (machineConfig or the encoded string).
     window.currentMasterRecord = data;
+    if (typeof window.prefetchSetupCheck === 'function') window.prefetchSetupCheck(data);
     try {
       localStorage.setItem(`${uniquePrefix}feedConfig`, JSON.stringify({
         送りピッチ: data.送りピッチ != null ? data.送りピッチ : '',
@@ -19567,4 +19568,109 @@ if (manualSendModal) {
       startBtn.addEventListener('click', handleBreakStartButtonClick, true);
     }
   });
+})();
+
+// ── Setup check sheet (after "Values changed") ──────────────────────────────────────────
+// Shows the product's release paper direction (masterDB 離型紙上/下: 上 = up, 下 = down) and blade
+// (masterDB 刃物, photo from Sasaki_Coating_MasterDB.NCBladeDB by name). "確認しました" continues.
+(function () {
+  const PAPER_IMAGES = { up: 'src/releasePaperUp.jpg', down: 'src/releasePaperDown.jpg' };
+  const bladeCache = new Map(); // blade name -> Promise<record|null>
+
+  const tr = (key, fallback) => {
+    try { if (typeof _t === 'function') { const v = _t(key); if (v && v !== key) return v; } } catch (e) { }
+    return fallback;
+  };
+
+  function getSetupMaster() {
+    if (window.currentMasterRecord) return window.currentMasterRecord;
+    try { return JSON.parse(localStorage.getItem(`${uniquePrefix}setupCheckMaster`) || 'null'); } catch (e) { return null; }
+  }
+
+  function readSetup(rec) {
+    if (!rec) return { paper: '', blade: '' };
+    const paperRaw = String(rec['離型紙上/下'] ?? rec['離型紙上下'] ?? '').trim();
+    const paper = paperRaw.startsWith('上') || /^up$/i.test(paperRaw) ? 'up'
+      : paperRaw.startsWith('下') || /^down$/i.test(paperRaw) ? 'down' : paperRaw;
+    return { paper, blade: String(rec['刃物'] ?? '').trim() };
+  }
+
+  function fetchBlade(name) {
+    if (!name) return Promise.resolve(null);
+    if (!bladeCache.has(name)) {
+      const p = fetch(`${serverURL}/queries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dbName: 'Sasaki_Coating_MasterDB', collectionName: 'NCBladeDB', query: { name } }),
+      })
+        .then(r => (r.ok ? r.json() : []))
+        .then(list => (Array.isArray(list) && list[0]) || null)
+        .catch(err => { console.warn('NCBladeDB lookup failed:', err); bladeCache.delete(name); return null; });
+      bladeCache.set(name, p);
+    }
+    return bladeCache.get(name);
+  }
+
+  // Called when a product is loaded, so the blade photo is ready by the time "Values changed" is pressed
+  window.prefetchSetupCheck = function (rec) {
+    const { paper, blade } = readSetup(rec);
+    try { localStorage.setItem(`${uniquePrefix}setupCheckMaster`, JSON.stringify({ '離型紙上/下': rec?.['離型紙上/下'] ?? rec?.['離型紙上下'] ?? '', '刃物': rec?.['刃物'] ?? '' })); } catch (e) { }
+    if (paper === 'up' || paper === 'down') { const img = new Image(); img.src = PAPER_IMAGES[paper]; }
+    fetchBlade(blade).then(b => { if (b && b.imageURL) { const img = new Image(); img.src = b.imageURL; } });
+  };
+
+  function setImage(img, src) {
+    if (src) { img.src = src; img.style.display = 'block'; } else { img.removeAttribute('src'); img.style.display = 'none'; }
+  }
+
+  window.showSetupCheckSheet = function (onConfirmed) {
+    const overlay = document.getElementById('setupCheckOverlay');
+    const { paper, blade } = readSetup(getSetupMaster());
+    // Nothing to check for this product: carry on as before
+    if (!overlay || (!paper && !blade)) { onConfirmed(); return; }
+
+    // 1. Release paper
+    const paperValue = document.getElementById('setupCheckPaperValue');
+    const paperImg = document.getElementById('setupCheckPaperImg');
+    paperValue.className = 'setup-check-value';
+    if (paper === 'up' || paper === 'down') {
+      paperValue.classList.add(paper);
+      paperValue.textContent = paper === 'up' ? tr('setup_paper_up', '上 (UP)') : tr('setup_paper_down', '下 (DOWN)');
+      paperImg.alt = paperValue.textContent;
+      setImage(paperImg, PAPER_IMAGES[paper]);
+    } else {
+      paperValue.classList.add(paper ? 'other' : 'missing');
+      paperValue.textContent = paper || tr('setup_not_set', '未設定');
+      setImage(paperImg, '');
+    }
+
+    // 2. Blade
+    const bladeValue = document.getElementById('setupCheckBladeValue');
+    const bladeImg = document.getElementById('setupCheckBladeImg');
+    const bladeNoImg = document.getElementById('setupCheckBladeNoImg');
+    bladeValue.className = 'setup-check-value' + (blade ? '' : ' missing');
+    bladeValue.textContent = blade || tr('setup_not_set', '未設定');
+    bladeImg.alt = blade;
+    setImage(bladeImg, '');
+    bladeNoImg.style.display = blade ? 'flex' : 'none';
+    bladeNoImg.textContent = tr('setup_loading', '読み込み中…');
+    if (blade) {
+      fetchBlade(blade).then(rec => {
+        if (bladeValue.textContent !== blade) return; // sheet was reopened for another product
+        if (rec && rec.imageURL) {
+          bladeNoImg.style.display = 'none';
+          setImage(bladeImg, rec.imageURL);
+        } else {
+          bladeNoImg.textContent = tr('setup_no_image', '画像なし');
+        }
+      });
+    }
+
+    const confirmBtn = document.getElementById('setupCheckConfirmBtn');
+    confirmBtn.onclick = function () {
+      overlay.classList.remove('open');
+      onConfirmed();
+    };
+    overlay.classList.add('open');
+  };
 })();
