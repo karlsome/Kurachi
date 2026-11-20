@@ -19721,3 +19721,121 @@ if (manualSendModal) {
     }
   });
 })();
+
+// ── "More info" at the bottom of the product sidebar (same idea as SCNA) ────────────────────
+// Every masterDB field of the current product. SCNA tablets get their own button from DCP interactive SCNA.js.
+(function () {
+  if (new URLSearchParams(location.search).get('filter') === 'SCNA') return;
+
+  const tr = (key, fallback) => {
+    try { if (typeof _t === 'function') { const v = _t(key); if (v && v !== key) return v; } } catch (e) { }
+    return fallback;
+  };
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+  function rows(obj, depth) {
+    let html = '';
+    Object.keys(obj).filter(k => k !== '_id').forEach(k => {
+      const v = obj[k];
+      const pad = depth ? ` style="padding-left:${depth * 14}px"` : '';
+      if (v !== null && typeof v === 'object') {
+        if (Array.isArray(v) && !v.some(x => x !== null && typeof x === 'object')) {
+          html += `<div class="dcp-mi-row${v.length ? '' : ' empty'}"${pad}><span class="k">${esc(k)}</span><span class="v">${esc(v.length ? v.join(', ') : '---')}</span></div>`;
+        } else {
+          (Array.isArray(v) ? v : [v]).forEach((x, i) => {
+            html += `<div class="dcp-mi-sub"${pad}>${esc(k)}${Array.isArray(v) ? ` [${i + 1}]` : ''}</div>` +
+              (x !== null && typeof x === 'object' ? rows(x, depth + 1) : `<div class="dcp-mi-row"${pad}><span class="v">${esc(x)}</span></div>`);
+          });
+        }
+      } else {
+        const txt = v === null || v === undefined ? '' : String(v);
+        html += `<div class="dcp-mi-row${txt === '' ? ' empty' : ''}"${pad}><span class="k">${esc(k)}</span><span class="v">${esc(txt === '' ? '---' : txt)}</span></div>`;
+      }
+    });
+    return html;
+  }
+
+  function ensureModal() {
+    let ov = document.getElementById('dcpMoreInfoModal');
+    if (ov) return ov;
+    const st = document.createElement('style');
+    st.textContent =
+      '.dcp-mi-row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid #E5E7EB;font-size:.875rem}' +
+      '.dcp-mi-row .k{color:#6B7280;font-weight:600;flex:0 0 38%}' +
+      '.dcp-mi-row .v{font-weight:700;text-align:right;word-break:break-all;white-space:pre-wrap;flex:1}' +
+      '.dcp-mi-row.empty .v{color:#9CA3AF;font-weight:600}' +
+      '.dcp-mi-sec{display:flex;align-items:baseline;gap:10px;margin:6px 0 4px;padding:8px 12px;border-left:4px solid #2563EB;background:#EFF6FF;border-radius:6px;font-weight:800;font-size:.95rem}' +
+      '.dcp-mi-sec small{font-weight:700;color:#6B7280;font-size:.78rem;word-break:break-all}' +
+      '.dcp-mi-sub{font-weight:800;font-size:.8rem;color:#2563EB;margin:8px 0 2px}' +
+      '.dcp-mi-img{display:block;margin:0 auto 10px;max-width:100%;max-height:200px;object-fit:contain;border:1px solid #E5E7EB;border-radius:10px;background:#fff;cursor:zoom-in}';
+    document.head.appendChild(st);
+    ov = document.createElement('div');
+    ov.id = 'dcpMoreInfoModal';
+    // Above the sidebar (10005), below the image preview (100150)
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(16,24,40,.45);display:none;align-items:center;justify-content:center;z-index:10030;padding:16px;';
+    ov.innerHTML = '<div style="background:#fff;border-radius:14px;width:100%;max-width:640px;max-height:88vh;display:flex;flex-direction:column;padding:20px;box-sizing:border-box;">' +
+      '<h3 id="dcpMoreInfoTitle" style="margin:0 0 4px;"></h3>' +
+      '<div id="dcpMoreInfoBody" style="overflow:auto;margin-top:8px;flex:1;-webkit-overflow-scrolling:touch;"></div>' +
+      '<button type="button" id="dcpMoreInfoClose" class="btn btn-primary btn-full" style="margin-top:12px;"></button></div>';
+    document.body.appendChild(ov);
+    const close = () => { ov.style.display = 'none'; };
+    document.getElementById('dcpMoreInfoClose').onclick = close;
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    return ov;
+  }
+
+  async function currentRecord() {
+    if (window.currentMasterRecord) return window.currentMasterRecord;
+    // After a reload the record is not in memory yet: look it up by the selected 背番号
+    const seb = document.getElementById('sub-dropdown')?.value
+      || (typeof currentProductDetails !== 'undefined' && currentProductDetails && currentProductDetails.sebanggo) || '';
+    if (!seb) return null;
+    const res = await fetch(`${serverURL}/queries`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dbName: 'Sasaki_Coating_MasterDB', collectionName: 'masterDB', query: { 背番号: seb } }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const list = await res.json();
+    return (Array.isArray(list) && list[0]) || null;
+  }
+
+  async function openMoreInfo() {
+    const ov = ensureModal();
+    const body = document.getElementById('dcpMoreInfoBody');
+    document.getElementById('dcpMoreInfoTitle').textContent = tr('more_info_title', '品目情報');
+    document.getElementById('dcpMoreInfoClose').textContent = tr('close', '閉じる');
+    const note = (text, color) => `<p style="text-align:center;color:${color || '#6B7280'};margin:20px 0">${esc(text)}</p>`;
+    body.innerHTML = note(tr('more_info_loading', '読み込み中…'));
+    ov.style.display = 'flex';
+    try {
+      const rec = await currentRecord();
+      if (!rec) { body.innerHTML = note(tr('more_info_none', '品目が選択されていません')); return; }
+      let html = '';
+      if (rec.imageURL) html += `<img class="dcp-mi-img" src="${esc(rec.imageURL)}" alt="${esc(rec.品番 || rec.背番号 || '')}">`;
+      const copy = Object.assign({}, rec);
+      delete copy.imageURL;
+      html += `<div class="dcp-mi-sec"><span>masterDB</span><small>${esc(rec.背番号 || '')}</small></div>` + rows(copy, 0);
+      body.innerHTML = html;
+      const im = body.querySelector('.dcp-mi-img');
+      if (im) im.onclick = () => { if (typeof window.openPreview === 'function') window.openPreview(im.getAttribute('src'), im.alt); };
+    } catch (e) {
+      body.innerHTML = note(tr('more_info_fail', '読み込み失敗: ') + e.message, '#DC2626');
+    }
+  }
+
+  function injectButton() {
+    const side = document.querySelector('.info-sidebar');
+    if (!side || document.getElementById('dcpMoreInfoBtn')) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'dcpMoreInfoBtn';
+    b.className = 'btn btn-secondary btn-full';
+    b.style.cssText = 'margin-top:auto;flex-shrink:0;';
+    b.textContent = tr('more_info_btn', 'もっと見る');
+    document.addEventListener('languageChanged', () => { b.textContent = tr('more_info_btn', 'もっと見る'); });
+    b.onclick = openMoreInfo;
+    side.appendChild(b);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', injectButton);
+  else injectButton();
+})();
