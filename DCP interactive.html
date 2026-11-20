@@ -1493,7 +1493,7 @@
         .setup-check-value.missing { background: var(--red-soft); color: var(--red); font-size: 1rem; }
         .setup-check-img {
             display: block; width: 100%; aspect-ratio: 4 / 3; max-height: 26vh;
-            object-fit: contain; background: #F1F3F7;
+            object-fit: contain; background: #F1F3F7; cursor: zoom-in;
         }
         .setup-check-noimg {
             display: flex; align-items: center; justify-content: center; min-height: 96px;
@@ -2982,14 +2982,14 @@
                                     <span class="setup-check-label"><span class="setup-check-step">1</span><span data-i18n="setup_release_paper">離型紙</span></span>
                                     <span class="setup-check-value" id="setupCheckPaperValue">—</span>
                                 </div>
-                                <img class="setup-check-img" id="setupCheckPaperImg" alt="" style="display:none;">
+                                <img class="setup-check-img" id="setupCheckPaperImg" alt="" style="display:none;" onclick="if(this.src && typeof window.openPreview==='function') window.openPreview(this.src, this.alt);">
                             </div>
                             <div class="setup-check-card">
                                 <div class="setup-check-card-head">
                                     <span class="setup-check-label"><span class="setup-check-step">2</span><span data-i18n="setup_blade">刃物</span></span>
                                     <span class="setup-check-value" id="setupCheckBladeValue">—</span>
                                 </div>
-                                <img class="setup-check-img" id="setupCheckBladeImg" alt="" style="display:none;">
+                                <img class="setup-check-img" id="setupCheckBladeImg" alt="" style="display:none;" onclick="if(this.src && typeof window.openPreview==='function') window.openPreview(this.src, this.alt);">
                                 <div class="setup-check-noimg" id="setupCheckBladeNoImg" style="display:none;"></div>
                             </div>
                         </div>
