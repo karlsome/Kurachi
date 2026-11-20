@@ -15520,6 +15520,11 @@ if (manualSendModal) {
     }
   };
 
+  // Rebuild the switcher, banner and tab-alert tooltip in the new language
+  document.addEventListener('languageChanged', () => {
+    try { window.renderChecklistMachineSwitcher(); } catch (e) { console.warn('Checklist switcher re-render failed:', e); }
+  });
+
   // The machine on screen can't run (NG / not done) but another machine can: let the worker go on with it.
   function setProceedWithOtherMachinesButton(nextBtn) {
     const operable = window.getOperableMachines();
