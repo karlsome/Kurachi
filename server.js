@@ -16839,11 +16839,28 @@ app.post("/batchUpdateMasterRecords", async (req, res) => {
       return res.json({ success: true, modifiedCount: 0, matchedCount: oldRecords.length });
     }
 
+    // Price / Box = Price / Pc × 収容数. It differs per record (each has its own 収容数), so when
+    // pricePerPc or 収容数 changes and pricePerBox is not set explicitly, compute it per record.
+    const toNum = (v) => (v === null || v === undefined || String(v).trim() === "" ? NaN : Number(v));
+    const derivePricePerBox = !("pricePerBox" in sanitizedUpdates)
+      && ("pricePerPc" in sanitizedUpdates || "収容数" in sanitizedUpdates);
+    const newDataFor = (oldRecord) => {
+      if (!derivePricePerBox) return sanitizedUpdates;
+      const perPc = toNum("pricePerPc" in sanitizedUpdates ? sanitizedUpdates.pricePerPc : oldRecord.pricePerPc);
+      const qty = toNum("収容数" in sanitizedUpdates ? sanitizedUpdates["収容数"] : oldRecord["収容数"]);
+      if (!Number.isFinite(perPc) || !Number.isFinite(qty)) return sanitizedUpdates;
+      return { ...sanitizedUpdates, pricePerBox: Math.round(perPc * qty * 100) / 100 };
+    };
+
     // Perform batch update
-    const updateResult = await masterColl.updateMany(
-      { _id: { $in: objectIds } },
-      { $set: sanitizedUpdates }
-    );
+    const updateResult = derivePricePerBox
+      ? await masterColl.bulkWrite(oldRecords.map((oldRecord) => ({
+          updateOne: { filter: { _id: oldRecord._id }, update: { $set: newDataFor(oldRecord) } },
+        })))
+      : await masterColl.updateMany(
+          { _id: { $in: objectIds } },
+          { $set: sanitizedUpdates }
+        );
 
     if (updateResult.modifiedCount === 0) {
       return res.status(304).json({ message: "No changes made" });
@@ -16856,7 +16873,7 @@ app.post("/batchUpdateMasterRecords", async (req, res) => {
       username,
       timestamp: new Date(Date.now() + 9 * 60 * 60 * 1000), // JST = UTC + 9 hours
       oldData: oldRecord,
-      newData: sanitizedUpdates,
+      newData: newDataFor(oldRecord),
       batchUpdate: true // Flag to indicate this was part of a batch update
     }));
 
