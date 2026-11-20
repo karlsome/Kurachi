@@ -19633,8 +19633,43 @@ if (manualSendModal) {
     return Boolean(paper || blade);
   }
 
+  // Params already confirmed (Production unlocked): both pager steps can be tapped at any time
+  function isParamsConfirmed() {
+    const prefix = typeof uniquePrefix !== 'undefined' ? uniquePrefix : '';
+    const key = prefix ? `${prefix}paramsConfirmed` : 'DCP_paramsConfirmed';
+    try { return localStorage.getItem(key) === 'true'; } catch (e) { return false; }
+  }
+
+  function goToProduction() {
+    if (typeof window.showAppToast === 'function') window.showAppToast(tr('toast_settings_confirmed', '設定を確認しました'));
+    if (typeof window.goToTab === 'function') window.goToTab(3);
+  }
+
+  function openSetupPageForReview() {
+    const { paper, blade } = readSetup(getSetupMaster());
+    fillSetupPage(paper, blade);
+    document.getElementById('setupCheckBackBtn').onclick = function () { window.showParamsPage(1); };
+    document.getElementById('setupCheckConfirmBtn').onclick = function () {
+      goToProduction();
+      setTimeout(() => window.showParamsPage(1), 400);
+    };
+    window.showParamsPage(2);
+  }
+
+  let pagerBound = false;
+  function bindPager() {
+    if (pagerBound) return;
+    const s1 = document.getElementById('paramsPagerStep1');
+    const s2 = document.getElementById('paramsPagerStep2');
+    if (!s1 || !s2) return;
+    pagerBound = true;
+    s1.addEventListener('click', () => { if (isParamsConfirmed()) window.showParamsPage(1); });
+    s2.addEventListener('click', () => { if (isParamsConfirmed()) openSetupPageForReview(); });
+  }
+
   // Show page 1 or 2 of the Params tab. The pager only shows when this product has a page 2.
   window.showParamsPage = function (page) {
+    bindPager();
     const p1 = document.getElementById('paramsPage1');
     const p2 = document.getElementById('paramsPage2');
     if (!p1 || !p2) return;
@@ -19647,6 +19682,12 @@ if (manualSendModal) {
     const s2 = document.getElementById('paramsPagerStep2');
     if (s1) { s1.classList.toggle('active', !two); s1.classList.toggle('done', two); }
     if (s2) s2.classList.toggle('active', two);
+    const canJump = isParamsConfirmed();
+    [s1, s2].forEach(el => {
+      if (!el) return;
+      el.classList.toggle('clickable', canJump);
+      if (canJump) { el.setAttribute('role', 'button'); el.tabIndex = 0; } else { el.removeAttribute('role'); el.removeAttribute('tabindex'); }
+    });
     const panel = document.getElementById('panel-1');
     if (panel) {
       try { panel.scrollTop = 0; } catch (e) { }

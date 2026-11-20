@@ -1470,6 +1470,11 @@
         .params-pager-step.active .params-pager-num { background: var(--brand); color: #fff; }
         .params-pager-step.done .params-pager-num { background: var(--brand); color: #fff; }
         .params-pager-line { width: 14px; height: 2px; background: var(--border); flex-shrink: 0; }
+        /* After Params is confirmed both steps can be tapped */
+        .params-pager-step.clickable { cursor: pointer; }
+        .params-pager-step.clickable:not(.active) { color: var(--text-main); }
+        .params-pager-step.clickable:not(.active):hover { border-color: var(--brand); }
+        .params-pager-step.clickable:not(.active) .params-pager-num { background: var(--brand); color: #fff; }
 
         /* Side by side on a tablet so page 2 fits without scrolling; stacked on narrow phones */
         .setup-check-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
