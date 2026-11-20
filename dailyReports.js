@@ -807,7 +807,7 @@ function registerDailyReportRoutes(app, client) {
   app.get("/api/reports/daily", async (req, res) => {
     try {
       const raw = String(req.query.date || "");
-      const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : addDays(jstToday(), -1);
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : jstToday();
       const hit = cache.get(date);
       let data;
       if (!req.query.refresh && hit && Date.now() - hit.at < CACHE_TTL_MS) {
