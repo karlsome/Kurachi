@@ -192,12 +192,51 @@ async function buildDailyReport(db, date) {
 
   const factories = [...new Set(all.map((d) => d["工場"]).filter(Boolean))].sort();
   const findings = [];
-  const add = (f) => findings.push({ ...f, id: `${f.type}-${findings.length}` });
+  // trendSrc (the records behind the trend chart) stays on the server: non-enumerable, so it is never
+  // sent with the report; /api/reports/daily/trend-day reads it when a bar is clicked.
+  const add = (f) => {
+    const { trendSrc, ...rest } = f;
+    const item = { ...rest, id: `${f.type}-${findings.length}` };
+    if (trendSrc) Object.defineProperty(item, "_trendSrc", { value: trendSrc, enumerable: false });
+    findings.push(item);
+  };
   const series = (records, valueFn) => {
     const byDay = groupBy(records, (r) => r.Date);
     return trendDays.map((day) => ({ date: day, value: byDay.has(day) ? round(valueFn(byDay.get(day))) : null }));
   };
   const activeDays = (records) => new Set(records.map((r) => r.Date)).size || 1;
+
+  // ── "how was this number calculated" payloads (compare item .calc) ──────
+  const recLine = (r) => ({ date: r.Date, seban: r["背番号"], machine: r["設備"], worker: r.Worker_Name, ng: ngOf(r), qty: qtyOf(r) });
+  const rateDays = (recs) =>
+    [...groupBy(recs, (r) => r.Date)]
+      .map(([date, l]) => {
+        const p = pool(l);
+        return { date, n: l.length, ng: p.ng, qty: p.qty, rate: round(p.rate) };
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+  /** NG % = all NG ÷ all pieces, today vs the 30 days before (per-day breakdown). */
+  const rateCalc = (todayRecs, baseRecs, scope) => {
+    const t = pool(todayRecs);
+    const b = pool(baseRecs);
+    return {
+      method: "rate",
+      scope,
+      today: { value: round(t.rate), ng: t.ng, qty: t.qty, n: todayRecs.length, records: todayRecs.slice(0, 20).map(recLine) },
+      normal: { value: round(b.rate), ng: b.ng, qty: b.qty, n: baseRecs.length, from: FROM, to: prevDay, days: rateDays(baseRecs) },
+    };
+  };
+  /** Average per working day: total in the 30 days ÷ number of working days. */
+  const perDayCalc = (scope, todayValue, dayList, valueOfDay, extra = {}) => {
+    const perDay = dayList.map((date) => ({ date, value: valueOfDay(date) }));
+    const total = perDay.reduce((s, x) => s + x.value, 0);
+    return {
+      method: "perDay",
+      scope,
+      today: { value: todayValue, ...(extra.today || {}) },
+      normal: { value: dayList.length ? round(total / dayList.length, 1) : 0, total, days: dayList.length, from: FROM, to: prevDay, perDay },
+    };
+  };
 
   // ── baselines by part ───────────────────────────────────────────────────
   const partKey = (d) => `${d._proc}|${d["背番号"]}`;
@@ -247,7 +286,16 @@ async function buildDailyReport(db, date) {
         prevHigh: lastSpike(pk, Math.max(2 * b, b + 3)),
       },
       trend: { unit: "%", points: series(allPart.get(pk) || [], (l) => pool(l).rate) },
-      compare: { unit: "%", items: list.map((x) => ({ label: `${x.d["工場"]} · ${x.d["設備"]} (${x.d.Worker_Name})`, today: round(x.r), normal: round(b) })) },
+      trendSrc: { kind: "rate", records: allPart.get(pk) || [] },
+      compare: {
+        unit: "%",
+        items: list.map((x) => ({
+          label: `${x.d["工場"]} · ${x.d["設備"]} (${x.d.Worker_Name})`,
+          today: round(x.r),
+          normal: round(b),
+          calc: rateCalc([x.d], (allPart.get(pk) || []).filter((r) => r.Date < D), { kind: "part", seban: x.d["背番号"], process: x.d._proc, todayKind: "record" }),
+        })),
+      },
       rows: list.map((x) => ({ cells: [x.d["工場"], x.d["設備"], x.d.Worker_Name, `${ngOf(x.d)} / ${qtyOf(x.d)}`, `${round(x.r, 1)}%`], record: slim(x.d) })),
       columns: ["factory", "machine", "worker", "ngQty", "ngRate"],
     });
@@ -279,7 +327,16 @@ async function buildDailyReport(db, date) {
         prevSpike: lastSpike(pk, Math.max(3 * top.b, top.b + 5)),
       },
       trend: { unit: "%", points: series(allPart.get(pk) || [], (l) => pool(l).rate) },
-      compare: { unit: "%", items: list.map((x) => ({ label: x.d["背番号"], today: round(x.r), normal: round(x.b) })) },
+      trendSrc: { kind: "rate", records: allPart.get(pk) || [] },
+      compare: {
+        unit: "%",
+        items: list.map((x) => ({
+          label: x.d["背番号"],
+          today: round(x.r),
+          normal: round(x.b),
+          calc: rateCalc([x.d], (allPart.get(partKey(x.d)) || []).filter((r) => r.Date < D), { kind: "part", seban: x.d["背番号"], process: x.d._proc, todayKind: "record" }),
+        })),
+      },
       rows: list.map((x) => ({ cells: [x.d["背番号"], x.d["設備"], x.d.Worker_Name, `${ngOf(x.d)} / ${qtyOf(x.d)}`, `${round(x.r, 1)}%`, x.d.Comment || ""], record: slim(x.d) })),
       columns: ["seban", "machine", "worker", "ngQty", "ngRate", "comment"],
     });
@@ -308,9 +365,19 @@ async function buildDailyReport(db, date) {
         base: round(top.b),
       },
       trend: { unit: "%", points: series(all.filter((r) => keys.has(partKey(r))), (l) => pool(l).rate) },
+      trendSrc: { kind: "rate", records: all.filter((r) => keys.has(partKey(r))) },
       compare: {
         unit: "%",
-        items: [...groupBy(list, (x) => x.d["背番号"]).values()].map((g) => ({ label: g[0].d["背番号"], today: round(pool(g.map((x) => x.d)).rate), normal: round(g[0].b) })),
+        items: [...groupBy(list, (x) => x.d["背番号"]).values()].map((g) => ({
+          label: g[0].d["背番号"],
+          today: round(pool(g.map((x) => x.d)).rate),
+          normal: round(g[0].b),
+          calc: rateCalc(
+            g.map((x) => x.d),
+            (allPart.get(partKey(g[0].d)) || []).filter((r) => r.Date < D),
+            { kind: "part", seban: g[0].d["背番号"], process: g[0].d._proc, todayKind: "records" }
+          ),
+        })),
       },
       rows: list.map((x) => ({ cells: [x.d["背番号"], x.d["設備"], x.d.Worker_Name, `${ngOf(x.d)} / ${qtyOf(x.d)}`, `${round(x.r, 1)}%`], record: slim(x.d) })),
       columns: ["seban", "machine", "worker", "ngQty", "ngRate"],
@@ -371,10 +438,16 @@ async function buildDailyReport(db, date) {
           weekdayPattern: pattern,
         },
         trend,
+        trendSrc: { kind: "rate", records: fpAll },
         compare: {
           unit: "%",
-          items: [{ label: fac, today: round(t.rate), normal: round(b.rate) }].concat(
-            topRecs.slice(0, 3).map((r) => ({ label: r["背番号"], today: round(pct(ngOf(r), qtyOf(r))), normal: round(b.rate) }))
+          items: [{ label: fac, today: round(t.rate), normal: round(b.rate), calc: rateCalc(list, fpAll.filter((r) => r.Date < D), { kind: "factoryProcess", factory: fac, process: proc, todayKind: "all" }) }].concat(
+            topRecs.slice(0, 3).map((r) => ({
+              label: r["背番号"],
+              today: round(pct(ngOf(r), qtyOf(r))),
+              normal: round(b.rate),
+              calc: rateCalc([r], fpAll.filter((x) => x.Date < D), { kind: "factoryProcess", factory: fac, process: proc, todayKind: "record", seban: r["背番号"] }),
+            }))
           ),
         },
         rows: topRecs.map((r) => ({ cells: [r["背番号"], r["設備"], r.Worker_Name, `${ngOf(r)} / ${qtyOf(r)}`, `${round(pct(ngOf(r), qtyOf(r)), 1)}%`], record: slim(r) })),
@@ -388,7 +461,8 @@ async function buildDailyReport(db, date) {
         facs: [fac],
         params: { factory: fac, process: proc, rate: round(t.rate), base: round(b.rate), ng: t.ng, qty: t.qty, baseQty: Math.round(b.qty / activeDays(fpAll.filter((r) => r.Date < D))) },
         trend,
-        compare: { unit: "%", items: [{ label: fac, today: round(t.rate), normal: round(b.rate) }] },
+        trendSrc: { kind: "rate", records: fpAll },
+        compare: { unit: "%", items: [{ label: fac, today: round(t.rate), normal: round(b.rate), calc: rateCalc(list, fpAll.filter((r) => r.Date < D), { kind: "factoryProcess", factory: fac, process: proc, todayKind: "all" }) }] },
         rows: list.slice(0, 8).map((r) => ({ cells: [r["背番号"], r.Worker_Name, qtyOf(r), ngOf(r)], record: slim(r) })),
         columns: ["seban", "worker", "qty", "ng"],
       });
@@ -412,7 +486,7 @@ async function buildDailyReport(db, date) {
     if (ratio < 1.4) continue;
     const prevList = prevDay ? (allJobs.get(k) || []).filter((r) => r.Date === prevDay) : [];
     const prevCt = prevList.length ? median(prevList.map((r) => num(r.Cycle_Time))) : null;
-    slowJobs.push({ k, list, tCt, bCt, ratio, n: baseList.length, slowPrev: prevCt != null && prevCt / bCt >= 1.4, prevCt });
+    slowJobs.push({ k, list, baseList, runQty, tCt, bCt, ratio, n: baseList.length, slowPrev: prevCt != null && prevCt / bCt >= 1.4, prevCt });
   }
   for (const [, jobs] of groupBy(slowJobs, (j) => `${j.list[0]._proc}|${j.list[0]["工場"]}`)) {
     jobs.sort((a, b) => b.ratio - a.ratio);
@@ -433,7 +507,34 @@ async function buildDailyReport(db, date) {
         machineNgRate: round(machineNg.rate),
       },
       trend: { unit: "s", points: series(allJobs.get(worst.k) || [], (l) => median(l.map((r) => num(r.Cycle_Time)))) },
-      compare: { unit: "s", items: jobs.slice(0, 6).map((j) => ({ label: `${j.list[0]["品番"]} · ${j.list[0]["設備"]}`, today: round(j.tCt, 2), normal: round(j.bCt, 2) })) },
+      trendSrc: { kind: "median", records: allJobs.get(worst.k) || [] },
+      compare: {
+        unit: "s",
+        items: jobs.slice(0, 6).map((j) => {
+          const ctLine = (r) => ({ date: r.Date, start: normalizeClock(r.Time_start), worker: r.Worker_Name, ct: round(num(r.Cycle_Time), 2), qty: qtyOf(r) });
+          const allSame = (allJobs.get(j.k) || []).filter((r) => r.Date < D);
+          return {
+            label: `${j.list[0]["品番"]} · ${j.list[0]["設備"]}`,
+            today: round(j.tCt, 2),
+            normal: round(j.bCt, 2),
+            calc: {
+              method: "median",
+              scope: { kind: "job", factory: j.list[0]["工場"], machine: j.list[0]["設備"], hinban: j.list[0]["品番"], process: j.list[0]._proc },
+              today: { value: round(j.tCt, 2), values: j.list.map(ctLine) },
+              normal: {
+                value: round(j.bCt, 2),
+                values: j.baseList.map(ctLine).sort((a, b2) => a.date.localeCompare(b2.date)),
+                runQty: j.runQty,
+                lo: Math.round(0.5 * j.runQty),
+                hi: Math.round(2 * j.runQty),
+                excluded: allSame.length - j.baseList.length,
+                from: FROM,
+                to: prevDay,
+              },
+            },
+          };
+        }),
+      },
       rows: jobs.slice(0, 8).map((j) => ({
         cells: [j.list[0]["品番"], j.list[0]["設備"], j.list[0].Worker_Name, `${round(j.tCt, 1)} s`, `${round(j.bCt, 1)} s`, `+${Math.round(100 * (j.ratio - 1))}%`],
         record: slim(j.list[0]),
@@ -462,7 +563,8 @@ async function buildDailyReport(db, date) {
   const stopKpi = {};
   for (const [fac, evs] of groupBy(events, (e) => e.factory)) {
     const facRecords = all.filter((d) => d["工場"] === fac && d.StopCall);
-    const nDays = new Set(facRecords.filter((d) => d.Date < D).map((d) => d.Date)).size || 1;
+    const callDays = [...new Set(facRecords.filter((d) => d.Date < D).map((d) => d.Date))].sort();
+    const nDays = callDays.length || 1;
     const tEv = evs.filter((e) => e.date === D);
     const bEv = evs.filter((e) => e.date < D);
     stopKpi[fac] = { today: tEv.length, base: round(bEv.length / nDays, 1) };
@@ -477,6 +579,7 @@ async function buildDailyReport(db, date) {
         base: round(b.length / nDays, 1),
         avgWait: t.length ? Math.round(t.reduce((s, e) => s + e.wait, 0) / t.length) : null,
         maxWait: t.length ? Math.max(...t.map((e) => e.wait)) : null,
+        calc: perDayCalc({ kind: "leaderCalls", name, factory: fac }, t.length, callDays, (day) => b.filter((e) => e.date === day).length),
       };
     });
     const absent = leaders.filter((l) => l.base >= 5 && l.today === 0);
@@ -491,15 +594,23 @@ async function buildDailyReport(db, date) {
         facs: [fac],
         params: { factory: fac, absent: absent.map((l) => ({ name: l.name, base: l.base })), over: over.map((l) => ({ name: l.name, today: l.today, base: l.base })), focus: focus.name, total: tEv.length },
         trend: { unit: "", points: trendDays.map((day) => ({ date: day, value: evs.filter((e) => e.date === day && e.leader === focus.name).length })) },
-        compare: { unit: "", items: ranked.slice(0, 8).map((l) => ({ label: l.name, today: l.today, normal: l.base })) },
+        trendSrc: { kind: "events", events: evs.filter((e) => e.leader === focus.name) },
+        compare: { unit: "", items: ranked.slice(0, 8).map((l) => ({ label: l.name, today: l.today, normal: l.base, calc: l.calc })) },
         rows: ranked.slice(0, 10).map((l) => ({ cells: [l.name, l.today, l.base, l.avgWait, l.maxWait], leader: l.name })),
         columns: ["leader", "callsToday", "callsNormal", "avgWait", "maxWait"],
       });
     }
 
     const machines = [...groupBy(tEv, (e) => e.machine)].map(([machine, list]) => {
-      const b = bEv.filter((e) => e.machine === machine).length / nDays;
-      return { machine, today: list.length, base: round(b, 1), maxWait: Math.max(...list.map((e) => e.wait)) };
+      const bm = bEv.filter((e) => e.machine === machine);
+      const b = bm.length / nDays;
+      return {
+        machine,
+        today: list.length,
+        base: round(b, 1),
+        maxWait: Math.max(...list.map((e) => e.wait)),
+        calc: perDayCalc({ kind: "machineCalls", machine, factory: fac }, list.length, callDays, (day) => bm.filter((e) => e.date === day).length),
+      };
     }).sort((a, b) => b.today - a.today);
     const hot = machines[0];
     if (hot && hot.today >= 10 && hot.today >= 3 * hot.base) {
@@ -510,7 +621,8 @@ async function buildDailyReport(db, date) {
         facs: [fac],
         params: { factory: fac, machine: hot.machine, today: hot.today, base: hot.base, next: machines[1] ? { machine: machines[1].machine, today: machines[1].today } : null },
         trend: { unit: "", points: trendDays.map((day) => ({ date: day, value: evs.filter((e) => e.date === day && e.machine === hot.machine).length })) },
-        compare: { unit: "", items: machines.slice(0, 8).map((m) => ({ label: m.machine, today: m.today, normal: m.base })) },
+        trendSrc: { kind: "events", events: evs.filter((e) => e.machine === hot.machine) },
+        compare: { unit: "", items: machines.slice(0, 8).map((m) => ({ label: m.machine, today: m.today, normal: m.base, calc: m.calc })) },
         rows: tEv.filter((e) => e.machine === hot.machine).map((e) => ({ cells: [e.calledAt, e.arrivedAt, e.leader, e.wait, e.record["背番号"]], record: slim(e.record) })),
         columns: ["calledAt", "arrivedAt", "leader", "waitSec", "seban"],
       });
@@ -522,7 +634,7 @@ async function buildDailyReport(db, date) {
   const dayEnd = new Date(dayStart.getTime() + 86400e3);
   const [bypassToday, bypass30, openTickets] = await Promise.all([
     db.collection("checklistBypassDB").find({ createdAt: { $gte: dayStart, $lt: dayEnd } }).toArray(),
-    db.collection("checklistBypassDB").find({ createdAt: { $gte: new Date(`${FROM}T00:00:00+09:00`), $lt: dayEnd } }).project({ factory: 1 }).toArray(),
+    db.collection("checklistBypassDB").find({ createdAt: { $gte: new Date(`${FROM}T00:00:00+09:00`), $lt: dayEnd } }).project({ factory: 1, createdAt: 1 }).toArray(),
     db.collection("ngReportsDB").find({ status: { $ne: "closed" } }).project({ factory: 1 }).toArray(),
   ]);
   const openByFac = {};
@@ -537,7 +649,34 @@ async function buildDailyReport(db, date) {
       facs: [fac],
       params: { factory: fac, count: list.length, count30: bypass30.filter((b) => b.factory === fac).length, openTickets: openByFac[fac] || 0, first: { machine: list[0].machine, leader: list[0].leaderName, reason: list[0].reason } },
       trend: null,
-      compare: { unit: "", items: [{ label: fac, today: list.length, normal: round(bypass30.filter((b) => b.factory === fac).length / BASELINE_DAYS, 2) }] },
+      compare: {
+        unit: "",
+        items: [
+          (() => {
+            const jstDay = (t) => new Date(new Date(t).getTime() + 9 * 3600e3).toISOString().slice(0, 10);
+            const past = bypass30.filter((b) => b.factory === fac && jstDay(b.createdAt) < D);
+            const byDay = groupBy(past, (b) => jstDay(b.createdAt));
+            return {
+              label: fac,
+              today: list.length,
+              normal: round(bypass30.filter((b) => b.factory === fac).length / BASELINE_DAYS, 2),
+              calc: {
+                method: "perDay",
+                scope: { kind: "bypass", factory: fac, calendar: true },
+                today: { value: list.length },
+                normal: {
+                  value: round(bypass30.filter((b) => b.factory === fac).length / BASELINE_DAYS, 2),
+                  total: bypass30.filter((b) => b.factory === fac).length,
+                  days: BASELINE_DAYS,
+                  from: FROM,
+                  to: D,
+                  perDay: [...byDay].map(([date, l]) => ({ date, value: l.length })).sort((a, b2) => a.date.localeCompare(b2.date)).concat([{ date: D, value: list.length }]),
+                },
+              },
+            };
+          })(),
+        ],
+      },
       rows: list.map((b) => ({
         cells: [b.machine, b.workerName || "—", b.leaderName, b.reason],
         bypass: { ...b, _id: String(b._id) },
@@ -594,7 +733,7 @@ async function buildDailyReport(db, date) {
       facs: [...new Set(list.map((w) => w.factory))],
       params: { count: list.length, workers: list.slice(0, 12) },
       trend: null,
-      compare: { unit: type === "peopleNew" ? "" : "d", items: list.slice(0, 8).map((w) => ({ label: w.name, today: type === "peopleNew" ? w.records : w.days, normal: type === "peopleNew" ? 0 : w.days })) },
+      compare: { unit: type === "peopleNew" ? "" : "d", items: list.slice(0, 8).map((w) => ({ label: w.name, today: type === "peopleNew" ? w.records : w.days, normal: type === "peopleNew" ? 0 : w.days, worker: { name: w.name, factory: w.factory } })) },
       rows: list.map((w) => ({ cells: [w.name, w.factory, w.process, type === "peopleNew" ? w.records : w.lastSeen, w.days], worker: { name: w.name, factory: w.factory } })),
       columns: ["worker", "factory", "process", type === "peopleNew" ? "recordsToday" : "lastSeen", "daysIn30"],
     });
@@ -614,7 +753,13 @@ async function buildDailyReport(db, date) {
         facs: [fac],
         params: { factory: fac, count: mismatch.length, diff: mismatch.reduce((s, d) => s + Math.abs(num(d.Process_Quantity) - ngOf(d) - num(d.Total)), 0) },
         trend: null,
-        compare: { unit: "", items: mismatch.slice(0, 6).map((d) => ({ label: d["背番号"], today: num(d.Total), normal: num(d.Process_Quantity) - ngOf(d) })) },
+        compare: { unit: "", items: mismatch.slice(0, 6).map((d) => ({
+            label: d["背番号"],
+            today: num(d.Total),
+            normal: num(d.Process_Quantity) - ngOf(d),
+            calc: { method: "formula", scope: { kind: "total", seban: d["背番号"], process: d._proc }, today: { value: num(d.Total) }, normal: { value: num(d.Process_Quantity) - ngOf(d), processQty: num(d.Process_Quantity), ng: ngOf(d) }, record: slim(d) },
+          })),
+        },
         rows: mismatch.map((d) => ({ cells: [d["背番号"], d.Worker_Name, qtyOf(d), ngOf(d), num(d.Total), num(d.Process_Quantity) - ngOf(d)], record: slim(d) })),
         columns: ["seban", "worker", "qty", "ng", "total", "expected"],
       });
@@ -630,7 +775,13 @@ async function buildDailyReport(db, date) {
         facs: [fac],
         params: { factory: fac, zero: zero.length, long: long.length, total: list.length, process: mode(bad.map((d) => d._proc)) },
         trend: null,
-        compare: { unit: "", items: [{ label: "0 min", today: zero.length, normal: list.length }, { label: "> 10 h", today: long.length, normal: list.length }] },
+        compare: {
+          unit: "",
+          items: [
+            { label: "0 min", today: zero.length, normal: list.length, calc: { method: "count", scope: { kind: "timeZero", factory: fac }, today: { value: zero.length, records: zero.map(recLine) }, normal: { value: list.length } } },
+            { label: "> 10 h", today: long.length, normal: list.length, calc: { method: "count", scope: { kind: "timeLong", factory: fac }, today: { value: long.length, records: long.map(recLine) }, normal: { value: list.length } } },
+          ],
+        },
         rows: bad.map((d) => ({ cells: [d["背番号"], d.Worker_Name, normalizeClock(d.Time_start), normalizeClock(d.Time_end), durationMin(d), qtyOf(d)], record: slim(d) })),
         columns: ["seban", "worker", "start", "end", "minutes", "qty"],
       });
@@ -658,7 +809,7 @@ async function buildDailyReport(db, date) {
         facs: [...new Set(rows.filter((r) => r.waiting).map((r) => r.fac))],
         params: { waiting, total: today.length, approved: today.length - waiting, approvers: [...approvers].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count) },
         trend: null,
-        compare: { unit: "", items: rows.slice(0, 8).map((r) => ({ label: `${r.fac} · ${r.proc}`, today: r.approved, normal: r.approved + r.waiting })) },
+        compare: { unit: "", items: rows.slice(0, 8).map((r) => ({ label: `${r.fac} · ${r.proc}`, today: r.approved, normal: r.approved + r.waiting, group: { factory: r.fac, proc: r.proc } })) },
         rows: rows.map((r) => ({ cells: [r.fac, r.proc, r.approved, r.waiting], group: { factory: r.fac, proc: r.proc } })),
         columns: ["factory", "process", "approved", "waiting"],
       });
@@ -684,7 +835,18 @@ async function buildDailyReport(db, date) {
       facs: [fac],
       params: { factory: fac, process: proc, today: t, base: Math.round(b), ratio: round(ratio, 2), records: list.length },
       trend: { unit: "", points: series(fpAll, (l) => l.reduce((s, r) => s + qtyOf(r), 0)) },
-      compare: { unit: "", items: [{ label: `${fac} · ${proc}`, today: t, normal: Math.round(b) }] },
+      trendSrc: { kind: "sum", records: fpAll },
+      compare: {
+        unit: "",
+        items: [
+          (() => {
+            const days = [...new Set(baseList.map((r) => r.Date))].sort();
+            const c = perDayCalc({ kind: "output", factory: fac, process: proc }, t, days, (day) => baseList.filter((r) => r.Date === day).reduce((s, r) => s + qtyOf(r), 0), { today: { n: list.length } });
+            c.normal.value = Math.round(b);
+            return { label: `${fac} · ${proc}`, today: t, normal: Math.round(b), calc: c };
+          })(),
+        ],
+      },
       rows: [...list].sort((a, b2) => qtyOf(b2) - qtyOf(a)).slice(0, 8).map((r) => ({ cells: [r["背番号"], r["設備"], r.Worker_Name, qtyOf(r)], record: slim(r) })),
       columns: ["seban", "machine", "worker", "qty"],
     });
@@ -693,7 +855,7 @@ async function buildDailyReport(db, date) {
     const inspected = new Set(today.filter((d) => d._proc === "kensa").map((d) => d["背番号"]));
     for (const [fac, list] of groupBy(today.filter((d) => d._proc === "press"), (d) => d["工場"])) {
       const items = [...groupBy(list, (d) => d["背番号"])]
-        .map(([seban, recs]) => ({ seban, pressed: recs.reduce((s, r) => s + num(r.Total), 0), record: recs[0] }))
+        .map(([seban, recs]) => ({ seban, pressed: recs.reduce((s, r) => s + num(r.Total), 0), record: recs[0], recs }))
         .filter((x) => x.pressed >= 1000 && !inspected.has(x.seban))
         .sort((a, b) => b.pressed - a.pressed);
       const sum = items.reduce((s, x) => s + x.pressed, 0);
@@ -705,7 +867,13 @@ async function buildDailyReport(db, date) {
         facs: [fac],
         params: { factory: fac, count: items.length, pressed: sum, top: { seban: items[0].seban, pressed: items[0].pressed } },
         trend: null,
-        compare: { unit: "", items: items.slice(0, 6).map((x) => ({ label: x.seban, today: x.pressed, normal: 0 })) },
+        compare: { unit: "", items: items.slice(0, 6).map((x) => ({
+            label: x.seban,
+            today: x.pressed,
+            normal: 0,
+            calc: { method: "count", scope: { kind: "notInspected", seban: x.seban, factory: fac }, today: { value: x.pressed, records: x.recs.map((r) => ({ ...recLine(r), qty: num(r.Total) })) }, normal: { value: 0 } },
+          })),
+        },
         rows: items.map((x) => ({ cells: [x.seban, x.pressed, 0], record: slim(x.record) })),
         columns: ["seban", "pressed", "inspected"],
       });
@@ -748,6 +916,29 @@ async function buildDailyReport(db, date) {
 }
 
 // ─── route ───────────────────────────────────────────────────────────────────
+/** Inputs behind one trend bar (see trendSrc in buildDailyReport). */
+function trendDayDetail(src, day) {
+  if (src.kind === "events") {
+    const ev = src.events.filter((e) => e.date === day).sort((a, b) => String(a.calledAt).localeCompare(String(b.calledAt)));
+    return {
+      method: "events",
+      value: ev.length,
+      events: ev.map((e) => ({ calledAt: e.calledAt, arrivedAt: e.arrivedAt, leader: e.leader, machine: e.machine, wait: e.wait, seban: e.record["背番号"], record: slim(e.record) })),
+    };
+  }
+  const recs = src.records.filter((r) => r.Date === day);
+  const line = (r) => ({ seban: r["背番号"], machine: r["設備"], worker: r.Worker_Name, start: normalizeClock(r.Time_start), ng: ngOf(r), qty: qtyOf(r), ct: round(num(r.Cycle_Time), 2), record: slim(r) });
+  const lines = recs.map(line).sort((a, b) => String(a.start).localeCompare(String(b.start)));
+  if (src.kind === "rate") {
+    const p = pool(recs);
+    return { method: "rate", value: round(p.rate), ng: p.ng, qty: p.qty, n: recs.length, records: lines };
+  }
+  if (src.kind === "median") {
+    return { method: "median", value: round(median(recs.map((r) => num(r.Cycle_Time))), 2), n: recs.length, records: lines };
+  }
+  return { method: "sum", value: recs.reduce((s, r) => s + qtyOf(r), 0), n: recs.length, records: lines };
+}
+
 function escapeRe(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -804,20 +995,37 @@ function registerDailyReportRoutes(app, client) {
     }
   });
 
+  const getReport = async (date, refresh) => {
+    const hit = cache.get(date);
+    if (!refresh && hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data;
+    await client.connect();
+    const data = await buildDailyReport(client.db("submittedDB"), date);
+    cache.set(date, { at: Date.now(), data });
+    if (cache.size > 40) cache.delete(cache.keys().next().value);
+    return data;
+  };
+
+  // One bar of a card's trend chart: the records / calls that made that day's value.
+  app.get("/api/reports/daily/trend-day", async (req, res) => {
+    try {
+      const date = String(req.query.date || "");
+      const day = String(req.query.day || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: "date and day required" });
+      const data = await getReport(date, false);
+      const f = data.findings.find((x) => x.id === req.query.id);
+      if (!f || !f._trendSrc) return res.status(404).json({ error: "finding not found (report may have changed; refresh)" });
+      res.json({ date, day, id: f.id, unit: f.trend?.unit || "", ...trendDayDetail(f._trendSrc, day) });
+    } catch (error) {
+      console.error("❌ Error in /api/reports/daily/trend-day:", error);
+      res.status(500).json({ error: "Failed to load trend day" });
+    }
+  });
+
   app.get("/api/reports/daily", async (req, res) => {
     try {
       const raw = String(req.query.date || "");
       const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : jstToday();
-      const hit = cache.get(date);
-      let data;
-      if (!req.query.refresh && hit && Date.now() - hit.at < CACHE_TTL_MS) {
-        data = hit.data;
-      } else {
-        await client.connect();
-        data = await buildDailyReport(client.db("submittedDB"), date);
-        cache.set(date, { at: Date.now(), data });
-        if (cache.size > 40) cache.delete(cache.keys().next().value);
-      }
+      const data = await getReport(date, Boolean(req.query.refresh));
       if (req.query.list) {
         // Top-bar bell popup: one page of compact findings (no trend/rows/records).
         const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
