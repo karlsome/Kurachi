@@ -12187,7 +12187,8 @@ function resetAllSteps() {
   // Also clear the saved tab index so it doesn't remember the locked tab after a reset
   localStorage.removeItem(`${prefix}activeTabIndex`);
 
-  // New scan: Params tab starts on page 1 (rolldist) again
+  // New scan: Params tab starts on page 1 (rolldist) again, both steps red
+  if (typeof window.clearParamsStepProgress === 'function') window.clearParamsStepProgress();
   if (typeof window.showParamsPage === 'function') window.showParamsPage(1);
 
   // Explicitly reset Values Changed button to prevent it from staying green
@@ -19640,6 +19641,17 @@ if (manualSendModal) {
     try { return localStorage.getItem(key) === 'true'; } catch (e) { return false; }
   }
 
+  // Step 1 is done once "Values changed" was pressed (kept across a reload, cleared on a new scan)
+  function step1Key() { return `${typeof uniquePrefix !== 'undefined' ? uniquePrefix : 'DCP_'}paramsValuesChanged`; }
+  function isStep1Done() {
+    if (isParamsConfirmed()) return true;
+    try { return localStorage.getItem(step1Key()) === 'true'; } catch (e) { return false; }
+  }
+  function setStep1Done(done) {
+    try { if (done) localStorage.setItem(step1Key(), 'true'); else localStorage.removeItem(step1Key()); } catch (e) { }
+  }
+  window.clearParamsStepProgress = function () { setStep1Done(false); };
+
   function goToProduction() {
     if (typeof window.showAppToast === 'function') window.showAppToast(tr('toast_settings_confirmed', '設定を確認しました'));
     if (typeof window.goToTab === 'function') window.goToTab(3);
@@ -19680,8 +19692,16 @@ if (manualSendModal) {
     if (pager) pager.style.display = hasSetupData() ? 'flex' : 'none';
     const s1 = document.getElementById('paramsPagerStep1');
     const s2 = document.getElementById('paramsPagerStep2');
-    if (s1) { s1.classList.toggle('active', !two); s1.classList.toggle('done', two); }
-    if (s2) s2.classList.toggle('active', two);
+    if (s1) {
+      s1.classList.toggle('active', !two);
+      s1.classList.toggle('ok', isStep1Done());
+      s1.classList.toggle('pending', !isStep1Done());
+    }
+    if (s2) {
+      s2.classList.toggle('active', two);
+      s2.classList.toggle('ok', isParamsConfirmed());
+      s2.classList.toggle('pending', !isParamsConfirmed());
+    }
     const canJump = isParamsConfirmed();
     [s1, s2].forEach(el => {
       if (!el) return;
@@ -19741,6 +19761,7 @@ if (manualSendModal) {
     // Nothing to check for this product, or no page 2 on this page: carry on as before
     if (!document.getElementById('paramsPage2') || (!paper && !blade)) { onConfirmed(); return; }
 
+    setStep1Done(true); // "Values changed" pressed: step 1 turns green
     fillSetupPage(paper, blade);
     document.getElementById('setupCheckBackBtn').onclick = function () { window.showParamsPage(1); };
     document.getElementById('setupCheckConfirmBtn').onclick = function () {

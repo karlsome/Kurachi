@@ -1466,15 +1466,19 @@
             display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
             width: 22px; height: 22px; border-radius: 50%; background: var(--border); color: var(--text-muted); font-size: 0.8rem;
         }
-        .params-pager-step.active { border-color: var(--brand); background: var(--brand-soft); color: var(--text-main); }
-        .params-pager-step.active .params-pager-num { background: var(--brand); color: #fff; }
-        .params-pager-step.done .params-pager-num { background: var(--brand); color: #fff; }
+        /* Red until that step is done (1: Values changed pressed, 2: Confirmed), then green.
+           The page on screen gets a thicker outline. */
+        .params-pager-step.pending { border-color: var(--red); background: var(--red-soft); color: var(--red); }
+        .params-pager-step.pending .params-pager-num { background: var(--red); color: #fff; }
+        .params-pager-step.ok { border-color: var(--brand); background: var(--brand-soft); color: #14532D; }
+        .params-pager-step.ok .params-pager-num { background: var(--brand); color: #fff; }
+        .params-pager-step.active { font-weight: 800; }
+        .params-pager-step.pending.active { box-shadow: 0 0 0 2px var(--red); }
+        .params-pager-step.ok.active { box-shadow: 0 0 0 2px var(--brand); }
         .params-pager-line { width: 14px; height: 2px; background: var(--border); flex-shrink: 0; }
         /* After Params is confirmed both steps can be tapped */
         .params-pager-step.clickable { cursor: pointer; }
-        .params-pager-step.clickable:not(.active) { color: var(--text-main); }
-        .params-pager-step.clickable:not(.active):hover { border-color: var(--brand); }
-        .params-pager-step.clickable:not(.active) .params-pager-num { background: var(--brand); color: #fff; }
+        .params-pager-step.clickable:not(.active):hover { box-shadow: 0 0 0 2px var(--brand); }
 
         /* Side by side on a tablet so page 2 fits without scrolling; stacked on narrow phones */
         .setup-check-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
@@ -2872,9 +2876,9 @@
                 <div class="tab-panel" id="panel-1">
                     <!-- Two pages: 1 = rolldist guide, 2 = release paper + blade (after "Values changed") -->
                     <div class="params-pager" id="paramsPager" style="display:none;">
-                        <div class="params-pager-step active" id="paramsPagerStep1"><span class="params-pager-num">1</span><span data-i18n="params_page_values">数値設定</span></div>
+                        <div class="params-pager-step pending active" id="paramsPagerStep1"><span class="params-pager-num">1</span><span data-i18n="params_page_values">数値設定</span></div>
                         <div class="params-pager-line"></div>
-                        <div class="params-pager-step" id="paramsPagerStep2"><span class="params-pager-num">2</span><span data-i18n="params_page_setup">離型紙・刃物</span></div>
+                        <div class="params-pager-step pending" id="paramsPagerStep2"><span class="params-pager-num">2</span><span data-i18n="params_page_setup">離型紙・刃物</span></div>
                     </div>
                     <div class="glass-card" id="paramsPage1">
                         <h3 data-i18n="cutter_guide_title">カッター設定ガイド</h3>
