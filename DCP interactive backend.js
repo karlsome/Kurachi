@@ -19760,7 +19760,10 @@ if (manualSendModal) {
     const paperArrow = document.getElementById('setupCheckPaperArrow');
     if (paperArrow) {
       paperArrow.className = 'setup-check-arrow' + (paper === 'up' || paper === 'down' ? ' ' + paper : '');
-      paperArrow.innerHTML = paper === 'up' ? '<span class="arr">&#11014;</span>上' : paper === 'down' ? '<span class="arr">&#11015;</span>下' : '';
+      // Line arrow in the same style as the tab icons (not a text symbol)
+      const arrow = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
+      paperArrow.innerHTML = paper === 'up' ? arrow('M12 20V4M5 11l7-7 7 7') + '上'
+        : paper === 'down' ? arrow('M12 4v16M5 13l7 7 7-7') + '下' : '';
     }
     paperValue.className = 'setup-check-value';
     if (paper === 'up' || paper === 'down') {

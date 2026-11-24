@@ -1500,7 +1500,7 @@
         }
         .setup-check-card.checked .setup-check-card-head { background: var(--brand-soft); }
         .setup-check-card.checked .setup-check-step { background: var(--brand); font-size: 0; }
-        .setup-check-card.checked .setup-check-step::after { content: '✓'; font-size: 1rem; font-weight: 900; }
+        .setup-check-card.checked .setup-check-step::after { content: ''; width: 16px; height: 16px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat; }
         .setup-check-tap {
             display: flex; align-items: center; justify-content: center; gap: 8px;
             min-height: 48px; padding: 8px 12px; font-weight: 800; font-size: 0.95rem;
@@ -1513,8 +1513,7 @@
         .setup-check-card.checked .setup-check-tap .when-checked { display: inline; }
         .setup-check-card.checked .setup-check-tap { color: #14532D; background: var(--brand-soft); border-top-style: solid; border-top-color: var(--brand); }
         .setup-check-card.checked .setup-check-tap::before {
-            content: '✓'; border: none; background: var(--brand); color: #fff;
-            display: inline-flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: 900;
+            border: none; background: var(--brand) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / 15px no-repeat;
         }
         .setup-check-media { position: relative; flex: 1 0 auto; display: flex; align-items: center; justify-content: center; aspect-ratio: 4 / 3; max-height: 45vh; min-height: 200px; background: #F1F3F7; overflow: hidden; }
         /* A blurred copy of the photo fills the empty bands when its shape differs from the box (nothing is cropped) */
@@ -1526,13 +1525,13 @@
         .setup-check-media > .setup-check-arrow, .setup-check-media > .setup-check-zoom { position: absolute; }
         /* Big direction marker drawn over the release paper photo */
         .setup-check-arrow {
-            position: absolute; top: 10px; left: 10px; display: none; align-items: center; gap: 4px;
-            padding: 6px 14px 6px 10px; border-radius: 12px; background: rgba(17, 24, 39, 0.82); color: #fff;
-            font-size: 1.8rem; font-weight: 900; line-height: 1; pointer-events: none;
+            position: absolute; top: 10px; left: 10px; display: none; align-items: center; gap: 6px;
+            padding: 8px 14px 8px 10px; border-radius: 12px; background: rgba(17, 24, 39, 0.82); color: #fff;
+            font-size: 1.35rem; font-weight: 800; line-height: 1; pointer-events: none;
         }
         .setup-check-arrow.up, .setup-check-arrow.down { display: inline-flex; }
         .setup-check-arrow.up { background: rgba(217, 119, 6, 0.92); }
-        .setup-check-arrow .arr { font-size: 2.2rem; }
+        .setup-check-arrow svg { width: 26px; height: 26px; flex-shrink: 0; }
         .setup-check-zoom {
             position: absolute; right: 8px; bottom: 8px; width: 44px; height: 44px; border-radius: 50%;
             border: none; background: rgba(17, 24, 39, 0.7); color: #fff; font-size: 1.2rem; cursor: zoom-in;
@@ -1544,7 +1543,7 @@
             width: 26px; height: 26px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 0.85rem;
         }
         .setup-check-value {
-            font-size: 1.15rem; font-weight: 900; padding: 4px 10px; border-radius: 10px;
+            font-size: 1.15rem; font-weight: 800; padding: 4px 10px; border-radius: 10px;
             background: var(--blue-soft); color: var(--blue); text-align: right; word-break: break-word;
         }
         /* Paper direction and blade use the same strong pill so neither looks weaker */
@@ -3046,7 +3045,7 @@
                                 <div class="setup-check-media">
                                     <img class="setup-check-img" id="setupCheckPaperImg" alt="" style="display:none;">
                                     <div class="setup-check-arrow" id="setupCheckPaperArrow"></div>
-                                    <button type="button" class="setup-check-zoom" aria-label="Zoom">&#128269;</button>
+                                    <button type="button" class="setup-check-zoom" aria-label="Zoom"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></button>
                                 </div>
                                 <div class="setup-check-tap"><span class="when-unchecked" data-i18n="setup_tap_to_check">確認したらタップ</span><span class="when-checked" data-i18n="setup_checked_label">確認済み</span></div>
                             </div>
@@ -3058,7 +3057,7 @@
                                 <div class="setup-check-media">
                                     <img class="setup-check-img" id="setupCheckBladeImg" alt="" style="display:none;">
                                     <div class="setup-check-noimg" id="setupCheckBladeNoImg" style="display:none;"></div>
-                                    <button type="button" class="setup-check-zoom" aria-label="Zoom">&#128269;</button>
+                                    <button type="button" class="setup-check-zoom" aria-label="Zoom"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></button>
                                 </div>
                                 <div class="setup-check-tap"><span class="when-unchecked" data-i18n="setup_tap_to_check">確認したらタップ</span><span class="when-checked" data-i18n="setup_checked_label">確認済み</span></div>
                             </div>
