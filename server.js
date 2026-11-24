@@ -14914,7 +14914,9 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
             m.sebanggoAt = log.ms;
           }
         }
-        if (log.Status === 'Completed' || log.Status === 'Reset') {
+        // 'Break ended' / 'Kensa mode checkbox toggled' are also logged with Completed/Reset status but do not end the job
+        const closesSession = action !== 'Break ended' && !action.startsWith('Kensa mode');
+        if (closesSession && (log.Status === 'Completed' || log.Status === 'Reset')) {
           m.sessionStartMs = null;
           m.endTimeSet = false;
         }
@@ -15090,13 +15092,20 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
 
       // Active run object (if currently in progress)
       let activeRun = null;
-      if ((m.lastLogStatus === 'in-progress' || m.sessionStartMs) && status !== 'off') {
+      // A schedule is still open while its 背番号 is set (cleared on Reset / completed Submit). The last log's status alone
+      // is not enough: 'Break ended' and the Kensa toggle are logged as Completed/Reset mid-job.
+      if ((m.lastLogStatus === 'in-progress' || m.sessionStartMs || m.sebanggo) && status !== 'off') {
         let activeStartMin = 480;
+        const toJstMin = (ms) => { const d = new Date(ms + DIGITAL_TWIN_JST_OFFSET_MS); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
+        const lastRunEndMin = completedRuns.length > 0 ? completedRuns[completedRuns.length - 1].endMin : null;
         if (m.sessionStartMs) {
-          const d = new Date(m.sessionStartMs + DIGITAL_TWIN_JST_OFFSET_MS);
-          activeStartMin = d.getUTCHours() * 60 + d.getUTCMinutes();
-        } else if (completedRuns.length > 0 && completedRuns[completedRuns.length - 1].endMin) {
-          activeStartMin = completedRuns[completedRuns.length - 1].endMin;
+          activeStartMin = toJstMin(m.sessionStartMs);
+        } else if (m.lotStartMs) {
+          // First log of the current schedule (kanban scan), never earlier than the last submitted run's end.
+          // (sebanggoAt is the LATEST log with a 背番号, e.g. a counter tap, so it is not the start.)
+          activeStartMin = Math.max(toJstMin(m.lotStartMs), lastRunEndMin ?? 0);
+        } else if (lastRunEndMin) {
+          activeStartMin = lastRunEndMin;
         } else if (m.sebanggoAt) {
           const d = new Date(m.sebanggoAt + DIGITAL_TWIN_JST_OFFSET_MS);
           activeStartMin = d.getUTCHours() * 60 + d.getUTCMinutes();
