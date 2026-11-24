@@ -5992,14 +5992,25 @@ window.getOzeRunPayload = function () {
   return run && run.runId && Array.isArray(run.boxIds) && run.boxIds.length ? { Run_ID: run.runId, Box_IDs: run.boxIds.slice() } : {};
 };
 
-// Material lot(s) in use right now: the open lot of each machine (no shots yet), else each machine's last lot
-function currentOzeLots() {
+// Material lots that went into this box = every lot in use since the previous print of this run, per machine:
+// the lot that was running at the previous print (it kept running into this box) + every lot started after it.
+// First box of the run: every lot so far. No counter needed, so this works on OZMANAS (manual shots) too.
+function ozeLotsSinceLastPrint(lastPrintAt) {
   try {
     const lp = typeof window.buildLotProductionPayload === 'function' ? window.buildLotProductionPayload() : null;
     const list = lp && Array.isArray(lp.Lot_Details) ? lp.Lot_Details : [];
-    const open = list.filter(l => l.shots == null);
-    const pick = open.length ? open : Object.values(list.reduce((m, l) => { m[l.machine || ''] = l; return m; }, {}));
-    return pick.map(l => ({ lotNumber: l.lotNumber, machine: l.machine || null, materialSeiban: l.materialSeiban || null }));
+    const since = lastPrintAt ? Date.parse(lastPrintAt) : NaN;
+    const byMachine = {};
+    list.forEach(l => { (byMachine[l.machine || ''] = byMachine[l.machine || ''] || []).push(l); });
+    const picked = [];
+    Object.keys(byMachine).forEach(m => {
+      const lots = byMachine[m].slice().sort((a, b) => (Date.parse(a.timestamp) || 0) - (Date.parse(b.timestamp) || 0));
+      if (!Number.isFinite(since)) { picked.push(...lots); return; }
+      const before = lots.filter(l => (Date.parse(l.timestamp) || 0) <= since);
+      if (before.length) picked.push(before[before.length - 1]);               // running at the previous print
+      picked.push(...lots.filter(l => (Date.parse(l.timestamp) || 0) > since)); // started since
+    });
+    return picked.map(l => ({ lotNumber: l.lotNumber, machine: l.machine || null, materialSeiban: l.materialSeiban || null }));
   } catch (e) { return []; }
 }
 
@@ -6020,7 +6031,7 @@ async function issueOzeBoxId(qtyLabel) {
     printedAt: new Date().toISOString(),
     qtyLabel: parseInt(qtyLabel, 10) || null,
     productionLot: document.getElementById('Lot No.')?.value || '',
-    lots: currentOzeLots(),
+    lots: ozeLotsSinceLastPrint(run.lastPrintAt),
   };
   const res = await fetch(`${serverURL}/api/oze-boxes`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -6030,6 +6041,7 @@ async function issueOzeBoxId(qtyLabel) {
   const doc = await res.json();
   if (!doc || !doc.boxId) throw new Error('no boxId');
   if (!run.boxIds.includes(doc.boxId)) run.boxIds.push(doc.boxId);
+  run.lastPrintAt = body.printedAt; // the next box starts here
   writeOzeRun(run);
   return doc.boxId;
 }
