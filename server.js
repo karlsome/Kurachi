@@ -14780,7 +14780,7 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         .toArray(),
       submittedDb.collection('tabletLogDB')
         .find({ 工場: factory, Date: { $in: logDates || [...new Set([productionDate, calendarDate])] } })
-        .project({ 設備: 1, sessionID: 1, 背番号: 1, 品番: 1, Worker_Name: 1, Action: 1, Status: 1, Timestamp: 1 })
+        .project({ 設備: 1, sessionID: 1, 背番号: 1, 品番: 1, Worker_Name: 1, Action: 1, Status: 1, Timestamp: 1, AdditionalData: 1 })
         .toArray(),
       submittedDb.collection('pressDB')
         .find({ 工場: factory, Date: { $in: [...new Set([productionDate, calendarDate])] } })
@@ -14805,7 +14805,7 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         machines.set(id, {
           id, noOfHead: 1, tableLength: null, hasCycleSensor: false,
           cycleRaw: null, lastCycleMs: null,
-          stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null, breakIntervals: [], stopIntervals: [],
+          stopCallAt: null, cncCancelAt: null, maintenanceAt: null, breakAt: null, breakIntervals: [], stopIntervals: [], stopEvents: [],
           lastLogMs: null, lastLogStatus: null, sessionEquipment: '',
           worker: '', sebanggo: '', hinban: '', sebanggoAt: 0, lotStartMs: 0,
           // Tablet session: 'Start time set' opens it, 'End time set' marks wrap-up, Submit/Reset closes it
@@ -14875,6 +14875,39 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         // Stop intervals (stop call / CNC cancel lock) for the shift timeline: open on activation, close on unlock
         const openStop = () => { if (!m.stopIntervals.some((b) => b.endMs === null)) m.stopIntervals.push({ startMs: log.ms, endMs: null }); };
         const closeStop = () => m.stopIntervals.forEach((b) => { if (b.endMs === null) b.endMs = log.ms; });
+        // Stop call / CNC cancel breakdown for the drawer: who called, which leader came, how long it took
+        const extra = log.AdditionalData && typeof log.AdditionalData === 'object' ? log.AdditionalData : {};
+        const isStopStart = action.startsWith('Stop call activated') || action.startsWith('CNC Cancel Button Detected');
+        const isStopEnd = /^Stop call (unlocked|resolved|canceled)/.test(action) || action.startsWith('CNC Cancel Unlocked');
+        if (isStopStart) {
+          const type = action.startsWith('CNC') ? 'cncCancel' : 'stopCall';
+          // A repeat activation while one is still open is the same event (pairs log once per tablet)
+          const open = m.stopEvents.find((e) => e.endMs === null && e.type === type);
+          if (!open) {
+            m.stopEvents.push({
+              type, startMs: log.ms, endMs: null, caller: log.Worker_Name || '', sebanggo: log.背番号 || '',
+              unit: extra.machine && extra.machine !== 'primary' ? String(extra.machine) : '',
+              reason: extra.holdReason || '', leaderName: '', leaderRole: '', waitSeconds: null, resolution: '',
+            });
+          }
+        } else if (isStopEnd) {
+          // Close the newest open event; a follow-up log (script unlock → leader unlock a second later) fills in the leader
+          const ev = [...m.stopEvents].reverse().find((e) => e.endMs === null)
+            || [...m.stopEvents].reverse().find((e) => !e.leaderName && e.endMs !== null && log.ms - e.endMs < 2 * 60 * 1000);
+          if (ev) {
+            if (ev.endMs === null) ev.endMs = log.ms;
+            if (extra.leaderName) { ev.leaderName = String(extra.leaderName); ev.leaderRole = String(extra.leaderRole || ''); }
+            if (Number.isFinite(Number(extra.waitSeconds)) && extra.waitSeconds !== null && extra.waitSeconds !== '') ev.waitSeconds = Number(extra.waitSeconds);
+            const resolution = /canceled/.test(action) ? 'canceled'
+              : /Gatekeeper/.test(action) ? 'gatekeeper'
+              : /Leader/.test(action) ? 'leader'
+              : 'script';
+            // Keep the most telling resolution: a leader unlock beats the script unlock logged just before it
+            const rank = { '': 0, script: 1, canceled: 2, gatekeeper: 3, leader: 3 };
+            if (rank[resolution] >= rank[ev.resolution || '']) ev.resolution = resolution;
+          }
+        }
+
         if (action.startsWith('Stop call activated')) { m.stopCallAt = log.ms; openStop(); }
         else if (/^Stop call (unlocked|resolved|canceled)/.test(action)) {
           // The leader unlock (gatekeeper) also releases a CNC cancel lock.
@@ -14902,6 +14935,7 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         } else if (action === 'Submit button pressed' || action === 'Reset button pressed') {
           m.breakIntervals.forEach((b) => { if (b.endMs === null) b.endMs = log.ms; });
           m.stopIntervals.forEach((b) => { if (b.endMs === null) b.endMs = log.ms; });
+          m.stopEvents.forEach((e) => { if (e.endMs === null) e.endMs = log.ms; });
           m.breakAt = null;
           m.maintenanceAt = null;
           m.sessionStartMs = null;
@@ -15192,6 +15226,24 @@ app.get('/api/digital-twin/:factoryName', async (req, res) => {
         activeRun,
         timeline,
         timelineSummary,
+        stopEvents: m.stopEvents.map((e) => ({
+          id: `${e.type}-${e.startMs}`,
+          type: e.type,
+          start: minutesToDigitalTwinTime(Math.floor((e.startMs + DIGITAL_TWIN_JST_OFFSET_MS) / 60000) % 1440),
+          end: e.endMs !== null ? minutesToDigitalTwinTime(Math.floor((e.endMs + DIGITAL_TWIN_JST_OFFSET_MS) / 60000) % 1440) : '',
+          startedAt: new Date(e.startMs).toISOString(),
+          endedAt: e.endMs !== null ? new Date(e.endMs).toISOString() : null,
+          durationSec: Math.max(0, Math.round(((e.endMs ?? nowMs) - e.startMs) / 1000)),
+          waitSeconds: e.waitSeconds,
+          open: e.endMs === null,
+          caller: e.caller,
+          sebanggo: e.sebanggo,
+          unit: e.unit,
+          reason: e.reason,
+          leaderName: e.leaderName,
+          leaderRole: e.leaderRole,
+          resolution: e.resolution,
+        })),
         pair: null,
         _sessionEquipment: m.sessionEquipment,
       });
@@ -29266,7 +29318,8 @@ async function _ensureOzeBoxIndexes() {
   _ozeBoxIndexesReady = true;
 }
 const _OZE_BOX_FIELDS = [
-  "runId", "背番号", "品番", "モデル", "machines", "factory", "worker", "printedAt", "qtyLabel", "lots", "productionLot"
+  "runId", "背番号", "品番", "モデル", "machines", "factory", "worker", "printedAt", "qtyLabel", "lots", "productionLot",
+  "qtyFull", "partial", "sparePieces"
 ];
 
 app.post("/api/oze-boxes", async (req, res) => {
