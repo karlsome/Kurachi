@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>進捗リーダーボード / Progress Leaderboard</title>
+    <style>
+        :root {
+            --bg: #0A0F1A;
+            --bg-2: #111A2B;
+            --tile: #16223A;
+            --tile-border: #243450;
+            --text: #E7EEF9;
+            --muted: #8499B8;
+            --red: #E11D2A;
+            --red-2: #FF3B47;
+            --green: #29C36A;
+            --amber: #F5A524;
+            --blue: #2E6FF2;
+            --material: #2DD4BF;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            height: 100%;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .app {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 1.2vh 1.4vw;
+            gap: 1vh;
+        }
+
+        .conn {
+            position: fixed;
+            top: 0.8vh;
+            right: 1vw;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: clamp(8px, 1vh, 11px);
+            color: var(--muted);
+            z-index: 5;
+            opacity: 0.6;
+        }
+
+        .dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: var(--red);
+        }
+
+        .dot.ok {
+            background: var(--green);
+        }
+
+        .board {
+            flex: 1;
+            display: grid;
+            grid-template-rows: repeat(6, 1fr);
+            gap: 1vh;
+            min-height: 0;
+        }
+
+        .row {
+            background: var(--tile);
+            border: 1px solid var(--tile-border);
+            border-radius: 14px;
+            display: grid;
+            grid-template-columns: clamp(170px, 20vw, 440px) 1fr minmax(0, 2fr) clamp(170px, 20vw, 440px);
+            align-items: center;
+            gap: 1vw;
+            padding: 0 1.4vw;
+            min-height: 0;
+            transition: background 0.3s ease;
+        }
+
+        .row.urgent {
+            border-color: var(--amber);
+            box-shadow: inset 0 0 0 1px rgba(245, 165, 36, 0.25);
+        }
+
+        .machine {
+            font-weight: 900;
+            font-size: clamp(28px, 6.5vh, 110px);
+            font-variant-numeric: tabular-nums;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .machine.combo {
+            font-size: clamp(18px, 4vh, 62px);
+            letter-spacing: -0.01em;
+        }
+
+        .material {
+            font-weight: 800;
+            font-size: clamp(20px, 3.8vh, 64px);
+            color: var(--material);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .progress-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3vh;
+            min-width: 0;
+        }
+
+        .bar-track {
+            position: relative;
+            width: 100%;
+            height: clamp(28px, 8vh, 130px);
+            background: var(--bg-2);
+            border-radius: 999px;
+            overflow: hidden;
+            border: 1px solid var(--tile-border);
+        }
+
+        .bar-fill {
+            position: absolute;
+            inset: 0;
+            width: 0%;
+            background: var(--green);
+            border-radius: 999px;
+            transition: width 0.6s ease, background 0.6s ease;
+        }
+
+        .bar-fill.warn {
+            background: var(--amber);
+        }
+
+        .bar-fill.hot {
+            background: var(--red-2);
+        }
+
+        .bar-label {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            font-size: clamp(16px, 4.4vh, 72px);
+            color: var(--text);
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+        }
+
+        .counts {
+            color: var(--muted);
+            font-weight: 700;
+            font-size: clamp(10px, 2vh, 30px);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .next {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            min-width: 0;
+        }
+
+        .next .val {
+            font-weight: 900;
+            font-size: clamp(26px, 5.8vh, 90px);
+            color: #FFD60A;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 100%;
+        }
+
+        .next .val.empty {
+            color: var(--muted);
+            font-size: clamp(18px, 3vh, 32px);
+        }
+
+        .row.empty-row {
+            opacity: 0.35;
+            justify-content: center;
+        }
+
+        .row.empty-row .material {
+            color: var(--muted);
+            font-size: clamp(14px, 2.4vh, 22px);
+            grid-column: 1 / -1;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="conn"><span class="dot" id="connDot"></span><span id="connText">接続中...</span></div>
+    <div class="app">
+        <div class="board" id="board"></div>
+    </div>
+
+    <script>
+        const params = new URLSearchParams(location.search);
+        const SERVER = params.get('server') || 'https://kurachi.onrender.com';
+        const FACTORY = params.get('factory') || params.get('filter') || '小瀬';
+        const TOP_N = 6;
+        const POLL_MS = 8000;
+
+        function todayStr() {
+            const parts = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit'
+            }).formatToParts(new Date());
+            const get = (t) => parts.find(p => p.type === t).value;
+            return `${get('year')}-${get('month')}-${get('day')}`;
+        }
+
+        function nowHHMM() {
+            const parts = new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+            }).formatToParts(new Date());
+            const get = (t) => parts.find(p => p.type === t).value;
+            return `${get('hour')}:${get('minute')}`;
+        }
+
+        function machineLabel(id) {
+            const m = String(id || '').match(/\d+$/);
+            if (m) return m[0];
+            return String(id || '').replace(/^OZ/, '');
+        }
+
+        function setConn(ok) {
+            document.getElementById('connDot').classList.toggle('ok', ok);
+            document.getElementById('connText').textContent = ok ? '接続中' : '切断';
+        }
+
+        async function fetchJSON(url) {
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        }
+
+        // Machines that physically share one mold/job and should collapse into a single
+        // row when they're currently running the same 品番.
+        const PAIR_GROUPS = [
+            ['OZNC04', 'OZNC06'],
+            ['OZNC08', 'OZNC10'],
+            ['OZNC03', 'OZNC05'],
+            ['OZNC07', 'OZNC09']
+        ];
+
+        // Handled differently on the factory floor — progress toward a task isn't
+        // a meaningful signal for these machines, so leave them off the board.
+        const EXCLUDED_MACHINES = new Set([
+            'OZNC11', 'OZNC12', 'OZNC13', 'OZNC14', 'OZNC15', 'OZNC16'
+        ]);
+
+        async function loadData() {
+            const date = todayStr();
+            const qs = `factory=${encodeURIComponent(FACTORY)}&date=${encodeURIComponent(date)}`;
+            const [liveRes, planRes] = await Promise.all([
+                fetchJSON(`${SERVER}/api/planner/live-production?${qs}`),
+                fetchJSON(`${SERVER}/api/production-plans?${qs}`)
+            ]);
+
+            const machines = (liveRes && liveRes.success && liveRes.data && liveRes.data.machines) || [];
+            const plans = (planRes && planRes.success && Array.isArray(planRes.data)) ? planRes.data : [];
+            const products = (plans[0] && Array.isArray(plans[0].products)) ? plans[0].products : [];
+
+            // machineId -> entry. A machine only gets an entry if it's still an open
+            // session server-side (closed/submitted sessions are already dropped by
+            // /api/planner/live-production) and its current task matches a planned
+            // quantity so a percentage is meaningful.
+            const entries = new Map();
+            const now = nowHHMM();
+
+            for (const m of machines) {
+                const machineId = m.machine;
+                if (EXCLUDED_MACHINES.has(String(machineId).toUpperCase())) continue;
+                const serial = m['背番号'] || '';
+                if (!serial) continue;
+
+                const items = products
+                    .filter(p => String(p.equipment || '')
+                        .split(',')
+                        .map(x => x.trim().toUpperCase())
+                        .includes(String(machineId).toUpperCase()))
+                    .sort((a, b) => String(a.startTime || '').localeCompare(String(b.startTime || '')));
+
+                // The same 背番号 can appear more than once in a day's schedule (split
+                // lots). Picking the first match would lock onto a stale quantity once
+                // the machine reaches a later occurrence of the same material — instead
+                // take the latest occurrence whose start time has actually passed.
+                let curIdx = -1;
+                items.forEach((p, idx) => {
+                    if (p['背番号'] !== serial) return;
+                    const st = String(p.startTime || '');
+                    if (!st || st <= now) curIdx = idx;
+                });
+                if (curIdx === -1) curIdx = items.findIndex(p => p['背番号'] === serial);
+                const curItem = curIdx >= 0 ? items[curIdx] : null;
+                const nextItem = curIdx >= 0 ? items[curIdx + 1] : null;
+
+                const plannedQty = curItem ? Number(curItem.quantity) || 0 : 0;
+                const pieces = Number(m.pieces) || 0;
+                if (plannedQty <= 0) continue;
+
+                entries.set(machineId, {
+                    machineIds: [machineId],
+                    label: machineLabel(machineId),
+                    serial,
+                    pieces,
+                    plannedQty,
+                    curItem,
+                    hinban: curItem ? (curItem['品番'] || '') : '',
+                    nextSerial: nextItem ? (nextItem['背番号'] || '') : ''
+                });
+            }
+
+            // Collapse paired machines (e.g. 04/06) into one row when both are
+            // currently running the same 品番 — they're cutting the same job.
+            for (const [idA, idB] of PAIR_GROUPS) {
+                const a = entries.get(idA);
+                const b = entries.get(idB);
+                if (!a || !b) continue;
+                if (!a.hinban || a.hinban !== b.hinban) continue;
+
+                const sameAssignment = a.curItem === b.curItem;
+                const plannedQty = sameAssignment ? a.plannedQty : (a.plannedQty + b.plannedQty);
+
+                entries.set(idA, {
+                    machineIds: [idA, idB],
+                    label: `${machineLabel(idA)}/${machineLabel(idB)}`,
+                    serial: a.serial,
+                    pieces: a.pieces + b.pieces,
+                    plannedQty,
+                    curItem: a.curItem,
+                    hinban: a.hinban,
+                    nextSerial: a.nextSerial || b.nextSerial
+                });
+                entries.delete(idB);
+            }
+
+            const rows = [];
+            for (const entry of entries.values()) {
+                const pct = Math.max(0, Math.min(100, (entry.pieces / entry.plannedQty) * 100));
+
+                // With no next material queued there's nothing to ready, so the row
+                // has no purpose on this board regardless of current progress — drop it.
+                if (!entry.nextSerial) continue;
+
+                rows.push({
+                    label: entry.label,
+                    serial: entry.serial,
+                    pieces: entry.pieces,
+                    plannedQty: entry.plannedQty,
+                    pct,
+                    nextSerial: entry.nextSerial
+                });
+            }
+
+            rows.sort((a, b) => b.pct - a.pct);
+            return rows.slice(0, TOP_N);
+        }
+
+        function render(rows) {
+            const board = document.getElementById('board');
+            board.innerHTML = '';
+
+            const slots = Math.max(rows.length, TOP_N);
+            for (let i = 0; i < TOP_N; i++) {
+                const row = document.createElement('div');
+                row.className = 'row';
+                const data = rows[i];
+
+                if (!data) {
+                    row.classList.add('empty-row');
+                    const m = document.createElement('div');
+                    m.className = 'material';
+                    m.textContent = '—';
+                    row.appendChild(m);
+                    board.appendChild(row);
+                    continue;
+                }
+
+                if (data.pct >= 90) row.classList.add('urgent');
+
+                const machine = document.createElement('div');
+                machine.className = data.label.includes('/') ? 'machine combo' : 'machine';
+                machine.textContent = data.label;
+
+                const material = document.createElement('div');
+                material.className = 'material';
+                material.textContent = data.serial;
+
+                const progress = document.createElement('div');
+                progress.className = 'progress-wrap';
+                const barClass = data.pct >= 95 ? 'hot' : (data.pct >= 80 ? 'warn' : '');
+                progress.innerHTML = `
+                    <div class="bar-track">
+                        <div class="bar-fill ${barClass}" style="width:${data.pct.toFixed(1)}%"></div>
+                        <div class="bar-label">${data.pct.toFixed(0)}%</div>
+                    </div>
+                    <div class="counts">${data.pieces.toLocaleString()} / ${data.plannedQty.toLocaleString()}</div>
+                `;
+
+                const next = document.createElement('div');
+                next.className = 'next';
+                next.innerHTML = `<div class="val ${data.nextSerial ? '' : 'empty'}">${data.nextSerial || 'なし'}</div>`;
+
+                row.appendChild(machine);
+                row.appendChild(material);
+                row.appendChild(progress);
+                row.appendChild(next);
+                board.appendChild(row);
+            }
+        }
+
+        async function tick() {
+            try {
+                const rows = await loadData();
+                render(rows);
+                setConn(true);
+            } catch (e) {
+                setConn(false);
+                console.error('leaderboard refresh failed', e);
+            }
+        }
+
+        tick();
+        setInterval(tick, POLL_MS);
+    </script>
+</body>
+
+</html>
