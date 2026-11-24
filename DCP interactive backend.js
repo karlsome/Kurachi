@@ -5969,7 +5969,8 @@ function hidePrintingIndicator() { /* handled by setPrintBtnState */ }
 
 // ── OZE box IDs (小瀬 / non-SCNA; OZE has no work orders) ────────────────────────────────────
 // Every Brother label print is one box: the server issues <背番号>-<YYYYMMDD>-B<seq> (POST /api/oze-boxes)
-// and it is appended to the QR: 品番,収容数  ->  品番,収容数,<boxId>  (first two fields unchanged).
+// and it is appended to the QR: 品番,収容数  ->  品番,収容数,<boxId>  (first two fields unchanged),
+// and printed as text after the machine name (setsubi field): "OZMANAS 3TD-20261124-B001".
 // Server unreachable (or older server): the label prints with the old QR and a warning; the line never stops.
 // The run (Run_ID + Box_IDs) lives on this tablet until submit / reset and goes into the press record.
 function isOzeBoxPage() {
@@ -6047,6 +6048,12 @@ async function sendLabelWithOzeBoxId(query, qrBase, qtyLabel) {
     const oldParam = `&barcode_barcode=${encodeURIComponent(qrBase)}`;
     const newParam = `&barcode_barcode=${encodeURIComponent(`${qrBase},${boxId}`)}`;
     query = query.includes(oldParam) ? query.replace(oldParam, newParam) : query;
+    // Readable on the label too: in the machine name text (setsubi), e.g. "OZMANAS 3TD-20261124-B001"
+    query = query.replace(/&text_setsubi=([^&]*)/, (m, v) => {
+      let name = '';
+      try { name = decodeURIComponent(v); } catch (e) { name = v; }
+      return `&text_setsubi=${encodeURIComponent(name ? `${name} ${boxId}` : boxId)}`;
+    });
     console.log('🏷️ OZE box ID:', boxId);
     logTabletAction('Label printed with box ID', 'Completed', { boxId, qr: `${qrBase},${boxId}` }).catch(() => { });
   } else {
