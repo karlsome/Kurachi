@@ -1473,7 +1473,9 @@
         .params-pager-step.ok { border-color: var(--brand); background: var(--brand-soft); color: #14532D; }
         .params-pager-step.ok .params-pager-num { background: var(--brand); color: #fff; }
         .params-pager-step.active { font-weight: 800; }
-        .params-pager-step.pending.active { box-shadow: 0 0 0 2px var(--red); }
+        /* The page on screen that is not done yet is "you are here" (blue), not an error (red) */
+        .params-pager-step.pending.active { border-color: var(--blue); background: var(--blue-soft); color: var(--blue); box-shadow: 0 0 0 2px var(--blue); }
+        .params-pager-step.pending.active .params-pager-num { background: var(--blue); color: #fff; }
         .params-pager-step.ok.active { box-shadow: 0 0 0 2px var(--brand); }
         .params-pager-line { width: 14px; height: 2px; background: var(--border); flex-shrink: 0; }
         /* After Params is confirmed both steps can be tapped */
@@ -1483,10 +1485,58 @@
         /* Side by side on a tablet so page 2 fits without scrolling; stacked on narrow phones */
         .setup-check-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
         @media (max-width: 560px) { .setup-check-list { grid-template-columns: 1fr; } }
-        .setup-check-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-app); }
+        /* Each card is tapped once the operator checked it on the machine (grey -> green tick) */
+        .setup-check-card {
+            border: 2px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-app);
+            display: flex; flex-direction: column; cursor: pointer; user-select: none; -webkit-user-select: none;
+            transition: border-color .15s, box-shadow .15s;
+        }
+        .setup-check-card:active { transform: scale(0.99); }
+        .setup-check-card.checked { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand); }
         .setup-check-card-head {
             display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            min-height: 64px; box-sizing: border-box;
             padding: 10px 12px; background: var(--bg-surface); border-bottom: 1px solid var(--border);
+        }
+        .setup-check-card.checked .setup-check-card-head { background: var(--brand-soft); }
+        .setup-check-card.checked .setup-check-step { background: var(--brand); font-size: 0; }
+        .setup-check-card.checked .setup-check-step::after { content: '✓'; font-size: 1rem; font-weight: 900; }
+        .setup-check-tap {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            min-height: 48px; padding: 8px 12px; font-weight: 800; font-size: 0.95rem;
+            color: var(--text-soft); background: var(--bg-surface); border-top: 1px dashed var(--border);
+        }
+        .setup-check-tap::before {
+            content: ''; width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--text-soft); box-sizing: border-box;
+        }
+        .setup-check-tap .when-checked, .setup-check-card.checked .setup-check-tap .when-unchecked { display: none; }
+        .setup-check-card.checked .setup-check-tap .when-checked { display: inline; }
+        .setup-check-card.checked .setup-check-tap { color: #14532D; background: var(--brand-soft); border-top-style: solid; border-top-color: var(--brand); }
+        .setup-check-card.checked .setup-check-tap::before {
+            content: '✓'; border: none; background: var(--brand); color: #fff;
+            display: inline-flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: 900;
+        }
+        .setup-check-media { position: relative; flex: 1 0 auto; display: flex; align-items: center; justify-content: center; aspect-ratio: 4 / 3; max-height: 45vh; min-height: 200px; background: #F1F3F7; overflow: hidden; }
+        /* A blurred copy of the photo fills the empty bands when its shape differs from the box (nothing is cropped) */
+        .setup-check-media::before {
+            content: ''; position: absolute; inset: -20px; background-image: var(--setup-bg, none);
+            background-size: cover; background-position: center; filter: blur(18px) brightness(0.85); transform: scale(1.1);
+        }
+        .setup-check-media > * { position: relative; }
+        .setup-check-media > .setup-check-arrow, .setup-check-media > .setup-check-zoom { position: absolute; }
+        /* Big direction marker drawn over the release paper photo */
+        .setup-check-arrow {
+            position: absolute; top: 10px; left: 10px; display: none; align-items: center; gap: 4px;
+            padding: 6px 14px 6px 10px; border-radius: 12px; background: rgba(17, 24, 39, 0.82); color: #fff;
+            font-size: 1.8rem; font-weight: 900; line-height: 1; pointer-events: none;
+        }
+        .setup-check-arrow.up, .setup-check-arrow.down { display: inline-flex; }
+        .setup-check-arrow.up { background: rgba(217, 119, 6, 0.92); }
+        .setup-check-arrow .arr { font-size: 2.2rem; }
+        .setup-check-zoom {
+            position: absolute; right: 8px; bottom: 8px; width: 44px; height: 44px; border-radius: 50%;
+            border: none; background: rgba(17, 24, 39, 0.7); color: #fff; font-size: 1.2rem; cursor: zoom-in;
+            display: none; align-items: center; justify-content: center;
         }
         .setup-check-label { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1rem; color: var(--text-main); }
         .setup-check-step {
@@ -1497,12 +1547,13 @@
             font-size: 1.15rem; font-weight: 900; padding: 4px 10px; border-radius: 10px;
             background: var(--blue-soft); color: var(--blue); text-align: right; word-break: break-word;
         }
+        /* Paper direction and blade use the same strong pill so neither looks weaker */
         .setup-check-value.up { background: var(--amber-soft); color: #9A5B00; }
-        .setup-check-value.down { background: #E5E7EB; color: #111827; }
+        .setup-check-value.down { background: var(--blue-soft); color: var(--blue); }
         .setup-check-value.missing { background: var(--red-soft); color: var(--red); font-size: 1rem; }
         .setup-check-img {
-            display: block; width: 100%; aspect-ratio: 4 / 3; max-height: 26vh;
-            object-fit: contain; background: #F1F3F7; cursor: zoom-in;
+            display: block; width: 100%; height: 100%;
+            object-fit: contain; background: transparent;
         }
         .setup-check-noimg {
             display: flex; align-items: center; justify-content: center; min-height: 96px;
@@ -1512,6 +1563,7 @@
         .setup-check-actions .btn { min-height: 52px; font-size: 1.05rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
         .setup-check-actions .btn-back { flex: 0 0 34%; }
         .setup-check-actions .btn-primary { flex: 1; }
+        .setup-check-actions .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); }
 
         .param-steps {
             list-style: none;
@@ -2986,20 +3038,29 @@
                         <h3 data-i18n="setup_check_title">生産前の確認</h3>
                         <p class="gallery-sub" data-i18n="setup_check_sub">離型紙の向きと刃物を確認してください</p>
                         <div class="setup-check-list">
-                            <div class="setup-check-card">
+                            <div class="setup-check-card" id="setupCheckPaperCard">
                                 <div class="setup-check-card-head">
                                     <span class="setup-check-label"><span class="setup-check-step">1</span><span data-i18n="setup_release_paper">離型紙</span></span>
                                     <span class="setup-check-value" id="setupCheckPaperValue">—</span>
                                 </div>
-                                <img class="setup-check-img" id="setupCheckPaperImg" alt="" style="display:none;" onclick="if(this.src && typeof window.openPreview==='function') window.openPreview(this.src, this.alt);">
+                                <div class="setup-check-media">
+                                    <img class="setup-check-img" id="setupCheckPaperImg" alt="" style="display:none;">
+                                    <div class="setup-check-arrow" id="setupCheckPaperArrow"></div>
+                                    <button type="button" class="setup-check-zoom" aria-label="Zoom">&#128269;</button>
+                                </div>
+                                <div class="setup-check-tap"><span class="when-unchecked" data-i18n="setup_tap_to_check">確認したらタップ</span><span class="when-checked" data-i18n="setup_checked_label">確認済み</span></div>
                             </div>
-                            <div class="setup-check-card">
+                            <div class="setup-check-card" id="setupCheckBladeCard">
                                 <div class="setup-check-card-head">
                                     <span class="setup-check-label"><span class="setup-check-step">2</span><span data-i18n="setup_blade">刃物</span></span>
                                     <span class="setup-check-value" id="setupCheckBladeValue">—</span>
                                 </div>
-                                <img class="setup-check-img" id="setupCheckBladeImg" alt="" style="display:none;" onclick="if(this.src && typeof window.openPreview==='function') window.openPreview(this.src, this.alt);">
-                                <div class="setup-check-noimg" id="setupCheckBladeNoImg" style="display:none;"></div>
+                                <div class="setup-check-media">
+                                    <img class="setup-check-img" id="setupCheckBladeImg" alt="" style="display:none;">
+                                    <div class="setup-check-noimg" id="setupCheckBladeNoImg" style="display:none;"></div>
+                                    <button type="button" class="setup-check-zoom" aria-label="Zoom">&#128269;</button>
+                                </div>
+                                <div class="setup-check-tap"><span class="when-unchecked" data-i18n="setup_tap_to_check">確認したらタップ</span><span class="when-checked" data-i18n="setup_checked_label">確認済み</span></div>
                             </div>
                         </div>
                         <div class="setup-check-actions">

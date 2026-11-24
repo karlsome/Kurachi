@@ -19627,6 +19627,41 @@ if (manualSendModal) {
 
   function setImage(img, src) {
     if (src) { img.src = src; img.style.display = 'block'; } else { img.removeAttribute('src'); img.style.display = 'none'; }
+    const media = img.parentElement;
+    const zoom = media && media.querySelector('.setup-check-zoom');
+    if (zoom) zoom.style.display = src ? 'flex' : 'none';
+    if (media && media.classList.contains('setup-check-media')) {
+      if (src) media.style.setProperty('--setup-bg', `url("${String(src).replace(/"/g, '%22')}")`);
+      else media.style.removeProperty('--setup-bg');
+    }
+  }
+
+  // Each card must be tapped (ticked) before "Confirm & continue" is enabled
+  const CARD_IDS = ['setupCheckPaperCard', 'setupCheckBladeCard'];
+  function updateConfirmEnabled() {
+    const btn = document.getElementById('setupCheckConfirmBtn');
+    if (!btn) return;
+    btn.disabled = !CARD_IDS.every(id => { const c = document.getElementById(id); return !c || c.classList.contains('checked'); });
+  }
+  function setAllChecked(checked) {
+    CARD_IDS.forEach(id => { const c = document.getElementById(id); if (c) c.classList.toggle('checked', checked); });
+    updateConfirmEnabled();
+  }
+  let cardsBound = false;
+  function bindCards() {
+    if (cardsBound) return;
+    cardsBound = true;
+    CARD_IDS.forEach(id => {
+      const card = document.getElementById(id);
+      if (!card) return;
+      card.addEventListener('click', () => { card.classList.toggle('checked'); updateConfirmEnabled(); });
+      const zoom = card.querySelector('.setup-check-zoom');
+      const img = card.querySelector('.setup-check-img');
+      if (zoom && img) zoom.addEventListener('click', e => {
+        e.stopPropagation(); // zoom only, does not tick the card
+        if (img.src && typeof window.openPreview === 'function') window.openPreview(img.src, img.alt);
+      });
+    });
   }
 
   function hasSetupData() {
@@ -19660,6 +19695,7 @@ if (manualSendModal) {
   function openSetupPageForReview() {
     const { paper, blade } = readSetup(getSetupMaster());
     fillSetupPage(paper, blade);
+    setAllChecked(true); // already confirmed earlier
     document.getElementById('setupCheckBackBtn').onclick = function () { window.showParamsPage(1); };
     document.getElementById('setupCheckConfirmBtn').onclick = function () {
       goToProduction();
@@ -19717,9 +19753,15 @@ if (manualSendModal) {
   };
 
   function fillSetupPage(paper, blade) {
+    bindCards();
     // 1. Release paper
     const paperValue = document.getElementById('setupCheckPaperValue');
     const paperImg = document.getElementById('setupCheckPaperImg');
+    const paperArrow = document.getElementById('setupCheckPaperArrow');
+    if (paperArrow) {
+      paperArrow.className = 'setup-check-arrow' + (paper === 'up' || paper === 'down' ? ' ' + paper : '');
+      paperArrow.innerHTML = paper === 'up' ? '<span class="arr">&#11014;</span>上' : paper === 'down' ? '<span class="arr">&#11015;</span>下' : '';
+    }
     paperValue.className = 'setup-check-value';
     if (paper === 'up' || paper === 'down') {
       paperValue.classList.add(paper);
@@ -19763,6 +19805,7 @@ if (manualSendModal) {
 
     setStep1Done(true); // "Values changed" pressed: step 1 turns green
     fillSetupPage(paper, blade);
+    setAllChecked(false); // operator ticks each card after checking it
     document.getElementById('setupCheckBackBtn').onclick = function () { window.showParamsPage(1); };
     document.getElementById('setupCheckConfirmBtn').onclick = function () {
       onConfirmed();
