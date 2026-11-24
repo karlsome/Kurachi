@@ -5987,18 +5987,42 @@ function ozeUid(prefix) {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 window.clearOzeRun = function () { try { localStorage.removeItem(ozeRunKey()); } catch (e) { } };
+// Submit payload (press record): Run_ID, Box_IDs, Printed_Boxes (also prints without an ID), Boxed_Pieces,
+// Spare_Lots (pieces from spare, not in Process Quantity), Leftover_Spare (kept as 在庫 at submit), Box_Mismatch
 window.getOzeRunPayload = function () {
   const run = readOzeRun();
-  return run && run.runId && Array.isArray(run.boxIds) && run.boxIds.length ? { Run_ID: run.runId, Box_IDs: run.boxIds.slice() } : {};
+  if (!run || !run.runId) return {};
+  const out = {};
+  const boxIds = Array.isArray(run.boxIds) ? run.boxIds : [];
+  const prints = Array.isArray(run.prints) ? run.prints : [];
+  const spare = Array.isArray(run.spare) ? run.spare : [];
+  if (boxIds.length || prints.length) { out.Run_ID = run.runId; out.Box_IDs = boxIds.slice(); }
+  if (prints.length) {
+    out.Printed_Boxes = prints.map(p => ({ boxId: p.boxId || null, qty: p.qty, partial: !!p.partial, sparePieces: p.sparePieces || 0, at: p.at, reprints: p.reprints || 0 }));
+    out.Boxed_Pieces = prints.reduce((n, p) => n + Math.max(0, (p.qty || 0) - (p.sparePieces || 0)), 0);
+  }
+  if (spare.length) out.Spare_Lots = spare.map(s => ({ lotNumber: s.lotNumber, pieces: s.pieces, at: s.at, worker: s.worker || '', boxId: s.boxId || null, used: !!s.used }));
+  if (run.leftover) out.Leftover_Spare = run.leftover;
+  if (run.mismatch) out.Box_Mismatch = run.mismatch;
+  return out;
 };
 
 // Material lots that went into this box = every lot in use since the previous print of this run, per machine:
 // the lot that was running at the previous print (it kept running into this box) + every lot started after it.
 // First box of the run: every lot so far. No counter needed, so this works on OZMANAS (manual shots) too.
+// All lot records, the running (open, no shots yet) lot included: buildLotProductionPayload() leaves open lots out.
+function ozeAllLotRecords() {
+  try {
+    const recs = typeof window.getAllLotRecords === 'function' ? window.getAllLotRecords() : [];
+    return (recs || []).filter(r => r && r.lotNumber).map(r => ({
+      lotNumber: r.lotNumber, machine: r.machine || '', materialSeiban: r.materialSeiban || null,
+      timestamp: typeof r.ts === 'number' ? new Date(r.ts).toISOString() : (r.ts ? String(r.ts) : null),
+    }));
+  } catch (e) { return []; }
+}
 function ozeLotsSinceLastPrint(lastPrintAt) {
   try {
-    const lp = typeof window.buildLotProductionPayload === 'function' ? window.buildLotProductionPayload() : null;
-    const list = lp && Array.isArray(lp.Lot_Details) ? lp.Lot_Details : [];
+    const list = ozeAllLotRecords();
     const since = lastPrintAt ? Date.parse(lastPrintAt) : NaN;
     const byMachine = {};
     list.forEach(l => { (byMachine[l.machine || ''] = byMachine[l.machine || ''] || []).push(l); });
@@ -6014,25 +6038,170 @@ function ozeLotsSinceLastPrint(lastPrintAt) {
   } catch (e) { return []; }
 }
 
-async function issueOzeBoxId(qtyLabel) {
-  const sebanggo = document.getElementById('sub-dropdown')?.value || '';
-  if (!sebanggo) return null;
+// ── OZE box rules: help the worker avoid mistakes (OZE only; SCNA pages never get here) ─────────
+// OZMANAS and legacy listeners have no live count, so the tablet cannot know if a box is full. So every print asks:
+//   Full                 -> label 収容数
+//   Not full             -> the worker enters the real count; label 収容数 text + QR carry that count; the box is flagged partial
+//   Reprint last label   -> same label, same box ID, no new box (torn / jammed label)
+// With a live count (OZNC + new listener) the dialog also shows the pieces made since the last label and warns if
+// "Full" is pressed while the counter shows fewer.
+// Partial from spare (like SCNA): pieces taken from spare (qty + lot) go into the NEXT printed box (listed as source
+// "spare" in that box), and are NOT part of Process Quantity / Total. Submit: Spare_Lots.
+// At submit (ozeCheckBoxesBeforeSubmit): good pieces that are in no printed box -> print a partial box or keep them as
+// spare (在庫); labels for more pieces than were made -> warning; spare that never went into a box -> warning.
+function ozeEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function ozeToast(msg, ms) {
+  if (typeof window.showAppToast === 'function') window.showAppToast(msg, ms || 4000);
+  else if (typeof window.showToast === 'function') window.showToast(msg, ms || 4000);
+}
+function ozeSebanggo() { return document.getElementById('sub-dropdown')?.value || ''; }
+function ozeGoodNow() { try { if (typeof updateTotal === 'function') updateTotal(); } catch (e) { } return parseInt(document.getElementById('total')?.value, 10) || 0; }
+function ozeSum(list, f) { return (list || []).reduce((n, x) => n + (parseInt(x[f], 10) || 0), 0); }
+
+// The run of this item on this tablet (box IDs, prints, spare). A different 背番号 = a new run.
+function getOzeRun(sebanggo) {
   let run = readOzeRun();
-  if (!run || !run.runId || run.背番号 !== sebanggo) run = { runId: ozeUid('run-'), 背番号: sebanggo, boxIds: [], startedAt: new Date().toISOString() };
-  const body = {
-    boxUid: ozeUid('box-'),
-    runId: run.runId,
-    背番号: sebanggo,
-    品番: document.getElementById('product-number')?.value || '',
-    モデル: document.getElementById('model')?.value || '',
-    machines: String(document.getElementById('process')?.value || selectedMachine || '').split(',').map(m => m.trim()).filter(Boolean),
-    factory: getQueryParam('filter') || '',
-    worker: document.getElementById('Machine Operator')?.value || '',
-    printedAt: new Date().toISOString(),
-    qtyLabel: parseInt(qtyLabel, 10) || null,
-    productionLot: document.getElementById('Lot No.')?.value || '',
-    lots: ozeLotsSinceLastPrint(run.lastPrintAt),
-  };
+  if (!run || !run.runId || (sebanggo && run.背番号 && run.背番号 !== sebanggo)) {
+    run = { runId: ozeUid('run-'), 背番号: sebanggo || '', startedAt: new Date().toISOString() };
+  }
+  if (!run.背番号 && sebanggo) run.背番号 = sebanggo;
+  run.boxIds = Array.isArray(run.boxIds) ? run.boxIds : [];
+  run.prints = Array.isArray(run.prints) ? run.prints : [];
+  run.spare = Array.isArray(run.spare) ? run.spare : [];
+  return run;
+}
+function ozePendingSpare(run) { return (run.spare || []).filter(s => !s.used); }
+// Machine pieces in printed boxes (spare pieces in a box were made earlier, so they are not this run's pieces)
+function ozeBoxedPieces(run) { return (run.prints || []).reduce((n, p) => n + Math.max(0, (p.qty || 0) - (p.sparePieces || 0)), 0); }
+
+// Pieces made since the last label, only when every machine of the page has a fresh live count; else null
+function ozeLiveSinceLastPrint(run) {
+  const nc = window.DCPNC;
+  if (!nc || !nc.cycleStatus || !Array.isArray(nc.machines) || !nc.machines.length) return null;
+  const pageMachines = String(document.getElementById('process')?.value || '').split(',').map(m => m.trim()).filter(Boolean);
+  if (pageMachines.some(m => !nc.machines.includes(m))) return null; // a machine without a counter in the group
+  const fresh = nc.machines.every(m => { const s = nc.cycleStatus[m]; return s && s.auto && Date.now() - (s.at || 0) < 60000; });
+  if (!fresh) return null;
+  return Math.max(0, ozeGoodNow() - (run.goodAtLastPrint || 0));
+}
+
+const OZE_BTN = {
+  primary: 'background:#16a34a;color:#fff;',
+  warn: 'background:#f59e0b;color:#111;',
+  danger: 'background:#dc2626;color:#fff;',
+  plain: 'background:#e5e7eb;color:#111;',
+};
+// Own overlay (the page's keypads and modals are not touched). buttons: [{ label, value, kind }] -> Promise(value)
+function ozeDialog(title, html, buttons) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.className = 'oze-dialog';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;color:#111;border-radius:14px;max-width:540px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.35);font-size:17px;line-height:1.45;max-height:92vh;overflow:auto;';
+    box.innerHTML = `<div style="font-weight:800;font-size:20px;margin-bottom:10px;">${title}</div><div class="oze-dialog-body">${html || ''}</div>` +
+      '<div class="oze-dialog-btns" style="display:flex;flex-direction:column;gap:10px;margin-top:16px;"></div>';
+    const wrap = box.querySelector('.oze-dialog-btns');
+    buttons.forEach(b => {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.innerHTML = b.label;
+      el.dataset.ozeValue = b.value;
+      el.style.cssText = 'min-height:56px;font-size:18px;font-weight:700;border-radius:10px;border:none;cursor:pointer;padding:8px 12px;' + (OZE_BTN[b.kind] || OZE_BTN.plain);
+      el.onclick = () => { ov.remove(); resolve(b.value); };
+      wrap.appendChild(el);
+    });
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    if (typeof window.__ozeOnDialog === 'function') { try { window.__ozeOnDialog(title, ov); } catch (e) { } }
+  });
+}
+// Number keypad (own overlay) -> Promise(string | null). allowHyphen for lot numbers.
+function ozeNumberPad(title, sub, initial, allowHyphen) {
+  return new Promise(resolve => {
+    let val = initial != null ? String(initial) : '';
+    let suggested = val !== ''; // a suggested value is replaced by the first key, not appended to (70 + "70" must not become 7070)
+    const ov = document.createElement('div');
+    ov.className = 'oze-dialog oze-pad';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483001;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', allowHyphen ? '-' : 'C', '0', '⌫'];
+    ov.innerHTML = '<div style="background:#fff;color:#111;border-radius:14px;width:100%;max-width:380px;padding:18px;">' +
+      `<div style="font-weight:800;font-size:19px;">${title}</div><div style="color:#555;font-size:14px;margin:4px 0 10px;">${sub || ''}</div>` +
+      '<div class="oze-pad-val" style="font-size:34px;font-weight:900;text-align:right;border:2px solid #d1d5db;border-radius:10px;padding:6px 12px;min-height:56px;margin-bottom:10px;"></div>' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">' +
+      keys.map(k => `<button type="button" data-k="${k}" style="min-height:58px;font-size:24px;font-weight:800;border-radius:10px;border:none;background:#f3f4f6;">${k}</button>`).join('') +
+      '</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">' +
+      `<button type="button" data-k="cancel" style="min-height:56px;font-size:18px;font-weight:700;border-radius:10px;border:none;${OZE_BTN.plain}">キャンセル / Cancel</button>` +
+      `<button type="button" data-k="ok" style="min-height:56px;font-size:18px;font-weight:700;border-radius:10px;border:none;${OZE_BTN.primary}">OK</button>` +
+      '</div></div>';
+    const show = () => { const el = ov.querySelector('.oze-pad-val'); el.textContent = val; el.style.color = suggested ? '#9ca3af' : '#111'; };
+    ov.addEventListener('click', e => {
+      const k = e.target && e.target.dataset ? e.target.dataset.k : null;
+      if (!k) return;
+      if (k === 'cancel') { ov.remove(); resolve(null); return; }
+      if (k === 'ok') { ov.remove(); resolve(val); return; }
+      if (k === '⌫') val = suggested ? '' : val.slice(0, -1);
+      else if (k === 'C') val = '';
+      else if (suggested) val = k;
+      else if (val.length < 24) val += k;
+      suggested = false;
+      show();
+    });
+    show();
+    document.body.appendChild(ov);
+  });
+}
+
+// Ask what this print is. -> { kind: 'full'|'partial'|'reprint'|'cancel', qty }
+async function ozeAskBox(qtyLabel, run) {
+  const full = parseInt(qtyLabel, 10) || 0;
+  const pending = ozePendingSpare(run);
+  const spareSum = ozeSum(pending, 'pieces');
+  const live = ozeLiveSinceLastPrint(run);
+  const last = run.prints[run.prints.length - 1];
+  let html = '<div style="color:#555;font-size:15px;">収容数 / Box quantity</div>' +
+    `<div style="font-size:44px;font-weight:900;line-height:1.1;">${full || '—'}</div>` +
+    `<div style="color:#555;font-size:15px;margin-top:4px;">${ozeEsc(ozeSebanggo())} · 箱 / box #${run.prints.length + 1}</div>`;
+  if (spareSum) {
+    html += `<div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:#eff6ff;">スペア ${spareSum} 個を含む (${pending.map(s => ozeEsc(s.lotNumber)).join(', ')}) / ` +
+      `includes ${spareSum} pcs from spare</div>`;
+  }
+  if (live != null) {
+    html += `<div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:#f0fdf4;">前回ラベル以降の良品 (カウンター) / Good pieces since last label (counter): <b>${live}</b></div>`;
+  }
+  const buttons = [];
+  if (full) buttons.push({ label: `満杯 ${full} 個 — 印刷<br><small>Box full — Print</small>`, value: 'full', kind: 'primary' });
+  buttons.push({ label: '満杯ではない — 数量を入力<br><small>Not full — enter the count</small>', value: 'partial', kind: 'warn' });
+  if (last && run.lastQuery) {
+    buttons.push({ label: `前回のラベルを再印刷 (${ozeEsc(last.boxId || 'IDなし / no ID')})<br><small>Reprint last label — same box</small>`, value: 'reprint', kind: 'plain' });
+  }
+  buttons.push({ label: 'キャンセル / Cancel', value: 'cancel', kind: 'plain' });
+  let choice = await ozeDialog('この箱は満杯ですか？ / Is this box full?', html, buttons);
+
+  if (choice === 'full' && live != null && live + spareSum < full) {
+    choice = await ozeDialog('カウンターと合いません / Counter does not match',
+      `カウンターでは前回ラベル以降 <b>${live + spareSum}</b> 個です (収容数 ${full})。<br>The counter shows only <b>${live + spareSum}</b> pcs since the last label (box ${full}).`,
+      [{ label: `数量を入力 / Enter the real count`, value: 'partial', kind: 'warn' },
+       { label: `満杯として印刷 / Print as full anyway`, value: 'full', kind: 'danger' },
+       { label: 'キャンセル / Cancel', value: 'cancel', kind: 'plain' }]);
+  }
+  if (choice === 'full') return { kind: 'full', qty: full };
+  if (choice === 'reprint') return { kind: 'reprint' };
+  if (choice !== 'partial') return { kind: 'cancel' };
+
+  const hint = live != null ? Math.min(live + spareSum, full ? full - 1 : live + spareSum) : '';
+  const raw = await ozeNumberPad('この箱の実数 / Pieces in this box', full ? `収容数 ${full} 個未満 / less than ${full}` : '', hint || '');
+  if (raw == null) return { kind: 'cancel' };
+  const n = parseInt(raw, 10);
+  if (!(n > 0)) { ozeToast('数量を入力してください / Enter a count above 0'); return { kind: 'cancel' }; }
+  if (full && n > full) { ozeToast(`収容数 ${full} を超えています / More than the box quantity ${full}`, 5000); return { kind: 'cancel' }; }
+  if (full && n === full) return { kind: 'full', qty: full };
+  return { kind: 'partial', qty: n };
+}
+
+async function postOzeBox(body) {
   const res = await fetch(`${serverURL}/api/oze-boxes`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     signal: AbortSignal.timeout(5000),
@@ -6040,41 +6209,248 @@ async function issueOzeBoxId(qtyLabel) {
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const doc = await res.json();
   if (!doc || !doc.boxId) throw new Error('no boxId');
-  if (!run.boxIds.includes(doc.boxId)) run.boxIds.push(doc.boxId);
-  run.lastPrintAt = body.printedAt; // the next box starts here
-  writeOzeRun(run);
   return doc.boxId;
 }
 
 // Print with the box ID appended to the QR value (qrBase = "品番,収容数" exactly as it is in the query)
 async function sendLabelWithOzeBoxId(query, qrBase, qtyLabel) {
   if (!isOzeBoxPage()) { sendBrotherPrint(query); return; }
-  setPrintBtnState('printing');
-  let boxId = null;
+  if (window.__ozePrintBusy) { ozeToast('印刷中です / Already printing'); return; }
+  window.__ozePrintBusy = true;
   try {
-    boxId = await issueOzeBoxId(qtyLabel);
-  } catch (err) {
-    console.warn('OZE box ID not issued, printing without it:', err);
+    const sebanggo = ozeSebanggo();
+    let run = getOzeRun(sebanggo);
+    const full = parseInt(qtyLabel, 10) || 0;
+    const forced = parseInt(window.__ozeForceBoxQty, 10);
+    window.__ozeForceBoxQty = null;
+    const decision = forced > 0 ? { kind: full && forced >= full ? 'full' : 'partial', qty: forced } : await ozeAskBox(qtyLabel, run);
+    if (decision.kind === 'cancel') return;
+    run = getOzeRun(sebanggo); // re-read: nothing else may have changed it while the dialog was open, but be safe
+    if (decision.kind === 'reprint') {
+      const last = run.prints[run.prints.length - 1];
+      last.reprints = (last.reprints || 0) + 1;
+      writeOzeRun(run);
+      logTabletAction('Label reprinted', 'Completed', { boxId: last.boxId || null }).catch(() => { });
+      sendBrotherPrint(run.lastQuery);
+      return;
+    }
+    const qty = decision.qty;
+    const partial = decision.kind === 'partial';
+    if (partial) {
+      // The label and the QR carry the real count: 品番,<count>
+      const newBase = `${qrBase.slice(0, qrBase.lastIndexOf(','))},${qty}`;
+      query = query.replace(`&barcode_barcode=${encodeURIComponent(qrBase)}`, `&barcode_barcode=${encodeURIComponent(newBase)}`);
+      query = query.replace(/&text_収容数=[^&]*/, `&text_収容数=${encodeURIComponent(qty)}`);
+      qrBase = newBase;
+    }
+    const pending = ozePendingSpare(run);
+    const sparePieces = ozeSum(pending, 'pieces');
+    setPrintBtnState('printing');
+    const body = {
+      boxUid: ozeUid('box-'),
+      runId: run.runId,
+      背番号: sebanggo,
+      品番: document.getElementById('product-number')?.value || '',
+      モデル: document.getElementById('model')?.value || '',
+      machines: String(document.getElementById('process')?.value || selectedMachine || '').split(',').map(m => m.trim()).filter(Boolean),
+      factory: getQueryParam('filter') || '',
+      worker: document.getElementById('Machine Operator')?.value || '',
+      printedAt: new Date().toISOString(),
+      qtyLabel: qty || null,
+      qtyFull: full || null,
+      partial,
+      sparePieces,
+      productionLot: document.getElementById('Lot No.')?.value || '',
+      lots: ozeLotsSinceLastPrint(run.lastPrintAt).map(l => Object.assign({ source: 'material' }, l))
+        .concat(pending.map(s => ({ source: 'spare', lotNumber: s.lotNumber, pieces: s.pieces, machine: null }))),
+    };
+    let boxId = null;
+    if (sebanggo) {
+      try { boxId = await postOzeBox(body); } catch (err) { console.warn('OZE box ID not issued, printing without it:', err); }
+    }
+    if (boxId) {
+      const oldParam = `&barcode_barcode=${encodeURIComponent(qrBase)}`;
+      const newParam = `&barcode_barcode=${encodeURIComponent(`${qrBase},${boxId}`)}`;
+      query = query.includes(oldParam) ? query.replace(oldParam, newParam) : query;
+      // Readable on the label too: in the machine name text (setsubi), e.g. "OZMANAS 3TD-20261124-B001"
+      query = query.replace(/&text_setsubi=([^&]*)/, (m, v) => {
+        let name = '';
+        try { name = decodeURIComponent(v); } catch (e) { name = v; }
+        return `&text_setsubi=${encodeURIComponent(name ? `${name} ${boxId}` : boxId)}`;
+      });
+      console.log('🏷️ OZE box ID:', boxId);
+      logTabletAction('Label printed with box ID', 'Completed', { boxId, qr: `${qrBase},${boxId}`, partial, qty }).catch(() => { });
+    } else {
+      ozeToast('ボックスIDなしで印刷しました (サーバー未接続) / Printed without a box ID (server unreachable)', 5000);
+      logTabletAction('Label printed without box ID', 'in-progress', { qr: qrBase, partial, qty }).catch(() => { });
+    }
+    // The physical box exists even without an ID: record the print either way
+    if (boxId && !run.boxIds.includes(boxId)) run.boxIds.push(boxId);
+    run.prints.push({ boxId, qty, full: full || null, partial, sparePieces, at: body.printedAt });
+    pending.forEach(s => { s.used = true; s.boxId = boxId; s.usedAt = body.printedAt; });
+    run.lastPrintAt = body.printedAt; // the next box starts here
+    run.goodAtLastPrint = ozeGoodNow();
+    run.lastQuery = query;
+    writeOzeRun(run);
+    ozeRefreshSpareField();
+    if (partial) ozeToast(`部分箱 ${qty} 個を印刷 / Partial box of ${qty} pcs printed`, 4000);
+    sendBrotherPrint(query);
+  } finally {
+    window.__ozePrintBusy = false;
   }
-  if (boxId) {
-    const oldParam = `&barcode_barcode=${encodeURIComponent(qrBase)}`;
-    const newParam = `&barcode_barcode=${encodeURIComponent(`${qrBase},${boxId}`)}`;
-    query = query.includes(oldParam) ? query.replace(oldParam, newParam) : query;
-    // Readable on the label too: in the machine name text (setsubi), e.g. "OZMANAS 3TD-20261124-B001"
-    query = query.replace(/&text_setsubi=([^&]*)/, (m, v) => {
-      let name = '';
-      try { name = decodeURIComponent(v); } catch (e) { name = v; }
-      return `&text_setsubi=${encodeURIComponent(name ? `${name} ${boxId}` : boxId)}`;
-    });
-    console.log('🏷️ OZE box ID:', boxId);
-    logTabletAction('Label printed with box ID', 'Completed', { boxId, qr: `${qrBase},${boxId}` }).catch(() => { });
-  } else {
-    const msg = 'ボックスIDなしで印刷しました (サーバー未接続) / Printed without a box ID (server unreachable)';
-    if (typeof window.showAppToast === 'function') window.showAppToast(msg, 5000);
-    logTabletAction('Label printed without box ID', 'in-progress', { qr: qrBase }).catch(() => { });
-  }
-  sendBrotherPrint(query);
 }
+
+// ── Partial from spare (OZE): field next to Process Quantity, manager overlay ───────────────────
+function ozeRefreshSpareField() {
+  const inp = document.getElementById('ozePartialSpare');
+  if (!inp) return;
+  const run = readOzeRun();
+  const pending = run ? ozePendingSpare(getOzeRun(ozeSebanggo())) : [];
+  const n = ozeSum(pending, 'pieces');
+  inp.value = n ? String(n) : '';
+  const used = run && Array.isArray(run.spare) ? run.spare.filter(s => s.used).length : 0;
+  inp.placeholder = used ? `0 (${used} 済 / used)` : '0';
+}
+function ozeKnownLots(run) {
+  const out = [];
+  ozeAllLotRecords().forEach(l => { if (!out.includes(l.lotNumber)) out.push(l.lotNumber); });
+  (run.spare || []).forEach(s => { if (s.lotNumber && !out.includes(s.lotNumber)) out.push(s.lotNumber); });
+  return out;
+}
+async function ozeAddSpare() {
+  const sebanggo = ozeSebanggo();
+  if (!sebanggo) { ozeToast('先に背番号を選んでください / Choose the 背番号 first'); return; }
+  const raw = await ozeNumberPad('スペアの数量 / Spare quantity', 'スペアから箱に入れる数 (個) / Pieces taken from spare into the next box', '');
+  if (raw == null) return;
+  const pieces = parseInt(raw, 10);
+  if (!(pieces > 0)) { ozeToast('数量を入力してください / Enter a count above 0'); return; }
+  const full = parseInt(document.getElementById('収容数')?.value, 10) || 0;
+  if (full && pieces >= full) {
+    const ok = await ozeDialog('確認 / Check', `スペア ${pieces} 個は収容数 ${full} 以上です。<br>Spare ${pieces} pcs is a full box (${full}) or more.`,
+      [{ label: 'このまま追加 / Add anyway', value: 'yes', kind: 'warn' }, { label: 'キャンセル / Cancel', value: 'no', kind: 'plain' }]);
+    if (ok !== 'yes') return;
+  }
+  let run = getOzeRun(sebanggo);
+  const lots = ozeKnownLots(run);
+  const pick = await ozeDialog(`スペアのロット番号 / Spare lot number`, `${pieces} 個 / pcs`,
+    lots.map((l, i) => ({ label: ozeEsc(l), value: 'lot:' + i, kind: 'plain' }))
+      .concat([{ label: '他のロット (入力) / Other lot (type it)', value: 'other', kind: 'warn' }, { label: 'キャンセル / Cancel', value: 'cancel', kind: 'plain' }]));
+  let lotNumber = null;
+  if (pick && pick.startsWith('lot:')) lotNumber = lots[parseInt(pick.slice(4), 10)];
+  else if (pick === 'other') lotNumber = await ozeNumberPad('スペアのロット番号 / Spare lot number', `${pieces} 個 / pcs`, '', true);
+  if (!lotNumber || !String(lotNumber).trim()) return;
+  run = getOzeRun(sebanggo);
+  run.spare.push({ id: ozeUid('sp-'), pieces, lotNumber: String(lotNumber).trim(), at: new Date().toISOString(), worker: document.getElementById('Machine Operator')?.value || '', used: false, boxId: null });
+  writeOzeRun(run);
+  logTabletAction('Spare added (OZE)', 'in-progress', { pieces, lotNumber }).catch(() => { });
+  ozeRefreshSpareField();
+}
+async function ozeOpenSpareManager() {
+  for (;;) {
+    const run = getOzeRun(ozeSebanggo());
+    const rows = run.spare.map((s, i) => `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid #eee;">` +
+      `<span><b>${s.pieces}</b> 個 · ${ozeEsc(s.lotNumber)}</span><span style="color:#555;font-size:14px;">${s.used ? '→ ' + ozeEsc(s.boxId || 'IDなし / no ID') : '次の箱 / next box'}</span></div>`).join('');
+    const pending = ozePendingSpare(run);
+    const html = (rows || '<div style="color:#777;">なし / None</div>') +
+      `<div style="text-align:right;font-weight:800;margin-top:8px;">次の箱に入る / Goes into the next box: ${ozeSum(pending, 'pieces')} 個</div>` +
+      '<div style="color:#555;font-size:13px;margin-top:6px;">スペアは加工数に含まれません / Spare is not part of Process Quantity.</div>';
+    const buttons = [{ label: '＋ 追加 / Add', value: 'add', kind: 'primary' }]
+      .concat(run.spare.map((s, i) => s.used ? null : { label: `✕ 削除 ${s.pieces} 個 · ${ozeEsc(s.lotNumber)} / Remove`, value: 'del:' + s.id, kind: 'danger' }).filter(Boolean))
+      .concat([{ label: '閉じる / Close', value: 'close', kind: 'plain' }]);
+    const v = await ozeDialog('スペアからの部分数 / Partial from spare', html, buttons);
+    if (v === 'add') { await ozeAddSpare(); continue; }
+    if (v && v.startsWith('del:')) {
+      const r = getOzeRun(ozeSebanggo());
+      r.spare = r.spare.filter(s => s.used || s.id !== v.slice(4));
+      writeOzeRun(r);
+      ozeRefreshSpareField();
+      continue;
+    }
+    return;
+  }
+}
+function ozeMountSpareField() {
+  if (!isOzeBoxPage() || document.getElementById('ozePartialSpare')) return;
+  const pq = document.getElementById('ProcessQuantity');
+  const group = pq && pq.closest('.form-group');
+  if (!group) return;
+  const box = document.createElement('div');
+  box.className = 'form-group';
+  box.id = 'ozePartialSpareGroup';
+  box.innerHTML = '<label for="ozePartialSpare">スペアからの部分数 / Partial from spare</label>' +
+    '<input type="text" id="ozePartialSpare" class="tap-field" readonly placeholder="0">';
+  group.parentNode.insertBefore(box, group.nextSibling);
+  document.getElementById('ozePartialSpare').addEventListener('click', ozeOpenSpareManager);
+  ozeRefreshSpareField();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ozeMountSpareField);
+else setTimeout(ozeMountSpareField, 0);
+
+// Submit check: every good piece should be in a printed box or kept as spare. true = go on with the submit.
+window.ozeCheckBoxesBeforeSubmit = async function () {
+  if (!isOzeBoxPage()) return true;
+  const run = readOzeRun();
+  if (!run || !Array.isArray(run.prints) || !run.prints.length) return true; // no labels printed for this item: nothing to check
+  const r = getOzeRun(ozeSebanggo());
+  const good = ozeGoodNow();
+  const boxed = ozeBoxedPieces(r);
+  const full = parseInt(document.getElementById('収容数')?.value, 10) || 0;
+  const spareEl = document.getElementById('在庫');
+  const kept = parseInt(spareEl?.value, 10) || 0;
+  const left = good - boxed;
+
+  const pending = ozePendingSpare(r);
+  if (pending.length) {
+    const v = await ozeDialog('箱に入っていないスペア / Spare not in a box',
+      `スペア ${ozeSum(pending, 'pieces')} 個 (${pending.map(s => ozeEsc(s.lotNumber)).join(', ')}) は、まだどの箱にも入っていません。<br>` +
+      `Spare ${ozeSum(pending, 'pieces')} pcs was added but no label was printed after it.`,
+      [{ label: '戻る (ラベルを印刷) / Back (print a label)', value: 'back', kind: 'primary' },
+       { label: 'スペアを削除して送信 / Remove the spare and submit', value: 'drop', kind: 'warn' }]);
+    if (v !== 'drop') return false;
+    r.spare = r.spare.filter(s => s.used);
+    writeOzeRun(r);
+    ozeRefreshSpareField();
+  }
+
+  if (left > 0 && kept !== left) {
+    const lines = `良品 / Good: <b>${good}</b> 個<br>印刷した箱 / In printed boxes: <b>${boxed}</b> 個 (${r.prints.length} 箱 / boxes)<br>` +
+      `<span style="color:#b45309;font-weight:800;">箱に入っていない / Not in a box: ${left} 個</span>`;
+    const buttons = [];
+    if (!full || left < full) buttons.push({ label: `部分箱 ${left} 個を印刷<br><small>Print a partial box of ${left}</small>`, value: 'print', kind: 'primary' });
+    else buttons.push({ label: `ラベルを印刷 (満杯の箱)<br><small>Print a label (full box) — ${left} pcs are not boxed</small>`, value: 'printfull', kind: 'primary' });
+    buttons.push({ label: `スペア (在庫) として保管: ${left} 個<br><small>Keep ${left} pcs as spare (在庫)</small>`, value: 'spare', kind: 'warn' });
+    buttons.push({ label: '戻る / Back', value: 'back', kind: 'plain' });
+    const v = await ozeDialog('残りがあります / Pieces left over', lines, buttons);
+    if (v === 'print' || v === 'printfull') {
+      if (v === 'print') window.__ozeForceBoxQty = left;
+      if (typeof printLabel === 'function') printLabel();
+      ozeToast('印刷後にもう一度送信してください / Submit again after the label is printed', 5000);
+      return false;
+    }
+    if (v !== 'spare') return false;
+    if (spareEl) { spareEl.value = String(left); try { spareEl.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { } }
+    r.leftover = { pieces: left, lots: ozeLotsSinceLastPrint(r.lastPrintAt), at: new Date().toISOString() };
+    writeOzeRun(r);
+  } else if (left <= 0 && r.leftover) {
+    delete r.leftover; writeOzeRun(r);
+  }
+
+  if (left < 0) {
+    const v = await ozeDialog('ラベルが多すぎます / More labels than pieces',
+      `印刷した箱 / In printed boxes: <b>${boxed}</b> 個<br>良品 / Good: <b>${good}</b> 個<br>` +
+      `<span style="color:#dc2626;font-weight:800;">${-left} 個多い / ${-left} pcs too many</span><br>` +
+      'ショット数・不良数・部分箱を確認してください。<br>Check the shot count, the defects and partial boxes.',
+      [{ label: '戻って確認 / Back to check', value: 'back', kind: 'primary' },
+       { label: 'このまま送信 / Submit anyway', value: 'go', kind: 'danger' }]);
+    if (v !== 'go') return false;
+    r.mismatch = { labelled: boxed, good, at: new Date().toISOString() };
+    writeOzeRun(r);
+    logTabletAction('Submit with more labels than pieces', 'in-progress', r.mismatch).catch(() => { });
+  } else if (r.mismatch) {
+    delete r.mismatch; writeOzeRun(r);
+  }
+  return true;
+};
 
 function sendBrotherPrint(query) {
   const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
@@ -7587,6 +7963,14 @@ document.getElementById('submit').addEventListener('click', async (event) => {
     if (!proceed) return;
   }
 
+  // OZE: every good piece in a printed box (or kept as spare); catches forgotten, early and extra labels
+  if (typeof window.ozeCheckBoxesBeforeSubmit === 'function' && !window.SCNA) {
+    if (document.querySelector('.oze-dialog')) return;
+    let proceed = true;
+    try { proceed = await window.ozeCheckBoxesBeforeSubmit(); } catch (e) { console.warn('OZE box check failed:', e); }
+    if (!proceed) return;
+  }
+
   uploadingModal.style.display = 'flex';
   updateUploadProgress(0, '');
 
@@ -8182,6 +8566,8 @@ document.getElementById('submit').addEventListener('click', async (event) => {
 
     // Clear session ONLY after successful submission
     clearSessionID();
+    // OZE: the boxes now belong to this record; a reload before the reset must not carry them into the next record
+    if (typeof window.clearOzeRun === 'function' && !window.SCNA) window.clearOzeRun();
 
     // Clear stop-call events so they are not re-submitted after the reload
     if (typeof window.clearStopCallData === 'function') window.clearStopCallData();
