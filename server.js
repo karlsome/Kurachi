@@ -29240,6 +29240,98 @@ app.post("/api/scna-boxes", async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// OZE box IDs (小瀬 / non-SCNA DCP interactive). OZE has NO work orders, so the ID is always
+// <背番号>-<YYYYMMDD JST>-B<seq>, from its own counter (ozeBoxCounters) in its own collection (ozeBoxDB);
+// SCNA's scnaBoxDB is not touched. One label print = one box. boxUid comes from the tablet, so a retry
+// of the same print returns the same box instead of making a second one.
+// ---------------------------------------------------------------------------
+let _ozeBoxIndexesReady = false;
+async function _ensureOzeBoxIndexes() {
+  if (_ozeBoxIndexesReady) return;
+  const col = client.db(DB_NAME).collection("ozeBoxDB");
+  await col.createIndex({ boxUid: 1 }, { unique: true });
+  await col.createIndex({ boxId: 1 }, { unique: true });
+  await col.createIndex({ runId: 1 });
+  await col.createIndex({ 背番号: 1, printedAt: -1 });
+  _ozeBoxIndexesReady = true;
+}
+const _OZE_BOX_FIELDS = [
+  "runId", "背番号", "品番", "モデル", "machines", "factory", "worker", "printedAt", "qtyLabel", "lots", "productionLot"
+];
+
+app.post("/api/oze-boxes", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const boxUid = String(body.boxUid || "").trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(boxUid)) return res.status(400).json({ error: "boxUid is required (8-64 letters, numbers, _ or -)" });
+    const sebanggo = String(body.背番号 || "").trim();
+    if (!sebanggo) return res.status(400).json({ error: "背番号 is required" });
+    if (body.lots !== undefined && !Array.isArray(body.lots)) return res.status(400).json({ error: "lots must be an array" });
+
+    await client.connect();
+    await _ensureOzeBoxIndexes();
+    const db = client.db(DB_NAME);
+    const col = db.collection("ozeBoxDB");
+
+    const existing = await col.findOne({ boxUid });
+    if (existing) return res.json({ ...existing, existing: true });
+
+    const ymd = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+    const key = `${sebanggo}-${ymd}`.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+    const counter = await db.collection("ozeBoxCounters").findOneAndUpdate(
+      { _id: key }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" }
+    );
+    const seq = (counter && (counter.value ? counter.value.seq : counter.seq)) || 1;
+
+    const doc = { boxId: `${key}-B${String(seq).padStart(3, "0")}`, boxUid, seq };
+    for (const f of _OZE_BOX_FIELDS) if (body[f] !== undefined) doc[f] = body[f];
+    doc.lots = Array.isArray(doc.lots) ? doc.lots : [];
+    doc.createdAt = new Date().toISOString();
+
+    try {
+      await col.insertOne(doc);
+    } catch (e) {
+      if (e && e.code === 11000) {   // same boxUid arrived twice at once: return the first
+        const again = await col.findOne({ boxUid });
+        if (again) return res.json({ ...again, existing: true });
+      }
+      throw e;
+    }
+    res.status(201).json(doc);
+  } catch (error) {
+    console.error("❌ Error saving OZE box:", error);
+    res.status(500).json({ error: "Failed to save box", details: error.message });
+  }
+});
+
+app.get("/api/oze-boxes/:boxId", async (req, res) => {
+  try {
+    await client.connect();
+    const doc = await client.db(DB_NAME).collection("ozeBoxDB").findOne({ boxId: String(req.params.boxId || "").trim() });
+    if (!doc) return res.status(404).json({ error: "Box not found" });
+    res.json(doc);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to load box", details: error.message });
+  }
+});
+
+// ?runId=… (all boxes of one run, in print order) or ?背番号=… (latest first)
+app.get("/api/oze-boxes", async (req, res) => {
+  try {
+    const runId = String(req.query.runId || "").trim();
+    const sebanggo = String(req.query.背番号 || "").trim();
+    if (!runId && !sebanggo) return res.status(400).json({ error: "runId or 背番号 is required" });
+    await client.connect();
+    const filter = runId ? { runId } : { 背番号: sebanggo };
+    const list = await client.db(DB_NAME).collection("ozeBoxDB").find(filter)
+      .sort(runId ? { printedAt: 1, seq: 1 } : { printedAt: -1 }).limit(500).toArray();
+    res.json(list);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to list boxes", details: error.message });
+  }
+});
+
 app.get("/api/scna-boxes/:boxId", async (req, res) => {
   try {
     await client.connect();

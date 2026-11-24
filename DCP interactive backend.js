@@ -5844,7 +5844,7 @@ async function printLabel() {
         `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
       console.log(WorkDate);
-      sendBrotherPrint(query); // iOS: brotherwebprint:// · Android: localhost:8088
+      sendLabelWithOzeBoxId(query, 品番収容数, value); // iOS: brotherwebprint:// · Android: localhost:8088
     }
 
     return; // Stop the submission process until user chooses 収容数
@@ -5898,7 +5898,7 @@ async function printLabel() {
     `&barcode_barcode=${encodeURIComponent(品番収容数)}`;
 
   console.log(WorkDate);
-  sendBrotherPrint(query);
+  sendLabelWithOzeBoxId(query, 品番収容数, 収容数);
 }
 
 // Take photo hatsumono and atomono and label
@@ -5966,6 +5966,96 @@ window.setPrintBtnState = setPrintBtnState;
 // Legacy aliases — keep them functional for any external callers
 function showPrintingIndicator() { setPrintBtnState('printing'); }
 function hidePrintingIndicator() { /* handled by setPrintBtnState */ }
+
+// ── OZE box IDs (小瀬 / non-SCNA; OZE has no work orders) ────────────────────────────────────
+// Every Brother label print is one box: the server issues <背番号>-<YYYYMMDD>-B<seq> (POST /api/oze-boxes)
+// and it is appended to the QR: 品番,収容数  ->  品番,収容数,<boxId>  (first two fields unchanged).
+// Server unreachable (or older server): the label prints with the old QR and a warning; the line never stops.
+// The run (Run_ID + Box_IDs) lives on this tablet until submit / reset and goes into the press record.
+function isOzeBoxPage() {
+  try { return getQueryParam('filter') !== 'SCNA' && !window.SCNA; } catch (e) { return false; }
+}
+function ozeRunKey() { return `${uniquePrefix}ozeRun`; }
+function readOzeRun() {
+  try { return JSON.parse(localStorage.getItem(ozeRunKey()) || 'null'); } catch (e) { return null; }
+}
+function writeOzeRun(run) {
+  try { localStorage.setItem(ozeRunKey(), JSON.stringify(run)); } catch (e) { }
+}
+function ozeUid(prefix) {
+  return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+window.clearOzeRun = function () { try { localStorage.removeItem(ozeRunKey()); } catch (e) { } };
+window.getOzeRunPayload = function () {
+  const run = readOzeRun();
+  return run && run.runId && Array.isArray(run.boxIds) && run.boxIds.length ? { Run_ID: run.runId, Box_IDs: run.boxIds.slice() } : {};
+};
+
+// Material lot(s) in use right now: the open lot of each machine (no shots yet), else each machine's last lot
+function currentOzeLots() {
+  try {
+    const lp = typeof window.buildLotProductionPayload === 'function' ? window.buildLotProductionPayload() : null;
+    const list = lp && Array.isArray(lp.Lot_Details) ? lp.Lot_Details : [];
+    const open = list.filter(l => l.shots == null);
+    const pick = open.length ? open : Object.values(list.reduce((m, l) => { m[l.machine || ''] = l; return m; }, {}));
+    return pick.map(l => ({ lotNumber: l.lotNumber, machine: l.machine || null, materialSeiban: l.materialSeiban || null }));
+  } catch (e) { return []; }
+}
+
+async function issueOzeBoxId(qtyLabel) {
+  const sebanggo = document.getElementById('sub-dropdown')?.value || '';
+  if (!sebanggo) return null;
+  let run = readOzeRun();
+  if (!run || !run.runId || run.背番号 !== sebanggo) run = { runId: ozeUid('run-'), 背番号: sebanggo, boxIds: [], startedAt: new Date().toISOString() };
+  const body = {
+    boxUid: ozeUid('box-'),
+    runId: run.runId,
+    背番号: sebanggo,
+    品番: document.getElementById('product-number')?.value || '',
+    モデル: document.getElementById('model')?.value || '',
+    machines: String(document.getElementById('process')?.value || selectedMachine || '').split(',').map(m => m.trim()).filter(Boolean),
+    factory: getQueryParam('filter') || '',
+    worker: document.getElementById('Machine Operator')?.value || '',
+    printedAt: new Date().toISOString(),
+    qtyLabel: parseInt(qtyLabel, 10) || null,
+    productionLot: document.getElementById('Lot No.')?.value || '',
+    lots: currentOzeLots(),
+  };
+  const res = await fetch(`${serverURL}/api/oze-boxes`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const doc = await res.json();
+  if (!doc || !doc.boxId) throw new Error('no boxId');
+  if (!run.boxIds.includes(doc.boxId)) run.boxIds.push(doc.boxId);
+  writeOzeRun(run);
+  return doc.boxId;
+}
+
+// Print with the box ID appended to the QR value (qrBase = "品番,収容数" exactly as it is in the query)
+async function sendLabelWithOzeBoxId(query, qrBase, qtyLabel) {
+  if (!isOzeBoxPage()) { sendBrotherPrint(query); return; }
+  setPrintBtnState('printing');
+  let boxId = null;
+  try {
+    boxId = await issueOzeBoxId(qtyLabel);
+  } catch (err) {
+    console.warn('OZE box ID not issued, printing without it:', err);
+  }
+  if (boxId) {
+    const oldParam = `&barcode_barcode=${encodeURIComponent(qrBase)}`;
+    const newParam = `&barcode_barcode=${encodeURIComponent(`${qrBase},${boxId}`)}`;
+    query = query.includes(oldParam) ? query.replace(oldParam, newParam) : query;
+    console.log('🏷️ OZE box ID:', boxId);
+    logTabletAction('Label printed with box ID', 'Completed', { boxId, qr: `${qrBase},${boxId}` }).catch(() => { });
+  } else {
+    const msg = 'ボックスIDなしで印刷しました (サーバー未接続) / Printed without a box ID (server unreachable)';
+    if (typeof window.showAppToast === 'function') window.showAppToast(msg, 5000);
+    logTabletAction('Label printed without box ID', 'in-progress', { qr: qrBase }).catch(() => { });
+  }
+  sendBrotherPrint(query);
+}
 
 function sendBrotherPrint(query) {
   const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
@@ -7983,6 +8073,13 @@ document.getElementById('submit').addEventListener('click', async (event) => {
         if (_lp.totalShots > 0) dcpSubmissionData.ショット数 = _lp.totalShots;
       }
     } catch (e) { console.warn('Lot production payload build failed:', e); }
+
+    // OZE box traceability (non-SCNA; SCNA sends its own Run_ID / Box_IDs): the labels printed in this run
+    try {
+      if (!window.SCNA && getQueryParam('filter') !== 'SCNA' && typeof window.getOzeRunPayload === 'function') {
+        Object.assign(dcpSubmissionData, window.getOzeRunPayload());
+      }
+    } catch (e) { console.warn('OZE run payload failed:', e); }
 
     // Grouped tablet (non-SCNA; SCNA rewrites its own payload): NG per machine per lot, and 設備 = only the
     // machines that ran (a machine blocked by its checklist all shift has no lot).
@@ -12186,6 +12283,7 @@ function closeAllStepModals() {
 // Function to reset all steps
 function resetAllSteps() {
   closeAllStepModals();
+  if (typeof window.clearOzeRun === 'function') window.clearOzeRun(); // new item = new run of box IDs
 
   // Clear sub-dropdown
   const subDropdown = document.getElementById('sub-dropdown');
