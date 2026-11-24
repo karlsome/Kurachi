@@ -9499,6 +9499,9 @@ app.post('/api/approval-paginate', async (req, res) => {
     const offsetHours = -timezoneOffset / 60;
     const offsetSign = offsetHours >= 0 ? '+' : '';
     const offsetString = `${offsetSign}${String(Math.floor(Math.abs(offsetHours))).padStart(2, '0')}:${String(Math.round((Math.abs(offsetHours) % 1) * 60)).padStart(2, '0')}`;
+    // Date/time mismatch checks compare the typed Date/Time with the save time in the RECORD's factory clock:
+    // SCNA (Indiana) types its own local time, so its save time is read in America/Indiana/Indianapolis.
+    const recordTimezone = { $cond: [{ $eq: ['$工場', 'SCNA'] }, 'America/Indiana/Indianapolis', offsetString] };
 
     // Add non-date filters
     Object.keys(filters).forEach(key => {
@@ -9542,13 +9545,13 @@ app.post('/api/approval-paginate', async (req, res) => {
             $dateToString: {
               format: "%Y-%m-%d",
               date: { $toDate: "$_id" },
-              timezone: offsetString,
+              timezone: recordTimezone,
             }
           },
           // Flag if user-entered Date doesn't match ObjectId date
           _hasDateMismatch: {
             $cond: {
-              if: { $ne: ["$Date", { $dateToString: { format: "%Y-%m-%d", date: { $toDate: "$_id" }, timezone: offsetString } }] },
+              if: { $ne: ["$Date", { $dateToString: { format: "%Y-%m-%d", date: { $toDate: "$_id" }, timezone: recordTimezone } }] },
               then: 1,
               else: 0
             }
@@ -9558,7 +9561,7 @@ app.post('/api/approval-paginate', async (req, res) => {
             $dateToString: {
               format: "%H:%M",
               date: { $toDate: "$_id" },
-              timezone: offsetString,
+              timezone: recordTimezone,
             }
           },
           // Flag if Time_end is off by more than 30 minutes
@@ -9594,7 +9597,7 @@ app.post('/api/approval-paginate', async (req, res) => {
                                         $dateToString: {
                                           format: "%H",
                                           date: { $toDate: "$_id" },
-                                          timezone: offsetString,
+                                          timezone: recordTimezone,
                                         }
                                       }
                                     },
@@ -9606,7 +9609,7 @@ app.post('/api/approval-paginate', async (req, res) => {
                                     $dateToString: {
                                       format: "%M",
                                       date: { $toDate: "$_id" },
-                                      timezone: offsetString,
+                                      timezone: recordTimezone,
                                     }
                                   }
                                 }
