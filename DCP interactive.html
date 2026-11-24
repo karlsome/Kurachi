@@ -1485,6 +1485,8 @@
         /* Side by side on a tablet so page 2 fits without scrolling; stacked on narrow phones */
         .setup-check-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
         @media (max-width: 560px) { .setup-check-list { grid-template-columns: 1fr; } }
+        /* Press machines: release paper only, one card centred at a readable width */
+        .setup-check-list.single { grid-template-columns: minmax(0, 560px); justify-content: center; }
         /* Each card is tapped once the operator checked it on the machine (grey -> green tick) */
         .setup-check-card {
             border: 2px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-app);
@@ -4196,9 +4198,7 @@
                 return;
             }
             const confirmedKey = getParamsConfirmedKey();
-            // OZMANAS / KUNTAI: the トムソンボード scan is the last step; nothing to confirm on Params
-            const noSendMachine = typeof window.isOZMANASMachine === 'function' && window.isOZMANASMachine();
-            const confirmed = noSendMachine || localStorage.getItem(confirmedKey) === 'true';
+            const confirmed = localStorage.getItem(confirmedKey) === 'true';
             if (confirmed) {
                 window.paramsLocked = false;
                 window.paramsVisited = true;
@@ -8293,18 +8293,20 @@
                     if (!panel) return;
                     panel.innerHTML = '';
 
-                    // OZMANAS (and KUNTAI on SCNA): Step 3 is the トムソンボード scan and nothing can be sent
-                    // to the machine. The scan already unlocked the tabs, so offer "Go to Production" instead.
+                    // Press machines (setsubiDB machineType is not "CNC", e.g. OZMANAS, KUNTAI): Step 3 is the
+                    // トムソンボード scan and nothing can be sent. Offer the next page instead: Params until
+                    // "Values changed" is confirmed there, then Production.
                     const resendHint = document.getElementById('completedResendHint');
-                    const noSend = typeof window.isOZMANASMachine === 'function' && window.isOZMANASMachine();
+                    const noSend = typeof window.isPressMachine === 'function' && window.isPressMachine();
                     if (resendHint) resendHint.style.display = noSend ? 'none' : '';
                     if (noSend) {
+                        const paramsDone = typeof window.getParamsConfirmedKey === 'function' && localStorage.getItem(window.getParamsConfirmedKey()) === 'true';
                         const btn = document.createElement('button');
                         btn.type = 'button';
-                        btn.id = 'completedGoToProduction';
+                        btn.id = 'completedGoNext';
                         btn.className = 'btn btn-primary btn-full';
-                        btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M5 12h14M13 6l6 6-6 6"/></svg>' + _t('go_to_production_btn');
-                        btn.addEventListener('click', () => { if (typeof window.goToTab === 'function') window.goToTab(3); });
+                        btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M5 12h14M13 6l6 6-6 6"/></svg>' + _t(paramsDone ? 'go_to_production_btn' : 'go_to_params_btn');
+                        btn.addEventListener('click', () => { if (typeof window.goToTab === 'function') window.goToTab(paramsDone ? 3 : 2); });
                         panel.appendChild(btn);
                         return;
                     }

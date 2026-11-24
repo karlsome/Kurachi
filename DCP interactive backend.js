@@ -8434,7 +8434,7 @@ function updateSendToMachineCooldownUI() {
 
   setButtonCooldownState(mainButton, isActive, secondsRemaining);
   setButtonCooldownState(completedButton, isActive, secondsRemaining);
-  if (!isOZMANASMachine()) {
+  if (!isPressMachine()) {
     setButtonCooldownState(step3Button, isActive, secondsRemaining);
   }
 
@@ -11773,13 +11773,68 @@ function isOZMANASMachine() {
   return machineFromQuery === 'OZMANAS' || machineFromProcess === 'OZMANAS';
 }
 
+// ── Press or CNC? (Sasaki_Coating_MasterDB.setsubiDB machineType) ─────────────────────────
+// A machine is CNC when its 設備 record has machineType: "CNC" (OZNC.., NCC01). Every other machine is
+// a press: Step 3 is the トムソンボード scan, nothing is sent to the machine, and Params page 2 checks
+// the release paper only (no blade). A tablet with several machines is CNC only if all of them are.
+// When the lookup fails (offline, server down) the last answer saved on this tablet is used, and before
+// any answer the old name rule (OZMANAS / KUNTAI = press, else CNC), so a slow server never blocks an NC line.
+// SCNA tablets keep their own rules (the AOL lines are not tagged) and skip the lookup.
+const MACHINE_TYPE_CACHE_KEY = `DCP_machineType_${selectedMachine}`;
+function tabletMachineNames() {
+  return String(selectedMachine || '').split(',').map(m => m.trim()).filter(Boolean);
+}
+function readCachedMachineType() {
+  try { return localStorage.getItem(MACHINE_TYPE_CACHE_KEY) || ''; } catch (e) { return ''; }
+}
+// true = press (トムソンボード flow), false = CNC (send to machine)
+function isPressMachine() {
+  if (isOZMANASMachine()) return true; // OZMANAS (and KUNTAI via the SCNA override) are always press
+  if (getQueryParam('filter') === 'SCNA') return false;
+  const cached = readCachedMachineType();
+  if (cached === 'press') return true;
+  if (cached === 'CNC') return false;
+  return false; // no answer yet: old behaviour (send to machine)
+}
+window.isPressMachine = isPressMachine;
+
+async function refreshMachineTypeFromMaster() {
+  if (getQueryParam('filter') === 'SCNA') return;
+  const names = tabletMachineNames();
+  if (names.length === 0) return;
+  try {
+    const res = await fetch(`${serverURL}/queries`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dbName: 'Sasaki_Coating_MasterDB', collectionName: 'setsubiDB', query: { name: { $in: names } } }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const list = await res.json();
+    if (!Array.isArray(list)) throw new Error('bad response');
+    const isCnc = name => list.some(r => r && r.name === name && !r._archived && String(r.machineType || '').toUpperCase() === 'CNC');
+    const type = names.every(isCnc) ? 'CNC' : 'press';
+    const before = isPressMachine();
+    try { localStorage.setItem(MACHINE_TYPE_CACHE_KEY, type); } catch (e) { }
+    if (isPressMachine() !== before) {
+      console.log(`🏭 Machine type for ${names.join(',')}: ${type}`);
+      updateSendToMachineVisibility();
+      if (typeof window.buildCompletedSendPanel === 'function') window.buildCompletedSendPanel();
+      if (typeof window.refreshSetupCheckForMachineType === 'function') window.refreshSetupCheckForMachineType();
+    }
+  } catch (err) {
+    console.warn('setsubiDB machineType lookup failed, keeping', readCachedMachineType() || 'name rule', err);
+  }
+}
+window.refreshMachineTypeFromMaster = refreshMachineTypeFromMaster;
+document.addEventListener('DOMContentLoaded', () => { refreshMachineTypeFromMaster(); });
+
 function updateSendToMachineVisibility() {
   const sendToMachineButton = document.getElementById('sendtoNC');
   if (!sendToMachineButton) {
     return;
   }
 
-  const shouldHide = isOZMANASMachine();
+  const shouldHide = isPressMachine();
   sendToMachineButton.hidden = shouldHide;
   sendToMachineButton.style.display = shouldHide ? 'none' : '';
 }
@@ -12009,7 +12064,7 @@ function showStep3Modal() {
   const skipBtn = document.getElementById('btnSkipStep3Send');
   if (skipBtn) skipBtn.style.display = 'none';
 
-  if (isOZMANASMachine()) {
+  if (isPressMachine()) {
     if (title) {
       title.innerHTML = 'Step <span style="color: #f39c12;">3</span>: scan <strong>トムソンボード</strong> / トムソンボードスキャン';
     }
@@ -12052,7 +12107,7 @@ let step3BlockSignature = '';
 function refreshStep3ChecklistBlock() {
   const modal = document.getElementById('step3Modal');
   const button = document.getElementById('startStep3Send');
-  if (!modal || !button || isOZMANASMachine()) return;
+  if (!modal || !button || isPressMachine()) return;
   const machines = typeof window.getChecklistMachines === 'function' ? window.getChecklistMachines() : [];
   const blocked = machines.length > 1 && typeof window.getChecklistBlockedMachines === 'function'
     ? window.getChecklistBlockedMachines() : [];
@@ -12949,7 +13004,7 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
       return;
     }
 
-    if (isOZMANASMachine()) {
+    if (isPressMachine()) {
       const content = document.getElementById('step3Content');
       const instruction = content?.querySelector('p');
       const arrow = content?.querySelector('div');
@@ -13070,9 +13125,9 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
           // Close Step 3 modal (OZMANAS does not send command to machine at this step)
           document.getElementById('step3Modal').style.display = 'none';
 
-          // Scan done = production can start: unlock the tabs and go straight to Production
+          // Scan done: on to Params (feed pitch, then the release paper check), same as after a send
           if (typeof window.updateTabLock === 'function') window.updateTabLock();
-          if (typeof window.goToTab === 'function') window.goToTab(3);
+          if (typeof window.goToTab === 'function') window.goToTab(2);
         },
         () => {
           // Ignore scan frame errors
@@ -19597,12 +19652,15 @@ if (manualSendModal) {
     try { return JSON.parse(localStorage.getItem(`${uniquePrefix}setupCheckMaster`) || 'null'); } catch (e) { return null; }
   }
 
+  // Press machines (not CNC) have no blade: page 2 checks the release paper only
+  const pressMachine = () => typeof window.isPressMachine === 'function' && window.isPressMachine();
+
   function readSetup(rec) {
     if (!rec) return { paper: '', blade: '' };
     const paperRaw = String(rec['離型紙上/下'] ?? rec['離型紙上下'] ?? '').trim();
     const paper = paperRaw.startsWith('上') || /^up$/i.test(paperRaw) ? 'up'
       : paperRaw.startsWith('下') || /^down$/i.test(paperRaw) ? 'down' : paperRaw;
-    return { paper, blade: String(rec['刃物'] ?? '').trim() };
+    return { paper, blade: pressMachine() ? '' : String(rec['刃物'] ?? '').trim() };
   }
 
   function fetchBlade(name) {
@@ -19645,7 +19703,7 @@ if (manualSendModal) {
   function updateConfirmEnabled() {
     const btn = document.getElementById('setupCheckConfirmBtn');
     if (!btn) return;
-    btn.disabled = !CARD_IDS.every(id => { const c = document.getElementById(id); return !c || c.classList.contains('checked'); });
+    btn.disabled = !CARD_IDS.every(id => { const c = document.getElementById(id); return !c || c.style.display === 'none' || c.classList.contains('checked'); });
   }
   function setAllChecked(checked) {
     CARD_IDS.forEach(id => { const c = document.getElementById(id); if (c) c.classList.toggle('checked', checked); });
@@ -19756,8 +19814,33 @@ if (manualSendModal) {
     }
   };
 
+  // Press: hide the blade card, paper card takes the full row; pager step 2 reads "Release paper"
+  function applyMachineTypeLayout() {
+    const press = pressMachine();
+    const bladeCard = document.getElementById('setupCheckBladeCard');
+    if (bladeCard) bladeCard.style.display = press ? 'none' : '';
+    const list = document.querySelector('#paramsPage2 .setup-check-list');
+    if (list) list.classList.toggle('single', press);
+    const s2Label = document.querySelector('#paramsPagerStep2 [data-i18n]');
+    if (s2Label) {
+      const key = press ? 'params_page_paper' : 'params_page_setup';
+      s2Label.setAttribute('data-i18n', key);
+      s2Label.textContent = tr(key, press ? '離型紙' : '離型紙・刃物');
+    }
+  }
+  window.refreshSetupCheckForMachineType = function () {
+    applyMachineTypeLayout();
+    const p2 = document.getElementById('paramsPage2');
+    if (p2 && p2.style.display !== 'none') {
+      const { paper, blade } = readSetup(getSetupMaster());
+      fillSetupPage(paper, blade);
+    }
+    updateConfirmEnabled();
+  };
+
   function fillSetupPage(paper, blade) {
     bindCards();
+    applyMachineTypeLayout();
     // 1. Release paper
     const paperValue = document.getElementById('setupCheckPaperValue');
     const paperImg = document.getElementById('setupCheckPaperImg');
