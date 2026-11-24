@@ -42874,6 +42874,11 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
             answersCount: Array.isArray(record.answers) ? record.answers.length : 0,
             answers: record.answers || [],
             linkedNgTickets: linkedNg,
+            // Leader Super Bypass (checklist skipped on the tablet)
+            skipped: !!record.skipped,
+            skippedBy: record.skippedBy || '',
+            skipReason: record.skipReason || '',
+            skippedAt: record.skippedAt || '',
           });
         }
       }
@@ -42883,6 +42888,7 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
     let completedCount = 0;
     let defectCount = 0;
     let pendingCount = 0;
+    let bypassedCount = 0;
 
     // Grouped setsubi entries ("OZNC04,OZNC06") are not checked any more (each machine is); keep such a row
     // only when it holds legacy group records for this day, otherwise it would show as pending forever.
@@ -42897,15 +42903,20 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
       const hasSubmissions = m.todaySubmissions.length > 0;
       const hasNG = m.todaySubmissions.some((s) => s.hasNG);
 
+      const hasBypass = m.todaySubmissions.some((s) => s.skipped);
+
       let status = 'pending';
       if (hasNG) {
         status = 'defect';
+      } else if (hasBypass) {
+        status = 'bypassed'; // a leader skipped (some of) today's checklist: not counted as a normal completion
       } else if (hasSubmissions) {
         status = 'completed';
       }
       // Legacy group rows are shown but kept out of the machine KPIs (they are not a machine)
       if (!m.legacyGroup) {
         if (status === 'defect') defectCount += 1;
+        else if (status === 'bypassed') bypassedCount += 1;
         else if (status === 'completed') completedCount += 1;
         else pendingCount += 1;
       }
@@ -42925,6 +42936,7 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
         factory: m.factory,
         status,
         hasNG,
+        hasBypass,
         submissionCount: m.todaySubmissions.length,
         primarySubmission: primary,
         submissions: sortedSubmissions,
@@ -42934,7 +42946,7 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
     });
 
     // Sort machine list: Defect (NG) first, then Pending, then Completed
-    const statusPriority = { defect: 0, pending: 1, completed: 2 };
+    const statusPriority = { defect: 0, bypassed: 0.5, pending: 1, completed: 2 };
     machineList.sort((a, b) => {
       const pDiff = statusPriority[a.status] - statusPriority[b.status];
       if (pDiff !== 0) return pDiff;
@@ -42950,6 +42962,7 @@ app.get('/api/check-forms/today-overview', async (req, res) => {
         completedCount,
         defectCount,
         pendingCount,
+        bypassedCount,
       },
       machines: machineList,
     });
