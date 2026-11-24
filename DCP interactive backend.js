@@ -13069,6 +13069,10 @@ document.getElementById('startStep3Send').addEventListener('click', async functi
 
           // Close Step 3 modal (OZMANAS does not send command to machine at this step)
           document.getElementById('step3Modal').style.display = 'none';
+
+          // Scan done = production can start: unlock the tabs and go straight to Production
+          if (typeof window.updateTabLock === 'function') window.updateTabLock();
+          if (typeof window.goToTab === 'function') window.goToTab(3);
         },
         () => {
           // Ignore scan frame errors

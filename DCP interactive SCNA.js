@@ -2659,9 +2659,10 @@
       window.isOZMANASMachine = widened;
     });
 
-    // The completed card also offers 「Send to Machine」: not for this machine.
+    // No 「Send to Machine」 for this machine. The completed card's panel shows 「Go to Production」
+    // instead (it follows isOZMANASMachine), so only the old #sendtoNC button is hidden here.
     var kuntaiCss = document.createElement('style');
-    kuntaiCss.textContent = '#sendtoNC, #completedSendPanel { display: none !important; }';
+    kuntaiCss.textContent = '#sendtoNC { display: none !important; }';
     document.head.appendChild(kuntaiCss);
   }
 
