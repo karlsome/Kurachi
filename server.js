@@ -29136,6 +29136,9 @@ app.delete("/api/scna-nc-programs/:id", async (req, res) => {
 
 // ==================== END SCNA NC PROGRAMS ====================
 
+// CCD mark app (ioT/ccd_mark on the cutter miniPC): recipes + per-sheet mark results backup
+require("./ccdMark").registerCcdMarkRoutes(app, client, { dbName: DB_NAME, bucket: () => admin.storage().bucket() });
+
 // ==================== SCNA LABEL LAYOUTS ====================
 // Layouts drawn in freyaAdmin2 (SCNA > Label Designer). The miniPC print server
 // (print_DBprinter.py) reads them straight from the `labelLayouts` collection via /queries:
