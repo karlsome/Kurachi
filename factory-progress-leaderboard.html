@@ -82,10 +82,10 @@
             border: 1px solid var(--tile-border);
             border-radius: 14px;
             display: grid;
-            grid-template-columns: clamp(170px, 20vw, 440px) 1fr minmax(0, 2fr) clamp(170px, 20vw, 440px);
+            grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1.2fr);
             align-items: center;
-            gap: 1vw;
-            padding: 0 1.4vw;
+            gap: 0.8vw;
+            padding: 0 1.2vw;
             min-height: 0;
             transition: background 0.3s ease;
         }
@@ -188,6 +188,26 @@
             max-width: 100%;
         }
 
+        .next {
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: center;
+        }
+
+        .next .code {
+            font-weight: 800;
+            font-size: clamp(13px, 2.9vh, 45px);
+            line-height: 1;
+            color: var(--muted);
+            white-space: nowrap;
+            transform-origin: left center;
+        }
+
+        .counts .boxes {
+            margin-left: 0.8em;
+            color: var(--text);
+        }
+
         .next .val.empty {
             color: var(--muted);
             font-size: clamp(18px, 3vh, 32px);
@@ -267,6 +287,39 @@
         const EXCLUDED_MACHINES = new Set([
             'OZNC11', 'OZNC12', 'OZNC13', 'OZNC14', 'OZNC15', 'OZNC16'
         ]);
+
+        // masterDB lookups (背番号 -> 材料背番号 / 収容数). Changes rarely, so cache
+        // client-side and only ask the server about serials we haven't seen yet.
+        const masterCache = new Map();
+        async function loadMaster(serials) {
+            const missing = [...new Set(serials)].filter(s => !masterCache.has(s));
+            if (missing.length) {
+                try {
+                    const res = await fetch(`${SERVER}/api/masterdb/data`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            collectionName: 'masterDB',
+                            query: { 背番号: { $in: missing } },
+                            projection: { 背番号: 1, 材料背番号: 1, 収容数: 1, 工場: 1, _id: 0 }
+                        })
+                    });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const docs = await res.json();
+                    for (const s of missing) {
+                        const matches = docs.filter(d => d['背番号'] === s);
+                        const d = matches.find(x => x['工場'] === FACTORY) || matches[0];
+                        masterCache.set(s, {
+                            materialCode: d ? String(d['材料背番号'] || '') : '',
+                            perBox: d ? Number(d['収容数']) || 0 : 0
+                        });
+                    }
+                } catch (e) {
+                    console.warn('masterDB lookup failed', e);
+                }
+            }
+            return masterCache;
+        }
 
         async function loadData() {
             const date = todayStr();
@@ -354,6 +407,11 @@
                 entries.delete(idB);
             }
 
+            // Look up 材料背番号 / 収容数 from masterDB for every serial on the board.
+            const master = await loadMaster(
+                [...entries.values()].flatMap(e => [e.serial, e.nextSerial]).filter(Boolean)
+            );
+
             const rows = [];
             for (const entry of entries.values()) {
                 const pct = Math.max(0, Math.min(100, (entry.pieces / entry.plannedQty) * 100));
@@ -368,7 +426,12 @@
                     pieces: entry.pieces,
                     plannedQty: entry.plannedQty,
                     pct,
-                    nextSerial: entry.nextSerial
+                    nextSerial: entry.nextSerial,
+                    nextMaterialCode: (master.get(entry.nextSerial) || {}).materialCode || '',
+                    boxes: (() => {
+                        const per = (master.get(entry.serial) || {}).perBox;
+                        return per > 0 ? Math.ceil(entry.plannedQty / per) : null;
+                    })()
                 });
             }
 
@@ -414,12 +477,13 @@
                         <div class="bar-fill ${barClass}" style="width:${data.pct.toFixed(1)}%"></div>
                         <div class="bar-label">${data.pct.toFixed(0)}%</div>
                     </div>
-                    <div class="counts">${data.pieces.toLocaleString()} / ${data.plannedQty.toLocaleString()}</div>
+                    <div class="counts">${data.pieces.toLocaleString()} / ${data.plannedQty.toLocaleString()}${data.boxes ? `<span class="boxes">${data.boxes.toLocaleString()}箱</span>` : ''}</div>
                 `;
 
                 const next = document.createElement('div');
                 next.className = 'next';
-                next.innerHTML = `<div class="val ${data.nextSerial ? '' : 'empty'}">${data.nextSerial || 'なし'}</div>`;
+                next.innerHTML = `<div class="val ${data.nextSerial ? '' : 'empty'}">${data.nextSerial || 'なし'}</div>` +
+                    (data.nextMaterialCode ? `<div class="code">${data.nextMaterialCode}</div>` : '');
 
                 row.appendChild(machine);
                 row.appendChild(material);
@@ -427,6 +491,20 @@
                 row.appendChild(next);
                 board.appendChild(row);
             }
+            fitCodes();
+        }
+
+        // Stretch each material code horizontally so it spans the same width as the
+        // material name above it.
+        function fitCodes() {
+            document.querySelectorAll('.next').forEach(n => {
+                const val = n.querySelector('.val');
+                const code = n.querySelector('.code');
+                if (!val || !code) return;
+                code.style.transform = '';
+                const target = val.scrollWidth, own = code.scrollWidth;
+                if (target > 0 && own > 0) code.style.transform = `scaleX(${Math.min(target / own, 3).toFixed(3)})`;
+            });
         }
 
         async function tick() {
