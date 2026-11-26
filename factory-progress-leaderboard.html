@@ -180,12 +180,11 @@
 
         .next .val {
             font-weight: 900;
-            font-size: clamp(26px, 5.8vh, 90px);
-            color: #FFD60A;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            font-size: clamp(13px, 2.9vh, 45px);
+            line-height: 1;
+            color: var(--muted);
             white-space: nowrap;
-            max-width: 100%;
+            transform-origin: left center;
         }
 
         .next {
@@ -195,10 +194,9 @@
         }
 
         .next .code {
-            font-weight: 800;
-            font-size: clamp(13px, 2.9vh, 45px);
-            line-height: 1;
-            color: var(--muted);
+            font-weight: 900;
+            font-size: clamp(26px, 5.8vh, 90px);
+            color: #FFD60A;
             white-space: nowrap;
             transform-origin: left center;
         }
@@ -206,6 +204,12 @@
         .counts .boxes {
             margin-left: 0.8em;
             color: var(--text);
+        }
+
+        /* No material code to show: the number is all there is, so keep it prominent. */
+        .next .val:only-child {
+            font-size: clamp(26px, 5.8vh, 90px);
+            color: #FFD60A;
         }
 
         .next .val.empty {
@@ -368,7 +372,9 @@
                 const nextItem = curIdx >= 0 ? items[curIdx + 1] : null;
 
                 const plannedQty = curItem ? Number(curItem.quantity) || 0 : 0;
-                const pieces = Number(m.pieces) || 0;
+                // m.pieces is everything the machine cut (cycles x pcPerCycle), NG included.
+                // Show good pieces only: produced minus live NG count.
+                const pieces = Math.max(0, (Number(m.pieces) || 0) - (Number(m.ng) || 0));
                 if (plannedQty <= 0) continue;
 
                 entries.set(machineId, {
@@ -416,10 +422,6 @@
             for (const entry of entries.values()) {
                 const pct = Math.max(0, Math.min(100, (entry.pieces / entry.plannedQty) * 100));
 
-                // With no next material queued there's nothing to ready, so the row
-                // has no purpose on this board regardless of current progress — drop it.
-                if (!entry.nextSerial) continue;
-
                 rows.push({
                     label: entry.label,
                     serial: entry.serial,
@@ -428,14 +430,21 @@
                     pct,
                     nextSerial: entry.nextSerial,
                     nextMaterialCode: (master.get(entry.nextSerial) || {}).materialCode || '',
-                    boxes: (() => {
+                    ...(() => {
                         const per = (master.get(entry.serial) || {}).perBox;
-                        return per > 0 ? Math.ceil(entry.plannedQty / per) : null;
+                        if (!(per > 0)) return { boxes: null, currentBox: null };
+                        const boxes = Math.ceil(entry.plannedQty / per);
+                        // Box being filled right now: rounded up, so it starts at 1/x.
+                        const currentBox = Math.min(boxes, Math.max(1, Math.ceil(entry.pieces / per)));
+                        return { boxes, currentBox };
                     })()
                 });
             }
 
-            rows.sort((a, b) => b.pct - a.pct);
+            // Machines with a next job come first (by progress); those without
+            // a next job are shown below them, also by progress.
+            rows.sort((a, b) =>
+                (!!b.nextSerial - !!a.nextSerial) || (b.pct - a.pct));
             return rows.slice(0, TOP_N);
         }
 
@@ -477,7 +486,7 @@
                         <div class="bar-fill ${barClass}" style="width:${data.pct.toFixed(1)}%"></div>
                         <div class="bar-label">${data.pct.toFixed(0)}%</div>
                     </div>
-                    <div class="counts">${data.pieces.toLocaleString()} / ${data.plannedQty.toLocaleString()}${data.boxes ? `<span class="boxes">${data.boxes.toLocaleString()}箱</span>` : ''}</div>
+                    <div class="counts">${data.pieces.toLocaleString()} / ${data.plannedQty.toLocaleString()}${data.boxes ? `<span class="boxes">${data.currentBox.toLocaleString()}/${data.boxes.toLocaleString()}箱</span>` : ''}</div>
                 `;
 
                 const next = document.createElement('div');
@@ -494,16 +503,22 @@
             fitCodes();
         }
 
-        // Stretch each material code horizontally so it spans the same width as the
-        // material name above it.
+        // The material code (bottom, large, yellow) is the primary text: squeeze it
+        // to fit the column if needed, then stretch the material number above it
+        // horizontally so it spans the same width as the code.
         function fitCodes() {
             document.querySelectorAll('.next').forEach(n => {
                 const val = n.querySelector('.val');
                 const code = n.querySelector('.code');
                 if (!val || !code) return;
+                val.style.transform = '';
                 code.style.transform = '';
-                const target = val.scrollWidth, own = code.scrollWidth;
-                if (target > 0 && own > 0) code.style.transform = `scaleX(${Math.min(target / own, 3).toFixed(3)})`;
+                const avail = n.clientWidth, codeW = code.scrollWidth;
+                let codeScale = 1;
+                if (avail > 0 && codeW > avail) codeScale = avail / codeW;
+                if (codeScale < 1) code.style.transform = `scaleX(${codeScale.toFixed(3)})`;
+                const target = codeW * codeScale, own = val.scrollWidth;
+                if (target > 0 && own > 0) val.style.transform = `scaleX(${Math.min(target / own, 3).toFixed(3)})`;
             });
         }
 
