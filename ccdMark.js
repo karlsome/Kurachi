@@ -8,11 +8,12 @@
  *   GET  /api/ccd-mark/recipes?machine=     list (no recipe body)
  *   GET  /api/ccd-mark/recipes/:sebanggo?machine=   full recipe + pceURL (restore on a miniPC)
  *   GET  /api/ccd-mark/recipes/:sebanggo/history?machine=   replaced versions, newest first (no recipe body)
- *   POST /api/ccd-mark/cuts                 one finished sheet: mark differences + cut check result
- *   GET  /api/ccd-mark/cuts?machine=&sebanggo=&limit=
+ *   POST /api/ccd-mark/cuts                 one finished sheet: mark differences + deformation + cut check result
+ *   GET  /api/ccd-mark/cuts?machine=&sebanggo=&id=&from=&to=&limit=
  *
  * Collections: ccdMarkRecipesDB (one active doc per machine + 背番号; a replaced one is moved to
- * ccdMarkRecipesHistoryDB), ccdMarkCutsDB. PCE originals: Storage ccdMark/<machine>/<背番号>/<time>.pce,
+ * ccdMarkRecipesHistoryDB) in the master DB; finished sheets in submittedDB.ccdDB (one doc per machine + sheet
+ * ID CCD-yymmdd-nnn, the same table the miniPC shows; freyaAdmin2 reads it there). PCE originals: Storage ccdMark/<machine>/<背番号>/<time>.pce,
  * written only when the file changed (sha1).
  *
  * Version = recipe.updated || recipe.created (time of the last save on a PC). An upload older than the
@@ -24,7 +25,8 @@ const crypto = require("crypto");
 
 const RECIPES = "ccdMarkRecipesDB";
 const HISTORY = "ccdMarkRecipesHistoryDB";
-const CUTS = "ccdMarkCutsDB";
+const CUTS_DB = "submittedDB";
+const CUTS = "ccdDB";
 const NAME_RE = /^[\w\-.]+$/;
 
 function registerCcdMarkRoutes(app, client, { dbName, bucket }) {
@@ -146,10 +148,14 @@ function registerCcdMarkRoutes(app, client, { dbName, bucket }) {
       if (!NAME_RE.test(machine) || !b.date || !b.time) {
         return res.status(400).json({ error: "machine, date and time are required" });
       }
-      const col = (await db()).collection(CUTS);
-      // the miniPC retries until it gets an answer: one doc per machine + date + time
-      const key = { machine, date: String(b.date), time: String(b.time) };
-      const doc = { ...b, ...key, 背番号: String(b.sebanggo || ""), uploadedAt: new Date().toISOString() };
+      await client.connect();
+      const col = client.db(CUTS_DB).collection(CUTS);
+      // the miniPC retries until it gets an answer: one doc per machine + sheet ID (older rows without an ID:
+      // machine + date + time + reference - two references of one sheet are two rows)
+      const id = String(b.id || "");
+      const key = id ? { machine, id } : { machine, date: String(b.date), time: String(b.time), reference: String(b.reference || "") };
+      const doc = { ...b, ...key, date: String(b.date), time: String(b.time), 背番号: String(b.sebanggo || ""),
+        uploadedAt: new Date().toISOString() };
       delete doc.sebanggo;
       delete doc._id;
       await col.updateOne(key, { $set: doc }, { upsert: true });
@@ -165,8 +171,15 @@ function registerCcdMarkRoutes(app, client, { dbName, bucket }) {
       const q = {};
       if (req.query.machine) q.machine = machineOf(req.query.machine);
       if (req.query.sebanggo) q.背番号 = String(req.query.sebanggo);
+      if (req.query.id) q.id = String(req.query.id);
+      if (req.query.from || req.query.to) {
+        q.date = {};
+        if (req.query.from) q.date.$gte = String(req.query.from);
+        if (req.query.to) q.date.$lte = String(req.query.to);
+      }
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 2000);
-      const list = await (await db()).collection(CUTS).find(q)
+      await client.connect();
+      const list = await client.db(CUTS_DB).collection(CUTS).find(q)
         .sort({ date: -1, time: -1 }).limit(limit).toArray();
       res.json(list);
     } catch (error) {
