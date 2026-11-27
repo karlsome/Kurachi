@@ -7,12 +7,17 @@
  *   PUT  /api/ccd-mark/recipes/:sebanggo   {machine, recipe, pceName?, pceBase64?}  save / replace a recipe
  *   GET  /api/ccd-mark/recipes?machine=     list (no recipe body)
  *   GET  /api/ccd-mark/recipes/:sebanggo?machine=   full recipe + pceURL (restore on a miniPC)
+ *   GET  /api/ccd-mark/recipes/:sebanggo/history?machine=   replaced versions, newest first (no recipe body)
  *   POST /api/ccd-mark/cuts                 one finished sheet: mark differences + cut check result
  *   GET  /api/ccd-mark/cuts?machine=&sebanggo=&limit=
  *
  * Collections: ccdMarkRecipesDB (one active doc per machine + 背番号; a replaced one is moved to
  * ccdMarkRecipesHistoryDB), ccdMarkCutsDB. PCE originals: Storage ccdMark/<machine>/<背番号>/<time>.pce,
  * written only when the file changed (sha1).
+ *
+ * Version = recipe.updated || recipe.created (time of the last save on a PC). An upload older than the
+ * active cloud copy is refused (409) so a PC that was offline cannot overwrite a newer recipe; that PC
+ * downloads the newer one at its next sync instead.
  */
 
 const crypto = require("crypto");
@@ -33,6 +38,7 @@ function registerCcdMarkRoutes(app, client, { dbName, bucket }) {
     try {
       const sebanggo = req.params.sebanggo;
       const { recipe, pceName, pceBase64 } = req.body || {};
+      const from = String((req.body && req.body.from) || "").slice(0, 100);
       const machine = machineOf(req.body && req.body.machine);
       if (!NAME_RE.test(sebanggo) || !NAME_RE.test(machine)) {
         return res.status(400).json({ error: "valid 背番号 and machine are required" });
@@ -44,6 +50,10 @@ function registerCcdMarkRoutes(app, client, { dbName, bucket }) {
       const col = d.collection(RECIPES);
       const old = await col.findOne({ machine, 背番号: sebanggo, isActive: true });
       const now = new Date().toISOString();
+      const savedAt = String(recipe.updated || recipe.created || "");
+      if (old && old.savedAt && savedAt < old.savedAt) {
+        return res.status(409).json({ error: `cloud has a newer version (${old.savedAt})`, savedAt: old.savedAt });
+      }
 
       let pce = old ? { pceName: old.pceName, pceURL: old.pceURL, pceSha1: old.pceSha1 } : {};
       if (pceBase64) {
@@ -67,7 +77,8 @@ function registerCcdMarkRoutes(app, client, { dbName, bucket }) {
         背番号: sebanggo,
         recipe,
         markCount: Object.keys(recipe.marks).length,
-        savedAt: String(recipe.created || ""),   // when the recipe was taught / saved on the miniPC
+        savedAt,                                 // when the recipe was last saved on a PC (= version)
+        uploadedFrom: from,                      // host name of that PC
         ...pce,
         uploadedAt: now,
         isActive: true,
@@ -99,6 +110,19 @@ function registerCcdMarkRoutes(app, client, { dbName, bucket }) {
       res.json(list);
     } catch (error) {
       res.status(500).json({ error: "Failed to list recipes", details: error.message });
+    }
+  });
+
+  app.get("/api/ccd-mark/recipes/:sebanggo/history", async (req, res) => {
+    try {
+      const machine = machineOf(req.query.machine);
+      if (!machine) return res.status(400).json({ error: "machine is required" });
+      const list = await (await db()).collection(HISTORY)
+        .find({ machine, 背番号: req.params.sebanggo })
+        .project({ recipe: 0 }).sort({ replacedAt: -1 }).limit(100).toArray();
+      res.json(list);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to list recipe history", details: error.message });
     }
   });
 
